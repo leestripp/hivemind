@@ -37,11 +37,6 @@ int main() {
     assert(lg.size() == 1);
     assert(lg[0].name == "in");
 
-    auto llm = Node::ports_for_type("llm");
-    assert(llm.size() == 2);
-    assert(llm[0].name == "in");
-    assert(llm[1].name == "out");
-
     auto mg = Node::ports_for_type("merge");
     assert(mg.size() == 4);
     assert(mg[0].name == "in_a");

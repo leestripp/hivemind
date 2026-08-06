@@ -1,6 +1,5 @@
 #include "hivemind/ExecutorRegistry.h"
 #include "hivemind/executors/PromptExecutor.h"
-#include "hivemind/executors/LLMExecutor.h"
 #include "hivemind/executors/AgentExecutor.h"
 #include "hivemind/executors/LoopStartExecutor.h"
 #include "hivemind/executors/LoopEndExecutor.h"
@@ -15,7 +14,6 @@ struct ExecutorRegistry::Impl {
     std::map<std::string_view, std::unique_ptr<NodeExecutor>> map_;
     Impl() {
         map_["prompt"]     = std::make_unique<PromptExecutor>();
-        map_["llm"]       = std::make_unique<LLMExecutor>();
         map_["agent"]      = std::make_unique<AgentExecutor>();
         map_["loop_start"] = std::make_unique<LoopStartExecutor>();
         map_["loop_end"]   = std::make_unique<LoopEndExecutor>();

@@ -36,7 +36,7 @@ void register_graph_routes(OmniNet::HTTP::Server& server, GraphStore& store) {
                                      OmniNet::HTTP::Response& resp) {
         (void)req;
         static const std::vector<std::string> types{
-            "input", "prompt", "llm", "agent",
+            "input", "prompt", "agent",
             "merge", "loop_start", "loop_end", "output", "log"
         };
         json arr = json::array();

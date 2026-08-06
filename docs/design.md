@@ -104,7 +104,7 @@ A **node** is a single unit of work. Each node has:
 
 A node's **ports** are not stored — they are derived at runtime from the
 node's `type` via `Node::ports_for_type(type)`. This guarantees that
-"LLM node always has `in` and `out`" is a property of the type, not the
+"an `agent` node always has `in` and `out`" is a property of the type, not the
 node instance, so the canvas never disagrees with the executor.
 
 ### 2.2 Port
@@ -175,7 +175,6 @@ discovers the set of available types by hitting `GET /api/node-types`.
 | Type | Inputs | Outputs | Backed by | What it does |
 |------|--------|---------|-----------|--------------|
 | `prompt`    | — | `out`           | static text | Returns its `config.value` as a single string. |
-| `llm`       | `in` | `out`        | `libcurl` + OpenAI-compat SSE | One-shot LLM call, non-streaming. |
 | `agent`     | `in` | `out`        | **`daedalus::Agent`** | Delegates text-in / text-out to an embedded `daedalus::Agent` with tool calls, MCP, skills, streaming. Each `agent` node runs as its own independent `daedalus::Agent` instance; multiple `agent` nodes in the same graph run as parallel peers. |
 | `input`     | — | `out`           | runner input map | Reads a named key from the `POST /api/graphs/:id/run` payload. |
 | `output`    | `in` | —            | run result map | Collects a named value into the run's return payload. |
@@ -190,15 +189,9 @@ discovers the set of available types by hitting `GET /api/node-types`.
 // prompt node
 { "value": "Hello, write me a README." }
 
-// llm node
-{
-  "model":         "minimax",                       // name from ~/.codemax/settings/settings.json
-  "system_prompt": "You are helpful."               // optional, prepended to user prompt
-}
-
 // agent node (daedalus)
 {
-  "model":        "minimax",                        // model name (same lookup as llm)
+  "model":        "minimax",                        // model name from ~/.codemax/settings/settings.json
   "project":      "/path/to/project",               // agent's working directory (tools use this)
   "auto_approve": true,                             // auto-approve execute_bash by default
   "system_prompt": "..."                            // optional override of composed prompt
@@ -267,27 +260,7 @@ The implications of multiple `agent` nodes in one graph:
 - **Concurrency hazards.** Two agents with the same `project` racing
   on the filesystem is the most common failure mode — see §6.6.
 
-### 3.4 Two LLM-touching node types: `llm` and `agent`
-
-Both nodes consume upstream text and both ultimately end up talking to
-an LLM. They differ in cost shape and capability, so picking the right
-one for a given role matters:
-
-| | `llm` | `agent` |
-|--|-------|---------|
-| Tool calls | ❌ | ✅ |
-| MCP servers | ❌ | ✅ |
-| Skills | ❌ | ✅ |
-| Streaming tokens to UI | one-shot only | live |
-| Persistence of conversation | ❌ | ✅ |
-| Cost | one HTTP request | many HTTP requests + tool dispatches |
-
-Use `llm` for cheap, deterministic text transformations (summarise this
-string, translate this string, classify this string). Use `agent` for
-anything that needs to *think* — read files, run shell commands, edit
-code, query an MCP tool.
-
-### 3.5 Merge node semantics
+### 3.4 Merge node semantics
 
 A `merge` node has multiple named input ports (`in_a`, `in_b`, …) and
 one output port (`out`). v1 ships one join strategy; future revisions
@@ -295,7 +268,7 @@ expose more.
 
 | Strategy | Behaviour | When to use |
 |----------|-----------|-------------|
-| `concat` (default) | `"<in_a><separator><in_b>"` with `separator = "\n\n"` | General-purpose. Downstream `llm`/`agent` receives the joined text as a single prompt. |
+| `concat` (default) | `"<in_a><separator><in_b>"` with `separator = "\n\n"` | General-purpose. The downstream `agent` receives the joined text as a single prompt. |
 | `interleave` (v2) | round-robin per-line or per-character | Rare. Useful when the join needs structural preservation (e.g. alternating turns of a debate). |
 
 For multi-agent DAGs, `concat` is almost always correct: the
@@ -463,8 +436,8 @@ patching the library.
 The `agent` node delegates text-in / text-out to an embedded
 [`daedalus::Agent`](https://gitlab.com/leestripp/daedalus) — the same
 shape as every other node (text in, text out), but with the most capable
-backing library underneath. Other node types back onto libcurl (the
-`llm` executor), SQLite (`input` / `output`), or `std::cerr` (`log`).
+backing library underneath. Other node types back onto SQLite
+(`input` / `output`) or `std::cerr` (`log`).
 The `agent` node is **not** hierarchically special; it's just one of
 several executors, and its executor happens to embed
 [`daedalus`](https://gitlab.com/leestripp/daedalus) — a C++23 static
@@ -974,7 +947,6 @@ recorded so future contributors can find the conversation.
 │   ├── ExecutorRegistry.h      # type-string → NodeExecutor*.
 │   ├── LoopEngine.h            # Loop iteration state.
 │   ├── GraphRunner.h           # Topological executor.
-│   ├── LLMClient.h             # In-process OpenAI-compat SSE client.
 │   ├── LLMSettings.h           # Reads ~/.codemax/settings/settings.json.
 │   ├── Settings.h              # CLI args.
 │   ├── executors/              # One .h per node type.
@@ -987,7 +959,6 @@ recorded so future contributors can find the conversation.
 │   ├── GraphRunner.cpp
 │   ├── LoopEngine.cpp
 │   ├── ExecutorRegistry.cpp
-│   ├── LLMClient.cpp
 │   ├── LLMSettings.cpp
 │   ├── Settings.cpp
 │   └── executors/              # One .cpp per node type.

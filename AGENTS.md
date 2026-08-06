@@ -45,7 +45,6 @@ AI-agent library.
 | Type | Inputs | Outputs | Purpose |
 |------|--------|---------|---------|
 | `prompt`    | — | `out`   | Static text value (`config.value`) |
-| `llm`       | `in`    | `out`   | One-shot LLM call (in-process `LLMClient`) |
 | `agent`     | `in`    | `out`   | AI-agent run via embedded `daedalus::Agent` (tool calls, MCP, skills, streaming) |
 | `loop_start`| `in`    | `out`, `loop_count` | Loop entry: passes `in` to `out`; emits `loop_count` to paired `loop_end`. Receives body text feedback from `loop_end` on iteration > 1. |
 | `loop_end`  | `in`, `loop_count` | `out` | Loop exit: receives body text and count. If `current < target`, runner feeds body text back to `loop_start`; else emits `out`. |
@@ -58,7 +57,7 @@ Unknown types return empty port lists. Port derivation lives in
 
 > **Important architectural note:** the **runner** walks the graph and
 > dispatches nodes. `agent` nodes are **passive peers** — they fire on
-> input-ready the same way `prompt`/`log`/`llm` do. The AI agent does **not**
+> input-ready the same way `prompt`/`log` do. The AI agent does **not**
 > orchestrate the graph. Multiple `agent` nodes in one graph run as parallel
 > independent `daedalus::Agent` instances. See `docs/design.md` §3.3 / §4.2 /
 > §6.
@@ -213,12 +212,10 @@ Hive-Mind/
 │   ├── LoopEngine.h                  # Per-loop iteration counters
 │   ├── AgentSpawner.h                # (legacy) subprocess wrapper — unused
 │   ├── GraphRunner.h                 # Topological exec engine (the conductor)
-│   ├── LLMClient.h                   # libcurl + SSE LLM client (stream + complete)
 │   ├── LLMSettings.h                 # Reads ~/.codemax/settings/settings.json
 │   ├── Settings.h                    # Server settings (port only)
 │   ├── executors/                    # One .h per node type
 │   │   ├── PromptExecutor.h
-│   │   ├── LLMExecutor.h
 │   │   ├── AgentExecutor.h           # AI Agent run via daedalus::Agent
 │   │   ├── LoopStartExecutor.h
 │   │   ├── LoopEndExecutor.h
@@ -242,12 +239,10 @@ Hive-Mind/
 │   ├── ExecutorRegistry.cpp          # Build the type → executor map
 │   ├── NodeExecutor.cpp              # Stub (base is pure-virtual)
 │   ├── AgentSpawner.cpp              # Legacy subprocess wrapper (kept for back-compat)
-│   ├── LLMClient.cpp                 # libcurl SSE client
 │   ├── LLMSettings.cpp               # Parse ~/.codemax/settings/settings.json
 │   ├── Settings.cpp                  # CLI arg parsing
 │   └── executors/                    # .cpp for each executor
 │       ├── PromptExecutor.cpp
-│       ├── LLMExecutor.cpp
 │       ├── AgentExecutor.cpp         # Calls daedalus::Agent (sinks events to output stream)
 │       ├── LoopStartExecutor.cpp
 │       ├── LoopEndExecutor.cpp
@@ -423,7 +418,7 @@ Models are configured externally in `~/.codemax/settings/settings.json`
 (see the codemax / icarus tool ecosystem). HiveMind reads them via `LLMSettings`
 (singleton: `llm_settings()`). Falls back to env vars `HIVEMIND_BASE_URL`,
 `HIVEMIND_API_KEY`, `HIVEMIND_MODEL` if the file is absent. The model `name`
-field is what the UI shows and what the `llm`/`agent` nodes store in their
+field is what the UI shows and what the `agent` nodes store in their
 `config.model`.
 
 ### daedalus embedding (the `agent` node)
@@ -458,9 +453,11 @@ patch OmniNet.
 
 ## 7. Anti-patterns to Avoid
 
-1. **Don't re-implement LLM streaming or the agent loop** — use `LLMClient`
-   (in-process one-shot calls) or `daedalus::Agent` (full agent with tool
-   calls, MCP, skills, streaming). No subprocess for LLM calls.
+1. **Don't re-implement LLM streaming or the agent loop** — there is no
+   "plain LLM call" node type by design. The `agent` node embeds
+   `daedalus::Agent` (tool calls, MCP, skills, streaming); daedalus owns
+   all LLM transport. No subprocess for LLM calls.
+
 2. **Don't store model credentials** in HiveMind. Read from
    `~/.codemax/settings/settings.json` or env vars.
 3. **Don't block the HTTP request thread** during graph execution. The

@@ -125,9 +125,7 @@ if [[ "$RUN_LINT" == true ]]; then
             ${SCRIPT_DIR}/src/GraphRunner.cpp \
             ${SCRIPT_DIR}/src/Settings.cpp \
             ${SCRIPT_DIR}/src/LLMSettings.cpp \
-            ${SCRIPT_DIR}/src/LLMClient.cpp \
             ${SCRIPT_DIR}/src/executors/PromptExecutor.cpp \
-            ${SCRIPT_DIR}/src/executors/LLMExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/AgentExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/LoopStartExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/LoopEndExecutor.cpp \
@@ -173,9 +171,7 @@ if [[ "$RUN_LINT_FIX" == true ]]; then
             ${SCRIPT_DIR}/src/GraphRunner.cpp \
             ${SCRIPT_DIR}/src/Settings.cpp \
             ${SCRIPT_DIR}/src/LLMSettings.cpp \
-            ${SCRIPT_DIR}/src/LLMClient.cpp \
             ${SCRIPT_DIR}/src/executors/PromptExecutor.cpp \
-            ${SCRIPT_DIR}/src/executors/LLMExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/AgentExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/LoopStartExecutor.cpp \
             ${SCRIPT_DIR}/src/executors/LoopEndExecutor.cpp \

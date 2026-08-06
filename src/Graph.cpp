@@ -27,10 +27,6 @@ std::vector<Port> Node::ports_for_type(const std::string& type) {
     if (type == "log") {
         return {{"in",     "string", "input"}};
     }
-    if (type == "llm") {
-        return {{"in",     "string", "input"},
-                {"out",    "string", "output"}};
-    }
     if (type == "merge") {
         return {{"in_a",   "string", "input"},
                 {"in_b",   "string", "input"},
