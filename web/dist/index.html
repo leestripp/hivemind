@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>HiveMind — Node Graph</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="toolbar">
+    <div class="brand">⚡ HiveMind</div>
+    <div class="brand-sub">Node Graph · multi-agent DAG</div>
+    <div class="spacer"></div>
+    <span class="status" id="status">ready</span>
+    <button class="btn primary" id="btn-run">▶ Run</button>
+    <button class="btn" id="btn-reset">Reset layout</button>
+  </header>
+
+  <main class="main">
+    <section class="canvas-wrap" id="canvas-wrap">
+      <svg id="edges" class="edges"></svg>
+      <div id="nodes" class="nodes"></div>
+      <div class="canvas-hint" id="hint">Right-click canvas to add nodes. Middle-drag or Space+drag to pan. Scroll to zoom.</div>
+      <button class="help-btn" id="btn-help" title="Show controls">?</button>
+    </section>
+
+    <aside class="inspector" id="inspector">
+      <div class="panel-title">Inspector</div>
+      <p class="muted">Click a node to see its config.</p>
+    </aside>
+  </main>
+
+  <!-- Right-click context menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <div class="ctx-item" id="ctx-add-node">Add node ▸</div>
+    <div class="ctx-sub hidden" id="ctx-sub-add-node">
+      <div class="ctx-item ctx-node" data-type="input"><span class="dot input"></span>Input</div>
+      <div class="ctx-item ctx-node" data-type="prompt"><span class="dot prompt"></span>Prompt</div>
+      <div class="ctx-item ctx-node" data-type="agent"><span class="dot agent"></span>AI Agent</div>
+      <div class="ctx-item ctx-node" data-type="merge"><span class="dot merge"></span>Merge</div>
+      <div class="ctx-item ctx-node" data-type="output"><span class="dot output"></span>Output</div>
+      <div class="ctx-item ctx-node" data-type="log"><span class="dot log"></span>Log</div>
+      <div class="ctx-item ctx-node" data-type="loop"><span class="dot loop"></span>Loop</div>
+    </div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-reset-view">Reset view</div>
+    <div class="ctx-item" id="ctx-load-loop">Load loop demo</div>
+    <div class="ctx-item" id="ctx-load-multi">Load multi-agent demo</div>
+  </div>
+
+  <!-- Help overlay -->
+  <div id="help-overlay" class="help-overlay hidden">
+    <div class="help-card">
+      <h3>Controls</h3>
+      <ul>
+        <li><b>Left drag</b> a node to move it.</li>
+        <li><b>Drag</b> from an output port to an input port to wire nodes.</li>
+        <li><b>Right-click</b> the canvas to add nodes.</li>
+        <li><b>Middle-drag</b> or hold <b>Space</b> and drag to pan.</li>
+        <li><b>Scroll</b> to zoom in/out.</li>
+      </ul>
+      <button class="btn" id="btn-help-close">Close</button>
+    </div>
+  </div>
+
+  <footer class="output" id="output">
+    <div class="panel-title">Output stream</div>
+    <pre id="output-log">(empty)</pre>
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
