@@ -68,16 +68,39 @@ with selectors fed by live backend data. `FIELD_SCHEMAS` already supports
 
 ### Planned layout
 
+Flat fields always visible; the three on/off groups live in
+**collapsible `<details>` sections** (same pattern as Raw JSON) so the
+panel stays compact. Summary line shows "N of M enabled".
+
 ```
 Name            [ Greeter                    ]
 Provider/Model  [ minimax — MiniMax-M3     ▼ ]   grouped by provider, from GET /api/models
 Project root    [ /path/to/project           ]   working dir for tools
 System prompt   [ (optional override)        ]   textarea
 Auto-approve    [x] run shell commands without asking
-Tools           [x] execute_bash  [x] read_file  [ ] create_file …   checkbox group, from GET /api/agent/tools
-Skills          [x] code-review   [ ] git-workflow …                 checkbox group, from GET /api/agent/skills  (NEW endpoint)
-MCP servers     [x] filesystem    [ ] github …                       checkbox group, from GET /api/agent/mcp     (NEW endpoint)
+
+▸ Tools        25 of 27 enabled          (GET /api/agent/tools ✅)
+   [x] execute_bash  [x] read_file  [ ] create_file …
+▸ Skills        2 of 3 enabled           (GET /api/agent/skills — NEW)
+   [x] code-review  [ ] git-workflow …
+▸ MCP servers   1 of 2 enabled           (GET /api/agent/mcp — NEW)
+   [x] filesystem  [ ] github …
 ```
+
+### daedalus on/off model (verified in AgentConfig.h)
+
+Default is everything ON; the config carries **disable-lists**:
+
+| daedalus `AgentConfig` field | Effect | Agent node config key |
+|------------------------------|--------|-----------------------|
+| `tools_disabled` (set<string>) | Hidden from LLM; call rejected | `tools_disabled: []` |
+| `skills_disabled` (set<string>) | Hidden from discovery | `skills_disabled: []` |
+| `mcp_servers_disabled` (set<string>) | Server skipped at startup | `mcp_servers_disabled: []` |
+| `mcp_enabled` (bool, master) | All MCP off | `mcp_enabled: true` |
+
+UI semantics: all checkboxes start **checked**; unchecking appends the
+name to the corresponding `*_disabled` array. `AgentExecutor` copies the
+arrays into `AgentConfig` verbatim.
 
 ### Backend work required
 
@@ -96,18 +119,17 @@ existing `introspection_agent_config()` pattern.
 1. Extend `FIELD_SCHEMAS` with `kind: 'multiselect'` (checkbox group) and
    async select population (`source: '/api/models'` fetched on inspector open).
 2. Agent config shape (what `AgentExecutor` must learn to read):
-   `model`, `project`, `system_prompt`, `auto_approve`,
-   `enabled_tools[]`, `enabled_skills[]`, `enabled_mcp[]`.
-3. Executor support: daedalus `AgentConfig` needs the tool/skill/MCP
-   allow-lists mapped — check daedalus API for per-agent filtering
-   (may need `disabled_tools` or per-tool registration; verify against
-   `AgentConfig` fields before writing UI).
+   `model`, `project`, `system_prompt`, `auto_approve`, `mcp_enabled`,
+   `tools_disabled[]`, `skills_disabled[]`, `mcp_servers_disabled[]`.
+3. Executor support: map the three `*_disabled[]` arrays straight into
+   `AgentConfig::tools_disabled / skills_disabled / mcp_servers_disabled`
+   (verified — see table above). Trivial copy, no daedalus changes.
 4. Keep raw JSON `<details>` as fallback throughout.
 
 ### Sequencing (when we start)
 
 1. Backend: add `/api/agent/skills` + `/api/agent/mcp` (small).
-2. Verify daedalus-side allow-list mechanism for tools/skills/MCP.
+2. ~~Verify daedalus-side allow-list mechanism~~ ✅ Done — disable-lists (`*_disabled` sets).
 3. Model/provider dropdown slice (highest value, endpoints ready).
 4. Project/system-prompt/auto-approve slice (plain fields, easy).
 5. Tools/skills/MCP multi-selects (needs #2).
