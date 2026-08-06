@@ -368,3 +368,6 @@ input[type="number"].insp-input { width: 90px; }
 .help-card h3 { color: #88c0d0; margin-bottom: 12px; }
 .help-card ul { color: #d8dee9; line-height: 1.7; padding-left: 18px; margin-bottom: 16px; }
 .help-card li { margin-bottom: 4px; }
+
+.insp-display { background: #0e1116; color: #8fbcbb; border: 1px dashed #2c333d;
+                border-radius: 4px; padding: 6px 8px; font-size: 12px; }

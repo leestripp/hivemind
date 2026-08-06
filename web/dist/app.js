@@ -55,8 +55,12 @@ const FIELD_SCHEMAS = {
       help: 'How many times the loop body runs.' },
   ],
   loop_end: [
-    { key: 'loop_count', label: 'Iterations', kind: 'number', min: 1, max: 100,
-      help: 'Authoritative target — kept in sync with the paired Loop Start.' },
+    { key: 'loop_count', label: 'Target iterations', kind: 'display',
+      value: (n) => {
+        const st = findLoopStartFor(n.id);
+        return st ? String(st.config.loop_count ?? 1) : '—';
+      },
+      help: 'Set on the paired Loop Start node (display only).' },
   ],
   log: [
     { key: 'message', label: 'Log prefix', kind: 'text',
@@ -277,7 +281,10 @@ function nodeSub(n) {
   if (n.type === 'output')      return { text: n.config.name || 'verdict',      muted: !n.config.name };
   if (n.type === 'log')         return { text: n.config.message || '(no msg)',  muted: !n.config.message };
   if (n.type === 'loop_start')  return { text: `loops: ${n.config.loop_count ?? 1}`, muted: false };
-  if (n.type === 'loop_end')    return { text: 'loop end', muted: true };
+  if (n.type === 'loop_end')    {
+    const st = findLoopStartFor(n.id);
+    return { text: st ? `loops: ${st.config.loop_count ?? 1}` : 'loop end', muted: !st };
+  }
   return { text: '', muted: true };
 }
 
@@ -329,17 +336,41 @@ function renderInspector() {
   // Bind schema fields
   if (schema) {
     for (const f of schema) {
+      if (f.kind === 'display') continue;
       const el = i.querySelector(`[data-inspkey="${f.key}"]`);
       if (!el) continue;
       el.addEventListener('input', (e) => {
         n.config[f.key] = f.kind === 'number' ? Number(e.target.value) : e.target.value;
         refreshNodeChrome(n); // node sub-label updates live
+        // loop_start owns the iteration setting — mirror it onto the
+        // paired loop_end so backend payloads stay consistent.
+        if (n.type === 'loop_start' && f.key === 'loop_count') {
+          const end = S.nodes.find(x =>
+            S.edges.some(e => e.source === n.id && e.sourcePort === 'loop_count'
+                           && e.target === x.id && e.targetPort === 'loop_count'));
+          if (end) { end.config.loop_count = n.config.loop_count; refreshNodeChrome(end); }
+        }
       });
     }
   }
 }
 
+// Find the loop_start paired with a loop_end via the permanent
+// start:loop_count → end:loop_count edge.
+function findLoopStartFor(endId) {
+  const e = S.edges.find(e => e.target === endId && e.targetPort === 'loop_count');
+  return e ? S.nodes.find(n => n.id === e.source) : null;
+}
+
 function inspFieldHtml(n, f) {
+  if (f.kind === 'display') {
+    const v = typeof f.value === 'function' ? f.value(n) : (n.config[f.key] ?? '—');
+    return `<div class="insp-field">
+    <label class="insp-label">${esc(f.label)}</label>
+    <div class="insp-display">${esc(v)}</div>
+    ${f.help ? `<div class="insp-help">${esc(f.help)}</div>` : ''}
+  </div>`;
+  }
   const v = n.config[f.key] ?? '';
   const ph = f.placeholder ? `placeholder="${esc(f.placeholder)}"` : '';
   const help = f.help ? `<div class="insp-help">${esc(f.help)}</div>` : '';
