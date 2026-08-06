@@ -36,9 +36,10 @@ full agent loop, so a separate plain-LLM node would be redundant.
    - Catches regressions in the runner's parallel dispatch and loop logic.
 
 2. **Live `agent` node run** (needs an API key)
-   - `~/.codemax/settings/settings.json` already has a `minimax` model
-     (`MiniMax-M3` @ `api.minimax.io`) referencing `$MINIMAX_API_KEY`.
-   - Export the key, then run the sample multi-agent DAG from the UI
+   - The daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`)
+     already has `minimax` and `moonshot` configured with keys
+     (see `GET /api/models`).
+   - Run the sample multi-agent DAG from the UI
      (or a single `prompt → agent → output` graph via curl).
    - Verify `node_output` streaming events and the final result.
 

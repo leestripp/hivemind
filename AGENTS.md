@@ -212,7 +212,6 @@ Hive-Mind/
 │   ├── LoopEngine.h                  # Per-loop iteration counters
 │   ├── AgentSpawner.h                # (legacy) subprocess wrapper — unused
 │   ├── GraphRunner.h                 # Topological exec engine (the conductor)
-│   ├── LLMSettings.h                 # Reads ~/.codemax/settings/settings.json
 │   ├── Settings.h                    # Server settings (port only)
 │   ├── executors/                    # One .h per node type
 │   │   ├── PromptExecutor.h
@@ -239,7 +238,6 @@ Hive-Mind/
 │   ├── ExecutorRegistry.cpp          # Build the type → executor map
 │   ├── NodeExecutor.cpp              # Stub (base is pure-virtual)
 │   ├── AgentSpawner.cpp              # Legacy subprocess wrapper (kept for back-compat)
-│   ├── LLMSettings.cpp               # Parse ~/.codemax/settings/settings.json
 │   ├── Settings.cpp                  # CLI arg parsing
 │   └── executors/                    # .cpp for each executor
 │       ├── PromptExecutor.cpp
@@ -414,10 +412,13 @@ from scratch; the existing config already does so.
 
 ### LLM model configuration
 
-Models are configured externally in `~/.codemax/settings/settings.json`
-(see the codemax / icarus tool ecosystem). HiveMind reads them via `LLMSettings`
-(singleton: `llm_settings()`). Falls back to env vars `HIVEMIND_BASE_URL`,
-`HIVEMIND_API_KEY`, `HIVEMIND_MODEL` if the file is absent. The model `name`
+Models and providers are configured in daedalus' own **SettingsStore**
+(SQLite at `~/.local/share/daedalus/daedalus.db`) — the same store the
+icarus CLI manages. HiveMind keeps no model settings of its own:
+- `/api/models` reads `daedalus::SettingsStore::instance().list_models()`.
+- The `agent` node passes `config.model` (a model *name* in the store)
+  straight to `daedalus::AgentConfig::model_name`; empty = store default.
+- Credentials/endpoints are resolved by daedalus, never by HiveMind. The model `name`
 field is what the UI shows and what the `agent` nodes store in their
 `config.model`.
 
@@ -459,7 +460,7 @@ patch OmniNet.
    all LLM transport. No subprocess for LLM calls.
 
 2. **Don't store model credentials** in HiveMind. Read from
-   `~/.codemax/settings/settings.json` or env vars.
+   the daedalus SettingsStore (`~/.local/share/daedalus/`).
 3. **Don't block the HTTP request thread** during graph execution. The
    `/api/graphs/:gid/run` handler returns `202` immediately; the runner runs
    on a detached thread.
@@ -534,7 +535,7 @@ the resulting target.
 | Change how graphs execute | `src/GraphRunner.cpp` (topo sort + ready queue) |
 | Change loop semantics | `src/LoopEngine.cpp` + `src/executors/{LoopStart,LoopEnd}Executor.cpp` |
 | Add a REST endpoint | `include/hivemind/routes/<X>Routes.cpp` and call its `register_*` from `src/main.cpp` |
-| Add an LLM provider | `include/hivemind/LLMSettings.h` / `src/LLMSettings.cpp` (read `~/.codemax/settings/settings.json`) |
+| Add an LLM provider | daedalus SettingsStore (`daedalus::SettingsStore::upsert_provider/upsert_model`, or the icarus CLI) |
 | Tweak UI serving | `include/hivemind/routes/StaticRoutes.cpp` (looks for `web/dist/`) |
 | Diagnose OmniNet API questions | `build/_deps/omninet-src/docs/api/` after the first configure |
 | Run lint | `./start.sh --lint` (requires `compile_commands.json` in `build/`) |

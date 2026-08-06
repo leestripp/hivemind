@@ -18,7 +18,6 @@ macro(hivemind_test name)
         ${CMAKE_SOURCE_DIR}/src/Settings.cpp
         ${CMAKE_SOURCE_DIR}/src/ExecutorRegistry.cpp
         ${CMAKE_SOURCE_DIR}/src/NodeExecutor.cpp
-        ${CMAKE_SOURCE_DIR}/src/LLMSettings.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/PromptExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/AgentExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/LoopStartExecutor.cpp

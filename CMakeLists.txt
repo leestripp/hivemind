@@ -201,7 +201,6 @@ set(CORE_SOURCES
     src/LoopEngine.cpp
     src/GraphRunner.cpp
     src/Settings.cpp
-    src/LLMSettings.cpp
 )
 
 set(EXECUTOR_SOURCES
@@ -288,7 +287,6 @@ set(_LINT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/LoopEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/GraphRunner.cpp
     ${CMAKE_SOURCE_DIR}/src/Settings.cpp
-    ${CMAKE_SOURCE_DIR}/src/LLMSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/executors/PromptExecutor.cpp
     ${CMAKE_SOURCE_DIR}/src/executors/AgentExecutor.cpp
     ${CMAKE_SOURCE_DIR}/src/executors/LoopStartExecutor.cpp

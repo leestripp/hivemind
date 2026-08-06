@@ -191,7 +191,7 @@ discovers the set of available types by hitting `GET /api/node-types`.
 
 // agent node (daedalus)
 {
-  "model":        "minimax",                        // model name from ~/.codemax/settings/settings.json
+  "model":        "minimax",                        // model name in the daedalus SettingsStore
   "project":      "/path/to/project",               // agent's working directory (tools use this)
   "auto_approve": true,                             // auto-approve execute_bash by default
   "system_prompt": "..."                            // optional override of composed prompt
@@ -655,7 +655,9 @@ not touch SQLite during execution; it persists only at run boundaries
 
 ### 7.3 Settings
 
-LLM model configurations are read from `~/.codemax/settings/settings.json`
+LLM model configurations live in daedalus' SQLite SettingsStore
+(`~/.local/share/daedalus/daedalus.db`). HiveMind reads them via
+`daedalus::SettingsStore` and never stores credentials itself.
 (the file managed by the upstream codemax / icarus tools). This is a
 read-only compatibility shim. In a future release we will read from
 `daedalus`'s SQLite-backed `SettingsStore` (under
@@ -906,10 +908,8 @@ recorded so future contributors can find the conversation.
    in the middle of a turn.
 
 3. **Settings store migration.**
-   `LLMSettings` today reads `~/.codemax/settings/settings.json`. The
-   long-term source of truth is daedalus's SQLite-backed
-   `SettingsStore`. Need a one-shot migration and a precedence rule
-   (daedalus store wins; JSON fallback for the transition release).
+   Done: model/provider settings live solely in daedalus's
+   SQLite-backed `SettingsStore` (`~/.local/share/daedalus/`).
 
 4. **Typed ports.**
    Today every port is `string`. `json` is reserved in the schema. Once
@@ -947,7 +947,6 @@ recorded so future contributors can find the conversation.
 │   ├── ExecutorRegistry.h      # type-string → NodeExecutor*.
 │   ├── LoopEngine.h            # Loop iteration state.
 │   ├── GraphRunner.h           # Topological executor.
-│   ├── LLMSettings.h           # Reads ~/.codemax/settings/settings.json.
 │   ├── Settings.h              # CLI args.
 │   ├── executors/              # One .h per node type.
 │   └── routes/                 # One .h + .cpp per route group.
@@ -959,7 +958,6 @@ recorded so future contributors can find the conversation.
 │   ├── GraphRunner.cpp
 │   ├── LoopEngine.cpp
 │   ├── ExecutorRegistry.cpp
-│   ├── LLMSettings.cpp
 │   ├── Settings.cpp
 │   └── executors/              # One .cpp per node type.
 │

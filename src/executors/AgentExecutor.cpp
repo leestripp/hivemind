@@ -13,7 +13,6 @@
 
 #include "hivemind/executors/AgentExecutor.h"
 #include "hivemind/Graph.h"
-#include "hivemind/LLMSettings.h"
 
 #include <daedalus.h>
 
@@ -154,36 +153,20 @@ AgentExecutor::execute(const Node& node,
                       const std::unordered_map<std::string, std::string>& inputs,
                       const std::string& run_id)
 {
-    // ── 1. Resolve model ──────────────────────────────────────────────────
+    // ── 1. Model selection ───────────────────────────────────────────────
+    // daedalus owns model/provider settings (SQLite SettingsStore under
+    // ~/.local/share/daedalus/). We pass the model name from the node
+    // config straight through; empty means "use the store's default model".
+    // Credentials/endpoints are resolved by the library — never here.
     std::string model_name;
     if (node.config_json.contains("model")
         && node.config_json["model"].is_string()) {
         model_name = node.config_json["model"].get<std::string>();
     }
 
-    if (model_name.empty()) {
-        auto def = llm_settings().default_model();
-        if (!def)
-            throw std::runtime_error{
-                "no model specified and no default in ~/.codemax/settings/settings.json"};
-        model_name = def->name;
-    }
-
-    auto mc_opt = llm_settings().get_model(model_name);
-    if (!mc_opt)
-        throw std::invalid_argument{
-            "unknown model: " + model_name
-            + " (check ~/.codemax/settings/settings.json models)"};
-
-    const ModelConfig& mc = *mc_opt;
-
     // ── 2. Build daedalus::AgentConfig ───────────────────────────────────
     daedalus::AgentConfig cfg;
-    cfg.model_name         = mc.model;       // actual model id (e.g. "MiniMax-M3")
-    cfg.api_host           = mc.base_url;
-    cfg.api_key            = mc.api_key;
-    cfg.chat_endpoint      = mc.chat_endpoint;
-    cfg.max_context_size = mc.max_context_size;
+    cfg.model_name         = model_name;
     // Each agent node must have its own session directory. Using the
     // run_id alone would make two parallel agents in the same run share
     // the same session path, which causes daedalus persistence conflicts

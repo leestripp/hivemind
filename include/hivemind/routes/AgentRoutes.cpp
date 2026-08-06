@@ -9,7 +9,6 @@
 // =============================================================================
 
 #include "hivemind/routes/AgentRoutes.h"
-#include "hivemind/LLMSettings.h"
 
 #include <daedalus.h>
 
@@ -28,19 +27,13 @@ namespace {
 // if no model is configured (the server is running but no LLM is
 // reachable yet). The two endpoints handle nullopt by returning
 // empty stubs instead of 500-ing.
-std::optional<daedalus::AgentConfig> try_default_agent_config() {
-    auto def = llm_settings().default_model();
-    if (!def) return std::nullopt;
-
+// Minimal config for introspection endpoints. Model is left unset —
+// daedalus resolves the default from its own SettingsStore.
+daedalus::AgentConfig introspection_agent_config() {
     daedalus::AgentConfig cfg;
-    cfg.model_name         = def->model;
-    cfg.api_host           = def->base_url;
-    cfg.api_key            = def->api_key;
-    cfg.chat_endpoint      = def->chat_endpoint;
-    cfg.max_context_size = def->max_context_size;
-    cfg.session_id         = "hivemind-introspection";
-    cfg.project_root       = fs::current_path().string();
-    cfg.auto_approve       = true;
+    cfg.session_id   = "hivemind-introspection";
+    cfg.project_root = fs::current_path().string();
+    cfg.auto_approve = true;
     return cfg;
 }
 
@@ -52,21 +45,10 @@ void register_agent_routes(OmniNet::HTTP::Server& server) {
     server.get("/api/agent/tools",
         [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             (void)req;
-            auto cfg = try_default_agent_config();
-            if (!cfg) {
-                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::ok();
-                r.setContentType("application/json");
-                r.setBody(json{
-                    {"tools", json::array()},
-                    {"note", "no default model configured"}
-                }.dump());
-                resp = r;
-                return;
-            }
             try {
                 // Throwaway sink — tool listing doesn't fire callbacks.
                 struct NullSink : daedalus::AgentSink {};
-                daedalus::Agent agent{*cfg, std::make_shared<NullSink>()};
+                daedalus::Agent agent{introspection_agent_config(), std::make_shared<NullSink>()};
                 agent.initialize();
                 auto tools = agent.list_tools();
 
@@ -93,21 +75,9 @@ void register_agent_routes(OmniNet::HTTP::Server& server) {
     server.get("/api/agent/status",
         [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             (void)req;
-            auto cfg = try_default_agent_config();
-            if (!cfg) {
-                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::ok();
-                r.setContentType("application/json");
-                r.setBody(json{
-                    {"status", "no_default_model"},
-                    {"tool_count", 0},
-                    {"tools", json::array()},
-                }.dump());
-                resp = r;
-                return;
-            }
             try {
                 struct NullSink : daedalus::AgentSink {};
-                daedalus::Agent agent{*cfg, std::make_shared<NullSink>()};
+                daedalus::Agent agent{introspection_agent_config(), std::make_shared<NullSink>()};
                 agent.initialize();
                 auto tools = agent.list_tools();
                 auto stats = agent.stats();
