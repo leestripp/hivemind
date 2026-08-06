@@ -262,10 +262,33 @@ body {
 /* ── Inspector ─────────────────────────────────── */
 .inspector .node-card { background: #1a1f29; border-radius: 6px; padding: 10px; margin-bottom: 12px; }
 .inspector .node-card-title { font-weight: 600; color: #88c0d0; margin-bottom: 4px; }
-.inspector .node-card-type  { font-size: 10px; color: #6c7280; text-transform: uppercase; }
+.inspector .node-card-type  { font-size: 10px; color: #6c7280; text-transform: uppercase;
+                              margin-bottom: 10px; letter-spacing: 0.4px; }
 .inspector pre { font-size: 11px; color: #d8dee9; background: #0e1116;
                   padding: 8px; border-radius: 4px; margin-top: 8px;
                   white-space: pre-wrap; word-break: break-word; }
+
+/* Inspector form fields */
+.insp-field { margin-bottom: 10px; }
+.insp-label { display: block; font-size: 11px; font-weight: 600; color: #8fbcbb;
+              margin-bottom: 4px; }
+.insp-input { width: 100%; box-sizing: border-box;
+              background: #0e1116; color: #d8dee9;
+              border: 1px solid #2c333d; border-radius: 4px;
+              padding: 6px 8px; font-size: 12px; font-family: inherit; }
+.insp-input:focus { outline: none; border-color: #88c0d0;
+                    box-shadow: 0 0 0 1px rgba(136,192,208,0.25); }
+.insp-textarea { resize: vertical; line-height: 1.4; }
+select.insp-input { cursor: pointer; }
+input[type="number"].insp-input { width: 90px; }
+.insp-help { font-size: 10px; color: #6c7280; margin-top: 3px; line-height: 1.35; }
+.insp-note { font-size: 11px; color: #ebcb8b; background: rgba(235,203,139,0.08);
+             border: 1px solid rgba(235,203,139,0.25); border-radius: 4px;
+             padding: 8px; margin-bottom: 10px; line-height: 1.4; }
+.insp-ports { margin-top: 10px; color: #8fbcbb; font-size: 11px; line-height: 1.5; }
+.insp-raw { margin-top: 10px; }
+.insp-raw summary { font-size: 11px; color: #6c7280; cursor: pointer; user-select: none; }
+.insp-raw summary:hover { color: #d8dee9; }
 
 /* ── Output ─────────────────────────────────────── */
 .output {

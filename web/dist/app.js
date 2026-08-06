@@ -14,6 +14,57 @@ const NODE_DEFS = {
   loop_end:    { color: '#5e81ac', label: 'Loop End',    in: ['in','loop_count'], out: ['out'] },
 };
 
+// ─── Inspector field schemas ─────────────────────────────────────────────
+// Per-node-type form definitions for the Inspector panel. Each field:
+//   key         config property name
+//   label       human-readable label
+//   kind        'text' | 'textarea' | 'number' | 'select'
+//   placeholder / help   UI hints
+//   options     [{value,label}] for 'select'
+//   min / max   for 'number'
+// The agent node is intentionally schema-less for now (raw JSON editor).
+const FIELD_SCHEMAS = {
+  input: [
+    { key: 'param_name', label: 'Parameter name', kind: 'text',
+      placeholder: 'topic',
+      help: 'Key looked up in the Run payload (POST body "inputs").' },
+    { key: 'value', label: 'Default value', kind: 'textarea', rows: 3,
+      placeholder: 'Used when the Run payload has no value for this key',
+      help: 'Fallback text when the run provides nothing.' },
+  ],
+  prompt: [
+    { key: 'value', label: 'Prompt text', kind: 'textarea', rows: 6,
+      placeholder: 'Write the static text this node emits…',
+      help: 'Emitted verbatim on the "out" port.' },
+  ],
+  output: [
+    { key: 'output_name', label: 'Result name', kind: 'text',
+      placeholder: 'verdict',
+      help: 'Key under which this value appears in the run results.' },
+  ],
+  merge: [
+    { key: 'strategy', label: 'Join strategy', kind: 'select',
+      options: [{ value: 'concat', label: 'Concatenate' }],
+      help: 'How the inputs are combined into one text.' },
+    { key: 'separator', label: 'Separator', kind: 'text',
+      placeholder: '\\n\\n',
+      help: 'Inserted between inputs (concat strategy).' },
+  ],
+  loop_start: [
+    { key: 'loop_count', label: 'Iterations', kind: 'number', min: 1, max: 100,
+      help: 'How many times the loop body runs.' },
+  ],
+  loop_end: [
+    { key: 'loop_count', label: 'Iterations', kind: 'number', min: 1, max: 100,
+      help: 'Authoritative target — kept in sync with the paired Loop Start.' },
+  ],
+  log: [
+    { key: 'message', label: 'Log prefix', kind: 'text',
+      placeholder: 'trace:',
+      help: 'Prepended to whatever this node logs to the server console.' },
+  ],
+};
+
 const LOOP_PAIR_SPACING = 220; // px between loop_start and loop_end
 
 const NODE_WIDTH = 220;
@@ -235,18 +286,105 @@ function renderInspector() {
   const n = S.nodes.find(x => x.id === S.selected);
   if (!n) { i.innerHTML = '<div class="panel-title">Inspector</div><p class="muted">Click a node to see its config.</p>'; return; }
   const def = NODE_DEFS[n.type];
+  const schema = FIELD_SCHEMAS[n.type];
+
+  let fieldsHtml = '';
+  if (schema) {
+    fieldsHtml = schema.map(f => inspFieldHtml(n, f)).join('');
+  } else {
+    // Agent node: user-friendly editor is a later milestone — raw JSON for now.
+    fieldsHtml = `
+      <div class="insp-note">A dedicated editor for AI Agent settings
+      (model, project, auto-approve, system prompt) is coming later.
+      Edit the raw JSON below for now.</div>`;
+  }
+
   i.innerHTML = `
     <div class="panel-title">Inspector</div>
     <div class="node-card">
-      <div class="node-card-title">${esc(n.label)}</div>
-      <div class="node-card-type">${n.type} · id ${esc(n.id)}</div>
-      <pre>${esc(JSON.stringify(n.config, null, 2))}</pre>
-      <div style="margin-top:8px;color:#8fbcbb;font-size:11px">
+      <div class="insp-field">
+        <label class="insp-label" for="insp-label">Name</label>
+        <input id="insp-label" class="insp-input" type="text"
+               value="${esc(n.label)}" data-insplabel="1">
+      </div>
+      <div class="node-card-type">${def.label} · ${n.type} · id ${esc(n.id)}</div>
+      ${fieldsHtml}
+      <div class="insp-ports">
         In:  ${def.in.length ? def.in.join(', ') : '—'}<br>
         Out: ${def.out.length ? def.out.join(', ') : '—'}
       </div>
+      <details class="insp-raw">
+        <summary>Raw JSON</summary>
+        <pre>${esc(JSON.stringify(n.config, null, 2))}</pre>
+      </details>
     </div>
   `;
+
+  // Bind label editor
+  i.querySelector('[data-insplabel]').addEventListener('input', (e) => {
+    n.label = e.target.value;
+    refreshNodeChrome(n);     // canvas title updates live; inspector keeps focus
+  });
+
+  // Bind schema fields
+  if (schema) {
+    for (const f of schema) {
+      const el = i.querySelector(`[data-inspkey="${f.key}"]`);
+      if (!el) continue;
+      el.addEventListener('input', (e) => {
+        n.config[f.key] = f.kind === 'number' ? Number(e.target.value) : e.target.value;
+        refreshNodeChrome(n); // node sub-label updates live
+      });
+    }
+  }
+}
+
+function inspFieldHtml(n, f) {
+  const v = n.config[f.key] ?? '';
+  const ph = f.placeholder ? `placeholder="${esc(f.placeholder)}"` : '';
+  const help = f.help ? `<div class="insp-help">${esc(f.help)}</div>` : '';
+  let control;
+  if (f.kind === 'textarea') {
+    control = `<textarea class="insp-input insp-textarea" rows="${f.rows || 4}"
+      data-inspkey="${f.key}" ${ph}>${esc(v)}</textarea>`;
+  } else if (f.kind === 'number') {
+    control = `<input class="insp-input" type="number" data-inspkey="${f.key}"
+      value="${esc(v)}" min="${f.min ?? ''}" max="${f.max ?? ''}" ${ph}>`;
+  } else if (f.kind === 'select') {
+    const opts = (f.options || []).map(o =>
+      `<option value="${esc(o.value)}"${o.value === v ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+    control = `<select class="insp-input" data-inspkey="${f.key}">${opts}</select>`;
+  } else {
+    control = `<input class="insp-input" type="text" data-inspkey="${f.key}"
+      value="${esc(v)}" ${ph}>`;
+  }
+  return `<div class="insp-field">
+    <label class="insp-label">${esc(f.label)}</label>
+    ${control}
+    ${help}
+  </div>`;
+}
+
+// Update one node's canvas chrome (title + sub-label) in place, without a
+// full render(). Used by the Inspector so typing doesn't rebuild the
+// inspector itself (which would steal focus mid-keystroke).
+function refreshNodeChrome(n) {
+  const el = document.querySelector(`.node[data-id="${n.id}"]`);
+  if (!el) return;
+  const def = NODE_DEFS[n.type];
+  const title = el.querySelector('.node-title');
+  if (title) {
+    title.innerHTML = `
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${def.color}"></span>
+          ${esc(n.label)}
+          <span class="node-type">${n.type}</span>`;
+  }
+  const sub = nodeSub(n);
+  const subEl = el.querySelector('.node-sub');
+  if (subEl) {
+    subEl.textContent = sub.text;
+    subEl.classList.toggle('muted', !!sub.muted);
+  }
 }
 
 function esc(s) {
