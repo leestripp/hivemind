@@ -66,9 +66,10 @@ A C++23 server that:
   plus a live, pollable event stream for output;
 - persists graphs and run history in SQLite;
 - executes each node by dispatching to a type-specific **executor**
-  (LLM calls, text I/O, loops, logs, etc.);
-- uses **daedalus** as the backing library for the `agent` node type
-  (the other node types back onto libcurl, SQLite, or `std::cerr`);
+  (agent runs, text I/O, merges, loops, logs);
+- uses **daedalus** as the backing library for the `agent` node type —
+  the only node that talks to an LLM (the other node types back onto
+  SQLite, in-memory state, or `std::cerr`);
 - serves a vanilla-JS canvas UI from `web/dist/` so the user can build and
   run graphs in a browser.
 
@@ -340,9 +341,11 @@ The runner is cancellable via `std::stop_token`. Sources of cancellation:
 | SIGINT / SIGTERM | `main.cpp` signal handler | global shutdown flag → `server.stop()` |
 | HTTP client disconnects | polling stops | run completes naturally (we don't kill runs mid-flight) |
 
-Cancellation is cooperative: nodes that are mid-LLM-call check the token
-between SSE chunks; nodes that are mid-`execute_bash` let the subprocess
-finish unless the runner is destroyed.
+Cancellation is cooperative: when the runner's cancel flag flips, each
+running `agent` node's `daedalus::Agent::cancel()` is called and the
+agent loop stops between streamed chunks / tool calls. daedalus' own
+tools (e.g. `execute_bash`) honour the same stop mechanism; HiveMind
+never kills a subprocess mid-flight unless the runner is destroyed.
 
 ### 4.4 The event stream
 
@@ -354,21 +357,30 @@ matters in multi-agent graphs where multiple `node_output` streams
 arrive concurrently. The event shapes are stable and form a public
 contract:
 
+**Emitted by v1** (see `GraphRunner.cpp`):
+
 | Event | Payload | When |
 |-------|---------|------|
 | `graph_started`    | `{graph_id, run_id}` | Run starts. |
 | `node_started`     | `{node_id, node_label}` | An executor is about to run. |
-| `node_output`      | `{node_id, chunk}` | A streamed token (LLM / agent only). |
+| `node_output`      | `{node_id, chunk}` | A node's output (for `agent`: the full text the `AgentSink` captured — assistant text, tool-call summaries, errors). |
+| `node_completed`   | `{node_id}` | Executor returned. |
+| `node_failed`      | `{node_id, error}` | Executor threw; the run fails. |
+| `loop_iteration`   | `{loop_id, current, target}` | A loop jumped back. |
+| `graph_completed`  | — | All nodes done. |
+| `graph_failed`     | `{error}` | An executor threw. |
+| `graph_cancelled`  | — | User cancelled. |
+
+**Planned (v1.1)** — finer-grained agent events, once the sink fans them
+out instead of folding them into the text stream:
+
+| Event | Payload | When |
+|-------|---------|------|
 | `node_tool_call`   | `{node_id, tool, args}` | Agent decided to call a tool. |
 | `node_tool_result` | `{node_id, tool, result}` | Tool returned. |
 | `node_state_change`| `{node_id, from, to}` | Agent state machine transition. |
 | `node_compaction`  | `{node_id, before, after}` | Context was compressed. |
-| `node_completed`   | `{node_id}` | Executor returned. |
-| `node_error`       | `{node_id, kind, message, will_retry}` | Recoverable / fatal error. |
-| `graph_completed`  | `{results: {...}}` | All nodes done. |
-| `graph_failed`     | `{error}` | An executor threw. |
-| `graph_cancelled`  | — | User cancelled. |
-| `run_done`         | — | Always last; the event stream ends after this. |
+| `node_error`       | `{node_id, kind, message, will_retry}` | Recoverable agent error (distinct from fatal `node_failed`). |
 
 The event stream is the integration contract for any UI, CLI, or
 downstream consumer. New event types are additive; existing ones do not
@@ -394,7 +406,7 @@ Port: `8421` (default, overridable with `--port` or `HIVEMIND_PORT`).
 |--------|------|---------|
 | `GET`    | `/api/health`              | Liveness probe. `{"status":"ok"}` |
 | `GET`    | `/api/node-types`          | List registered executor types + port shapes. |
-| `GET`    | `/api/models`              | List configured LLM models (`name, host, has_key, …`). |
+| `GET`    | `/api/models`              | List models from the daedalus SettingsStore (`name, provider, host, has_key, is_default, …`). |
 | `GET`    | `/api/projects`            | List known project roots the agent can be pointed at. |
 | `GET`    | `/api/agent/tools`         | List tools the embedded `daedalus::Agent` exposes. |
 | `GET`    | `/api/agent/status`        | Agent state + stats for the current session. |
@@ -460,17 +472,26 @@ skills, context compression, crash-resilient session persistence).
                          │ sink callbacks fire on agent threads
                          ▼
 ┌────────────────────────────────────────────────────────┐
-│   AgentSink subclass owned by HiveMind                  │
-│   on_assistant_delta(text)   →  emit `node_output`     │
-│   on_tool_call(name, args)   →  emit `node_tool_call`  │
-│   on_tool_result(name, res)  →  emit `node_tool_result`│
-│   on_state_change(from, to)  →  emit `node_state_change`│
-│   on_error(kind, msg, retry) →  emit `node_error`       │
-│   on_compaction(b,a)         →  emit `node_compaction` │
+│   CapturingSink (src/executors/AgentExecutor.cpp)      │
+│   on_assistant_delta(text)   →  append to text buffer  │
+│   on_tool_call(name, args)   →  append "[tool: …]"     │
+│   on_tool_result(name, res)  →  append "  → result"    │
+│   on_state_change(from, to)  →  append "[state]"       │
+│   on_error(kind, msg, retry) →  append "[error] …"     │
+│   on_compaction(b,a)         →  append "[compaction]"  │
 │   on_log(level, msg)         →  std::cerr              │
 │   request_command_approval() →  return auto_approve    │
-└────────────────────────────────────────────────────────┘
+└────────────────────────┬───────────────────────────────┘
+                         │ buffer returned as the node's "out" port
+                         ▼
+              one `node_output` event per agent execution
 ```
+
+v1 keeps the sink deliberately simple: everything the agent says or does
+is folded into a single text stream that becomes the node's `out` value.
+The per-event fan-out (right-hand column of the diagram as separate
+`node_tool_call` / `node_state_change` / … events) is the v1.1 plan —
+see §4.4.
 
 ### 6.2 Per-agent-instance model
 
@@ -505,13 +526,20 @@ Concrete consequences for graph authors:
 The construction pattern in `AgentExecutor::execute()`:
 
 ```cpp
-daedalus::AgentConfig cfg = /* per-node config + model lookup */;
-auto sink = std::make_shared<GraphRunnerSink>(/*runner, node_id*/);
-daedalus::Agent agent{std::move(cfg), std::move(sink)};
+daedalus::AgentConfig cfg;
+cfg.model_name   = /* node config.model, or "" for the store default */;
+cfg.project_root = /* node config.project, or cwd */;
+cfg.session_id   = run_id + "-" + node.id;   // unique per agent node
+cfg.auto_approve = true;
+// No credentials here — daedalus resolves model_name against its own
+// SQLite SettingsStore (~/.local/share/daedalus/daedalus.db).
+
+auto sink = std::make_shared<CapturingSink>();
+daedalus::Agent agent{std::move(cfg), sink};
 agent.initialize();
 agent.submit_user_message(joined_inputs);
 agent.run_one_turn();   // returns on stop / cancel / error
-// dtor → agent.shutdown()
+// dtor → agent.shutdown(); sink->consume_output() becomes "out"
 ```
 
 ### 6.3 Why daedalus (not roll-our-own)
@@ -655,13 +683,13 @@ not touch SQLite during execution; it persists only at run boundaries
 
 ### 7.3 Settings
 
-LLM model configurations live in daedalus' SQLite SettingsStore
-(`~/.local/share/daedalus/daedalus.db`). HiveMind reads them via
-`daedalus::SettingsStore` and never stores credentials itself.
-(the file managed by the upstream codemax / icarus tools). This is a
-read-only compatibility shim. In a future release we will read from
-`daedalus`'s SQLite-backed `SettingsStore` (under
-`~/.local/share/daedalus/`) and ship a one-shot JSON→SQLite migration.
+Model and provider configurations live in daedalus' SQLite
+**SettingsStore** (`~/.local/share/daedalus/daedalus.db`) — the same
+store the icarus CLI manages. HiveMind reads them through
+`daedalus::SettingsStore::instance()` (for `/api/models`) and otherwise
+just hands a model *name* to `daedalus::AgentConfig`; the library
+resolves host, credentials, and endpoints itself. HiveMind has no
+settings file of its own and never stores credentials.
 
 ---
 
@@ -877,7 +905,10 @@ the agent's tool calls live.
 `daedalus` ships with built-in provider plugins (`openai-compatible`,
 `minimax`, `moonshot`, `lmstudio`) and exposes `ProviderRegistry` so
 hosts can add their own. HiveMind doesn't need to change — operators
-add the new provider via the model config file.
+add providers and models to the daedalus SettingsStore (via the icarus
+CLI, or `SettingsStore::upsert_provider` / `upsert_model`), and they
+immediately show up in `/api/models` and in the `agent` node's
+`config.model` picker.
 
 ### 9.4 Hook the event stream
 
@@ -907,22 +938,18 @@ recorded so future contributors can find the conversation.
    `config.auto_approve = false`. Requires a synchronous UI round-trip
    in the middle of a turn.
 
-3. **Settings store migration.**
-   Done: model/provider settings live solely in daedalus's
-   SQLite-backed `SettingsStore` (`~/.local/share/daedalus/`).
-
-4. **Typed ports.**
+3. **Typed ports.**
    Today every port is `string`. `json` is reserved in the schema. Once
    agents start producing structured outputs (tool_call results,
    tables), typed ports become the natural way to enforce shape at the
    edge level.
 
-5. **Graph versioning.**
+4. **Graph versioning.**
    Currently every save overwrites. A diff/branch model (à la Git)
    would let users iterate on graphs without losing old versions.
    Out of scope for v1.
 
-6. **Multi-graph runs.**
+5. **Multi-graph runs.**
    Today a run executes one graph. A "subgraph" node that calls
    another graph by ID would let users compose larger workflows from
    smaller tested ones. Same execution engine, different entry point.
@@ -989,3 +1016,4 @@ build/_deps/
 | **LoopEngine** | HiveMind's per-run counter for loop iterations. |
 | **OmniNet** | The HTTP server library we embed (WebSocket-capable via public API). |
 | **daedalus** | The C++23 agent library we embed (`libdaedalus.a`). |
+| **SettingsStore** | daedalus' SQLite settings database (`~/.local/share/daedalus/daedalus.db`); the single source of truth for models, providers, and credentials. |
