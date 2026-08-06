@@ -1,57 +1,64 @@
 # HiveMind — Next Steps / Working Notes
 
-> Status: 2026-08-05 — new Loop node pair implemented and verified. Next: test `llm` node and fix `OutputExecutor` result key.
+> Status: 2026-08-06 — working tree is clean, `daedalus` migration is committed, all
+> non-Agent node types are implemented and unit-tested. Next milestone is a live
+> `llm` node end-to-end, then a GraphRunner CTest, then the `agent` node.
 
-## Decision: Agent node is last
+## Quick project state
 
-The `agent` node delegates to `daedalus::Agent`, which requires:
-- A configured LLM provider (`~/.codemax/settings/settings.json`).
-- A valid `MINIMAX_API_KEY` / `OPENAI_API_KEY` / etc. in the environment.
-- Network access to the provider's chat-completions endpoint.
-- Non-trivial runtime (tool calls, MCP servers, skills, context compression).
+- **Build:** `build/hivemind` exists and compiles cleanly.
+- **Tests:** `ctest --test-dir build` → 3/3 pass (LoopEngine, node ports, daedalus smoke).
+- **Server:** not currently running; can start with `./build/hivemind --port 8421`.
+- **Git:** clean working tree on `main` (one big initial commit containing the full migration).
 
-Because the Agent node depends on all of that, **leave it for the end**.
-Get the simpler node types rock-solid first, then return to Agent as the
-final integration step.
+## Node-type status
 
-## Non-Agent node checklist
+| Node type | Backend | Status | Notes |
+|-----------|---------|--------|-------|
+| `input` | `InputExecutor` | ✅ | tested end-to-end; supports `param_name` + fallback `value`/`default_value` |
+| `prompt` | `PromptExecutor` | ✅ | tested end-to-end |
+| `output` | `OutputExecutor` | ✅ | keys results by `config.output_name` (done) |
+| `log` | `LogExecutor` | ✅ | tested end-to-end |
+| `merge` | `MergeExecutor` | ✅ | `concat` strategy; `interleave` is future |
+| `loop_start`/`loop_end` | `LoopEngine` | ✅ | unit + end-to-end tested with feedback/loop_count |
+| `llm` | `LLMExecutor` / libcurl | ⚠️ | compile-tested; needs a real model/API key to verify live |
+| `agent` | `daedalus::Agent` | ⏸️ | intentionally deferred; do it last |
 
-| Node type | Backend | Status | Needs work |
-|-------------|---------|--------|------------|
-| `input`     | `InputExecutor`        | ✅ tested end-to-end | — |
-| `prompt`    | `PromptExecutor`       | ✅ tested end-to-end | — |
-| `output`    | `OutputExecutor`       | ✅ tested end-to-end | Minor: result key currently uses empty port name (`node_id:`) instead of `output_name` |
-| `log`       | `LogExecutor`          | ✅ tested end-to-end | — |
-| `merge`     | `MergeExecutor`        | ✅ tested end-to-end | Only `concat` strategy implemented; `interleave` is future |
-| `llm`       | `LLMExecutor` / libcurl | ⚠️ compile-only | Needs API key + model config to test live |
-| `loop_start` | `LoopStartExecutor` / `LoopEngine` | ✅ end-to-end tested | — |
-| `loop_end`   | `LoopEndExecutor` / `LoopEngine`   | ✅ end-to-end tested | — |
-| `agent`     | `daedalus::Agent`      | ⏸️ deferred | Do last |
+## What to do next
 
-## Immediate next tasks (suggested order)
+1. **Test the `llm` node end-to-end** (top priority)
+   - Get a model configured in `~/.codemax/settings/settings.json` and an API key in env.
+   - Create a tiny graph: `input` → `llm` → `output` (or `prompt` → `llm` → `output`).
+   - Run it and confirm a model response lands in the output.
+   - This validates `LLMClient`, `LLMSettings`, and the model-config pipeline.
 
-1. **Fix `OutputExecutor` result key** (next)
-   - Current: `results["node_id:out"]` (port is empty, so it becomes `node_id:`).
-   - Should be: `results["output_name"]` matching the node's `config.output_name`.
-   - See `src/executors/OutputExecutor.cpp` and `src/GraphRunner.cpp`.
+2. **Add a GraphRunner end-to-end CTest**
+   - Construct a graph in memory and call `runner.run_sync()` without a server.
+   - Covers: `input → prompt → merge → output` and a separate loop graph.
+   - Catches regressions in the runner's parallel dispatch and loop logic.
 
-2. **Test `llm` node end-to-end**
-   - Set a valid API key (e.g. `MINIMAX_API_KEY`) or use `tools/setup-models.sh`.
-   - Build a tiny graph: `prompt → llm → output`.
-   - Verify it streams/returns the model response.
+3. **Return to the `agent` node** (only after 1 and 2 are green)
+   - It already uses `daedalus::Agent` + `CapturingSink` + `LLMSettings`.
+   - Needs a live provider and likely some UI tweaks to display multi-agent streams.
+   - The sample multi-agent DAG in the UI is waiting for this.
 
-3. ~~Test loop nodes end-to-end~~ ✅ Done.
+## What *not* to do yet
 
-4. **Add a GraphRunner end-to-end test**
-   - A CTest test that constructs a graph in memory and runs it without a server.
-   - Covers `input → prompt → merge → output` at minimum.
+- Don't touch the UI beyond the node chrome already built — the front-end can render
+  nodes/edges but we haven't wired event-stream rendering for live tokens.
+- Don't add WebSocket support — v1 is HTTP polling (`GET /api/runs/:rid/output`).
+- Don't add more node types (`if`, `filter`, `map`, etc.) until the current set is solid.
 
-5. **Return to `agent` node**
-   - Only after items 1-4 are green.
-   - Verify provider config, API key, and stream events through the WebSocket/HTTP event stream.
+## How to pick up the next task
 
-## Notes
+Run the server and try a live `llm` graph:
 
-- The `agent` node's plumbing is already in place (`daedalus::Agent`, `CapturingSink`, `AgentConfig` from `LLMSettings`). It just needs a live provider to exercise it.
-- The UI already loads a sample multi-agent DAG, but clicking **Run** on it will fail until a provider key is configured. For testing non-Agent flows, build graphs that don't contain `AI Agent` nodes.
-- WebSocket streaming (`/ws/runs`) is documented but not yet implemented; v1 uses HTTP polling via `GET /api/runs/:rid/output`. That's fine for non-Agent testing.
+```bash
+cd /workspace/AI/Hive-Mind
+./build/hivemind --port 8421
+
+# In another shell, create a graph, add nodes/edges, and run it.
+# Or use the web UI at http://localhost:8421/.
+```
+
+If no API key is available, the next best thing is the GraphRunner CTest in step 2.
