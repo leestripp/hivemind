@@ -263,7 +263,9 @@ function renderEdges() {
     path.setAttribute('title', `${esc(edge.sourcePort)} → ${esc(edge.targetPort)}`);
     svg.appendChild(path);
   }
-
+  // The svg was just wiped — re-add the in-progress wire if the user is
+  // mid-drag (e.g. a node drag triggered renderEdges() during wiring).
+  if (S.connecting) drawPendingEdge();
 }
 
 function renderNodes() {
@@ -691,40 +693,112 @@ document.addEventListener('keyup', (e) => {
   }
 });
 
-// ─── Click port → start edge ─────────────────────────────────────────
+// ─── Click-and-drag wiring ────────────────────────────────────────────
+// Press on any port, drag (a dashed preview wire follows the cursor and
+// valid drop-target ports light up), release on a matching port to create
+// the edge. Works in both directions — out→in and in→out both produce an
+// output→input edge. Release anywhere else (or press ESC) to cancel.
+
+function startConnecting(port) {
+  S.connecting = {
+    fromId:   port.dataset.id,
+    fromPort: port.dataset.port,
+    fromDir:  port.dataset.dir,
+    cursor:   null,   // canvas coords of the last cursor position
+  };
+  document.querySelector('.canvas-wrap').classList.add('wiring');
+  markDropTargets();
+}
+
+function markDropTargets() {
+  const wantDir = S.connecting.fromDir === 'output' ? 'input' : 'output';
+  document.querySelectorAll(`.port[data-dir="${wantDir}"]`).forEach(el => {
+    if (el.dataset.id !== S.connecting.fromId) el.classList.add('drop-target');
+  });
+}
+
+function clearWiringUi() {
+  document.querySelector('.canvas-wrap').classList.remove('wiring');
+  document.querySelectorAll('.port.drop-target').forEach(el => el.classList.remove('drop-target'));
+  document.getElementById('pending-edge')?.remove();
+}
+
+function drawPendingEdge() {
+  if (!S.connecting || !S.connecting.cursor) return;
+  const srcNode = S.nodes.find(n => n.id === S.connecting.fromId);
+  if (!srcNode) return;
+  const srcPt = portCenter(srcNode, S.connecting.fromPort, S.connecting.fromDir);
+  const dstPt = S.connecting.cursor;
+  // Curve in the direction of travel: out-drags bend right, in-drags left.
+  const sign = S.connecting.fromDir === 'output' ? 1 : -1;
+  const dx = dstPt.x - srcPt.x;
+  const cp = Math.max(40, Math.abs(dx) * 0.45);
+  const d = `M ${srcPt.x.toFixed(1)} ${srcPt.y.toFixed(1)} C ${(srcPt.x + sign * cp).toFixed(1)} ${srcPt.y.toFixed(1)}, ${(dstPt.x - sign * cp).toFixed(1)} ${dstPt.y.toFixed(1)}, ${dstPt.x.toFixed(1)} ${dstPt.y.toFixed(1)}`;
+  let path = document.getElementById('pending-edge');
+  if (!path) {
+    path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('id', 'pending-edge');
+    path.setAttribute('class', 'pending');
+    $('edges').appendChild(path);
+  }
+  path.setAttribute('d', d);
+}
+
 document.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return; // only left click starts a connection
-  const port = e.target.closest('.port');
+  const port = e.target instanceof Element ? e.target.closest('.port') : null;
   if (!port) return;
   e.stopPropagation();
-  S.connecting = {
-    fromId: port.dataset.id,
-    fromPort: port.dataset.port,
-    fromDir: port.dataset.dir,
-  };
+  startConnecting(port);
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!S.connecting) return;
+  S.connecting.cursor = screenToCanvas(e.clientX, e.clientY);
+  drawPendingEdge();
 });
 
 document.addEventListener('mouseup', (e) => {
   if (!S.connecting) return;
+  const from = S.connecting;
+  S.connecting = null;
+  clearWiringUi();
+
   // e.target can be document/window in edge cases (e.g. mouse released
   // outside the window) — guard before calling closest().
   const port = e.target instanceof Element ? e.target.closest('.port') : null;
-  if (!port) { S.connecting = null; return; }
-  if (port.dataset.dir !== 'input') { S.connecting = null; return; } // output → input only
-  const dup = S.edges.find(ed =>
-    ed.source === S.connecting.fromId && ed.sourcePort === S.connecting.fromPort &&
-    ed.target === port.dataset.id && ed.targetPort === port.dataset.port);
-  if (!dup) {
-    S.edges.push({
-      id: `e-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-      source: S.connecting.fromId,
-      sourcePort: S.connecting.fromPort,
-      target: port.dataset.id,
-      targetPort: port.dataset.port,
-    });
-    render();
+  if (!port) return;                          // released on empty canvas → cancel
+  if (port.dataset.id === from.fromId) return; // no self-connections
+
+  // Normalise to output → input regardless of drag direction.
+  let source, sourcePort, target, targetPort;
+  if (from.fromDir === 'output' && port.dataset.dir === 'input') {
+    source = from.fromId;       sourcePort = from.fromPort;
+    target = port.dataset.id;   targetPort = port.dataset.port;
+  } else if (from.fromDir === 'input' && port.dataset.dir === 'output') {
+    source = port.dataset.id;   sourcePort = port.dataset.port;
+    target = from.fromId;       targetPort = from.fromPort;
+  } else {
+    return;                     // same-direction: not a valid connection
   }
-  S.connecting = null;
+
+  const dup = S.edges.find(ed =>
+    ed.source === source && ed.sourcePort === sourcePort &&
+    ed.target === target && ed.targetPort === targetPort);
+  if (dup) return;
+
+  S.edges.push({
+    id: `e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    source, sourcePort, target, targetPort,
+  });
+  render();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && S.connecting) {
+    S.connecting = null;
+    clearWiringUi();
+  }
 });
 
 // ─── Workflow save / export / import / switch ─────────────────────────

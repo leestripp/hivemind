@@ -210,6 +210,9 @@ body {
   box-shadow: 0 0 0 4px transparent; /* invisible hit-area padding */
 }
 .port:hover { transform: scale(1.35); background: #88c0d0; border-color: #88c0d0; }
+.port.drop-target { transform: scale(1.4); background: #ebcb8b; border-color: #ebcb8b; box-shadow: 0 0 10px rgba(235,203,139,0.55); }
+.canvas-wrap.wiring { cursor: crosshair; }
+.edges path.pending { stroke: #88c0d0; stroke-dasharray: 7 5; stroke-width: 2.5; filter: drop-shadow(0 0 3px rgba(136,192,208,0.4)); }
 .port.connected { background: #a3be8c; border-color: #a3be8c; }
 .port.connected:hover { background: #b0c795; border-color: #b0c795; }
 
