@@ -964,6 +964,15 @@ const Layout = (() => {
   const toggleInsp = () => { st.inspCollapsed = !st.inspCollapsed; apply(); save(); };
   const toggleOut  = () => { st.outCollapsed  = !st.outCollapsed;  apply(); save(); };
 
+  // Global shortcuts: ] toggles inspector, \\ toggles output — but not
+  // while typing in an input/textarea/select.
+  document.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    if (e.key === ']') { toggleInsp(); e.preventDefault(); }
+    if (e.key === '\\') { toggleOut(); e.preventDefault(); }
+  });
+
   $('btn-collapse-insp').addEventListener('click', toggleInsp);
   $('btn-collapse-out').addEventListener('click', toggleOut);
   $('split-insp').addEventListener('dblclick', toggleInsp);

@@ -194,12 +194,28 @@ collisions (edge references rewritten to match).
 4. (Later) server-side workflow library dir + `/api/workflows` listing.
 
 
-## Resizable & collapsible panels (UI)
+## Resizable & collapsible panels (UI) — ✅ DONE (aad0abe)
 
 Real runs produce a lot of output — the output area needs to grow, and
 panels need to get out of the way.
 
-### Scope
+### Delivered
+
+- Grid refactor: `.app` = 4 rows, `.main` = 3 cols; sizes via `--insp-w` /
+  `--out-h` custom properties.
+- 6px splitters with pointer-capture drag; focusable (`role="separator"`),
+  arrows = 16px step, Shift+arrows = 48px.
+- Collapse via head toggle button, splitter double-click, or collapsed
+  strip click. Global keys: `]` inspector, `\\` output (ignored while
+  typing in form fields).
+- Persistence: `localStorage` key `hm.layout`
+  (`{inspW, outH, inspCollapsed, outCollapsed}`), restored on load,
+  clamped on window resize.
+- Inspector collapsed strip: 28px vertical label; output collapsed: 28px
+  title bar (the "latest status line" strip idea was dropped — the title
+  bar is enough for v1).
+
+### Original scope (kept for reference)
 
 | Panel | Resize | Hide/show |
 |-------|--------|-----------|
