@@ -96,12 +96,16 @@ body {
 .edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .edges path { fill: none; stroke: #4c566a; stroke-width: 2; }
 .edges path:hover { stroke: #6c7280; }
+.edges path.edge-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+.edges path.edge-wire { pointer-events: stroke; cursor: pointer; }
+.edges path.edge-wire.selected { stroke: #ebcb8b; stroke-width: 3.5; filter: drop-shadow(0 0 5px rgba(235,203,139,0.5)); }
 .edges path.active { stroke: #88c0d0; stroke-width: 3; filter: drop-shadow(0 0 4px rgba(136,192,208,0.35)); }
 
-.nodes { position: absolute; inset: 0; }
+.nodes { position: absolute; inset: 0; pointer-events: none; }
 
 .node {
   position: absolute;
+  pointer-events: auto;
   width: 220px;
   background: linear-gradient(180deg, #1b212b 0%, #161b24 100%);
   border: 1px solid #2c333d;

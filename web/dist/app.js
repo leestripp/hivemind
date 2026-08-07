@@ -110,6 +110,7 @@ const S = {
   selected: null,
   dragging: null,
   connecting: null,
+  selectedEdge: null,
   running: false,
   // Canvas transform (pan/zoom). Node positions are stored in canvas coordinates.
   scale: 1,
@@ -257,10 +258,22 @@ function renderEdges() {
     // Control points give a clean S-curve and keep the wire clear of the source/target bodies.
     const cp1x = srcPt.x + Math.max(40, Math.abs(dx) * 0.45);
     const cp2x = dstPt.x - Math.max(40, Math.abs(dx) * 0.45);
+    const dAttr = `M ${srcPt.x.toFixed(1)} ${srcPt.y.toFixed(1)} C ${cp1x.toFixed(1)} ${srcPt.y.toFixed(1)}, ${cp2x.toFixed(1)} ${dstPt.y.toFixed(1)}, ${dstPt.x.toFixed(1)} ${dstPt.y.toFixed(1)}`;
+    // Fat invisible hit area — a 2px bezier is nearly unclickable.
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('d', dAttr);
+    hit.setAttribute('class', 'edge-hit');
+    hit.dataset.eid = edge.id;
+    svg.appendChild(hit);
+
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${srcPt.x.toFixed(1)} ${srcPt.y.toFixed(1)} C ${cp1x.toFixed(1)} ${srcPt.y.toFixed(1)}, ${cp2x.toFixed(1)} ${dstPt.y.toFixed(1)}, ${dstPt.x.toFixed(1)} ${dstPt.y.toFixed(1)}`);
-    path.setAttribute('class', src.running || dst.running ? 'active' : '');
-    path.setAttribute('title', `${esc(edge.sourcePort)} → ${esc(edge.targetPort)}`);
+    path.setAttribute('d', dAttr);
+    let cls = 'edge-wire';
+    if (src.running || dst.running) cls += ' active';
+    if (S.selectedEdge === edge.id) cls += ' selected';
+    path.setAttribute('class', cls);
+    path.dataset.eid = edge.id;
+    path.setAttribute('title', `${esc(edge.sourcePort)} → ${esc(edge.targetPort)} — click to select, Delete to break`);
     svg.appendChild(path);
   }
   // The svg was just wiped — re-add the in-progress wire if the user is
@@ -792,6 +805,42 @@ document.addEventListener('mouseup', (e) => {
     source, sourcePort, target, targetPort,
   });
   render();
+});
+
+// Click a wire to select it; click anything else to deselect.
+document.addEventListener('click', (e) => {
+  const wire = e.target instanceof Element ? e.target.closest('#edges path') : null;
+  if (wire && wire.dataset.eid) {
+    S.selectedEdge = wire.dataset.eid;
+    renderEdges();
+    return;
+  }
+  if (S.selectedEdge) {
+    S.selectedEdge = null;
+    renderEdges();
+  }
+});
+
+// Delete / Backspace breaks the selected connection. Never while the
+// user is typing in a form field (inspector, workflow name, …).
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Delete' && e.code !== 'Backspace') return;
+  if (!S.selectedEdge) return;
+  if (e.target instanceof HTMLElement &&
+      (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+  const before = S.edges.length;
+  S.edges = S.edges.filter(ed => ed.id !== S.selectedEdge);
+  if (S.edges.length !== before) log('Connection removed.');
+  S.selectedEdge = null;
+  render();
+});
+
+// ESC also deselects a wire (in addition to cancelling an in-progress wire).
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && S.selectedEdge) {
+    S.selectedEdge = null;
+    renderEdges();
+  }
 });
 
 document.addEventListener('keydown', (e) => {
