@@ -62,12 +62,43 @@ const FIELD_SCHEMAS = {
       },
       help: 'Set on the paired Loop Start node (display only).' },
   ],
-  log: [
-    { key: 'message', label: 'Log prefix', kind: 'text',
-      placeholder: 'trace:',
-      help: 'Prepended to whatever this node logs to the server console.' },
-  ],
+
 };
+
+// ─── Agent metadata cache ─────────────────────────────────────────────────
+// Async-populated data for the Agent inspector: models, tools, skills, MCP
+// servers. Fetched lazily on first inspector open, cached afterwards.
+// Call AgentMeta.refresh() to force a refetch (e.g. after settings change).
+const AgentMeta = (() => {
+  const cache = {};   // key -> {status:'loading'|'ok'|'error', data, error}
+  const listeners = new Set();
+
+  function notify() { [...listeners].forEach(fn => fn()); }
+
+  async function fetchKey(key, url) {
+    if (cache[key] && cache[key].status !== 'error') return cache[key];
+    cache[key] = { status: 'loading', data: null };
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      cache[key] = { status: 'ok', data: await r.json() };
+    } catch (e) {
+      cache[key] = { status: 'error', data: null, error: String(e) };
+    }
+    notify();
+    return cache[key];
+  }
+
+  return {
+    models: () => fetchKey('models', '/api/models'),
+    tools:  () => fetchKey('tools',  '/api/agent/tools'),
+    skills: () => fetchKey('skills', '/api/agent/skills'),
+    mcp:    () => fetchKey('mcp',    '/api/agent/mcp'),
+    get: (key) => cache[key],
+    onChange: (fn) => listeners.add(fn),
+    refresh: () => { for (const k of Object.keys(cache)) delete cache[k]; },
+  };
+})();
 
 const LOOP_PAIR_SPACING = 220; // px between loop_start and loop_end
 
@@ -298,12 +329,8 @@ function renderInspector() {
   let fieldsHtml = '';
   if (schema) {
     fieldsHtml = schema.map(f => inspFieldHtml(n, f)).join('');
-  } else {
-    // Agent node: user-friendly editor is a later milestone — raw JSON for now.
-    fieldsHtml = `
-      <div class="insp-note">A dedicated editor for AI Agent settings
-      (model, project, auto-approve, system prompt) is coming later.
-      Edit the raw JSON below for now.</div>`;
+  } else if (n.type === 'agent') {
+    fieldsHtml = renderAgentFields(n);
   }
 
   i.innerHTML = `
@@ -332,6 +359,13 @@ function renderInspector() {
     refreshNodeChrome(n);     // canvas title updates live; inspector keeps focus
   });
 
+  // Bind agent fields (async-populated). When the metadata fetches land,
+  // a single global AgentMeta.onChange listener (registered at init)
+  // re-renders the inspector if an agent node is still selected.
+  if (n.type === 'agent') {
+    bindAgentFields(n, i);
+  }
+
   // Bind schema fields
   if (schema) {
     for (const f of schema) {
@@ -359,6 +393,140 @@ function renderInspector() {
 function findLoopStartFor(endId) {
   const e = S.edges.find(e => e.target === endId && e.targetPort === 'loop_count');
   return e ? S.nodes.find(n => n.id === e.source) : null;
+}
+
+// ─── Agent inspector fields ───────────────────────────────────────────────
+// Renders the Agent node's editor: flat fields (model, project, system
+// prompt, auto-approve) plus three collapsible checkbox groups (tools,
+// skills, MCP servers). Unchecked items are stored as *_disabled arrays in
+// the node config — daedalus' AgentConfig uses disable-lists, so "everything
+// on by default" is the empty array.
+
+function agentCfg(n, key, def) {
+  return n.config[key] !== undefined ? n.config[key] : def;
+}
+
+function renderAgentFields(n) {
+  const modelsSt = AgentMeta.get('models');
+  const toolsSt  = AgentMeta.get('tools');
+  const skillsSt = AgentMeta.get('skills');
+  const mcpSt    = AgentMeta.get('mcp');
+
+  // Kick off fetches (idempotent while cached).
+  AgentMeta.models(); AgentMeta.tools(); AgentMeta.skills(); AgentMeta.mcp();
+
+  // ── Model select, grouped by provider ──
+  let modelOpts = '';
+  const cur = agentCfg(n, 'model', '');
+  if (modelsSt && modelsSt.status === 'ok') {
+    const byProvider = {};
+    for (const m of modelsSt.data) {
+      (byProvider[m.provider || 'Other'] ??= []).push(m);
+    }
+    for (const [prov, list] of Object.entries(byProvider)) {
+      modelOpts += `<optgroup label="${esc(prov)}">` + list.map(m =>
+        `<option value="${esc(m.name)}"${m.name === cur ? ' selected' : ''}${m.has_key ? '' : ' disabled'}>
+           ${esc(m.name)}${m.has_key ? '' : ' (no key)'}${m.is_default ? ' · default' : ''}
+         </option>`).join('') + '</optgroup>';
+    }
+    // Current value not in the list (renamed / removed model) — keep it.
+    if (cur && !modelsSt.data.some(m => m.name === cur)) {
+      modelOpts = `<option value="${esc(cur)}" selected>${esc(cur)} (unlisted)</option>` + modelOpts;
+    }
+  } else {
+    modelOpts = `<option value="${esc(cur)}" selected>${esc(cur || (modelsSt && modelsSt.status === 'error' ? '(failed to load models)' : 'loading…'))}</option>`;
+  }
+
+  const autoApprove = agentCfg(n, 'auto_approve', true);
+  const mcpEnabled  = agentCfg(n, 'mcp_enabled', true);
+
+  return `
+    <div class="insp-field">
+      <label class="insp-label" for="insp-agent-model">Model</label>
+      <select id="insp-agent-model" class="insp-input" data-agent-key="model">${modelOpts}</select>
+      <div class="insp-help">Provider/model used for this agent's LLM calls.</div>
+    </div>
+    <div class="insp-field">
+      <label class="insp-label">Project root</label>
+      <input class="insp-input" type="text" data-agent-key="project"
+             value="${esc(agentCfg(n, 'project', ''))}" placeholder="/path/to/project">
+      <div class="insp-help">Working directory for the agent's tools.</div>
+    </div>
+    <div class="insp-field">
+      <label class="insp-label">System prompt</label>
+      <textarea class="insp-input insp-textarea" rows="4" data-agent-key="system_prompt"
+        placeholder="(optional — overrides the composed default)">${esc(agentCfg(n, 'system_prompt', ''))}</textarea>
+      <div class="insp-help">Persona / role override, prepended to the system prompt.</div>
+    </div>
+    <div class="insp-field insp-check">
+      <label><input type="checkbox" data-agent-key="auto_approve"${autoApprove ? ' checked' : ''}>
+        Auto-approve shell commands</label>
+      <div class="insp-help">Run execute_bash without asking (recommended in graphs).</div>
+    </div>
+    <div class="insp-field insp-check">
+      <label><input type="checkbox" data-agent-key="mcp_enabled"${mcpEnabled ? ' checked' : ''}>
+        Enable MCP servers</label>
+      <div class="insp-help">Master switch for all MCP integrations.</div>
+    </div>
+    ${agentGroupHtml(n, 'tools',  'Tools',       toolsSt,  'tools_disabled')}
+    ${agentGroupHtml(n, 'skills', 'Skills',      skillsSt, 'skills_disabled')}
+    ${agentGroupHtml(n, 'mcp',    'MCP servers', mcpSt,    'mcp_servers_disabled')}
+  `;
+}
+
+// Collapsible checkbox group for one of tools / skills / mcp.
+function agentGroupHtml(n, key, title, st, disabledKey) {
+  const disabled = new Set(agentCfg(n, disabledKey, []));
+  let body, summary;
+  if (!st || st.status === 'loading') {
+    summary = 'loading…';
+    body = '<div class="insp-help">Loading…</div>';
+  } else if (st.status === 'error') {
+    summary = 'failed to load';
+    body = `<div class="insp-help">Error: ${esc(st.error || 'unknown')}</div>`;
+  } else {
+    const items = st.data.map(x => typeof x === 'string' ? x : x.name);
+    if (items.length === 0) {
+      summary = 'none configured';
+      body = '<div class="insp-help">None found on the server.</div>';
+    } else {
+      const enabled = items.filter(x => !disabled.has(x)).length;
+      summary = `${enabled} of ${items.length} enabled`;
+      body = items.map(name =>
+        `<label class="insp-check-item">
+           <input type="checkbox" data-agent-group="${disabledKey}" value="${esc(name)}"
+             ${disabled.has(name) ? '' : ' checked'}> ${esc(name)}
+         </label>`).join('');
+    }
+  }
+  return `<details class="insp-group" data-group="${key}">
+    <summary>${esc(title)} <span class="insp-group-count">${esc(summary)}</span></summary>
+    <div class="insp-group-body">${body}</div>
+  </details>`;
+}
+
+// Bind agent fields after renderInspector injects the HTML.
+function bindAgentFields(n, container) {
+  container.querySelectorAll('[data-agent-key]').forEach(el => {
+    const key = el.dataset.agentKey;
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', (e) => {
+      n.config[key] = el.type === 'checkbox' ? el.checked : e.target.value;
+      refreshNodeChrome(n);
+    });
+  });
+  container.querySelectorAll('[data-agent-group]').forEach(el => {
+    el.addEventListener('change', () => {
+      const key = el.dataset.agentGroup;
+      const set = new Set(agentCfg(n, key, []));
+      if (el.checked) set.delete(el.value); else set.add(el.value);
+      n.config[key] = [...set];
+      // Update the "N of M enabled" summary without a full re-render.
+      const group = el.closest('.insp-group');
+      const boxes = group.querySelectorAll('[data-agent-group]');
+      const on = [...boxes].filter(b => b.checked).length;
+      group.querySelector('.insp-group-count').textContent = `${on} of ${boxes.length} enabled`;
+    });
+  });
 }
 
 function inspFieldHtml(n, f) {
@@ -989,6 +1157,13 @@ const Layout = (() => {
   apply();
   return { toggleInsp, toggleOut };
 })();
+
+// Single global AgentMeta listener: when async agent metadata arrives,
+// re-render the inspector if the selected node is an agent.
+AgentMeta.onChange(() => {
+  const n = S.nodes.find(x => x.id === S.selected);
+  if (n && n.type === 'agent') renderInspector();
+});
 
 // ─── Init ────────────────────────────────────────────────────────────
 loadSampleGraph();

@@ -17,6 +17,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -37,6 +38,12 @@ daedalus::AgentConfig introspection_agent_config() {
     return cfg;
 }
 
+// daedalus::Agent is not thread-safe, and constructing several agents
+// concurrently races on shared global state (SettingsStore, curl globals,
+// MCP config) — observed as a SIGSEGV when the browser fired /tools,
+// /skills and /mcp simultaneously. Serialize all introspection endpoints.
+std::mutex g_introspection_mtx;
+
 }  // namespace
 
 void register_agent_routes(OmniNet::HTTP::Server& server) {
@@ -45,6 +52,7 @@ void register_agent_routes(OmniNet::HTTP::Server& server) {
     server.get("/api/agent/tools",
         [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             (void)req;
+            std::lock_guard<std::mutex> lk{g_introspection_mtx};
             try {
                 // Throwaway sink — tool listing doesn't fire callbacks.
                 struct NullSink : daedalus::AgentSink {};
@@ -75,6 +83,7 @@ void register_agent_routes(OmniNet::HTTP::Server& server) {
     server.get("/api/agent/status",
         [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             (void)req;
+            std::lock_guard<std::mutex> lk{g_introspection_mtx};
             try {
                 struct NullSink : daedalus::AgentSink {};
                 daedalus::Agent agent{introspection_agent_config(), std::make_shared<NullSink>()};
@@ -101,6 +110,62 @@ void register_agent_routes(OmniNet::HTTP::Server& server) {
                         {"total_tokens",      stats.total_tokens},
                     }},
                 }.dump());
+                resp = r;
+            } catch (const std::exception& e) {
+                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::internalError(e.what());
+                r.setContentType("application/json");
+                r.setBody(json{{"error", e.what()}}.dump());
+                resp = r;
+            }
+        });
+
+    // GET /api/agent/skills — list discoverable skills
+    server.get("/api/agent/skills",
+        [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            (void)req;
+            std::lock_guard<std::mutex> lk{g_introspection_mtx};
+            try {
+                struct NullSink : daedalus::AgentSink {};
+                daedalus::Agent agent{introspection_agent_config(), std::make_shared<NullSink>()};
+                agent.initialize();
+                auto skills = agent.list_skills();
+
+                json arr = json::array();
+                for (auto& sk : skills) {
+                    arr.push_back({
+                        {"name",        sk.name},
+                        {"description", sk.description},
+                        {"tags",        sk.tags},
+                    });
+                }
+                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::ok();
+                r.setContentType("application/json");
+                r.setBody(arr.dump());
+                resp = r;
+            } catch (const std::exception& e) {
+                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::internalError(e.what());
+                r.setContentType("application/json");
+                r.setBody(json{{"error", e.what()}}.dump());
+                resp = r;
+            }
+        });
+
+    // GET /api/agent/mcp — list configured MCP servers
+    server.get("/api/agent/mcp",
+        [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            (void)req;
+            std::lock_guard<std::mutex> lk{g_introspection_mtx};
+            try {
+                struct NullSink : daedalus::AgentSink {};
+                daedalus::Agent agent{introspection_agent_config(), std::make_shared<NullSink>()};
+                agent.initialize();
+                auto servers = agent.mcp_configured_servers();
+
+                json arr = json::array();
+                for (auto& name : servers) arr.push_back(name);
+                OmniNet::HTTP::Response r = OmniNet::HTTP::Response::ok();
+                r.setContentType("application/json");
+                r.setBody(arr.dump());
                 resp = r;
             } catch (const std::exception& e) {
                 OmniNet::HTTP::Response r = OmniNet::HTTP::Response::internalError(e.what());

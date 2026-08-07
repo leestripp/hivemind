@@ -415,3 +415,21 @@ input[type="number"].insp-input { width: 90px; }
 body.splitter-dragging { user-select: none; }
 body.splitter-dragging * { pointer-events: none !important; }
 body.splitter-dragging .splitter.dragging { pointer-events: auto !important; }
+
+/* ── Agent inspector: checkbox fields & collapsible groups ── */
+.insp-check label { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.insp-check input[type="checkbox"] { accent-color: #5e81ac; }
+.insp-group { margin-top: 10px; border-top: 1px solid #2c333d; padding-top: 8px; }
+.insp-group summary {
+  font-size: 11px; color: #88c0d0; cursor: pointer; user-select: none;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.insp-group summary:hover { color: #d8dee9; }
+.insp-group-count { color: #6c7280; font-size: 10px; }
+.insp-group-body { margin-top: 6px; max-height: 180px; overflow-y: auto; }
+.insp-check-item {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  padding: 2px 0; cursor: pointer; color: #d8dee9;
+}
+.insp-check-item input[type="checkbox"] { accent-color: #5e81ac; }
+.insp-check-item:hover { color: #88c0d0; }

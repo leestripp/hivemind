@@ -190,8 +190,32 @@ AgentExecutor::execute(const Node& node,
         cfg.system_prompt = node.config_json["system_prompt"].get<std::string>();
     }
 
-    // Auto-approve (no user in node-graph context)
-    cfg.auto_approve = true;
+    // Auto-approve shell commands. Default true in node-graph context
+    // (no user to prompt); the inspector can turn it off per node.
+    if (node.config_json.contains("auto_approve")
+        && node.config_json["auto_approve"].is_boolean()) {
+        cfg.auto_approve = node.config_json["auto_approve"].get<bool>();
+    } else {
+        cfg.auto_approve = true;
+    }
+
+    // MCP master switch (default on)
+    if (node.config_json.contains("mcp_enabled")
+        && node.config_json["mcp_enabled"].is_boolean()) {
+        cfg.mcp_enabled = node.config_json["mcp_enabled"].get<bool>();
+    }
+
+    // Disable-lists: the Agent inspector stores unchecked items as string
+    // arrays; daedalus hides/rejects anything listed here.
+    auto copy_disabled = [&](const char* key, std::set<std::string>& out) {
+        if (!node.config_json.contains(key) || !node.config_json[key].is_array()) return;
+        for (auto& v : node.config_json[key]) {
+            if (v.is_string()) out.insert(v.get<std::string>());
+        }
+    };
+    copy_disabled("tools_disabled",        cfg.tools_disabled);
+    copy_disabled("skills_disabled",       cfg.skills_disabled);
+    copy_disabled("mcp_servers_disabled",  cfg.mcp_servers_disabled);
 
     // ── 3. Build sink + agent ────────────────────────────────────────────
     auto sink = std::make_shared<CapturingSink>();
