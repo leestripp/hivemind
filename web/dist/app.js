@@ -289,9 +289,9 @@ function nodeSub(n) {
 }
 
 function renderInspector() {
-  const i = $('inspector');
+  const i = $('inspector-body');
   const n = S.nodes.find(x => x.id === S.selected);
-  if (!n) { i.innerHTML = '<div class="panel-title">Inspector</div><p class="muted">Click a node to see its config.</p>'; return; }
+  if (!n) { i.innerHTML = '<p class="muted">Click a node to see its config.</p>'; return; }
   const def = NODE_DEFS[n.type];
   const schema = FIELD_SCHEMAS[n.type];
 
@@ -307,7 +307,6 @@ function renderInspector() {
   }
 
   i.innerHTML = `
-    <div class="panel-title">Inspector</div>
     <div class="node-card">
       <div class="insp-field">
         <label class="insp-label" for="insp-label">Name</label>
@@ -892,6 +891,95 @@ $('btn-reset').addEventListener('click', () => {
   render();
   log('Layout reset (canvas only — backend graph unchanged).');
 });
+
+// ─── Panel layout (Phase 2): splitters, collapse, persistence ─────────
+const Layout = (() => {
+  const KEY = 'hm.layout';
+  const app = document.querySelector('.app');
+  const DEF = { inspW: 286, outH: 166, inspCollapsed: false, outCollapsed: false };
+  let st = { ...DEF };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) Object.assign(st, JSON.parse(raw));
+    } catch { /* corrupt storage → defaults */ }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* ignore */ }
+  }
+  function apply() {
+    app.classList.toggle('insp-collapsed', st.inspCollapsed);
+    app.classList.toggle('out-collapsed', st.outCollapsed);
+    app.style.setProperty('--insp-w', st.inspW + 'px');
+    app.style.setProperty('--out-h', st.outH + 'px');
+    const bi = $('btn-collapse-insp'), bo = $('btn-collapse-out');
+    bi.textContent = st.inspCollapsed ? '\u27e9' : '\u27e8';
+    bi.title = st.inspCollapsed ? 'Expand inspector' : 'Collapse inspector';
+    bo.textContent = st.outCollapsed ? '\u25b4' : '\u25be';
+    bo.title = st.outCollapsed ? 'Expand output' : 'Collapse output';
+  }
+
+  const clampInsp = (w) => Math.max(200, Math.min(w, window.innerWidth * 0.5));
+  const clampOut  = (h) => Math.max(60, Math.min(h, window.innerHeight * 0.7));
+
+  function wireSplitter(el, onDelta) {
+    const isV = el.classList.contains('splitter-v');
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('dragging');
+      document.body.classList.add('splitter-dragging');
+      let last = isV ? e.clientX : e.clientY;
+      const move = (ev) => {
+        const cur = isV ? ev.clientX : ev.clientY;
+        onDelta(cur - last);
+        last = cur;
+      };
+      const up = () => {
+        el.classList.remove('dragging');
+        document.body.classList.remove('splitter-dragging');
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        save();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    el.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 48 : 16;
+      const grow = isV ? (e.key === 'ArrowLeft') : (e.key === 'ArrowUp');
+      const shrink = isV ? (e.key === 'ArrowRight') : (e.key === 'ArrowDown');
+      if (grow)  { onDelta(-step); save(); e.preventDefault(); }
+      if (shrink){ onDelta(+step); save(); e.preventDefault(); }
+    });
+  }
+
+  // Dragging left (negative dx) grows the inspector; up (negative dy) grows output.
+  wireSplitter($('split-insp'), (dx) => { st.inspW = clampInsp(st.inspW - dx); apply(); });
+  wireSplitter($('split-out'),  (dy) => { st.outH  = clampOut(st.outH - dy);  apply(); });
+
+  const toggleInsp = () => { st.inspCollapsed = !st.inspCollapsed; apply(); save(); };
+  const toggleOut  = () => { st.outCollapsed  = !st.outCollapsed;  apply(); save(); };
+
+  $('btn-collapse-insp').addEventListener('click', toggleInsp);
+  $('btn-collapse-out').addEventListener('click', toggleOut);
+  $('split-insp').addEventListener('dblclick', toggleInsp);
+  $('split-out').addEventListener('dblclick', toggleOut);
+  document.querySelector('.panel-strip-v').addEventListener('click', toggleInsp);
+
+  window.addEventListener('resize', () => {
+    st.inspW = clampInsp(st.inspW);
+    st.outH  = clampOut(st.outH);
+    apply();
+  });
+
+  load();
+  apply();
+  return { toggleInsp, toggleOut };
+})();
 
 // ─── Init ────────────────────────────────────────────────────────────
 loadSampleGraph();

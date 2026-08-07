@@ -31,9 +31,19 @@
       <button class="help-btn" id="btn-help" title="Show controls">?</button>
     </section>
 
+    <div class="splitter splitter-v" id="split-insp" role="separator"
+         aria-orientation="vertical" aria-label="Resize inspector" tabindex="0"
+         title="Drag to resize · double-click to collapse"></div>
+
     <aside class="inspector" id="inspector">
-      <div class="panel-title">Inspector</div>
-      <p class="muted">Click a node to see its config.</p>
+      <div class="panel-head">
+        <div class="panel-title">Inspector</div>
+        <button class="panel-toggle" id="btn-collapse-insp" title="Collapse inspector">⟨</button>
+      </div>
+      <div class="panel-body" id="inspector-body">
+        <p class="muted">Click a node to see its config.</p>
+      </div>
+      <div class="panel-strip-v">Inspector</div>
     </aside>
   </main>
 
@@ -70,9 +80,19 @@
     </div>
   </div>
 
+  <div class="splitter splitter-h" id="split-out" role="separator"
+       aria-orientation="horizontal" aria-label="Resize output panel" tabindex="0"
+       title="Drag to resize · double-click to collapse"></div>
+
   <footer class="output" id="output">
-    <div class="panel-title">Output stream</div>
-    <pre id="output-log">(empty)</pre>
+    <div class="panel-head">
+      <div class="panel-title">Output stream</div>
+      <button class="panel-toggle" id="btn-collapse-out" title="Collapse output">▾</button>
+    </div>
+    <div class="panel-body" id="output-body">
+      <pre id="output-log">(empty)</pre>
+    </div>
+    <div class="panel-strip-h">Output stream</div>
   </footer>
 </div>
 
