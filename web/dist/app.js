@@ -226,22 +226,25 @@ function portCenter(node, portName, dir) {
   };
 }
 
+// Full render: structure (nodes) first, then wires (which read live port
+// positions from the fresh DOM), then the inspector. For cheap updates
+// call the individual renderers — see the drag/pan handlers below.
 function render() {
-  // Mark ports that participate in an edge so we can style them as connected.
-  const connectedPorts = new Set();
-  for (const e of S.edges) {
-    connectedPorts.add(`${e.source}:${e.sourcePort}:output`);
-    connectedPorts.add(`${e.target}:${e.targetPort}:input`);
-  }
+  applyTransform();
+  renderNodes();
+  renderEdges();
+  renderInspector();
+}
 
-  // Apply the shared pan/zoom transform to both layers.
+function applyTransform() {
   const transform = `translate(${S.panX.toFixed(1)}px, ${S.panY.toFixed(1)}px) scale(${S.scale.toFixed(4)})`;
   $('nodes').style.transform = transform;
   $('nodes').style.transformOrigin = '0 0';
   $('edges').style.transform = transform;
   $('edges').style.transformOrigin = '0 0';
+}
 
-  // edges
+function renderEdges() {
   const svg = $('edges');
   svg.innerHTML = '';
   for (const edge of S.edges) {
@@ -261,7 +264,16 @@ function render() {
     svg.appendChild(path);
   }
 
-  // nodes
+}
+
+function renderNodes() {
+  // Mark ports that participate in an edge so we can style them as connected.
+  const connectedPorts = new Set();
+  for (const e of S.edges) {
+    connectedPorts.add(`${e.source}:${e.sourcePort}:output`);
+    connectedPorts.add(`${e.target}:${e.targetPort}:input`);
+  }
+
   const layer = $('nodes');
   layer.innerHTML = '';
   for (const n of S.nodes) {
@@ -296,8 +308,6 @@ function render() {
     `;
     layer.appendChild(div);
   }
-
-  renderInspector();
 }
 
 function nodeSub(n) {
@@ -604,8 +614,13 @@ document.addEventListener('mousedown', (e) => {
     S.selected = id;
     const m = screenToCanvas(e.clientX, e.clientY);
     S.dragging = { id, dx: m.x - node.x, dy: m.y - node.y };
+    // Update selection highlight in place — a full render here would
+    // rebuild every node div (innerHTML='') and destroy the very element
+    // being grabbed, dropping the drag gesture.
+    document.querySelectorAll('.node.selected').forEach(el => el.classList.remove('selected'));
+    nodeEl.classList.add('selected');
     nodeEl.classList.add('dragging');
-    render();
+    renderInspector();
     return;
   }
 
@@ -623,12 +638,17 @@ document.addEventListener('mousemove', (e) => {
     const m = screenToCanvas(e.clientX, e.clientY);
     n.x = m.x - S.dragging.dx;
     n.y = m.y - S.dragging.dy;
-    render();
+    // Move just this node's div (no DOM rebuild → no flicker) and redraw
+    // the wires — portCenter() reads the live rect, so wires track exactly.
+    const el = document.querySelector(`.node[data-id="${CSS.escape(n.id)}"]`);
+    if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+    renderEdges();
   }
   if (S.panning) {
     S.panX = S.panning.panX + (e.clientX - S.panning.x);
     S.panY = S.panning.panY + (e.clientY - S.panning.y);
-    render();
+    // Both layers share the transform — nothing needs redrawing.
+    applyTransform();
   }
 });
 
@@ -654,7 +674,7 @@ $('canvas-wrap').addEventListener('wheel', (e) => {
   S.panX = mx - cx * newScale;
   S.panY = my - cy * newScale;
   S.scale = newScale;
-  render();
+  applyTransform();
 }, { passive: false });
 
 // ─── Space key toggles pan mode cursor ─────────────────────────────────
@@ -686,7 +706,9 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('mouseup', (e) => {
   if (!S.connecting) return;
-  const port = e.target.closest('.port');
+  // e.target can be document/window in edge cases (e.g. mouse released
+  // outside the window) — guard before calling closest().
+  const port = e.target instanceof Element ? e.target.closest('.port') : null;
   if (!port) { S.connecting = null; return; }
   if (port.dataset.dir !== 'input') { S.connecting = null; return; } // output → input only
   const dup = S.edges.find(ed =>
