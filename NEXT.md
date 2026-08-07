@@ -133,3 +133,62 @@ existing `introspection_agent_config()` pattern.
 3. Model/provider dropdown slice (highest value, endpoints ready).
 4. Project/system-prompt/auto-approve slice (plain fields, easy).
 5. Tools/skills/MCP multi-selects (needs #2).
+
+
+## Workflow save / load / files (BEFORE the Agent inspector)
+
+Two persistence layers, distinct jobs:
+
+| Layer | What | Status |
+|-------|------|--------|
+| **SQLite** (`GraphStore`) | Live working state — the server's source of truth | ✅ exists; UI already saves nodes+edges via `/api/graphs` CRUD at run time |
+| **Workflow files** (JSON) | Portable export/import — share, version-control, back up, switch between workflows | ❌ to build |
+
+### File format (v1)
+
+One self-contained JSON document per workflow:
+
+```jsonc
+{
+  "version": 1,                 // for future migrations
+  "name": "expert-panel",
+  "description": "...",
+  "saved_at": "2026-08-07T00:00:00Z",
+  "nodes": [ { "id", "type", "label", "config": {...}, "x", "y" } ],
+  "edges": [ { "source", "source_port", "target", "target_port" } ]
+}
+```
+
+Suggested extension: `.hivemind.json`. No DB-local foreign keys; node ids
+are preserved in-file but **remapped to fresh UUIDs on import** to avoid
+collisions (edge references rewritten to match).
+
+### API additions
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET  /api/graphs/:id/export` | Serialize graph → download `.hivemind.json` |
+| `POST /api/graphs/import`     | Upload file → validate `version`, remap ids, create new graph (name + " (imported)") |
+| `GET  /api/workflows`         | (later) list a server-side library dir `~/.local/share/hivemind/workflows/` |
+
+### Frontend
+
+1. **Save button** — explicit persist (today save only happens implicitly at Run).
+2. **Export button** — `GET /api/graphs/:id/export` → browser download.
+3. **Import button** — file picker → `POST /api/graphs/import` → open the new graph.
+4. **Workflow switcher** — dropdown of `GET /api/graphs` in the top bar to
+   change between saved workflows (replaces always loading the sample graph).
+
+### Validation & edge cases
+
+- Reject files without `version`, unknown `version`, missing `nodes`/`edges`.
+- Reject unknown node `type`s (or import them disabled with a warning).
+- Import never overwrites an existing graph — always creates a new one.
+- Export is deterministic (sorted keys) so files diff cleanly in git.
+
+### Sequencing
+
+1. Backend export endpoint (pure serialization — easiest).
+2. Backend import endpoint (validate + id remap).
+3. UI Save/Export/Import buttons + switcher.
+4. (Later) server-side workflow library dir + `/api/workflows` listing.
