@@ -440,3 +440,7 @@ body.splitter-dragging .splitter.dragging { pointer-events: auto !important; }
 }
 .insp-check-item input[type="checkbox"] { accent-color: #5e81ac; }
 .insp-check-item:hover { color: #88c0d0; }
+
+/* Danger menu items (Delete node / Delete connection) */
+.ctx-item.ctx-danger { color: #e06c75; }
+.ctx-item.ctx-danger:hover { background: rgba(224, 108, 117, .12); }

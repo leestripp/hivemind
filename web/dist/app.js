@@ -828,11 +828,19 @@ document.addEventListener('keydown', (e) => {
   if (!S.selectedEdge) return;
   if (e.target instanceof HTMLElement &&
       (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
-  const before = S.edges.length;
-  S.edges = S.edges.filter(ed => ed.id !== S.selectedEdge);
-  if (S.edges.length !== before) log('Connection removed.');
-  S.selectedEdge = null;
-  render();
+  deleteEdge(S.selectedEdge);
+});
+
+// Delete / Backspace also deletes the selected NODE (when no wire is
+// selected) — the node's wires go with it. Never while typing in a field.
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Delete' && e.code !== 'Backspace') return;
+  if (e.target instanceof HTMLElement &&
+      (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+  if (S.selectedEdge) return;               // wire deletion handled above
+  if (!S.selected) return;
+  e.preventDefault();
+  deleteNode(S.selected);
 });
 
 // ESC also deselects a wire (in addition to cancelling an in-progress wire).
@@ -1206,6 +1214,26 @@ function fitView() {
   S.panY = wrap.height / 2 - ((minY + maxY) / 2) * S.scale;
 }
 
+// ─── Deletion helpers ───────────────────────────────────────────────
+// Delete a node and every wire attached to it.
+function deleteNode(nodeId) {
+  const n = S.nodes.find(x => x.id === nodeId);
+  S.edges = S.edges.filter(e => e.source !== nodeId && e.target !== nodeId);
+  S.nodes = S.nodes.filter(x => x.id !== nodeId);
+  if (S.selected === nodeId) S.selected = null;
+  if (S.selectedEdge && !S.edges.find(e => e.id === S.selectedEdge)) S.selectedEdge = null;
+  render();
+  log(`Deleted node "${n ? n.label : nodeId}" and its connections.`);
+}
+
+// Delete a single wire.
+function deleteEdge(edgeId) {
+  S.edges = S.edges.filter(e => e.id !== edgeId);
+  if (S.selectedEdge === edgeId) S.selectedEdge = null;
+  render();
+  log('Connection removed.');
+}
+
 // ─── Context menu (right-click on canvas) ───────────────────────────
 const menu = $('context-menu');
 const subAdd = $('ctx-sub-add-node');
@@ -1216,16 +1244,35 @@ function showContextMenu(sx, sy, cx, cy) {
   menu.classList.remove('hidden');
   subAdd.classList.add('hidden');
   S.menuPos = { x: cx, y: cy };
+  // Show target-specific items only when the right-click landed on one.
+  $('ctx-delete-node').classList.toggle('hidden', S.menuTarget?.kind !== 'node');
+  $('ctx-delete-edge').classList.toggle('hidden', S.menuTarget?.kind !== 'edge');
 }
 function hideContextMenu() {
   menu.classList.add('hidden');
   subAdd.classList.add('hidden');
   S.menuPos = null;
+  S.menuTarget = null;
 }
 
 $('canvas-wrap').addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const m = screenToCanvas(e.clientX, e.clientY);
+
+  // What is under the cursor? node > wire > bare canvas.
+  S.menuTarget = null;
+  const nodeEl = e.target.closest('.node');
+  const wireEl = e.target.closest('path[data-eid]');
+  if (nodeEl) {
+    S.menuTarget = { kind: 'node', id: nodeEl.dataset.id };
+    // Right-click also selects the node (inspector + highlight follow).
+    S.selected = S.menuTarget.id;
+    render();
+  } else if (wireEl) {
+    S.menuTarget = { kind: 'edge', id: wireEl.dataset.eid };
+    S.selectedEdge = S.menuTarget.id;
+    render();
+  }
   showContextMenu(e.clientX, e.clientY, m.x, m.y);
 });
 
@@ -1243,6 +1290,14 @@ menu.addEventListener('click', (e) => {
     if (type === 'loop') createLoopPair(S.menuPos.x, S.menuPos.y, 3);
     else createNode(type, S.menuPos.x, S.menuPos.y);
     render();
+    hideContextMenu();
+  }
+  if (e.target.id === 'ctx-delete-node' && S.menuTarget?.kind === 'node') {
+    deleteNode(S.menuTarget.id);
+    hideContextMenu();
+  }
+  if (e.target.id === 'ctx-delete-edge' && S.menuTarget?.kind === 'edge') {
+    deleteEdge(S.menuTarget.id);
     hideContextMenu();
   }
   if (e.target.id === 'ctx-reset-view') {

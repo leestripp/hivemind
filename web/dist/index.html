@@ -60,6 +60,9 @@
       <div class="ctx-item ctx-node" data-type="loop"><span class="dot loop"></span>Loop</div>
     </div>
     <div class="ctx-sep"></div>
+    <div class="ctx-item ctx-danger hidden" id="ctx-delete-node">Delete node</div>
+    <div class="ctx-item ctx-danger hidden" id="ctx-delete-edge">Delete connection</div>
+    <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-reset-view">Reset view</div>
     <div class="ctx-item" id="ctx-auto-layout">Auto layout</div>
     <div class="ctx-item" id="ctx-load-loop">Load loop demo</div>
@@ -73,7 +76,8 @@
       <ul>
         <li><b>Left drag</b> a node to move it.</li>
         <li><b>Drag</b> from any port to a matching port to wire nodes (ESC cancels).</li>
-        <li><b>Click a wire</b> to select it, then <b>Delete</b> to break the connection.</li>
+        <li><b>Delete a node</b>: select it and press <b>Delete</b>, or <b>right-click</b> it → Delete node (its wires go too).</li>
+        <li><b>Break a wire</b>: click it and press <b>Delete</b>, or <b>right-click</b> it → Delete connection.</li>
         <li><b>Right-click</b> the canvas to add nodes.</li>
         <li><b>Right-click → Auto layout</b> arranges nodes left-to-right by data flow.</li>
         <li><b>Middle-drag</b> or hold <b>Space</b> and drag to pan.</li>
