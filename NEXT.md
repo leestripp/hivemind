@@ -192,3 +192,40 @@ collisions (edge references rewritten to match).
 2. Backend import endpoint (validate + id remap).
 3. UI Save/Export/Import buttons + switcher.
 4. (Later) server-side workflow library dir + `/api/workflows` listing.
+
+
+## Resizable & collapsible panels (UI)
+
+Real runs produce a lot of output — the output area needs to grow, and
+panels need to get out of the way.
+
+### Scope
+
+| Panel | Resize | Hide/show |
+|-------|--------|-----------|
+| Inspector (right) | Drag left edge — width 240–600px | Toggle button in top bar (and `]` key) |
+| Output (bottom) | Drag top edge — height 80px–70% of viewport | Toggle button (and `\` key) |
+| Canvas (center) | Fills remaining space automatically | Always visible |
+
+### Implementation notes
+
+1. **Splitters**: 4–6px drag handles between panels (`pointerdown/move/up`,
+   `touch-action: none`). Change CSS grid tracks (`grid-template-columns`
+   for inspector, `grid-template-rows` for output) during drag; live
+   resize, no ghost line needed.
+2. **Collapse**: animated (150ms) to zero track size; panel content kept
+   in DOM so state (scroll position, inspector selection) survives.
+   Collapsed output shows a thin strip with the latest status line +
+   expand chevron.
+3. **Persist layout in `localStorage`** (`hivemind.layout.v1`):
+   `{ inspectorWidth, outputHeight, inspectorHidden, outputHidden }` —
+   restore on load. Client-side only; nothing in the backend.
+4. **Accessibility**: splitters focusable, arrow-key resize (10px step),
+   `role="separator"` with `aria-orientation`.
+5. Canvas pan/zoom must re-clamp after resize (viewport size changed).
+
+### Sequencing
+
+1. CSS grid refactor + splitters (inspector width, output height).
+2. Hide/show toggles + thin collapsed strip for output.
+3. `localStorage` persistence + keyboard support.
