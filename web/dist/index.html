@@ -14,7 +14,12 @@
     <div class="brand-sub">Node Graph · multi-agent DAG</div>
     <div class="spacer"></div>
     <span class="status" id="status">ready</span>
+    <select class="btn" id="wf-switcher" title="Open workflow"><option value="">workflow…</option></select>
     <button class="btn primary" id="btn-run">▶ Run</button>
+    <button class="btn" id="btn-save" title="Save to server">Save</button>
+    <button class="btn" id="btn-export" title="Download .hivemind.json">Export</button>
+    <button class="btn" id="btn-import" title="Import .hivemind.json">Import</button>
+    <input type="file" id="wf-file" accept=".json,.hivemind.json" style="display:none">
     <button class="btn" id="btn-reset">Reset layout</button>
   </header>
 

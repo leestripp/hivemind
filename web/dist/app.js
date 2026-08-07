@@ -538,6 +538,71 @@ document.addEventListener('mouseup', (e) => {
   S.connecting = null;
 });
 
+// ─── Workflow save / export / import / switch ─────────────────────────
+async function refreshWorkflowList() {
+  try {
+    const graphs = await API.get('/api/graphs');
+    const sel = $('wf-switcher');
+    sel.innerHTML = '<option value="">workflow…</option>' +
+      graphs.map(g => `<option value="${g.id}"${g.id === S.graphId ? ' selected' : ''}>${esc(g.name)}</option>`).join('');
+  } catch (e) { /* server offline — switcher stays empty */ }
+}
+
+function loadBackendGraph(g) {
+  S.graphId = g.id;
+  S.nodes = (g.nodes || []).map(n => ({
+    id: n.id, type: n.type, label: n.label,
+    x: n.x ?? n.position_x ?? (n.position && n.position.x) ?? 0,
+    y: n.y ?? n.position_y ?? (n.position && n.position.y) ?? 0,
+    config: n.config ?? n.config_json ?? {},
+  }));
+  S.edges = (g.edges || []).map(e => ({
+    id: e.id || `${e.source}-${e.source_port}-${e.target}-${e.target_port}`,
+    source: e.source ?? e.source_node, sourcePort: e.source_port,
+    target: e.target ?? e.target_node, targetPort: e.target_port,
+  }));
+  S.selected = null;
+  render();
+}
+
+$('wf-switcher').addEventListener('change', async (e) => {
+  if (!e.target.value) return;
+  const g = await API.get(`/api/graphs/${e.target.value}`);
+  loadBackendGraph(g);
+  log(`opened workflow "${g.meta ? g.meta.name : g.name}"`);
+});
+
+$('btn-save').addEventListener('click', async () => {
+  await syncGraphToBackend();
+  await refreshWorkflowList();
+  log('workflow saved to server');
+});
+
+$('btn-export').addEventListener('click', async () => {
+  await syncGraphToBackend();
+  const resp = await fetch(`/api/graphs/${S.graphId}/export`);
+  const blob = await resp.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'workflow.hivemind.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  log('exported workflow.hivemind.json');
+});
+
+$('btn-import').addEventListener('click', () => $('wf-file').click());
+$('wf-file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const text = await f.text();
+  const r = await API.post('/api/graphs/import', JSON.parse(text));
+  const g = await API.get(`/api/graphs/${r.graph_id}`);
+  loadBackendGraph(g);
+  await refreshWorkflowList();
+  log(`imported "${r.name}" (${r.nodes} nodes)`);
+  e.target.value = '';
+});
+
 // ─── Reset / Run ─────────────────────────────────────────────────────
 $('btn-reset').addEventListener('click', () => {
   loadSampleGraph();
@@ -831,4 +896,5 @@ $('btn-reset').addEventListener('click', () => {
 // ─── Init ────────────────────────────────────────────────────────────
 loadSampleGraph();
 render();
+refreshWorkflowList();
 log('Loaded sample loop demo. Right-click the canvas to add nodes, scroll to zoom, middle-drag to pan.');
