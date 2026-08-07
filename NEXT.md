@@ -22,13 +22,15 @@
 | `log` | `LogExecutor` | ✅ | tested end-to-end |
 | `merge` | `MergeExecutor` | ✅ | `concat` strategy; `interleave` is future |
 | `loop_start`/`loop_end` | `LoopEngine` | ✅ | unit + end-to-end tested with feedback/loop_count |
-| `agent` | `daedalus::Agent` | ✅ inspector done | executor wired; needs a live provider run to verify end-to-end |
+| `agent` | `daedalus::Agent` | ✅ **live-verified** | single + multi-agent runs complete against MiniMax-M2.7 |
 
 There is intentionally **no `llm` node**. HiveMind runs agents; one-shot
 LLM calls are just agents without tool use. daedalus already provides the
 full agent loop, so a separate plain-LLM node would be redundant.
 
 ## What to do next
+
+Remaining, in priority order:
 
 1. **Add a GraphRunner end-to-end CTest** (no API key needed)
    - Construct a graph in memory and call `runner.run_sync()` without a server.
@@ -85,10 +87,10 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 
 ## What remains
 
-1. **Live `agent` node run** — the final milestone. Needs
-   `MINIMAX_API_KEY` (or moonshot) exported. Run the sample
-   multi-agent DAG or a single `prompt → agent → output` graph and
-   verify `node_output` events + final result.
+1. ~~Live `agent` node run~~ ✅ Done 2026-08-07 — single-agent and
+   3-agent fan-out/merge/fan-out runs complete against MiniMax-M2.7
+   (~40s for the multi-agent DAG). Unknown models now fail fast with
+   a clear error instead of hanging in daedalus' retry loop.
 2. **GraphRunner end-to-end CTest** — in-memory graph run without a
    server (`input → prompt → merge → output`, plus a loop graph).
 3. (Later) WebSocket `/ws/runs` instead of HTTP polling.

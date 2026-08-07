@@ -185,10 +185,10 @@ function loadMultiAgentGraph() {
   S.nodes = [
     mk('input',  'topic',       40, 100, { param_name: 'topic', value: 'Should we use SQLite or Postgres?' }),
     mk('prompt', 'ask-pros',    40, 240, { value: 'Give a 2-line verdict on SQLite vs Postgres.' }),
-    mk('agent',  'sqlite-pro',  280, 60,  { model: 'minimax', project: '~/work/sqlite' }),
-    mk('agent',  'postgres-pro',280, 220, { model: 'minimax', project: '~/work/postgres' }),
+    mk('agent',  'sqlite-pro',  280, 60,  { model: 'MiniMax-M2.7', project: '~/work/sqlite' }),
+    mk('agent',  'postgres-pro',280, 220, { model: 'MiniMax-M2.7', project: '~/work/postgres' }),
     mk('merge',  'merge',       520, 140, { strategy: 'concat' }),
-    mk('agent',  'synthesiser', 760, 140, { model: 'minimax' }),
+    mk('agent',  'synthesiser', 760, 140, { model: 'MiniMax-M2.7' }),
     mk('output', 'verdict',     1000,140, { name: 'verdict' }),
   ];
   const e = (s, sp, t, tp) => ({

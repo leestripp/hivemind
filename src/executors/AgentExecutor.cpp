@@ -15,6 +15,7 @@
 #include "hivemind/Graph.h"
 
 #include <daedalus.h>
+#include "daedalus/settings.h"
 
 #include <filesystem>
 #include <memory>
@@ -162,6 +163,26 @@ AgentExecutor::execute(const Node& node,
     if (node.config_json.contains("model")
         && node.config_json["model"].is_string()) {
         model_name = node.config_json["model"].get<std::string>();
+    }
+
+    // Fail fast on unknown model names. daedalus itself does not validate
+    // here — an unknown name yields an empty Base URL and the LLM client
+    // then retries with 30s/60s/… waits, which hangs the run silently.
+    // (Verified standalone: cfg.model_name="minimax" retries forever.)
+    if (!model_name.empty()) {
+        auto& store = daedalus::SettingsStore::instance();
+        auto resolved = store.resolve_model(model_name);
+        if (!resolved || resolved->host.empty()) {
+            std::string available;
+            for (auto& m : store.list_models()) {
+                if (!available.empty()) available += ", ";
+                available += m.name;
+            }
+            throw std::invalid_argument{
+                "unknown model '" + model_name + "' for agent node '" + node.label +
+                "'. Available models in the daedalus settings store: " +
+                (available.empty() ? std::string{"(none)"} : available)};
+        }
     }
 
     // ── 2. Build daedalus::AgentConfig ───────────────────────────────────
