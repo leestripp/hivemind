@@ -217,6 +217,7 @@ set(EXECUTOR_SOURCES
 set(ROUTE_SOURCES
     include/hivemind/routes/GraphRoutes.cpp
     include/hivemind/routes/RunRoutes.cpp
+    include/hivemind/routes/WorkflowRoutes.cpp
     include/hivemind/routes/StaticRoutes.cpp
     include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp

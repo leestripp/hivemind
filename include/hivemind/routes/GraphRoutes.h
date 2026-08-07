@@ -21,3 +21,6 @@ void register_run_routes(OmniNet::HTTP::Server& server,
  * Register model listing route: GET /api/models.
  */
 void register_model_routes(OmniNet::HTTP::Server& server);
+
+/// Portable workflow files: export / import (.hivemind.json).
+void register_workflow_routes(OmniNet::HTTP::Server& server, GraphStore& store);

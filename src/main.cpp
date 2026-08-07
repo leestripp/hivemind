@@ -84,6 +84,7 @@ int main(int argc, char* argv[]) {
     register_project_routes(server);
     register_agent_routes(server);
     register_graph_routes(server, store);
+    register_workflow_routes(server, store);
     register_run_routes(server, store, registry);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
