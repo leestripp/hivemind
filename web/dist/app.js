@@ -977,6 +977,90 @@ function createLoopPair(x, y, loopCount = 3) {
   log(`Created Loop pair (count=${loopCount}). Wire body nodes between Loop Start and Loop End.`);
 }
 
+// ─── Auto layout (layered DAG layout, "Sugiyama-lite") ──────────────
+// Longest-path layering over the edge DAG: every node gets a column =
+// longest distance from a source; columns stack their nodes vertically
+// centered against the tallest column. Loop feedback edges are NOT
+// stored (the runner injects feedback), so real graphs are acyclic —
+// but we defensively park any unlayered leftovers (cycles) in the last
+// column instead of looping forever.
+const LAYOUT_H_SPACING = 300;   // column pitch (node is 220px wide)
+const LAYOUT_V_SPACING = 170;   // row pitch inside a column
+const LAYOUT_MARGIN    = 60;
+
+function autoLayout() {
+  if (S.nodes.length === 0) return;
+
+  const layer = new Map();   // node id -> column
+  const indeg = new Map();
+  const adj   = new Map();
+  for (const n of S.nodes) { indeg.set(n.id, 0); adj.set(n.id, []); }
+  for (const e of S.edges) {
+    if (!indeg.has(e.source) || !indeg.has(e.target)) continue;
+    adj.get(e.source).push(e.target);
+    indeg.set(e.target, indeg.get(e.target) + 1);
+  }
+
+  // Kahn's algorithm with longest-path layering. Once a node's indegree
+  // hits 0 all predecessors are placed, so its layer is final.
+  let queue = S.nodes.filter(n => indeg.get(n.id) === 0).map(n => n.id);
+  for (const id of queue) layer.set(id, 0);
+  let guard = S.nodes.length * 4 + 16;
+  while (queue.length && guard-- > 0) {
+    const next = [];
+    for (const id of queue) {
+      for (const t of adj.get(id)) {
+        const want = layer.get(id) + 1;
+        if (!layer.has(t) || layer.get(t) < want) layer.set(t, want);
+        indeg.set(t, indeg.get(t) - 1);
+        if (indeg.get(t) === 0) next.push(t);
+      }
+    }
+    queue = next;
+  }
+  // Defensive: nodes stuck in a cycle get parked after the real columns.
+  let maxLayer = -1;
+  for (const v of layer.values()) maxLayer = Math.max(maxLayer, v);
+  for (const n of S.nodes) if (!layer.has(n.id)) layer.set(n.id, maxLayer + 1);
+
+  // Group by column, keep each column's current top-to-bottom order
+  // (stable, so the user's relative arrangement survives where possible).
+  const cols = new Map();
+  for (const n of S.nodes) {
+    const c = layer.get(n.id);
+    if (!cols.has(c)) cols.set(c, []);
+    cols.get(c).push(n);
+  }
+  const colKeys = [...cols.keys()].sort((a, b) => a - b);
+  for (const c of colKeys) cols.get(c).sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+  const maxRows = Math.max(...colKeys.map(c => cols.get(c).length));
+  colKeys.forEach((c, i) => {   // i (not c): compresses empty columns
+    const nodes = cols.get(c);
+    const y0 = LAYOUT_MARGIN + (maxRows - nodes.length) * LAYOUT_V_SPACING / 2;
+    nodes.forEach((n, j) => {
+      n.x = LAYOUT_MARGIN + i * LAYOUT_H_SPACING;
+      n.y = y0 + j * LAYOUT_V_SPACING;
+    });
+  });
+}
+
+// Fit the current node bounding box into the viewport (used after layout).
+function fitView() {
+  if (!S.nodes.length) return;
+  const wrap = $('canvas-wrap').getBoundingClientRect();
+  const pad = 80;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of S.nodes) {
+    minX = Math.min(minX, n.x);           minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + 220);     maxY = Math.max(maxY, n.y + 160);
+  }
+  const w = maxX - minX + pad * 2, h = maxY - minY + pad * 2;
+  S.scale = Math.max(0.2, Math.min(wrap.width / w, wrap.height / h, 1.5));
+  S.panX = wrap.width  / 2 - ((minX + maxX) / 2) * S.scale;
+  S.panY = wrap.height / 2 - ((minY + maxY) / 2) * S.scale;
+}
+
 // ─── Context menu (right-click on canvas) ───────────────────────────
 const menu = $('context-menu');
 const subAdd = $('ctx-sub-add-node');
@@ -1019,6 +1103,13 @@ menu.addEventListener('click', (e) => {
   if (e.target.id === 'ctx-reset-view') {
     resetView();
     render();
+    hideContextMenu();
+  }
+  if (e.target.id === 'ctx-auto-layout') {
+    autoLayout();
+    fitView();
+    render();
+    log('Auto layout applied.');
     hideContextMenu();
   }
   if (e.target.id === 'ctx-load-loop') {
