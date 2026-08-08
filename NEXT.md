@@ -82,6 +82,13 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 
 ## Done milestones (kept for history)
 
+- ~~VS Code-style activity bar~~ ✅ 2026-08-08 — left icon rail with three
+  pages: **Nodes** (canvas workspace), **Triggers** (webhook list/create/
+  delete, replaces the toolbar modal), **Settings** (pinned at bottom:
+  server health, daedalus models, agent engine stats, storage paths).
+  App grid restructured to 48px rail + content column; collapsed-panel
+  selectors updated. Verified live in browser.
+
 - ~~Webhook trigger node~~ ✅ 2026-08-08 — `triggers` table + CRUD,
   `POST /api/graphs/:gid/triggers` / `GET` list / `DELETE /api/triggers/:id`
   / `POST /api/hooks/:gid/:secret` (JSON object body → run inputs, else

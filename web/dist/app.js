@@ -906,8 +906,19 @@ $('wf-switcher').addEventListener('change', async (e) => {
   log(`opened workflow "${g.meta ? g.meta.name : g.name}"`);
 });
 
+// ─── Activity bar pages ─────────────────────────────────────────────────
+function showPage(name) {
+  for (const pg of ['nodes', 'triggers', 'settings'])
+    $('page-' + pg).classList.toggle('hidden', pg !== name);
+  document.querySelectorAll('.ab-item').forEach(b =>
+    b.classList.toggle('active', b.dataset.page === name));
+  if (name === 'triggers') renderTriggerList();
+  if (name === 'settings') loadSettingsPage();
+}
+document.querySelectorAll('.ab-item').forEach(b =>
+  b.addEventListener('click', () => showPage(b.dataset.page)));
+
 // ─── Webhook triggers ───────────────────────────────────────────────────
-const closeTrig = () => $('trig-overlay').classList.add('hidden');
 
 async function renderTriggerList() {
   const list = $('trig-list');
@@ -948,11 +959,36 @@ async function renderTriggerList() {
   }
 }
 
-$('btn-triggers').addEventListener('click', () => {
-  $('trig-overlay').classList.remove('hidden');
-  renderTriggerList();
-});
-$('trig-close').addEventListener('click', closeTrig);
+// ─── Settings page ──────────────────────────────────────────────────────
+async function loadSettingsPage() {
+  const rows = (el, pairs) => {
+    $(el).innerHTML = pairs.map(([k, v]) =>
+      `<div class="k">${esc(k)}</div><div>${v}</div>`).join('');
+  };
+  try {
+    const h = await API.get('/api/health');
+    rows('set-server', [['status', esc(h.status)], ['service', esc(h.service)],
+      ['address', '<code>' + location.host + '</code>']]);
+  } catch { rows('set-server', [['status', 'offline']]); }
+  try {
+    const models = await API.get('/api/models');
+    rows('set-models', models.length
+      ? models.map(m => [m.name + (m.is_default ? ' ★' : ''),
+          `<code>${esc(m.provider || '')}</code> ${esc(m.model || '')}`])
+      : [['models', 'none configured — add via icarus CLI']]);
+  } catch { rows('set-models', [['models', 'unavailable']]); }
+  try {
+    const a = await API.get('/api/agent/status');
+    rows('set-agent', [['engine', '<code>daedalus</code> (libdaedalus.a)'],
+      ['tools', String(a.tool_count ?? a.tools?.length ?? '?')],
+      ['stats', `<code>${JSON.stringify(a.stats || {})}</code>`]]);
+  } catch { rows('set-agent', [['engine', 'unavailable']]); }
+  rows('set-storage', [
+    ['workflows', '<code>~/.local/share/hivemind/hivemind.db</code>'],
+    ['models/providers', '<code>~/.local/share/daedalus/daedalus.db</code>'],
+    ['theme', 'dark (only theme)']]);
+}
+
 $('trig-create').addEventListener('click', async () => {
   if (!S.graphId) { log('save the workflow first'); return; }
   try {
@@ -960,12 +996,6 @@ $('trig-create').addEventListener('click', async () => {
     log('webhook created');
     renderTriggerList();
   } catch (e) { log(`create failed: ${e.message || e}`); }
-});
-$('trig-overlay').addEventListener('click', (e) => {
-  if (e.target === $('trig-overlay')) closeTrig();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('trig-overlay').classList.contains('hidden')) closeTrig();
 });
 
 // ─── New workflow ───────────────────────────────────────────────────────
