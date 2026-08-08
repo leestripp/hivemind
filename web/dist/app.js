@@ -1436,7 +1436,16 @@ const Layout = (() => {
   $('btn-collapse-out').addEventListener('click', toggleOut);
   $('split-insp').addEventListener('dblclick', toggleInsp);
   $('split-out').addEventListener('dblclick', toggleOut);
-  document.querySelector('.panel-strip-v').addEventListener('click', toggleInsp);
+  const inspStrip = document.querySelector('.panel-strip-v');
+  inspStrip.addEventListener('click', toggleInsp);
+  inspStrip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { toggleInsp(); e.preventDefault(); }
+  });
+  const outStrip = document.querySelector('.panel-strip-h');
+  outStrip.addEventListener('click', toggleOut);
+  outStrip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { toggleOut(); e.preventDefault(); }
+  });
 
   window.addEventListener('resize', () => {
     st.inspW = clampInsp(st.inspW);

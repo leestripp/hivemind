@@ -37,6 +37,17 @@ body {
   grid-template-rows: 48px 1fr 6px var(--out-h, 166px);
   height: 100vh;
 }
+/* Explicit grid placement for every track. REQUIRED: the splitters go
+   display:none when their panel is collapsed — without explicit placement,
+   auto-placement would shift the panel into the splitter's 0px track and
+   the panel would vanish entirely (the old "can't un-collapse" bug). */
+.toolbar     { grid-row: 1; }
+.main        { grid-row: 2; }
+#split-out   { grid-row: 3; }
+#output      { grid-row: 4; }
+.canvas-wrap { grid-column: 1; }
+#split-insp  { grid-column: 2; }
+#inspector   { grid-column: 3; }
 .app.out-collapsed { grid-template-rows: 48px 1fr 0 28px; }
 
 /* ── Toolbar ───────────────────────────────────── */
@@ -434,17 +445,66 @@ input[type="number"].insp-input { width: 90px; }
 .panel-toggle:hover { color: #d8dee9; background: #2c333d; }
 
 .panel-strip-v, .panel-strip-h { display: none; }
+
+/* Collapsed-panel strips — one design for both panels:
+   chevron + panel name, full-size clickable bar, same colors. */
+.panel-strip-v .strip-chevron,
+.panel-strip-h .strip-chevron {
+  color: #88c0d0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+.panel-strip-v .strip-label,
+.panel-strip-h .strip-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8fbcbb;
+  transition: color 0.12s;
+}
+.panel-strip-v .strip-label { writing-mode: vertical-rl; }
+
+.app.insp-collapsed .inspector .panel-strip-v:hover,
+.app.out-collapsed .output .panel-strip-h:hover { background: #2c333d; }
+.app.insp-collapsed .inspector .panel-strip-v:hover .strip-label,
+.app.out-collapsed .output .panel-strip-h:hover .strip-label { color: #d8dee9; }
+.panel-strip-v:focus-visible, .panel-strip-h:focus-visible {
+  outline: 1px solid #88c0d0;
+  outline-offset: -1px;
+}
 .app.insp-collapsed .inspector .panel-head,
 .app.insp-collapsed .inspector .panel-body { display: none; }
+/* Collapsed inspector: vertical rail — chevron on top, vertical label.
+   writing-mode goes ONLY on the label span (on the container it collapsed
+   the rail's width to 0). Shared colors/hover live in the strip block above. */
 .app.insp-collapsed .inspector .panel-strip-v {
-  display: flex; align-items: center; justify-content: center;
-  writing-mode: vertical-rl; font-size: 10px; letter-spacing: 1px;
-  text-transform: uppercase; color: #6c7280; flex: 1; cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  flex: 1;
+  padding: 10px 0;
+  background: #1a1f29;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
 }
-.app.insp-collapsed .inspector .panel-strip-v:hover { color: #88c0d0; }
+.app.out-collapsed .output .panel-head,
 .app.out-collapsed .output .panel-body { display: none; }
-.app.out-collapsed .output .panel-head { padding: 5px 12px; }
-.app.out-collapsed .output .panel-strip-h { display: none; }
+.app.out-collapsed .output .panel-strip-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  flex: 1;
+  padding: 0 12px;
+  background: #1a1f29;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
 
 /* While dragging a splitter, disable text selection + iframe/pointer traps */
 body.splitter-dragging { user-select: none; }

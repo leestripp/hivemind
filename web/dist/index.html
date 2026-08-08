@@ -43,7 +43,10 @@
       <div class="panel-body" id="inspector-body">
         <p class="muted">Click a node to see its config.</p>
       </div>
-      <div class="panel-strip-v">Inspector</div>
+      <div class="panel-strip-v" role="button" tabindex="0" title="Expand inspector (] key)">
+        <span class="strip-chevron">⟩</span>
+        <span class="strip-label">Inspector</span>
+      </div>
     </aside>
   </main>
 
@@ -82,6 +85,7 @@
         <li><b>Right-click → Auto layout</b> arranges nodes left-to-right by data flow.</li>
         <li><b>Middle-drag</b> or hold <b>Space</b> and drag to pan.</li>
         <li><b>Scroll</b> to zoom in/out.</li>
+        <li><b>]</b> toggles the Inspector panel, <b>\</b> toggles the Output panel.</li>
       </ul>
       <button class="btn" id="btn-help-close">Close</button>
     </div>
@@ -99,7 +103,10 @@
     <div class="panel-body" id="output-body">
       <pre id="output-log">(empty)</pre>
     </div>
-    <div class="panel-strip-h">Output stream</div>
+    <div class="panel-strip-h" role="button" tabindex="0" title="Expand output (\ key)">
+      <span class="strip-chevron">▴</span>
+      <span class="strip-label">Output stream</span>
+    </div>
   </footer>
 </div>
 
