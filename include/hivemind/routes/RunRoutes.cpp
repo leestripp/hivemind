@@ -97,6 +97,50 @@ static void finish_run(const std::string& run_id, const std::string& status,
     rs->error = error;
 }
 
+// ─── Shared run starter ────────────────────────────────────────────────
+// Used by both the REST /run route and webhook triggers.
+
+std::string start_graph_run(
+    GraphStore& store,
+    ExecutorRegistry& registry,
+    Graph graph,
+    std::unordered_map<std::string, std::string> inputs)
+{
+    std::string gid = graph.meta.id;
+    std::string run_id = store.create_run(gid);
+
+    // Allocate state before spawning so callers can reference run_id.
+    get_or_create_run(run_id);
+
+    std::thread t{[&, gr=std::move(graph), run_id,
+                   inputs=std::move(inputs)]() mutable {
+        GraphRunner runner{store, registry, gr, run_id, std::move(inputs)};
+        runner.set_event_callback([&run_id](json event) {
+            append_run_output(run_id, event.dump() + "\n");
+        });
+        try {
+            runner.run_sync();
+            if (runner.failed()) {
+                finish_run(run_id, "failed", runner.fail_error());
+                try { store.update_run(run_id, "failed", runner.fail_error()); }
+                catch (...) {}
+            } else {
+                finish_run(run_id, "completed");
+                store.update_run(run_id, "completed");
+            }
+        } catch (const std::exception& e) {
+            append_run_output(run_id,
+                json{{"event","node_failed"},
+                     {"error", e.what()}}.dump() + "\n");
+            finish_run(run_id, "failed", e.what());
+            try { store.update_run(run_id, "failed", e.what()); }
+            catch (...) {}
+        }
+    }};
+    t.detach();
+    return run_id;
+}
+
 // ─── Route registration ────────────────────────────────────────────────
 
 void register_run_routes(OmniNet::HTTP::Server& server,
@@ -120,42 +164,11 @@ void register_run_routes(OmniNet::HTTP::Server& server,
 
             std::string run_id;
             try {
-                run_id = store.create_run(gid);
+                run_id = start_graph_run(store, registry, std::move(*g),
+                                         std::move(run_inputs));
             } catch (const std::exception& e) {
                 resp = OmniNet::HTTP::Response::badRequest(e.what()); return;
             }
-
-            // Allocate state before spawning the runner so the
-            // HTTP response can refer to a valid run_id.
-            get_or_create_run(run_id);
-
-            // Spawn the runner on a detached thread.
-            std::thread t{[&, gr=std::move(*g), run_id,
-                           inputs=std::move(run_inputs)]() mutable {
-                GraphRunner runner{store, registry, gr, run_id, std::move(inputs)};
-                runner.set_event_callback([&run_id](json event) {
-                    append_run_output(run_id, event.dump() + "\n");
-                });
-                try {
-                    runner.run_sync();
-                    if (runner.failed()) {
-                        finish_run(run_id, "failed", runner.fail_error());
-                        try { store.update_run(run_id, "failed", runner.fail_error()); }
-                        catch (...) {}
-                    } else {
-                        finish_run(run_id, "completed");
-                        store.update_run(run_id, "completed");
-                    }
-                } catch (const std::exception& e) {
-                    append_run_output(run_id,
-                        json{{"event","node_failed"},
-                             {"error", e.what()}}.dump() + "\n");
-                    finish_run(run_id, "failed", e.what());
-                    try { store.update_run(run_id, "failed", e.what()); }
-                    catch (...) {}
-                }
-            }};
-            t.detach();
 
             json out{
                 {"run_id", run_id},

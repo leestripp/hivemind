@@ -2,6 +2,8 @@
 
 #include <OmniNet.h>
 #include <websocket/WebSocket.h>
+#include <unordered_map>
+#include "hivemind/Graph.h"
 
 class GraphStore;
 class ExecutorRegistry;
@@ -25,3 +27,15 @@ class ExecutorRegistry;
 void register_run_routes(OmniNet::HTTP::Server& server,
                          GraphStore& store,
                          ExecutorRegistry& registry);
+
+/**
+ * Start a graph run on a detached thread (shared by the REST run route
+ * and webhook triggers). Creates the run row + live output buffer,
+ * spawns the GraphRunner, and returns the new run_id immediately.
+ * Throws std::runtime_error if the run row cannot be created.
+ */
+std::string start_graph_run(
+    GraphStore& store,
+    ExecutorRegistry& registry,
+    Graph graph,
+    std::unordered_map<std::string, std::string> inputs);

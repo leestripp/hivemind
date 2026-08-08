@@ -906,6 +906,68 @@ $('wf-switcher').addEventListener('change', async (e) => {
   log(`opened workflow "${g.meta ? g.meta.name : g.name}"`);
 });
 
+// ─── Webhook triggers ───────────────────────────────────────────────────
+const closeTrig = () => $('trig-overlay').classList.add('hidden');
+
+async function renderTriggerList() {
+  const list = $('trig-list');
+  if (!S.graphId) {
+    list.innerHTML = '<div class="insp-help">Save the workflow first — triggers attach to a saved graph.</div>';
+    return;
+  }
+  let triggers = [];
+  try { triggers = await API.get(`/api/graphs/${S.graphId}/triggers`); }
+  catch (e) { list.innerHTML = `<div class="insp-help">failed to load: ${esc(e.message || e)}</div>`; return; }
+
+  if (!triggers.length) {
+    list.innerHTML = '<div class="insp-help">No webhooks yet — create one below.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const t of triggers) {
+    const full = location.origin + t.url;
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--border);border-radius:6px;padding:8px 10px;';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <code style="font-size:11px;word-break:break-all">${esc(full)}</code>
+        <button class="btn danger" data-del="${t.id}" style="flex:none">Delete</button>
+      </div>
+      <div class="insp-help" style="margin-top:6px">
+        last fired: ${t.last_fired_at ? esc(t.last_fired_at) : 'never'}
+        · <code>curl -X POST ${esc(full)} -d '{"topic":"..."}'</code>
+      </div>`;
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      try {
+        await API.del(`/api/triggers/${t.id}`);
+        log('webhook deleted');
+        renderTriggerList();
+      } catch (e) { log(`delete failed: ${e.message || e}`); }
+    });
+    list.appendChild(row);
+  }
+}
+
+$('btn-triggers').addEventListener('click', () => {
+  $('trig-overlay').classList.remove('hidden');
+  renderTriggerList();
+});
+$('trig-close').addEventListener('click', closeTrig);
+$('trig-create').addEventListener('click', async () => {
+  if (!S.graphId) { log('save the workflow first'); return; }
+  try {
+    await API.post(`/api/graphs/${S.graphId}/triggers`, {});
+    log('webhook created');
+    renderTriggerList();
+  } catch (e) { log(`create failed: ${e.message || e}`); }
+});
+$('trig-overlay').addEventListener('click', (e) => {
+  if (e.target === $('trig-overlay')) closeTrig();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('trig-overlay').classList.contains('hidden')) closeTrig();
+});
+
 // ─── New workflow ───────────────────────────────────────────────────────
 // "New" opens a name prompt, then creates an empty backend graph and a
 // blank canvas. syncGraphToBackend() will populate it on the next Save.

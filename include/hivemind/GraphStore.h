@@ -17,6 +17,18 @@
  *
  * DB file: ~/.local/share/hivemind/hivemind.db (created on first access).
  */
+// A registered trigger that can auto-fire a graph run.
+// v1 supports kind="webhook" only (fired via POST /api/hooks/:gid/:secret).
+struct Trigger {
+    std::string id;
+    std::string graph_id;
+    std::string kind;        // "webhook"
+    std::string secret;      // URL path secret
+    bool        enabled = true;
+    std::string created_at;
+    std::string last_fired_at;   // "" if never
+};
+
 class GraphStore {
 public:
     explicit GraphStore();
@@ -112,6 +124,14 @@ public:
 
     /// Load full run state.
     std::optional<GraphRun> get_run(const std::string& run_id);
+
+    // ── Triggers ───────────────────────────────────────────────────────
+    std::string create_trigger(const std::string& graph_id, const std::string& kind);
+    std::vector<Trigger> list_triggers(const std::string& graph_id);
+    std::optional<Trigger> get_trigger(const std::string& graph_id,
+                                       const std::string& secret);
+    void delete_trigger(const std::string& id);
+    void touch_trigger(const std::string& id);   // set last_fired_at = now
 
 private:
     std::filesystem::path db_path_;

@@ -2,8 +2,8 @@
 
 > Status: 2026-08-08 — all 8 node types shipped and live-verified (agents
 > included, against MiniMax-M2.7). UI is feature-rich: agent inspector,
-> workflow files, directory browser, panel system. Next milestone: webhook trigger nodes
-> (first slice of the trigger roadmap).
+> workflow files, directory browser, panel system. Next milestone: cron/schedule triggers or
+> WebSocket run streaming (pick per roadmap below).
 
 ## Quick project state
 
@@ -32,9 +32,14 @@ full agent loop, so a separate plain-LLM node would be redundant.
 
 Remaining, in priority order:
 
-1. **Webhook trigger node** (first slice of the trigger roadmap below)
-   - Smallest trigger: `POST /api/hooks/:graph_id/:secret` → run inputs →
-     existing run path. No scheduler thread required.
+1. **Cron/schedule triggers** (next trigger slice)
+   - Scheduler thread scanning enabled `kind="cron"` triggers; same
+     `start_graph_run()` path the webhook uses.
+   - Needs `triggers.config` column (cron expr) — the table already has
+     room to grow (kind discriminator exists).
+
+2. **WebSocket `/ws/runs`** — replace HTTP polling with OmniNet's
+   `registerProtocolSwitch` upgrade.
 
 ## What *not* to do yet
 
@@ -76,6 +81,14 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 `skills_disabled[]`, `mcp_servers_disabled[]`.
 
 ## Done milestones (kept for history)
+
+- ~~Webhook trigger node~~ ✅ 2026-08-08 — `triggers` table + CRUD,
+  `POST /api/graphs/:gid/triggers` / `GET` list / `DELETE /api/triggers/:id`
+  / `POST /api/hooks/:gid/:secret` (JSON object body → run inputs, else
+  `inputs["body"]`). Shared `start_graph_run()` extracted from RunRoutes;
+  runner untouched. Toolbar **Triggers** modal: list/create/delete + curl
+  example. Verified live: create → fire → run completed with webhook input
+  flowing through; `last_fired_at` touched; bad secret → 404.
 
 - ~~GraphRunner end-to-end CTest~~ ✅ 2026-08-08 — `test_graph_runner.cpp`:
   merge flow, loop body runs exactly 3×, parallel fan-out; asserts on the

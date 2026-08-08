@@ -134,6 +134,16 @@ void GraphStore::ensure_schema() {
             PRIMARY KEY (run_id, node_id, port),
             FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS triggers (
+            id            TEXT PRIMARY KEY,
+            graph_id      TEXT NOT NULL REFERENCES graphs(id) ON DELETE CASCADE,
+            kind          TEXT NOT NULL,
+            secret        TEXT NOT NULL,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT NOT NULL,
+            last_fired_at TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE TABLE IF NOT EXISTS run_completed (
             run_id      TEXT NOT NULL,
             node_id     TEXT NOT NULL,
@@ -493,4 +503,108 @@ std::optional<GraphRun> GraphStore::get_run(const std::string& run_id) {
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     return r;
+}
+
+// ─── Triggers ────────────────────────────────────────────────────────────
+
+std::string GraphStore::create_trigger(const std::string& graph_id,
+                                       const std::string& kind) {
+    std::string id = uuid_v4();
+    std::string secret = uuid_v4();
+    std::string now = iso_now();
+    auto* db = open_conn();
+    const char* sql =
+        "INSERT INTO triggers (id, graph_id, kind, secret, enabled, created_at)"
+        " VALUES (?,?,?,?,1,?)";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        throw std::runtime_error("create_trigger prepare failed");
+    }
+    sqlite3_bind_text(st, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, graph_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, secret.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, now.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (!ok) throw std::runtime_error("create_trigger insert failed");
+    return id;
+}
+
+std::vector<Trigger> GraphStore::list_triggers(const std::string& graph_id) {
+    std::vector<Trigger> out;
+    auto* db = open_conn();
+    const char* sql =
+        "SELECT id, graph_id, kind, secret, enabled, created_at, last_fired_at"
+        " FROM triggers WHERE graph_id = ? ORDER BY created_at";
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(db, sql, -1, &st, nullptr);
+    sqlite3_bind_text(st, 1, graph_id.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        Trigger t;
+        t.id            = (const char*)sqlite3_column_text(st, 0);
+        t.graph_id      = (const char*)sqlite3_column_text(st, 1);
+        t.kind          = (const char*)sqlite3_column_text(st, 2);
+        t.secret        = (const char*)sqlite3_column_text(st, 3);
+        t.enabled       = sqlite3_column_int(st, 4) != 0;
+        t.created_at    = (const char*)sqlite3_column_text(st, 5);
+        t.last_fired_at = (const char*)sqlite3_column_text(st, 6);
+        out.push_back(std::move(t));
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return out;
+}
+
+std::optional<Trigger> GraphStore::get_trigger(const std::string& graph_id,
+                                               const std::string& secret) {
+    auto* db = open_conn();
+    const char* sql =
+        "SELECT id, graph_id, kind, secret, enabled, created_at, last_fired_at"
+        " FROM triggers WHERE graph_id = ? AND secret = ?";
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(db, sql, -1, &st, nullptr);
+    sqlite3_bind_text(st, 1, graph_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, secret.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<Trigger> out;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        Trigger t;
+        t.id            = (const char*)sqlite3_column_text(st, 0);
+        t.graph_id      = (const char*)sqlite3_column_text(st, 1);
+        t.kind          = (const char*)sqlite3_column_text(st, 2);
+        t.secret        = (const char*)sqlite3_column_text(st, 3);
+        t.enabled       = sqlite3_column_int(st, 4) != 0;
+        t.created_at    = (const char*)sqlite3_column_text(st, 5);
+        t.last_fired_at = (const char*)sqlite3_column_text(st, 6);
+        out = std::move(t);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return out;
+}
+
+void GraphStore::delete_trigger(const std::string& id) {
+    auto* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(db, "DELETE FROM triggers WHERE id = ?", -1, &st, nullptr);
+    sqlite3_bind_text(st, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (!ok) throw std::runtime_error("delete_trigger failed");
+}
+
+void GraphStore::touch_trigger(const std::string& id) {
+    auto* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(db, "UPDATE triggers SET last_fired_at = ? WHERE id = ?",
+                       -1, &st, nullptr);
+    std::string now = iso_now();
+    sqlite3_bind_text(st, 1, now.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
 }

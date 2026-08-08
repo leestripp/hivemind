@@ -17,6 +17,7 @@
     <select class="btn" id="wf-switcher" title="Open workflow"><option value="">workflow…</option></select>
     <button class="btn primary" id="btn-run">▶ Run</button>
     <button class="btn" id="btn-new" title="Create a new empty workflow">New</button>
+    <button class="btn" id="btn-triggers" title="Manage webhook triggers for this workflow">Triggers</button>
     <button class="btn" id="btn-save" title="Save to server">Save</button>
     <button class="btn" id="btn-export" title="Download .hivemind.json">Export</button>
     <button class="btn" id="btn-import" title="Import .hivemind.json">Import</button>
@@ -87,6 +88,22 @@
         <li><b>]</b> toggles the Inspector panel, <b>\</b> toggles the Output panel.</li>
       </ul>
       <button class="btn" id="btn-help-close">Close</button>
+    </div>
+  </div>
+
+  <!-- Webhook triggers manager -->
+  <div id="trig-overlay" class="browse-overlay hidden">
+    <div class="browse-card" style="width: 560px">
+      <h3>Webhook triggers</h3>
+      <div class="insp-help" style="margin-bottom: 10px">
+        POST to a webhook URL to auto-run this workflow. A JSON object body becomes
+        run inputs; anything else is passed as <code>body</code>.
+      </div>
+      <div id="trig-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+      <div class="browse-actions">
+        <button class="btn" id="trig-close">Close</button>
+        <button class="btn primary" id="trig-create">+ New webhook</button>
+      </div>
     </div>
   </div>
 
