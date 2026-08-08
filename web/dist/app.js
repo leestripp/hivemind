@@ -933,7 +933,10 @@ async function loadTrigWorkflows() {
       if (g.id === S.graphId) o.selected = true;
       sel.appendChild(o);
     }
-  } catch (e) { /* leave as-is */ }
+  } catch (e) {
+    console.error('loadTrigWorkflows failed:', e);
+    $('trig-form-err').textContent = 'could not load workflows: ' + (e.message || e);
+  }
 }
 
 function syncTrigKindRows() {
@@ -946,6 +949,7 @@ $('trig-kind').addEventListener('change', syncTrigKindRows);
 
 function openTrigModal(existing) {
   trigEditing = existing || null;
+  if ($('trig-wf').options.length === 0) loadTrigWorkflows();
   $('trig-modal-title').textContent = existing ? 'Edit trigger' : 'Add trigger';
   $('trig-form-err').textContent = '';
   const sch = existing?.schedule;
