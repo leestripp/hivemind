@@ -33,9 +33,9 @@ function syncTrigKindRows() {
 }
 $('trig-kind').addEventListener('change', syncTrigKindRows);
 
-function openTrigModal(existing) {
+async function openTrigModal(existing) {
   trigEditing = existing || null;
-  if ($('trig-wf').options.length === 0) loadTrigWorkflows();
+  if ($('trig-wf').options.length === 0) await loadTrigWorkflows();
   $('trig-modal-title').textContent = existing ? 'Edit trigger' : 'Add trigger';
   $('trig-form-err').textContent = '';
   const sch = existing?.schedule;
