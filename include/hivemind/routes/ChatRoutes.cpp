@@ -22,8 +22,10 @@ void register_chat_routes(OmniNet::HTTP::Server& server,
                     "expected {\"message\": \"...\"}");
                 return;
             }
-            bool started = chat_agent(&store, &registry)
-                .send_async(body["message"].get<std::string>());
+            auto& ca = chat_agent(&store, &registry);
+            if (body.contains("model") && body["model"].is_string())
+                ca.set_model(body["model"].get<std::string>());
+            bool started = ca.send_async(body["message"].get<std::string>());
             json out{{"started", started}};
             if (!started) out["error"] = "a turn is already in flight";
             resp = OmniNet::HTTP::Response::ok();
@@ -35,7 +37,9 @@ void register_chat_routes(OmniNet::HTTP::Server& server,
         [&store, &registry](const OmniNet::HTTP::Request&,
                             OmniNet::HTTP::Response& resp) {
             auto& ca = chat_agent(&store, &registry);
-            json out{{"messages", ca.history()}, {"pending", ca.pending()}};
+            json out{{"messages", ca.history()},
+                     {"pending", ca.pending()},
+                     {"model",   ca.current_model()}};
             resp = OmniNet::HTTP::Response::ok();
             resp.setContentType("application/json");
             resp.setBody(out.dump());

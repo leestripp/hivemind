@@ -1,18 +1,6 @@
-// =============================================================================
-// HiveMind Node Graph — app.js
-// Pure-vanilla, self-contained node graph editor + runner simulator.
-// =============================================================================
-
-const NODE_DEFS = {
-  input:       { color: '#a3be8c', label: 'Input',       in: [],        out: ['out'] },
-  prompt:      { color: '#b48ead', label: 'Prompt',      in: ['in'],     out: ['out'] },
-  agent:       { color: '#88c0d0', label: 'AI Agent',    in: ['in'],     out: ['out'] },
-  merge:       { color: '#ebcb8b', label: 'Merge',       in: ['in_a','in_b','in_c'], out: ['out'] },
-  output:      { color: '#d08770', label: 'Output',      in: ['in'],     out: [] },
-  log:         { color: '#6c7280', label: 'Log',         in: ['in'],     out: [] },
-  loop_start:  { color: '#5e81ac', label: 'Loop Start',  in: ['in'],     out: ['out','loop_count'] },
-  loop_end:    { color: '#5e81ac', label: 'Loop End',    in: ['in','loop_count'], out: ['out'] },
-};
+import { API } from '../api.js';
+import { $, esc, log } from '../util.js';
+import { S, NODE_DEFS } from '../state.js';
 
 // ─── Inspector field schemas ─────────────────────────────────────────────
 // Per-node-type form definitions for the Inspector panel. Each field:
@@ -104,22 +92,6 @@ const LOOP_PAIR_SPACING = 220; // px between loop_start and loop_end
 
 const NODE_WIDTH = 220;
 
-const S = {
-  nodes: [],
-  edges: [],
-  selected: null,
-  dragging: null,
-  connecting: null,
-  selectedEdge: null,
-  running: false,
-  // Canvas transform (pan/zoom). Node positions are stored in canvas coordinates.
-  scale: 1,
-  panX: 0,
-  panY: 0,
-  panning: null,
-  spaceHeld: false,
-  menuPos: null,
-};
 
 // ─── Coordinate helpers ─────────────────────────────────────────────────
 // The .nodes/.edges layers are CSS-transformed with translate(panX,panY) scale(scale).
@@ -208,7 +180,6 @@ function loadMultiAgentGraph() {
 }
 
 // ─── Render ─────────────────────────────────────────────────────────────
-const $ = (id) => document.getElementById(id);
 
 // Return the exact canvas coordinates for the centre of a port dot.
 // We read the DOM after render() so the edge always lines up with the real
@@ -624,9 +595,6 @@ function refreshNodeChrome(n) {
   }
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 // ─── Drag node + pan canvas ───────────────────────────────────────────
 // Left click on a node body → drag the node (in canvas coordinates).
@@ -906,266 +874,6 @@ $('wf-switcher').addEventListener('change', async (e) => {
   log(`opened workflow "${g.meta ? g.meta.name : g.name}"`);
 });
 
-// ─── Activity bar pages ─────────────────────────────────────────────────
-function showPage(name) {
-  for (const pg of ['nodes', 'chat', 'triggers', 'settings'])
-    $('page-' + pg).classList.toggle('hidden', pg !== name);
-  document.querySelectorAll('.ab-item').forEach(b =>
-    b.classList.toggle('active', b.dataset.page === name));
-  if (name === 'triggers') { loadTrigWorkflows(); renderTriggerList(); }
-  if (name === 'chat') refreshChat();
-  if (name === 'settings') loadSettingsPage();
-}
-document.querySelectorAll('.ab-item').forEach(b =>
-  b.addEventListener('click', () => showPage(b.dataset.page)));
-
-// ─── Triggers page ──────────────────────────────────────────────────────
-let trigEditing = null;   // trigger object when editing, null when adding
-
-async function loadTrigWorkflows() {
-  try {
-    const graphs = await API.get('/api/graphs');
-    const sel = $('trig-wf');
-    sel.innerHTML = '';
-    for (const g of graphs) {
-      const o = document.createElement('option');
-      o.value = g.id; o.textContent = g.name;
-      if (g.id === S.graphId) o.selected = true;
-      sel.appendChild(o);
-    }
-  } catch (e) {
-    console.error('loadTrigWorkflows failed:', e);
-    $('trig-form-err').textContent = 'could not load workflows: ' + (e.message || e);
-  }
-}
-
-function syncTrigKindRows() {
-  const kind = $('trig-kind').value;
-  document.querySelectorAll('.trig-form-row[data-kinds]').forEach(row => {
-    row.classList.toggle('hidden', !row.dataset.kinds.split(' ').includes(kind));
-  });
-}
-$('trig-kind').addEventListener('change', syncTrigKindRows);
-
-function openTrigModal(existing) {
-  trigEditing = existing || null;
-  if ($('trig-wf').options.length === 0) loadTrigWorkflows();
-  $('trig-modal-title').textContent = existing ? 'Edit trigger' : 'Add trigger';
-  $('trig-form-err').textContent = '';
-  const sch = existing?.schedule;
-  const type = existing ? (existing.kind === 'webhook' ? 'webhook' : sch?.type || 'daily') : 'daily';
-  $('trig-kind').value = type;
-  $('trig-wf').disabled = !!existing;
-  $('trig-kind').disabled = !!existing;
-  if (existing) {
-    $('trig-wf').value = existing.graph_id;
-    if (sch?.at) $('trig-once-at').value = sch.at;
-    if (sch?.time) $('trig-time').value = sch.time;
-    if (sch?.every_minutes) $('trig-mins').value = sch.every_minutes;
-    const days = sch?.days || [1];
-    document.querySelectorAll('#trig-days input').forEach(cb => {
-      cb.checked = days.includes(Number(cb.value));
-    });
-  }
-  syncTrigKindRows();
-  $('trig-modal').classList.remove('hidden');
-}
-const closeTrigModal = () => { $('trig-modal').classList.add('hidden'); trigEditing = null; };
-
-$('trig-add').addEventListener('click', () => openTrigModal(null));
-$('trig-cancel').addEventListener('click', closeTrigModal);
-$('trig-modal').addEventListener('click', (e) => { if (e.target === $('trig-modal')) closeTrigModal(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('trig-modal').classList.contains('hidden')) closeTrigModal();
-});
-
-function readTrigForm() {
-  const errEl = $('trig-form-err');
-  errEl.textContent = '';
-  const kind = $('trig-kind').value;
-  if (kind === 'webhook') return { body: { kind: 'webhook' } };
-  let schedule;
-  if (kind === 'once') {
-    const at = $('trig-once-at').value;
-    if (!at) { errEl.textContent = 'pick a date + time'; return null; }
-    schedule = { type: 'once', at };
-  } else if (kind === 'daily') {
-    schedule = { type: 'daily', time: $('trig-time').value || '09:00' };
-  } else if (kind === 'weekly') {
-    const days = [...document.querySelectorAll('#trig-days input:checked')].map(cb => Number(cb.value));
-    if (!days.length) { errEl.textContent = 'pick at least one day'; return null; }
-    schedule = { type: 'weekly', days, time: $('trig-time').value || '09:00' };
-  } else {
-    const mins = Number($('trig-mins').value);
-    if (!mins || mins < 1) { errEl.textContent = 'minutes must be ≥ 1'; return null; }
-    schedule = { type: 'interval', every_minutes: mins };
-  }
-  return { schedule };
-}
-
-$('trig-save').addEventListener('click', async () => {
-  const errEl = $('trig-form-err');
-  const form = readTrigForm();
-  if (!form) return;
-  try {
-    if (trigEditing) {
-      await API.put(`/api/triggers/${trigEditing.id}`, { schedule: form.schedule });
-    } else {
-      const gid = $('trig-wf').value;
-      if (!gid) { errEl.textContent = 'pick a workflow first'; return; }
-      const body = form.body || { kind: 'schedule', schedule: form.schedule };
-      await API.post(`/api/graphs/${gid}/triggers`, body);
-    }
-    log(trigEditing ? 'trigger updated' : 'trigger added');
-    closeTrigModal();
-    renderTriggerList();
-  } catch (e) { errEl.textContent = String(e.message || e); }
-});
-
-function trigCard(t) {
-  const card = document.createElement('div');
-  card.className = 'trig-card' + (t.enabled ? '' : ' disabled');
-  const icon = t.kind === 'webhook' ? '🔗' : '🕐';
-  const desc = t.kind === 'webhook' ? 'Webhook (external HTTP POST)'
-                                    : esc(t.description || 'Scheduled');
-  card.innerHTML = `
-    <div class="trig-card-head">
-      <span>${icon}</span>
-      <span class="trig-wf-name">${esc(t.graph_name || '')}</span>
-      <span class="grow trig-desc">${desc}</span>
-      <label title="Enabled"><input type="checkbox" data-en ${t.enabled ? 'checked' : ''}></label>
-      ${t.kind === 'schedule' ? '<button class="btn" data-edit>Edit</button>' : ''}
-      <button class="btn danger" data-del>Delete</button>
-    </div>
-    <div class="trig-meta">
-      <span>next: ${t.enabled && t.next_fire_at ? esc(t.next_fire_at.replace('T', ' ').slice(0, 16)) : '—'}</span>
-      <span>last fired: ${t.last_fired_at ? esc(t.last_fired_at.replace('T', ' ').slice(0, 16)) : 'never'}</span>
-    </div>
-    ${t.kind === 'webhook' && t.url ? `
-    <div class="trig-url">
-      <code>${esc(location.origin + t.url)}</code><br>
-      <code>curl -X POST ${esc(location.origin + t.url)} -d '{"topic":"..."}'</code>
-    </div>` : ''}`;
-  card.querySelector('[data-del]').addEventListener('click', async () => {
-    if (!confirm('Delete this trigger?')) return;
-    try { await API.del(`/api/triggers/${t.id}`); renderTriggerList(); }
-    catch (e) { log(`delete failed: ${e.message || e}`); }
-  });
-  card.querySelector('[data-en]').addEventListener('change', async (e) => {
-    try { await API.put(`/api/triggers/${t.id}`, { enabled: e.target.checked }); renderTriggerList(); }
-    catch (err) { log(`toggle failed: ${err.message || err}`); }
-  });
-  const editBtn = card.querySelector('[data-edit]');
-  if (editBtn) editBtn.addEventListener('click', () => openTrigModal(t));
-  return card;
-}
-
-async function renderTriggerList() {
-  const list = $('trig-list');
-  let triggers = [];
-  try { triggers = await API.get('/api/triggers'); }
-  catch (e) { list.innerHTML = `<div class="insp-help">failed to load: ${esc(e.message || e)}</div>`; return; }
-  list.innerHTML = '';
-  if (!triggers.length) {
-    list.innerHTML = '<div class="insp-help">No triggers yet — click + Add Trigger.</div>';
-    return;
-  }
-  for (const t of triggers) list.appendChild(trigCard(t));
-}
-
-// ─── Chat page ──────────────────────────────────────────────────────────
-let chatPolling = false;
-
-function renderChatMessages(messages, pending) {
-  const log = $('chat-log');
-  log.innerHTML = '';
-  for (const m of messages) {
-    const div = document.createElement('div');
-    div.className = 'chat-msg ' + m.role;
-    div.textContent = m.content;
-    if (m.tool_log) {
-      const tl = document.createElement('div');
-      tl.className = 'tool-log';
-      tl.textContent = m.tool_log;
-      div.appendChild(tl);
-    }
-    log.appendChild(div);
-  }
-  if (pending) {
-    const div = document.createElement('div');
-    div.className = 'chat-msg assistant pending';
-    div.textContent = 'thinking…';
-    log.appendChild(div);
-  }
-  log.scrollTop = log.scrollHeight;
-}
-
-async function refreshChat() {
-  try {
-    const d = await API.get('/api/chat/messages');
-    renderChatMessages(d.messages || [], d.pending);
-    if (d.pending && !chatPolling) {
-      chatPolling = true;
-      const tick = setInterval(async () => {
-        try {
-          const d2 = await API.get('/api/chat/messages');
-          renderChatMessages(d2.messages || [], d2.pending);
-          if (!d2.pending) { clearInterval(tick); chatPolling = false; }
-        } catch { clearInterval(tick); chatPolling = false; }
-      }, 1500);
-    }
-  } catch (e) { /* server down — leave */ }
-}
-
-async function sendChat() {
-  const ta = $('chat-text');
-  const msg = ta.value.trim();
-  if (!msg) return;
-  ta.value = '';
-  try {
-    const r = await API.post('/api/chat/message', { message: msg });
-    if (r.error) { log(r.error); }
-    refreshChat();
-  } catch (e) { log(`chat failed: ${e.message || e}`); }
-}
-
-$('chat-send').addEventListener('click', sendChat);
-$('chat-text').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
-});
-$('chat-clear').addEventListener('click', async () => {
-  try { await API.del('/api/chat/messages'); refreshChat(); } catch {}
-});
-
-// ─── Settings page ──────────────────────────────────────────────────────
-async function loadSettingsPage() {
-  const rows = (el, pairs) => {
-    $(el).innerHTML = pairs.map(([k, v]) =>
-      `<div class="k">${esc(k)}</div><div>${v}</div>`).join('');
-  };
-  try {
-    const h = await API.get('/api/health');
-    rows('set-server', [['status', esc(h.status)], ['service', esc(h.service)],
-      ['address', '<code>' + location.host + '</code>']]);
-  } catch { rows('set-server', [['status', 'offline']]); }
-  try {
-    const models = await API.get('/api/models');
-    rows('set-models', models.length
-      ? models.map(m => [m.name + (m.is_default ? ' ★' : ''),
-          `<code>${esc(m.provider || '')}</code> ${esc(m.model || '')}`])
-      : [['models', 'none configured — add via icarus CLI']]);
-  } catch { rows('set-models', [['models', 'unavailable']]); }
-  try {
-    const a = await API.get('/api/agent/status');
-    rows('set-agent', [['engine', '<code>daedalus</code> (libdaedalus.a)'],
-      ['tools', String(a.tool_count ?? a.tools?.length ?? '?')],
-      ['stats', `<code>${JSON.stringify(a.stats || {})}</code>`]]);
-  } catch { rows('set-agent', [['engine', 'unavailable']]); }
-  rows('set-storage', [
-    ['workflows', '<code>~/.local/share/hivemind/hivemind.db</code>'],
-    ['models/providers', '<code>~/.local/share/daedalus/daedalus.db</code>'],
-    ['theme', 'dark (only theme)']]);
-}
 
 // ─── New workflow ───────────────────────────────────────────────────────
 // "New" opens a name prompt, then creates an empty backend graph and a
@@ -1267,11 +975,6 @@ $('btn-run').addEventListener('click', async () => {
   }
 });
 
-function log(msg) {
-  const el = $('output-log');
-  el.textContent += msg + '\n';
-  el.scrollTop = el.scrollHeight;
-}
 
 // ─── Real backend integration ─────────────────────────────────────────
 // The canvas state (S.nodes / S.edges) is mirrored to the backend:
@@ -1280,25 +983,7 @@ function log(msg) {
 //   3. poll /api/runs/:rid/output every 400 ms, render events live
 // The server walks the graph; the UI only renders events.
 
-const API = {
-  async req(method, path, body) {
-    const opt = { method, headers: {} };
-    if (body !== undefined) {
-      opt.headers['Content-Type'] = 'application/json';
-      opt.body = JSON.stringify(body);
-    }
-    const r = await fetch(path, opt);
-    const text = await r.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-    if (!r.ok) throw new Error(`${method} ${path} → ${r.status} ${text}`);
-    return data;
-  },
-  get: (p) => API.req('GET', p),
-  post: (p, b) => API.req('POST', p, b),
-  put: (p, b) => API.req('PUT', p, b),
-  del: (p) => API.req('DELETE', p),
-};
+
 
 // Map frontend node → backend node shape (config passes through).
 function toBackendNode(n) {
@@ -1880,8 +1565,10 @@ AgentMeta.onChange(() => {
   if (n && n.type === 'agent') renderInspector();
 });
 
-// ─── Init ────────────────────────────────────────────────────────────
-loadSampleGraph();
-render();
-refreshWorkflowList();
-log('Loaded sample loop demo. Right-click the canvas to add nodes, scroll to zoom, middle-drag to pan.');
+// ─── Init (called once from main.js) ───────────────────────────────────
+export function initNodes() {
+  loadSampleGraph();
+  render();
+  refreshWorkflowList();
+  log('Loaded sample loop demo. Right-click the canvas to add nodes, scroll to zoom, middle-drag to pan.');
+}

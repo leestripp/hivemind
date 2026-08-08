@@ -4,7 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind — Node Graph</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="css/base.css?v=20260808c">
+  <link rel="stylesheet" href="css/chat.css?v=20260808c">
+  <link rel="stylesheet" href="css/nodes.css?v=20260808c">
+  <link rel="stylesheet" href="css/triggers.css?v=20260808c">
+  <link rel="stylesheet" href="css/settings.css?v=20260808c">
 </head>
 <body>
 <div class="app">
@@ -25,15 +29,15 @@
   </header>
 
   <nav class="activity-bar">
-    <button class="ab-item active" data-page="nodes" title="Nodes">
+    <button class="ab-item active" data-page="chat" title="Chat">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
+    <button class="ab-item" data-page="nodes" title="Nodes">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="12" cy="18" r="2.6"/>
         <path d="M8.3 7.3l6 8M15.7 7.3l-6 8M8.6 6h6.8"/>
-      </svg>
-    </button>
-    <button class="ab-item" data-page="chat" title="Chat">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
       </svg>
     </button>
     <button class="ab-item" data-page="triggers" title="Triggers">
@@ -41,13 +45,13 @@
         <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
       </svg>
     </button>
-    <div class="ab-spacer"></div>
     <button class="ab-item" data-page="settings" title="Settings">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="3.2"/>
         <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>
       </svg>
     </button>
+    <div class="ab-spacer"></div>
   </nav>
 
   <div class="content">
@@ -192,6 +196,8 @@
         <h2>Chat</h2>
         <span class="muted">The HiveMind assistant — builds workflows and triggers for you</span>
         <span class="grow"></span>
+        <label class="muted" for="chat-model">Model</label>
+        <select id="chat-model" class="btn"></select>
         <button class="btn" id="chat-clear">Clear</button>
       </div>
       <div id="chat-log" class="chat-log"></div>
@@ -264,6 +270,6 @@
     </div>
   </div>
 
-<script src="app.js?v=20260808b"></script>
+<script type="module" src="js/main.js?v=20260808c"></script>
 </body>
 </html>

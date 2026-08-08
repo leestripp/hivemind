@@ -96,7 +96,7 @@ void ChatAgent::ensure_agent() {
     if (agent_) return;
 
     daedalus::AgentConfig cfg;
-    cfg.model_name   = "MiniMax-M2.7";           // verified live model
+    cfg.model_name   = model_name_;                 // user-selectable via Chat page
     cfg.session_id   = "hivemind-chat-" + std::to_string(session_gen_);
     cfg.project_root = fs::current_path().string();
     cfg.system_prompt = kSystemPrompt;
@@ -108,6 +108,20 @@ void ChatAgent::ensure_agent() {
     for (auto& t : make_hivemind_tools(store_, registry_))
         agent_->register_tool(std::move(t));
     agent_->initialize();
+}
+
+void ChatAgent::set_model(const std::string& model) {
+    if (model.empty() || model == model_name_) return;
+    std::lock_guard<std::mutex> lk(m_);
+    if (pending_) return;                    // don't yank the rug mid-turn
+    model_name_ = model;
+    agent_.reset();                          // fresh agent on next turn
+    ++session_gen_;
+}
+
+std::string ChatAgent::current_model() const {
+    std::lock_guard<std::mutex> lk(m_);
+    return model_name_;
 }
 
 bool ChatAgent::send_async(const std::string& message) {
