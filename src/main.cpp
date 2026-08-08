@@ -21,6 +21,7 @@
 #include "hivemind/Settings.h"
 #include "hivemind/GraphStore.h"
 #include "hivemind/ExecutorRegistry.h"
+#include "hivemind/Schedule.h"
 
 #include "hivemind/routes/GraphRoutes.h"
 #include "hivemind/routes/RunRoutes.h"
@@ -31,6 +32,7 @@
 #include "hivemind/routes/AgentRoutes.h"
 
 #include <OmniNet.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -107,6 +109,52 @@ int main(int argc, char* argv[]) {
               << settings.port << "/api/health\n";
     std::cout << "Web UI:     http://" << settings.address << ":"
               << settings.port << "/\n";
+    // ─── Scheduled-trigger engine ─────────────────────────────────
+    // Every 30s: fire enabled schedule triggers whose next_fire_at <= now
+    // (server-local time), then recompute their next fire. Once-triggers
+    // disable themselves after firing. The actual run goes through the
+    // same start_graph_run() path as the REST Run button and webhooks.
+    std::jthread scheduler{[&store, &registry](std::stop_token st) {
+        while (!st.stop_requested()) {
+            for (int i = 0; i < 30 && !st.stop_requested(); ++i)
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (st.stop_requested()) break;
+            try {
+                const std::string now = hm::now_iso_local();
+                for (auto& t : store.list_due_schedules(now)) {
+                    auto g = store.get_graph(t.graph_id);
+                    if (!g) {
+                        std::cerr << "[scheduler] trigger " << t.id
+                                  << ": graph gone, disabling\n";
+                        store.mark_trigger_fired(t.id, now, "", true);
+                        continue;
+                    }
+                    json cfg = json::parse(t.config_json, nullptr, false);
+                    std::unordered_map<std::string, std::string> inputs;
+                    if (cfg.is_object() && cfg.contains("inputs") && cfg["inputs"].is_object())
+                        for (auto& [k, v] : cfg["inputs"].items())
+                            if (v.is_string()) inputs[k] = v.get<std::string>();
+
+                    std::string run_id = start_graph_run(store, registry, std::move(*g),
+                                                         std::move(inputs));
+                    const bool once = cfg.is_object() && cfg.contains("schedule")
+                        && cfg["schedule"].is_object()
+                        && cfg["schedule"].value("type", "") == "once";
+                    auto next = once ? std::nullopt
+                        : hm::compute_next_fire(cfg.value("schedule", json::object()),
+                                                now, t.created_at);
+                    store.mark_trigger_fired(t.id, now,
+                                             next.value_or(""), once || !next);
+                    std::cout << "[scheduler] fired trigger " << t.id
+                              << " (graph " << t.graph_id << ") → run " << run_id << "\n";
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[scheduler] tick failed: " << e.what() << "\n";
+            }
+        }
+    }};
+
+    std::cout << "Scheduler running (30s tick, server-local time).\n";
     std::cout << "Press Ctrl-C to stop.\n";
 
     while (!g_shutdown.load()) {

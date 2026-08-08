@@ -2,8 +2,9 @@
 
 > Status: 2026-08-08 — all 8 node types shipped and live-verified (agents
 > included, against MiniMax-M2.7). UI is feature-rich: agent inspector,
-> workflow files, directory browser, panel system. Next milestone: cron/schedule triggers or
-> WebSocket run streaming (pick per roadmap below).
+> workflow files, directory browser, panel system. Next milestone: WebSocket run streaming
+> (`/ws/runs`), then cron niceties (next-firing display
+> polish, run-history page).
 
 ## Quick project state
 
@@ -81,6 +82,24 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 `skills_disabled[]`, `mcp_servers_disabled[]`.
 
 ## Done milestones (kept for history)
+
+- ~~Scheduled triggers (calendar-style)~~ ✅ 2026-08-08 — the user's real
+  ask: user-facing scheduled triggers, not just webhooks. Backend:
+  `src/Schedule.cpp` (once/interval/daily/weekly, server-local time,
+  aligned ticks, no catch-up storms), `triggers.config_json` +
+  `next_fire_at` columns (idempotent ALTER migration), scheduler
+  `std::jthread` in main.cpp (30s tick, fires via shared
+  `start_graph_run()`, once-triggers auto-disable). API: `GET
+  /api/triggers` (all + workflow names), schedule-kind POST with
+  validation, `PUT /api/triggers/:id` enable/disable. UI: Triggers page
+  is now a global calendar-item list — cards show workflow name,
+  schedule description ("Daily at 09:00"), next/last fire, enable
+  toggle, delete; create form with workflow dropdown (all workflows) +
+  type picker (once/daily/weekly/interval/webhook) with conditional
+  fields. Verified live: 1-min interval triggers fired by the scheduler
+  (last_fired advanced, next tick aligned), delete works, UI cards +
+  form render. Bug fixed along the way: `describe_schedule` called
+  `.value()` on a string (`sch["type"].value(...)` → `sch.value(...)`).
 
 - ~~VS Code-style activity bar~~ ✅ 2026-08-08 — left icon rail with three
   pages: **Nodes** (canvas workspace), **Triggers** (webhook list/create/

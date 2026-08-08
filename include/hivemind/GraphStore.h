@@ -22,11 +22,13 @@
 struct Trigger {
     std::string id;
     std::string graph_id;
-    std::string kind;        // "webhook"
-    std::string secret;      // URL path secret
+    std::string kind;          // "webhook" | "schedule"
+    std::string secret;        // URL path secret (webhook kind)
+    std::string config_json;   // {"schedule":{...}, "inputs":{...}} (schedule kind)
+    std::string next_fire_at;  // ISO local; "" = not scheduled
     bool        enabled = true;
     std::string created_at;
-    std::string last_fired_at;   // "" if never
+    std::string last_fired_at; // "" if never
 };
 
 class GraphStore {
@@ -126,8 +128,17 @@ public:
     std::optional<GraphRun> get_run(const std::string& run_id);
 
     // ── Triggers ───────────────────────────────────────────────────────
-    std::string create_trigger(const std::string& graph_id, const std::string& kind);
+    std::string create_trigger(const std::string& graph_id, const std::string& kind,
+                               const std::string& config_json = "",
+                               const std::string& next_fire_at = "");
     std::vector<Trigger> list_triggers(const std::string& graph_id);
+    std::vector<Trigger> list_all_triggers();
+    /// Enabled schedule triggers whose next_fire_at <= now (ISO local).
+    std::vector<Trigger> list_due_schedules(const std::string& now_iso);
+    /// Record a firing: set last_fired_at, next_fire_at, optionally disable.
+    void mark_trigger_fired(const std::string& id, const std::string& fired_at,
+                            const std::string& next_fire_at, bool disable);
+    void set_trigger_enabled(const std::string& id, bool enabled);
     std::optional<Trigger> get_trigger(const std::string& graph_id,
                                        const std::string& secret);
     void delete_trigger(const std::string& id);

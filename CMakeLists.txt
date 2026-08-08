@@ -199,6 +199,7 @@ set(CORE_SOURCES
     src/NodeExecutor.cpp
     src/ExecutorRegistry.cpp
     src/LoopEngine.cpp
+    src/Schedule.cpp
     src/GraphRunner.cpp
     src/Settings.cpp
 )

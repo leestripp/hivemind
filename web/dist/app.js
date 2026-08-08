@@ -912,52 +912,120 @@ function showPage(name) {
     $('page-' + pg).classList.toggle('hidden', pg !== name);
   document.querySelectorAll('.ab-item').forEach(b =>
     b.classList.toggle('active', b.dataset.page === name));
-  if (name === 'triggers') renderTriggerList();
+  if (name === 'triggers') { loadTrigWorkflows(); renderTriggerList(); }
   if (name === 'settings') loadSettingsPage();
 }
 document.querySelectorAll('.ab-item').forEach(b =>
   b.addEventListener('click', () => showPage(b.dataset.page)));
 
-// ─── Webhook triggers ───────────────────────────────────────────────────
+// ─── Triggers page ──────────────────────────────────────────────────────
+let trigWorkflows = [];
+
+async function loadTrigWorkflows() {
+  try {
+    trigWorkflows = await API.get('/api/graphs');
+    const sel = $('trig-wf');
+    sel.innerHTML = '';
+    for (const g of trigWorkflows) {
+      const o = document.createElement('option');
+      o.value = g.id; o.textContent = g.name;
+      if (g.id === S.graphId) o.selected = true;
+      sel.appendChild(o);
+    }
+  } catch (e) { /* leave select as-is */ }
+}
+
+function trigCard(t) {
+  const card = document.createElement('div');
+  card.className = 'trig-card' + (t.enabled ? '' : ' disabled');
+  const icon = t.kind === 'webhook' ? '🔗' : '🕐';
+  const desc = t.kind === 'webhook' ? 'Webhook (external HTTP POST)'
+                                    : esc(t.description || 'Scheduled');
+  card.innerHTML = `
+    <div class="trig-card-head">
+      <span>${icon}</span>
+      <span class="trig-wf-name">${esc(t.graph_name || '')}</span>
+      <span class="grow trig-desc">${desc}</span>
+      <label title="Enabled"><input type="checkbox" data-en ${t.enabled ? 'checked' : ''}></label>
+      <button class="btn danger" data-del>Delete</button>
+    </div>
+    <div class="trig-meta">
+      <span>next: ${t.enabled && t.next_fire_at ? esc(t.next_fire_at.replace('T', ' ').slice(0, 16)) : '—'}</span>
+      <span>last fired: ${t.last_fired_at ? esc(t.last_fired_at.replace('T', ' ').slice(0, 16)) : 'never'}</span>
+    </div>
+    ${t.kind === 'webhook' && t.url ? `
+    <div class="trig-url">
+      <code>${esc(location.origin + t.url)}</code><br>
+      <code>curl -X POST ${esc(location.origin + t.url)} -d '{"topic":"..."}'</code>
+    </div>` : ''}`;
+  card.querySelector('[data-del]').addEventListener('click', async () => {
+    if (!confirm('Delete this trigger?')) return;
+    try { await API.del(`/api/triggers/${t.id}`); renderTriggerList(); }
+    catch (e) { log(`delete failed: ${e.message || e}`); }
+  });
+  card.querySelector('[data-en]').addEventListener('change', async (e) => {
+    try { await API.put(`/api/triggers/${t.id}`, { enabled: e.target.checked }); renderTriggerList(); }
+    catch (err) { log(`toggle failed: ${err.message || err}`); }
+  });
+  return card;
+}
 
 async function renderTriggerList() {
   const list = $('trig-list');
-  if (!S.graphId) {
-    list.innerHTML = '<div class="insp-help">Save the workflow first — triggers attach to a saved graph.</div>';
-    return;
-  }
   let triggers = [];
-  try { triggers = await API.get(`/api/graphs/${S.graphId}/triggers`); }
+  try { triggers = await API.get('/api/triggers'); }
   catch (e) { list.innerHTML = `<div class="insp-help">failed to load: ${esc(e.message || e)}</div>`; return; }
-
+  list.innerHTML = '';
   if (!triggers.length) {
-    list.innerHTML = '<div class="insp-help">No webhooks yet — create one below.</div>';
+    list.innerHTML = '<div class="insp-help">No triggers yet — add one above.</div>';
     return;
   }
-  list.innerHTML = '';
-  for (const t of triggers) {
-    const full = location.origin + t.url;
-    const row = document.createElement('div');
-    row.style.cssText = 'border:1px solid var(--border);border-radius:6px;padding:8px 10px;';
-    row.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <code style="font-size:11px;word-break:break-all">${esc(full)}</code>
-        <button class="btn danger" data-del="${t.id}" style="flex:none">Delete</button>
-      </div>
-      <div class="insp-help" style="margin-top:6px">
-        last fired: ${t.last_fired_at ? esc(t.last_fired_at) : 'never'}
-        · <code>curl -X POST ${esc(full)} -d '{"topic":"..."}'</code>
-      </div>`;
-    row.querySelector('[data-del]').addEventListener('click', async () => {
-      try {
-        await API.del(`/api/triggers/${t.id}`);
-        log('webhook deleted');
-        renderTriggerList();
-      } catch (e) { log(`delete failed: ${e.message || e}`); }
-    });
-    list.appendChild(row);
-  }
+  for (const t of triggers) list.appendChild(trigCard(t));
 }
+
+// Kind picker: show/hide the schedule fields
+$('trig-kind').addEventListener('change', () => {
+  const kind = $('trig-kind').value;
+  document.querySelectorAll('.trig-form-row[data-kinds]').forEach(row => {
+    row.classList.toggle('hidden', !row.dataset.kinds.split(' ').includes(kind));
+  });
+});
+
+$('trig-create').addEventListener('click', async () => {
+  const errEl = $('trig-form-err');
+  errEl.textContent = '';
+  const gid = $('trig-wf').value;
+  if (!gid) { errEl.textContent = 'pick a workflow first'; return; }
+  const kind = $('trig-kind').value;
+  let body;
+  if (kind === 'webhook') {
+    body = { kind: 'webhook' };
+  } else {
+    let schedule;
+    if (kind === 'once') {
+      const at = $('trig-once-at').value;
+      if (!at) { errEl.textContent = 'pick a date + time'; return; }
+      schedule = { type: 'once', at };
+    } else if (kind === 'daily') {
+      schedule = { type: 'daily', time: $('trig-time').value || '09:00' };
+    } else if (kind === 'weekly') {
+      const days = [...document.querySelectorAll('#trig-days input:checked')]
+        .map(cb => Number(cb.value));
+      if (!days.length) { errEl.textContent = 'pick at least one day'; return; }
+      schedule = { type: 'weekly', days, time: $('trig-time').value || '09:00' };
+    } else {
+      const mins = Number($('trig-mins').value);
+      if (!mins || mins < 1) { errEl.textContent = 'minutes must be ≥ 1'; return; }
+      schedule = { type: 'interval', every_minutes: mins };
+    }
+    body = { kind: 'schedule', schedule };
+  }
+  try {
+    await API.post(`/api/graphs/${gid}/triggers`, body);
+    log('trigger added');
+    renderTriggerList();
+  } catch (e) { errEl.textContent = String(e.message || e); }
+});
 
 // ─── Settings page ──────────────────────────────────────────────────────
 async function loadSettingsPage() {
