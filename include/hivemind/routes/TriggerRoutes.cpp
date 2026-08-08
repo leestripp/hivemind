@@ -151,20 +151,47 @@ void register_trigger_routes(OmniNet::HTTP::Server& server,
             send_json(resp, arr);
         });
 
-    // PUT /api/triggers/:id — enable/disable (schedule recompute on re-enable)
+    // PUT /api/triggers/:id — edit schedule and/or enable/disable.
+    // Body: {"enabled": bool} and/or {"schedule": {...}, "inputs": {...}}
     server.put("/api/triggers/:id",
         [&store](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { resp = OmniNet::HTTP::Response::badRequest("bad path"); return; }
             std::string id = seg[2];
             json body = json::parse(req.bodyAsString(), nullptr, false);
-            if (!body.is_object() || !body.contains("enabled") || !body["enabled"].is_boolean()) {
-                resp = OmniNet::HTTP::Response::badRequest("expected {enabled: bool}");
+            if (!body.is_object()) {
+                resp = OmniNet::HTTP::Response::badRequest("expected JSON object");
                 return;
             }
             try {
-                store.set_trigger_enabled(id, body["enabled"].get<bool>());
-                send_json(resp, json{{"id", id}, {"enabled", body["enabled"]}});
+                if (body.contains("schedule")) {
+                    std::string err = hm::validate_schedule(body["schedule"]);
+                    if (!err.empty()) {
+                        resp = OmniNet::HTTP::Response::badRequest(err);
+                        return;
+                    }
+                    json cfg;
+                    cfg["schedule"] = body["schedule"];
+                    if (body.contains("inputs") && body["inputs"].is_object())
+                        cfg["inputs"] = body["inputs"];
+                    auto nxt = hm::compute_next_fire(body["schedule"],
+                                                     hm::now_iso_local(),
+                                                     hm::now_iso_local());
+                    if (!nxt) {
+                        resp = OmniNet::HTTP::Response::badRequest(
+                            "schedule never fires (in the past?)");
+                        return;
+                    }
+                    store.update_trigger(id, cfg.dump(), *nxt);
+                }
+                if (body.contains("enabled") && body["enabled"].is_boolean())
+                    store.set_trigger_enabled(id, body["enabled"].get<bool>());
+
+                // Read back the updated trigger for the response.
+                for (auto& t : store.list_all_triggers()) {
+                    if (t.id == id) { send_json(resp, trigger_to_json(t)); return; }
+                }
+                send_json(resp, json{{"id", id}});
             } catch (const std::exception& e) {
                 resp = OmniNet::HTTP::Response::notFound(e.what());
             }

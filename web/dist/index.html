@@ -177,51 +177,7 @@
         external webhook call.
       </p>
 
-      <div class="trig-form">
-        <div class="trig-form-row">
-          <label>Workflow</label>
-          <select id="trig-wf" class="btn"></select>
-        </div>
-        <div class="trig-form-row">
-          <label>Type</label>
-          <select id="trig-kind" class="btn">
-            <option value="once">Once — date + time</option>
-            <option value="daily">Daily — every day at a time</option>
-            <option value="weekly">Weekly — chosen days at a time</option>
-            <option value="interval">Interval — every N minutes</option>
-            <option value="webhook">Webhook — external HTTP POST</option>
-          </select>
-        </div>
-        <div class="trig-form-row" data-kinds="once">
-          <label>When</label>
-          <input type="datetime-local" id="trig-once-at" class="btn">
-        </div>
-        <div class="trig-form-row hidden" data-kinds="daily weekly">
-          <label>Time</label>
-          <input type="time" id="trig-time" class="btn" value="09:00">
-        </div>
-        <div class="trig-form-row hidden" data-kinds="weekly">
-          <label>Days</label>
-          <div id="trig-days" class="trig-days">
-            <label><input type="checkbox" value="1" checked>Mon</label>
-            <label><input type="checkbox" value="2">Tue</label>
-            <label><input type="checkbox" value="3">Wed</label>
-            <label><input type="checkbox" value="4">Thu</label>
-            <label><input type="checkbox" value="5">Fri</label>
-            <label><input type="checkbox" value="6">Sat</label>
-            <label><input type="checkbox" value="0">Sun</label>
-          </div>
-        </div>
-        <div class="trig-form-row hidden" data-kinds="interval">
-          <label>Every</label>
-          <span><input type="number" id="trig-mins" class="btn" min="1" value="60" style="width:80px"> minutes</span>
-        </div>
-        <div class="trig-form-row">
-          <label></label>
-          <button class="btn primary" id="trig-create">+ Add trigger</button>
-        </div>
-        <div class="insp-help" id="trig-form-err"></div>
-      </div>
+      <button class="btn primary" id="trig-add" style="margin:12px 0 18px">+ Add Trigger</button>
 
       <div id="trig-list" class="trig-rows"></div>
     </div>
@@ -238,6 +194,56 @@
   </div>
   </div><!-- /content -->
 </div>
+
+  <!-- Add/Edit trigger modal -->
+  <div id="trig-modal" class="browse-overlay hidden">
+    <div class="browse-card" style="width: 480px">
+      <h3 id="trig-modal-title">Add trigger</h3>
+      <div class="trig-form-row">
+        <label>Workflow</label>
+        <select id="trig-wf" class="btn"></select>
+      </div>
+      <div class="trig-form-row">
+        <label>Type</label>
+        <select id="trig-kind" class="btn">
+          <option value="once">Once — date + time</option>
+          <option value="daily">Daily — every day at a time</option>
+          <option value="weekly">Weekly — chosen days at a time</option>
+          <option value="interval">Interval — every N minutes</option>
+          <option value="webhook">Webhook — external HTTP POST</option>
+        </select>
+      </div>
+      <div class="trig-form-row" data-kinds="once">
+        <label>When</label>
+        <input type="datetime-local" id="trig-once-at" class="btn">
+      </div>
+      <div class="trig-form-row hidden" data-kinds="daily weekly">
+        <label>Time</label>
+        <input type="time" id="trig-time" class="btn" value="09:00">
+      </div>
+      <div class="trig-form-row hidden" data-kinds="weekly">
+        <label>Days</label>
+        <div id="trig-days" class="trig-days">
+          <label><input type="checkbox" value="1" checked>Mon</label>
+          <label><input type="checkbox" value="2">Tue</label>
+          <label><input type="checkbox" value="3">Wed</label>
+          <label><input type="checkbox" value="4">Thu</label>
+          <label><input type="checkbox" value="5">Fri</label>
+          <label><input type="checkbox" value="6">Sat</label>
+          <label><input type="checkbox" value="0">Sun</label>
+        </div>
+      </div>
+      <div class="trig-form-row hidden" data-kinds="interval">
+        <label>Every</label>
+        <span><input type="number" id="trig-mins" class="btn" min="1" value="60" style="width:80px"> minutes</span>
+      </div>
+      <div class="insp-help" id="trig-form-err"></div>
+      <div class="browse-actions">
+        <button class="btn" id="trig-cancel">Cancel</button>
+        <button class="btn primary" id="trig-save">Save</button>
+      </div>
+    </div>
+  </div>
 
 <script src="app.js"></script>
 </body>

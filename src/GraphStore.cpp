@@ -642,6 +642,23 @@ void GraphStore::mark_trigger_fired(const std::string& id, const std::string& fi
     sqlite3_close(db);
 }
 
+void GraphStore::update_trigger(const std::string& id, const std::string& config_json,
+                                const std::string& next_fire_at) {
+    auto* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(db,
+        "UPDATE triggers SET config_json = ?, next_fire_at = ? WHERE id = ?",
+        -1, &st, nullptr);
+    sqlite3_bind_text(st, 1, config_json.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, next_fire_at.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    int changed = sqlite3_changes(db);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (changed == 0) throw std::runtime_error("trigger not found");
+}
+
 void GraphStore::set_trigger_enabled(const std::string& id, bool enabled) {
     auto* db = open_conn();
     sqlite3_stmt* st = nullptr;
@@ -650,8 +667,10 @@ void GraphStore::set_trigger_enabled(const std::string& id, bool enabled) {
     sqlite3_bind_int(st, 1, enabled ? 1 : 0);
     sqlite3_bind_text(st, 2, id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(st);
+    int changed = sqlite3_changes(db);
     sqlite3_finalize(st);
     sqlite3_close(db);
+    if (changed == 0) throw std::runtime_error("trigger not found");
 }
 
 void GraphStore::delete_trigger(const std::string& id) {

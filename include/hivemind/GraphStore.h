@@ -139,6 +139,9 @@ public:
     void mark_trigger_fired(const std::string& id, const std::string& fired_at,
                             const std::string& next_fire_at, bool disable);
     void set_trigger_enabled(const std::string& id, bool enabled);
+    /// Replace schedule config + recompute next fire (edit). Throws if id unknown.
+    void update_trigger(const std::string& id, const std::string& config_json,
+                        const std::string& next_fire_at);
     std::optional<Trigger> get_trigger(const std::string& graph_id,
                                        const std::string& secret);
     void delete_trigger(const std::string& id);
