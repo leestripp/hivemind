@@ -91,6 +91,26 @@
     </div>
   </div>
 
+  <!-- Directory browser (Agent project root picker) -->
+  <div id="browse-overlay" class="browse-overlay hidden">
+    <div class="browse-card">
+      <h3>Choose project directory</h3>
+      <div class="browse-pathbar">
+        <button class="btn" id="browse-up" title="Go to parent directory">↑ Up</button>
+        <div class="browse-path" id="browse-path" title="Current directory">…</div>
+        <label class="browse-hidden-toggle" title="Show dotfiles">
+          <input type="checkbox" id="browse-hidden"> hidden
+        </label>
+      </div>
+      <div class="browse-quick" id="browse-quick"></div>
+      <div class="browse-list" id="browse-list"><p class="muted">loading…</p></div>
+      <div class="browse-actions">
+        <button class="btn" id="browse-cancel">Cancel</button>
+        <button class="btn primary" id="browse-select">Select this folder</button>
+      </div>
+    </div>
+  </div>
+
   <div class="splitter splitter-h" id="split-out" role="separator"
        aria-orientation="horizontal" aria-label="Resize output panel" tabindex="0"
        title="Drag to resize · double-click to collapse"></div>

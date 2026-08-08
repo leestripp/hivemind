@@ -473,8 +473,11 @@ function renderAgentFields(n) {
     </div>
     <div class="insp-field">
       <label class="insp-label">Project root</label>
-      <input class="insp-input" type="text" data-agent-key="project"
-             value="${esc(agentCfg(n, 'project', ''))}" placeholder="/path/to/project">
+      <div class="insp-input-row">
+        <input class="insp-input" type="text" data-agent-key="project"
+               value="${esc(agentCfg(n, 'project', ''))}" placeholder="/path/to/project">
+        <button class="btn" type="button" data-agent-browse title="Browse for a directory">Browse…</button>
+      </div>
       <div class="insp-help">Working directory for the agent's tools.</div>
     </div>
     <div class="insp-field">
@@ -539,6 +542,17 @@ function bindAgentFields(n, container) {
       refreshNodeChrome(n);
     });
   });
+  const browseBtn = container.querySelector('[data-agent-browse]');
+  if (browseBtn) {
+    browseBtn.addEventListener('click', () => {
+      openProjectBrowser(agentCfg(n, 'project', ''), (chosen) => {
+        n.config.project = chosen;
+        const input = container.querySelector('[data-agent-key="project"]');
+        if (input) input.value = chosen;
+        refreshNodeChrome(n);
+      });
+    });
+  }
   container.querySelectorAll('[data-agent-group]').forEach(el => {
     el.addEventListener('change', () => {
       const key = el.dataset.agentGroup;
@@ -1338,6 +1352,120 @@ document.addEventListener('click', (e) => {
 // ─── Help overlay ────────────────────────────────────────────────────
 $('btn-help').addEventListener('click', () => $('help-overlay').classList.remove('hidden'));
 $('btn-help-close').addEventListener('click', () => $('help-overlay').classList.add('hidden'));
+
+// ─── Directory browser (Agent project root picker) ──────────────────────
+// Server-side picker: GET /api/fs/browse?path=… lists subdirectories of a
+// path on the machine hivemind runs on. Quick-pick chips come from
+// GET /api/projects (known project roots).
+const ProjectBrowser = (() => {
+  let cur = '';        // directory currently listed
+  let onSelect = null; // callback(chosenPath)
+
+  const ov = () => $('browse-overlay');
+
+  async function load(path) {
+    const list = $('browse-list');
+    list.innerHTML = '<p class="browse-empty">loading…</p>';
+    let data;
+    try {
+      const hidden = $('browse-hidden').checked ? '&hidden=1' : '';
+      const r = await fetch('/api/fs/browse?path=' + encodeURIComponent(path) + hidden);
+      data = await r.json();
+    } catch (e) {
+      list.innerHTML = `<p class="browse-empty">failed: ${esc(String(e))}</p>`;
+      return;
+    }
+    cur = data.path || path;
+    $('browse-path').textContent = cur;
+    $('browse-path').title = cur;
+    $('browse-up').disabled = !data.parent;
+
+    if (data.error) {
+      list.innerHTML = `<p class="browse-empty">${esc(data.error)}</p>`;
+      return;
+    }
+    if (!data.dirs || data.dirs.length === 0) {
+      list.innerHTML = '<p class="browse-empty">(no subdirectories — use Select to take this folder)</p>';
+      return;
+    }
+    list.innerHTML = data.dirs.map(d =>
+      `<div class="browse-item" data-path="${esc(d.path)}">
+         <span class="browse-folder">📁</span>${esc(d.name)}
+       </div>`).join('');
+    list.querySelectorAll('.browse-item').forEach(el => {
+      el.addEventListener('click', () => {
+        list.querySelectorAll('.browse-item.selected')
+            .forEach(x => x.classList.remove('selected'));
+        el.classList.add('selected');
+        cur = el.dataset.path;   // Select takes the highlighted dir
+        $('browse-path').textContent = cur;
+        $('browse-path').title = cur;
+      });
+      el.addEventListener('dblclick', () => load(el.dataset.path));
+    });
+  }
+
+  async function loadQuickPicks() {
+    const box = $('browse-quick');
+    box.innerHTML = '';
+    try {
+      const r = await fetch('/api/projects');
+      const projects = await r.json();
+      for (const p of projects.slice(0, 12)) {
+        const chip = document.createElement('button');
+        chip.className = 'browse-chip';
+        chip.type = 'button';
+        chip.textContent = p.name;
+        chip.title = p.path;
+        chip.addEventListener('click', () => {
+          cur = p.path;
+          $('browse-path').textContent = cur;
+          $('browse-path').title = cur;
+          load(p.path);
+        });
+        box.appendChild(chip);
+      }
+    } catch { /* quick picks are best-effort */ }
+  }
+
+  function open(initial, cb) {
+    onSelect = cb;
+    cur = initial || '';
+    ov().classList.remove('hidden');
+    loadQuickPicks();
+    load(cur);
+  }
+  function close() {
+    ov().classList.add('hidden');
+    onSelect = null;
+  }
+
+  $('browse-up').addEventListener('click', async () => {
+    // Ask the server for the parent of the current listing.
+    try {
+      const hidden = $('browse-hidden').checked ? '&hidden=1' : '';
+      const r = await fetch('/api/fs/browse?path=' + encodeURIComponent(cur) + hidden);
+      const data = await r.json();
+      if (data.parent) load(data.parent);
+    } catch { /* ignore */ }
+  });
+  $('browse-hidden').addEventListener('change', () => load(cur));
+  $('browse-select').addEventListener('click', () => {
+    const cb = onSelect;
+    const chosen = cur;
+    close();
+    if (cb && chosen) cb(chosen);
+  });
+  $('browse-cancel').addEventListener('click', close);
+  ov().addEventListener('click', (e) => { if (e.target === ov()) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !ov().classList.contains('hidden')) close();
+  });
+
+  return { open };
+})();
+
+function openProjectBrowser(initial, cb) { ProjectBrowser.open(initial, cb); }
 $('help-overlay').addEventListener('click', (e) => {
   if (e.target === $('help-overlay')) $('help-overlay').classList.add('hidden');
 });
