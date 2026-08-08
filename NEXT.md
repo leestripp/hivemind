@@ -94,3 +94,45 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 2. **GraphRunner end-to-end CTest** — in-memory graph run without a
    server (`input → prompt → merge → output`, plus a loop graph).
 3. (Later) WebSocket `/ws/runs` instead of HTTP polling.
+
+
+## Future roadmap (big-ticket items — discussed 2026-08-08)
+
+Ideas from the user; not scheduled yet, order TBD. Capture scope notes here
+as they firm up.
+
+### 1. User logins / auth
+- Server is currently single-user, no auth at all (local trust model).
+- Options: simple session-token login (SQLite `users` table, cookie),
+  or defer and gate behind a reverse proxy (nginx/traefik basic auth).
+- Multi-user raises: per-user graph namespaces, per-user run history,
+  per-user model/credentials access (today everything shares the daedalus
+  SettingsStore — fine single-user, needs scoping for multi-user).
+- Touch points: `main.cpp` (auth middleware on routes), `GraphStore`
+  (add `owner` column to graphs/runs), UI login screen + session cookie.
+
+### 2. Trigger nodes (auto-fire workflows)
+- New node category: workflow starts from an event instead of ▶ Run.
+- Candidate trigger types:
+  - **cron/schedule** — "run this graph every N minutes / at 09:00 daily".
+    Needs a scheduler thread in `main.cpp` that scans registered triggers
+    and calls the same run path as `POST /api/graphs/:gid/run`.
+  - **webhook** — `POST /api/hooks/:graph_id/:secret` fires the graph;
+    body becomes run inputs. Cheap to build on existing run plumbing.
+  - **file watch** — inotify on a directory; new/changed file path becomes
+    an input. Needs `std::filesystem` watcher thread.
+  - **another run completes** — graph A finishing triggers graph B
+    (chaining). Natural fit with the event stream.
+- Common design: a `trigger` node type whose executor is a no-op (like
+  `input`), plus a `TriggerRegistry` that owns the firing side. The
+  runner doesn't need to change — triggers just inject `run_inputs` and
+  start a run.
+- Storage: `triggers` table in the HiveMind DB (graph_id, kind, config,
+  enabled, last_fired_at).
+
+### 3. Other "lots to do" candidates (from earlier discussions)
+- WebSocket `/ws/runs` live streaming (replace HTTP polling).
+- GraphRunner end-to-end CTest (in-memory run, no server).
+- Merge `interleave` strategy.
+- Graph versioning / multi-graph (subgraph) nodes.
+- Per-node approval UI for agent shell commands.
