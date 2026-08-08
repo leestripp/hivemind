@@ -1098,15 +1098,6 @@ async function loadSettingsPage() {
     ['theme', 'dark (only theme)']]);
 }
 
-$('trig-create').addEventListener('click', async () => {
-  if (!S.graphId) { log('save the workflow first'); return; }
-  try {
-    await API.post(`/api/graphs/${S.graphId}/triggers`, {});
-    log('webhook created');
-    renderTriggerList();
-  } catch (e) { log(`create failed: ${e.message || e}`); }
-});
-
 // ─── New workflow ───────────────────────────────────────────────────────
 // "New" opens a name prompt, then creates an empty backend graph and a
 // blank canvas. syncGraphToBackend() will populate it on the next Save.
