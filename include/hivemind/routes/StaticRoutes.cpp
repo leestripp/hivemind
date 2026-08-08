@@ -109,6 +109,7 @@ void serve_fallback(const fs::path& web_dir, const OmniNet::HTTP::Request& req,
 </body></html>)";
     resp = OmniNet::HTTP::Response::ok();
     resp.setContentType("text/html; charset=utf-8");
+    resp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     resp.setBody(fallback);
 }
 
@@ -151,6 +152,10 @@ void register_static_routes(OmniNet::HTTP::Server& server) {
 
             resp = OmniNet::HTTP::Response::ok();
             resp.setContentType(mime_type_for(*file_opt));
+            // The UI is a local dev app — never let the browser serve a
+            // stale index.html/app.js from cache (this has bitten us twice:
+            // old JS + new HTML = broken page wiring).
+            resp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
             resp.setBody(*content_opt);
         } catch (const std::exception& e) {
             std::cerr << "[StaticRoutes] error serving '" << req.path()
