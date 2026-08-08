@@ -5,7 +5,15 @@
    scrollbars, number-input spinners, checkboxes, file pickers) renders
    with its dark palette. Without this, <select> dropdowns pop open in
    the OS light theme even though the page is dark. */
-:root { color-scheme: dark; }
+:root {
+  color-scheme: dark;
+  --bg:     #0e1116;
+  --panel:  #1a1f29;
+  --border: #2c333d;
+  --accent: #88c0d0;
+  --fg:     #d8dee9;
+  --muted:  #6c7280;
+}
 
 /* Native <option> elements inside a <select> popup (Firefox honours
    these; Chromium follows :root color-scheme above). */
@@ -624,7 +632,7 @@ body.splitter-dragging .splitter.dragging { pointer-events: auto !important; }
 .trig-days { display:flex; gap:10px; flex-wrap:wrap; font-size:13px; }
 .trig-days label { display:flex; align-items:center; gap:4px; cursor:pointer; }
 #trig-form-err { color:var(--danger, #e5534b); min-height:16px; }
-.trig-card { border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:var(--panel); }
+.trig-card { border:1px solid #4c566a; border-radius:8px; padding:10px 12px; background:var(--panel); box-shadow:0 1px 3px rgba(0,0,0,.45); }
 .trig-card.disabled { opacity:.55; }
 .trig-card-head { display:flex; align-items:center; gap:8px; }
 .trig-card-head .grow { flex:1; min-width:0; }
