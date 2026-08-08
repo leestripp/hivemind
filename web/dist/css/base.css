@@ -129,3 +129,34 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .kv .k { color:var(--muted); }
 .kv code { font-size:12px; }
 
+
+/* ── Modal / browse overlay ─────────────────────────────────────────── */
+.browse-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+}
+.browse-overlay.hidden { display: none; }
+
+.browse-card {
+  background: var(--bg1, #1e2030);
+  border: 1px solid var(--border, #2d3250);
+  border-radius: 10px;
+  padding: 28px 28px 20px;
+  min-width: 360px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+.browse-card h3 {
+  margin: 0 0 18px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text, #cdd6f4);
+}
+.browse-card .insp-help { color: #f38ba8; font-size: 0.82rem; margin: 6px 0 0; }

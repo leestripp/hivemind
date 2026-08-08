@@ -27,6 +27,17 @@ std::vector<Port> Node::ports_for_type(const std::string& type) {
     if (type == "log") {
         return {{"in",     "string", "input"}};
     }
+    if (type == "agent_loop_start") {
+        return {{"in",         "string", "input"},
+                {"out",        "string", "output"},
+                {"loop_count", "string", "output"}};
+    }
+    if (type == "agent_loop_end") {
+        return {{"in",         "string", "input"},
+                {"prompt_in",  "string", "input"},
+                {"loop_count", "string", "input"},
+                {"out",        "string", "output"}};
+    }
     if (type == "merge") {
         return {{"in_a",   "string", "input"},
                 {"in_b",   "string", "input"},

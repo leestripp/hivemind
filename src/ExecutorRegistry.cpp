@@ -2,6 +2,8 @@
 #include "hivemind/executors/PromptExecutor.h"
 #include "hivemind/executors/AgentExecutor.h"
 #include "hivemind/executors/LoopStartExecutor.h"
+#include "hivemind/executors/AgentLoopStartExecutor.h"
+#include "hivemind/executors/AgentLoopEndExecutor.h"
 #include "hivemind/executors/LoopEndExecutor.h"
 #include "hivemind/executors/InputExecutor.h"
 #include "hivemind/executors/OutputExecutor.h"
@@ -16,6 +18,8 @@ struct ExecutorRegistry::Impl {
         map_["prompt"]     = std::make_unique<PromptExecutor>();
         map_["agent"]      = std::make_unique<AgentExecutor>();
         map_["loop_start"] = std::make_unique<LoopStartExecutor>();
+        map_["agent_loop_start"] = std::make_unique<AgentLoopStartExecutor>();
+        map_["agent_loop_end"]   = std::make_unique<AgentLoopEndExecutor>();
         map_["loop_end"]   = std::make_unique<LoopEndExecutor>();
         map_["input"]      = std::make_unique<InputExecutor>();
         map_["output"]     = std::make_unique<OutputExecutor>();

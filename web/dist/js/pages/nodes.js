@@ -38,6 +38,12 @@ const FIELD_SCHEMAS = {
       placeholder: '\\n\\n',
       help: 'Inserted between inputs (concat strategy).' },
   ],
+  agent_loop_start: [
+    { key: 'max_iterations', label: 'Max iterations (safety cap)', kind: 'number', help: 'Hard stop if the judge never exits (default 10).' },
+  ],
+  agent_loop_end: [
+    { key: 'model', label: 'Judge model', kind: 'select', source: '/api/models', help: 'Model for the judge agent. Wire a Prompt node into prompt_in for instructions.' },
+  ],
   loop_start: [
     { key: 'loop_count', label: 'Iterations', kind: 'number', min: 1, max: 100,
       help: 'How many times the loop body runs.' },

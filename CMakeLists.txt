@@ -208,6 +208,8 @@ set(EXECUTOR_SOURCES
     src/executors/PromptExecutor.cpp
     src/executors/AgentExecutor.cpp
     src/executors/LoopStartExecutor.cpp
+    src/executors/AgentLoopStartExecutor.cpp
+    src/executors/AgentLoopEndExecutor.cpp
     src/executors/LoopEndExecutor.cpp
     src/executors/InputExecutor.cpp
     src/executors/OutputExecutor.cpp

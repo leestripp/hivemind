@@ -9,6 +9,8 @@ export const NODE_DEFS = {
   log:         { color: '#6c7280', label: 'Log',         in: ['in'],     out: [] },
   loop_start:  { color: '#5e81ac', label: 'Loop Start',  in: ['in'],     out: ['out','loop_count'] },
   loop_end:    { color: '#5e81ac', label: 'Loop End',    in: ['in','loop_count'], out: ['out'] },
+  agent_loop_start: { color: '#bf616a', label: 'Agent Loop Start', in: ['in'], out: ['out','loop_count'] },
+  agent_loop_end:   { color: '#bf616a', label: 'Agent Loop End (judge)', in: ['in','prompt_in','loop_count'], out: ['out'] },
 };
 
 export const S = {

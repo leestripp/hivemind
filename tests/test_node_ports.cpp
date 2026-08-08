@@ -44,6 +44,15 @@ int main() {
     assert(mg[2].name == "in_c");
     assert(mg[3].name == "out");
 
+    auto als = Node::ports_for_type("agent_loop_start");
+    assert(als.size() == 3);
+    assert(als[0].name == "in" && als[1].name == "out" && als[2].name == "loop_count");
+
+    auto ale = Node::ports_for_type("agent_loop_end");
+    assert(ale.size() == 4);
+    assert(ale[0].name == "in" && ale[1].name == "prompt_in"
+        && ale[2].name == "loop_count" && ale[3].name == "out");
+
     // Unknown type
     auto unk = Node::ports_for_type("unknown_node");
     assert(unk.size() == 0);

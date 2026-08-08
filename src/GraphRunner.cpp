@@ -281,6 +281,30 @@ void GraphRunner::execute_node(const Node& node) {
         return;
     }
 
+    // Handle agent_loop_end: the judge agent decides continue/exit.
+    if (node.type == "agent_loop_end") {
+        std::string cont_feedback, final_text;
+        bool wants_continue = false;
+        for (auto& r : results) {
+            if (r.output_port == "__continue__") { wants_continue = true; cont_feedback = r.value; }
+            else if (r.output_port == "out") final_text = r.value;
+        }
+        bool jumped = false;
+        if (wants_continue) {
+            // Reuse the basic loop machinery (cap enforced via loop_count).
+            jumped = handle_loop_end(node, cont_feedback);
+        }
+        if (!jumped) {
+            std::lock_guard<std::mutex> lk{state_mtx_};
+            resolved_[node.id + ":out"] = final_text;
+            store_.set_run_result(run_id_, node.id, "out", final_text);
+            emit_event({{"event", "node_output"}, {"node_id", node.id}, {"chunk", final_text}});
+            completed_.insert(node.id);
+        }
+        store_.add_run_completed(run_id_, node.id);
+        return;
+    }
+
     // Record results (lock: resolved_ / completed_ are shared with other workers)
     {
         std::lock_guard<std::mutex> lk{state_mtx_};

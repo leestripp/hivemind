@@ -22,6 +22,8 @@ macro(hivemind_test name)
         ${CMAKE_SOURCE_DIR}/src/executors/PromptExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/AgentExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/LoopStartExecutor.cpp
+        ${CMAKE_SOURCE_DIR}/src/executors/AgentLoopStartExecutor.cpp
+        ${CMAKE_SOURCE_DIR}/src/executors/AgentLoopEndExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/LoopEndExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/InputExecutor.cpp
         ${CMAKE_SOURCE_DIR}/src/executors/OutputExecutor.cpp
