@@ -1,15 +1,15 @@
 # HiveMind — Next Steps / Working Notes
 
-> Status: 2026-08-06 — `llm` node removed (never wanted; the `agent` node covers
-> all LLM work via daedalus). All remaining node types are implemented and
-> unit-tested. Next milestone: GraphRunner end-to-end CTest, then a live
-> `agent` node run.
+> Status: 2026-08-08 — all 8 node types shipped and live-verified (agents
+> included, against MiniMax-M2.7). UI is feature-rich: agent inspector,
+> workflow files, directory browser, panel system. Next milestone:
+> GraphRunner end-to-end CTest, then webhook trigger nodes.
 
 ## Quick project state
 
 - **Build:** `build/hivemind` compiles cleanly.
 - **Tests:** `ctest --test-dir build` → 3/3 pass (LoopEngine, node ports, daedalus smoke).
-- **Server:** not running; start with `./build/hivemind --port 8421`.
+- **Server:** running in dev on `:8421`; start with `./build/hivemind --port 8421`.
 - **Git:** clean working tree on `main`.
 
 ## Node-type status
@@ -37,19 +37,14 @@ Remaining, in priority order:
    - Covers: `input → prompt → merge → output` and a separate loop graph.
    - Catches regressions in the runner's parallel dispatch and loop logic.
 
-2. **Live `agent` node run** (needs an API key)
-   - The daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`)
-     already has `minimax` and `moonshot` configured with keys
-     (see `GET /api/models`).
-   - Run the sample multi-agent DAG from the UI
-     (or a single `prompt → agent → output` graph via curl).
-   - Verify `node_output` streaming events and the final result.
+2. **Webhook trigger node** (first slice of the trigger roadmap below)
+   - Smallest trigger: `POST /api/hooks/:graph_id/:secret` → run inputs →
+     existing run path. No scheduler thread required.
 
 ## What *not* to do yet
 
-- Don't touch the UI beyond the node chrome already built.
 - Don't add WebSocket support — v1 is HTTP polling (`GET /api/runs/:rid/output`).
-- Don't add more node types (`if`, `filter`, `map`, etc.) until the current set is solid.
+- Don't add more node types (`if`, `filter`, `map`, etc.) until triggers land.
 
 ## How to pick up
 
@@ -85,15 +80,19 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 `system_prompt`, `auto_approve`, `mcp_enabled`, `tools_disabled[]`,
 `skills_disabled[]`, `mcp_servers_disabled[]`.
 
-## What remains
+## Done milestones (kept for history)
 
-1. ~~Live `agent` node run~~ ✅ Done 2026-08-07 — single-agent and
-   3-agent fan-out/merge/fan-out runs complete against MiniMax-M2.7
-   (~40s for the multi-agent DAG). Unknown models now fail fast with
-   a clear error instead of hanging in daedalus' retry loop.
-2. **GraphRunner end-to-end CTest** — in-memory graph run without a
-   server (`input → prompt → merge → output`, plus a loop graph).
-3. (Later) WebSocket `/ws/runs` instead of HTTP polling.
+- ~~Live `agent` node run~~ ✅ 2026-08-07 — single-agent and 3-agent
+  fan-out/merge/fan-out runs complete against MiniMax-M2.7 (~40s for the
+  multi-agent DAG). Unknown models fail fast with a clear error.
+- ~~Workflow save/load files~~ ✅ 2026-08-07 — `.hivemind.json`
+  export/import with id remapping + UI buttons and workflow switcher.
+- ~~Agent node directory browser~~ ✅ 2026-08-07 — `/api/fs/browse` +
+  modal picker on the Agent inspector's project field.
+- ~~New-workflow button~~ ✅ 2026-08-08 — toolbar New → name prompt →
+  empty backend graph.
+- ~~UI panel system polish~~ ✅ 2026-08-07/08 — explicit grid placement,
+  restore strips, dark native widgets, drag/wire fixes.
 
 
 ## Future roadmap (big-ticket items — discussed 2026-08-08)
