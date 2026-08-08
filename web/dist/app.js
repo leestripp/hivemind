@@ -908,11 +908,12 @@ $('wf-switcher').addEventListener('change', async (e) => {
 
 // ─── Activity bar pages ─────────────────────────────────────────────────
 function showPage(name) {
-  for (const pg of ['nodes', 'triggers', 'settings'])
+  for (const pg of ['nodes', 'chat', 'triggers', 'settings'])
     $('page-' + pg).classList.toggle('hidden', pg !== name);
   document.querySelectorAll('.ab-item').forEach(b =>
     b.classList.toggle('active', b.dataset.page === name));
   if (name === 'triggers') { loadTrigWorkflows(); renderTriggerList(); }
+  if (name === 'chat') refreshChat();
   if (name === 'settings') loadSettingsPage();
 }
 document.querySelectorAll('.ab-item').forEach(b =>
@@ -1067,6 +1068,70 @@ async function renderTriggerList() {
   }
   for (const t of triggers) list.appendChild(trigCard(t));
 }
+
+// ─── Chat page ──────────────────────────────────────────────────────────
+let chatPolling = false;
+
+function renderChatMessages(messages, pending) {
+  const log = $('chat-log');
+  log.innerHTML = '';
+  for (const m of messages) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + m.role;
+    div.textContent = m.content;
+    if (m.tool_log) {
+      const tl = document.createElement('div');
+      tl.className = 'tool-log';
+      tl.textContent = m.tool_log;
+      div.appendChild(tl);
+    }
+    log.appendChild(div);
+  }
+  if (pending) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg assistant pending';
+    div.textContent = 'thinking…';
+    log.appendChild(div);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+async function refreshChat() {
+  try {
+    const d = await API.get('/api/chat/messages');
+    renderChatMessages(d.messages || [], d.pending);
+    if (d.pending && !chatPolling) {
+      chatPolling = true;
+      const tick = setInterval(async () => {
+        try {
+          const d2 = await API.get('/api/chat/messages');
+          renderChatMessages(d2.messages || [], d2.pending);
+          if (!d2.pending) { clearInterval(tick); chatPolling = false; }
+        } catch { clearInterval(tick); chatPolling = false; }
+      }, 1500);
+    }
+  } catch (e) { /* server down — leave */ }
+}
+
+async function sendChat() {
+  const ta = $('chat-text');
+  const msg = ta.value.trim();
+  if (!msg) return;
+  ta.value = '';
+  try {
+    const r = await API.post('/api/chat/message', { message: msg });
+    if (r.error) { log(r.error); }
+    refreshChat();
+  } catch (e) { log(`chat failed: ${e.message || e}`); }
+}
+
+$('chat-send').addEventListener('click', sendChat);
+$('chat-text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$('chat-clear').addEventListener('click', async () => {
+  try { await API.del('/api/chat/messages'); refreshChat(); } catch {}
+});
 
 // ─── Settings page ──────────────────────────────────────────────────────
 async function loadSettingsPage() {

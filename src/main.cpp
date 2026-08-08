@@ -30,6 +30,8 @@
 #include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/AgentRoutes.h"
+#include "hivemind/routes/ChatRoutes.h"
+#include "hivemind/chat/ChatAgent.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -90,6 +92,9 @@ int main(int argc, char* argv[]) {
     register_workflow_routes(server, store);
     register_trigger_routes(server, store, registry);
     register_run_routes(server, store, registry);
+    // Chat assistant (daedalus agent with HiveMind tools)
+    chat_agent(&store, &registry);
+    register_chat_routes(server, store, registry);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);

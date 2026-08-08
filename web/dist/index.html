@@ -31,6 +31,11 @@
         <path d="M8.3 7.3l6 8M15.7 7.3l-6 8M8.6 6h6.8"/>
       </svg>
     </button>
+    <button class="ab-item" data-page="chat" title="Chat">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
     <button class="ab-item" data-page="triggers" title="Triggers">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
         <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
@@ -180,6 +185,20 @@
       <button class="btn primary" id="trig-add" style="margin:12px 0 18px">+ Add Trigger</button>
 
       <div id="trig-list" class="trig-rows"></div>
+    </div>
+
+    <div id="page-chat" class="page hidden">
+      <div class="chat-head">
+        <h2>Chat</h2>
+        <span class="muted">The HiveMind assistant — builds workflows and triggers for you</span>
+        <span class="grow"></span>
+        <button class="btn" id="chat-clear">Clear</button>
+      </div>
+      <div id="chat-log" class="chat-log"></div>
+      <div class="chat-input">
+        <textarea id="chat-text" rows="2" placeholder="Ask me to build a workflow… (Enter to send)"></textarea>
+        <button class="btn primary" id="chat-send">Send</button>
+      </div>
     </div>
   </div>
 

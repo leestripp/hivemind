@@ -224,6 +224,9 @@ set(ROUTE_SOURCES
     include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/AgentRoutes.cpp
+    include/hivemind/routes/ChatRoutes.cpp
+    src/chat/ChatAgent.cpp
+    src/chat/HivemindTools.cpp
 )
 
 set(ALL_SOURCES
