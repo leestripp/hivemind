@@ -906,6 +906,48 @@ $('wf-switcher').addEventListener('change', async (e) => {
   log(`opened workflow "${g.meta ? g.meta.name : g.name}"`);
 });
 
+// ─── New workflow ───────────────────────────────────────────────────────
+// "New" opens a name prompt, then creates an empty backend graph and a
+// blank canvas. syncGraphToBackend() will populate it on the next Save.
+$('btn-new').addEventListener('click', () => {
+  $('newwf-name').value = '';
+  $('newwf-overlay').classList.remove('hidden');
+  setTimeout(() => $('newwf-name').focus(), 0);
+});
+
+const closeNewwf = () => $('newwf-overlay').classList.add('hidden');
+
+async function createNewWorkflow() {
+  const name = $('newwf-name').value.trim() || 'untitled';
+  closeNewwf();
+  try {
+    const g = await API.post('/api/graphs', { name, description: '' });
+    S.graphId = g.id;
+    S.nodes = [];
+    S.edges = [];
+    S.selected = null;
+    S.selectedEdge = null;
+    resetView();
+    render();
+    await refreshWorkflowList();   // switcher selects the new graph via S.graphId
+    log(`created empty workflow "${name}"`);
+  } catch (e) {
+    log(`failed to create workflow: ${e.message || e}`);
+  }
+}
+
+$('newwf-create').addEventListener('click', createNewWorkflow);
+$('newwf-cancel').addEventListener('click', closeNewwf);
+$('newwf-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); createNewWorkflow(); }
+});
+$('newwf-overlay').addEventListener('click', (e) => {
+  if (e.target === $('newwf-overlay')) closeNewwf();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('newwf-overlay').classList.contains('hidden')) closeNewwf();
+});
+
 $('btn-save').addEventListener('click', async () => {
   await syncGraphToBackend();
   await refreshWorkflowList();

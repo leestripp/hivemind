@@ -16,6 +16,7 @@
     <span class="status" id="status">ready</span>
     <select class="btn" id="wf-switcher" title="Open workflow"><option value="">workflow…</option></select>
     <button class="btn primary" id="btn-run">▶ Run</button>
+    <button class="btn" id="btn-new" title="Create a new empty workflow">New</button>
     <button class="btn" id="btn-save" title="Save to server">Save</button>
     <button class="btn" id="btn-export" title="Download .hivemind.json">Export</button>
     <button class="btn" id="btn-import" title="Import .hivemind.json">Import</button>
@@ -88,6 +89,23 @@
         <li><b>]</b> toggles the Inspector panel, <b>\</b> toggles the Output panel.</li>
       </ul>
       <button class="btn" id="btn-help-close">Close</button>
+    </div>
+  </div>
+
+  <!-- New workflow name prompt -->
+  <div id="newwf-overlay" class="browse-overlay hidden">
+    <div class="browse-card" style="width: 360px">
+      <h3>New workflow</h3>
+      <div class="insp-field">
+        <label class="insp-label" for="newwf-name">Name</label>
+        <input class="insp-input" id="newwf-name" type="text" placeholder="my-workflow"
+               autocomplete="off" spellcheck="false">
+        <div class="insp-help">Creates an empty workflow; the current canvas is replaced.</div>
+      </div>
+      <div class="browse-actions">
+        <button class="btn" id="newwf-cancel">Cancel</button>
+        <button class="btn primary" id="newwf-create">Create</button>
+      </div>
     </div>
   </div>
 
