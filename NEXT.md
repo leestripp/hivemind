@@ -17,6 +17,10 @@
 
 ## What to do next (priority order)
 
+0. **Agent-loop judge quality** — the exit path is verified; exercise the
+   continue path in a real refinement workflow and tune the judge prompt
+   (MiniMax occasionally returns an empty verdict; the executor falls
+   back to text parsing, then to exit).
 1. **WebSocket run streaming** (`/ws/runs`) — replaces HTTP polling of
    `GET /api/runs/:rid/output`. Use OmniNet's `registerProtocolSwitch`
    (public API; do NOT patch OmniNet).
@@ -37,6 +41,7 @@
 | `merge` | `MergeExecutor` | ✅ concat (interleave = future) |
 | `loop_start`/`loop_end` | `LoopEngine` | ✅ feedback + loop_count |
 | `agent` | `daedalus::Agent` | ✅ live vs MiniMax-M2.7 |
+| `agent_loop_start`/`agent_loop_end` | daedalus judge + `loop_decision` tool | ✅ e2e verified (exit path) |
 
 ## What *not* to do
 

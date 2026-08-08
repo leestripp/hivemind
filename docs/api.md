@@ -29,7 +29,8 @@ Liveness probe.
 ### `GET /api/node-types`
 Registered node types with port shapes.
 ```json
-{ "types": ["input", "prompt", "agent", "merge", "loop_start", "loop_end", "output", "log"] }
+{ "types": ["input", "prompt", "agent", "merge", "loop_start", "loop_end",
+            "agent_loop_start", "agent_loop_end", "output", "log"] }
 ```
 
 ### `GET /api/models`
@@ -128,8 +129,8 @@ Delete node + its connected edges.
 ### `POST /api/graphs/:gid/edges`
 Connect ports. Body:
 ```json
-{ "source_node": "uuid", "source_port": "out",
-  "target_node": "uuid", "target_port": "in" }
+{ "source": "uuid", "source_port": "out",
+  "target": "uuid", "target_port": "in" }
 ```
 → 201 + created edge.
 
@@ -242,6 +243,8 @@ curl -X POST http://localhost:8421/api/hooks/<gid>/<secret> \
 | `merge` | `in_a`,`in_b`,`in_c` | `out` | `strategy:"concat"`, `separator` (default `"\n\n"`) |
 | `loop_start` | `in` | `out`,`loop_count` | `iteration_count` |
 | `loop_end` | `in`,`loop_count` | `out` | — |
+| `agent_loop_start` | `in` | `out`,`loop_count` | `max_iterations` (safety cap, default 10) |
+| `agent_loop_end` | `in`,`prompt_in`,`loop_count` | `out` | `model` (judge agent model) |
 | `output` | `in` | — | `output_name` (result key) |
 | `log` | `in` | — | — |
 
@@ -275,8 +278,8 @@ AG=$(curl  -s -X POST $BASE/api/graphs/$GID/nodes -d '{"type":"agent","label":"w
 OUT=$(curl -s -X POST $BASE/api/graphs/$GID/nodes -d '{"type":"output","label":"brief","config":{"output_name":"brief"}}' | jq -r .id)
 
 # 3. Wire
-curl -s -X POST $BASE/api/graphs/$GID/edges -d "{\"source_node\":\"$IN\",\"source_port\":\"out\",\"target_node\":\"$AG\",\"target_port\":\"in\"}"
-curl -s -X POST $BASE/api/graphs/$GID/edges -d "{\"source_node\":\"$AG\",\"source_port\":\"out\",\"target_node\":\"$OUT\",\"target_port\":\"in\"}"
+curl -s -X POST $BASE/api/graphs/$GID/edges -d "{\"source\":\"$IN\",\"source_port\":\"out\",\"target\":\"$AG\",\"target_port\":\"in\"}"
+curl -s -X POST $BASE/api/graphs/$GID/edges -d "{\"source\":\"$AG\",\"source_port\":\"out\",\"target\":\"$OUT\",\"target_port\":\"in\"}"
 
 # 4. Schedule it every weekday at 07:30
 curl -s -X POST $BASE/api/graphs/$GID/triggers -d '{"kind":"schedule","schedule":{"type":"weekly","days":[1,2,3,4,5],"time":"07:30"},"inputs":{"topic":"overnight news summary"}}'
