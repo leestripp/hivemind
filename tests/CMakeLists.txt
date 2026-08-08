@@ -15,6 +15,7 @@ macro(hivemind_test name)
         ${CMAKE_SOURCE_DIR}/src/Graph.cpp
         ${CMAKE_SOURCE_DIR}/src/GraphStore.cpp
         ${CMAKE_SOURCE_DIR}/src/LoopEngine.cpp
+        ${CMAKE_SOURCE_DIR}/src/GraphRunner.cpp
         ${CMAKE_SOURCE_DIR}/src/Settings.cpp
         ${CMAKE_SOURCE_DIR}/src/ExecutorRegistry.cpp
         ${CMAKE_SOURCE_DIR}/src/NodeExecutor.cpp
@@ -35,6 +36,7 @@ macro(hivemind_test name)
         ${CMAKE_SOURCE_DIR}/_deps/nlohmann_json-src/include
         ${CMAKE_SOURCE_DIR}/build/_deps/daedalus-src/include
         ${CMAKE_SOURCE_DIR}/build/_deps/omninet-src/include
+        ${CMAKE_SOURCE_DIR}/build/_deps/omninet-src/src
     )
     target_link_libraries(${name} PRIVATE
         -Wl,--start-group
@@ -55,3 +57,4 @@ endmacro()
 hivemind_test(test_loop_engine)
 hivemind_test(test_node_ports)
 hivemind_test(test_daedalus_smoke)
+hivemind_test(test_graph_runner)

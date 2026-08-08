@@ -2,13 +2,13 @@
 
 > Status: 2026-08-08 — all 8 node types shipped and live-verified (agents
 > included, against MiniMax-M2.7). UI is feature-rich: agent inspector,
-> workflow files, directory browser, panel system. Next milestone:
-> GraphRunner end-to-end CTest, then webhook trigger nodes.
+> workflow files, directory browser, panel system. Next milestone: webhook trigger nodes
+> (first slice of the trigger roadmap).
 
 ## Quick project state
 
 - **Build:** `build/hivemind` compiles cleanly.
-- **Tests:** `ctest --test-dir build` → 3/3 pass (LoopEngine, node ports, daedalus smoke).
+- **Tests:** `ctest --test-dir build` → 4/4 pass (LoopEngine, node ports, daedalus smoke, graph runner e2e).
 - **Server:** running in dev on `:8421`; start with `./build/hivemind --port 8421`.
 - **Git:** clean working tree on `main`.
 
@@ -32,12 +32,7 @@ full agent loop, so a separate plain-LLM node would be redundant.
 
 Remaining, in priority order:
 
-1. **Add a GraphRunner end-to-end CTest** (no API key needed)
-   - Construct a graph in memory and call `runner.run_sync()` without a server.
-   - Covers: `input → prompt → merge → output` and a separate loop graph.
-   - Catches regressions in the runner's parallel dispatch and loop logic.
-
-2. **Webhook trigger node** (first slice of the trigger roadmap below)
+1. **Webhook trigger node** (first slice of the trigger roadmap below)
    - Smallest trigger: `POST /api/hooks/:graph_id/:secret` → run inputs →
      existing run path. No scheduler thread required.
 
@@ -81,6 +76,10 @@ Agent config shape (what `AgentExecutor` consumes): `model`, `project`,
 `skills_disabled[]`, `mcp_servers_disabled[]`.
 
 ## Done milestones (kept for history)
+
+- ~~GraphRunner end-to-end CTest~~ ✅ 2026-08-08 — `test_graph_runner.cpp`:
+  merge flow, loop body runs exactly 3×, parallel fan-out; asserts on the
+  event stream + persisted results with an isolated temp-HOME DB. 4/4 ctest.
 
 - ~~Live `agent` node run~~ ✅ 2026-08-07 — single-agent and 3-agent
   fan-out/merge/fan-out runs complete against MiniMax-M2.7 (~40s for the
