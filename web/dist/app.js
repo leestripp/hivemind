@@ -1368,22 +1368,6 @@ menu.addEventListener('click', (e) => {
     log('Auto layout applied.');
     hideContextMenu();
   }
-  if (e.target.id === 'ctx-load-loop') {
-    loadSampleGraph();
-    S.graphId = null;
-    resetView();
-    render();
-    log('Loaded loop demo graph.');
-    hideContextMenu();
-  }
-  if (e.target.id === 'ctx-load-multi') {
-    loadMultiAgentGraph();
-    S.graphId = null;
-    resetView();
-    render();
-    log('Loaded multi-agent demo graph.');
-    hideContextMenu();
-  }
 });
 
 // Hide menu when clicking elsewhere.
