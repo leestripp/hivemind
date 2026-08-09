@@ -12,6 +12,7 @@
 // =============================================================================
 
 #include "hivemind/executors/AgentExecutor.h"
+#include "hivemind/AgentSerialization.h"
 #include "hivemind/Graph.h"
 
 #include <daedalus.h>
@@ -154,6 +155,9 @@ AgentExecutor::execute(const Node& node,
                       const std::unordered_map<std::string, std::string>& inputs,
                       const std::string& run_id)
 {
+    // Serialize agent lifecycles — see AgentSerialization.h.
+    std::lock_guard<std::mutex> agent_lock{agent_exec_mutex()};
+
     // ── 1. Model selection ───────────────────────────────────────────────
     // daedalus owns model/provider settings (SQLite SettingsStore under
     // ~/.local/share/daedalus/). We pass the model name from the node

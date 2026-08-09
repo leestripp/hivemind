@@ -1,4 +1,5 @@
 #include "hivemind/executors/AgentLoopEndExecutor.h"
+#include "hivemind/AgentSerialization.h"
 #include "hivemind/Graph.h"
 #include <daedalus.h>
 #include <atomic>
@@ -85,6 +86,8 @@ AgentLoopEndExecutor::execute(const Node& node,
     const std::unordered_map<std::string, std::string>& inputs,
     const std::string& run_id)
 {
+    std::lock_guard<std::mutex> agent_lock{agent_exec_mutex()};  // serialize agent lifecycles
+
     std::string body   = inputs.count("in")        ? inputs.at("in")        : std::string{};
     std::string instr  = inputs.count("prompt_in") ? inputs.at("prompt_in") : std::string{};
 
