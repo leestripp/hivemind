@@ -3,12 +3,12 @@ import { $, esc, log } from '../util.js';
 import { S } from '../state.js';
 
 
-export function enterTriggers() { loadTrigWorkflows(); renderTriggerList(); }
+export function enterTriggers() { console.log("[triggers] enterTriggers firing"); loadTrigWorkflows(); renderTriggerList(); }
 
 // ─── Triggers page ──────────────────────────────────────────────────────
 let trigEditing = null;   // trigger object when editing, null when adding
 
-async function loadTrigWorkflows() {
+async function loadTrigWorkflows() { console.log("[triggers] loadTrigWorkflows firing");
   try {
     const graphs = await API.get('/api/graphs');
     const sel = $('trig-wf');
