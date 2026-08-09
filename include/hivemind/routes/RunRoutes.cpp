@@ -14,6 +14,7 @@
 #include "hivemind/GraphStore.h"
 #include "hivemind/GraphRunner.h"
 #include "hivemind/ExecutorRegistry.h"
+#include "hivemind/routes/WsRunRoutes.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -87,6 +88,19 @@ static void append_run_output(const std::string& run_id, const std::string& text
     rs->output += text;
 }
 
+// Backfill accessor for the WebSocket subscriber path (WsRunRoutes).
+std::string run_output_snapshot(const std::string& run_id) {
+    auto rs = get_run_state(run_id);
+    if (!rs) return {};
+    std::lock_guard<std::mutex> lk{rs->m};
+    return rs->output;
+}
+
+static void append_run_output_ws(const std::string& run_id, const std::string& text) {
+    append_run_output(run_id, text);
+    ws_run_publish(run_id, text);   // live fan-out to /ws/runs subscribers
+}
+
 static void finish_run(const std::string& run_id, const std::string& status,
                       const std::string& error = "") {
     auto rs = get_run_state(run_id);
@@ -116,7 +130,7 @@ std::string start_graph_run(
                    inputs=std::move(inputs)]() mutable {
         GraphRunner runner{store, registry, gr, run_id, std::move(inputs)};
         runner.set_event_callback([&run_id](json event) {
-            append_run_output(run_id, event.dump() + "\n");
+            append_run_output_ws(run_id, event.dump() + "\n");
         });
         try {
             runner.run_sync();
@@ -129,7 +143,7 @@ std::string start_graph_run(
                 store.update_run(run_id, "completed");
             }
         } catch (const std::exception& e) {
-            append_run_output(run_id,
+            append_run_output_ws(run_id,
                 json{{"event","node_failed"},
                      {"error", e.what()}}.dump() + "\n");
             finish_run(run_id, "failed", e.what());

@@ -25,6 +25,7 @@
 
 #include "hivemind/routes/GraphRoutes.h"
 #include "hivemind/routes/RunRoutes.h"
+#include "hivemind/routes/WsRunRoutes.h"
 #include "hivemind/routes/TriggerRoutes.h"
 #include "hivemind/routes/StaticRoutes.h"
 #include "hivemind/routes/ModelRoutes.h"
@@ -90,6 +91,7 @@ int main(int argc, char* argv[]) {
     register_workflow_routes(server, store);
     register_trigger_routes(server, store, registry);
     register_run_routes(server, store, registry);
+    register_ws_run_routes(server);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);

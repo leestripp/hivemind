@@ -39,3 +39,6 @@ std::string start_graph_run(
     ExecutorRegistry& registry,
     Graph graph,
     std::unordered_map<std::string, std::string> inputs);
+
+/// Buffered event log for a run (WebSocket backfill). "" for unknown ids.
+std::string run_output_snapshot(const std::string& run_id);
