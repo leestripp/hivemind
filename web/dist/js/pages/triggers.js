@@ -35,7 +35,7 @@ $('trig-kind').addEventListener('change', syncTrigKindRows);
 
 async function openTrigModal(existing) {
   trigEditing = existing || null;
-  if ($('trig-wf').options.length === 0) await loadTrigWorkflows();
+  await loadTrigWorkflows();   // always refresh so dropdown is populated
   $('trig-modal-title').textContent = existing ? 'Edit trigger' : 'Add trigger';
   $('trig-form-err').textContent = '';
   const sch = existing?.schedule;
