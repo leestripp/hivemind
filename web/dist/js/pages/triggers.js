@@ -3,7 +3,15 @@ import { $, esc, log } from '../util.js';
 import { S } from '../state.js';
 
 
-export function enterTriggers() { console.log("[triggers] enterTriggers firing"); loadTrigWorkflows(); renderTriggerList(); }
+export function enterTriggers() {
+  console.log("[triggers] enterTriggers firing");
+  const sel = $("trig-wf");
+  if (!sel.options.length) { // not yet loaded — show loading placeholder
+    sel.innerHTML = "<option>Loading workflows…</option>";
+    loadTrigWorkflows().catch(() => {});
+  }
+  renderTriggerList();
+}
 
 // ─── Triggers page ──────────────────────────────────────────────────────
 let trigEditing = null;   // trigger object when editing, null when adding
@@ -36,6 +44,11 @@ $('trig-kind').addEventListener('change', syncTrigKindRows);
 async function openTrigModal(existing) {
   trigEditing = existing || null;
   await loadTrigWorkflows();   // always refresh so dropdown is populated
+  // If load failed and left the placeholder, remove it so the select is usable
+  const sel = $("trig-wf");
+  if (sel.options.length === 1 && sel.options[0].textContent.includes("Loading")) {
+    sel.innerHTML = "";
+  }
   $('trig-modal-title').textContent = existing ? 'Edit trigger' : 'Add trigger';
   $('trig-form-err').textContent = '';
   const sch = existing?.schedule;
