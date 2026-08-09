@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "name": "app-builder-loop",
+  "description": "Agent Loop showcase: a worker agent builds an app in /workspace/myproject; the judge agent inspects the work and loops with feedback until done.",
+  "saved_at": "2026-08-09T00:30:00Z",
+  "nodes": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "type": "prompt",
+      "label": "task",
+      "config": {
+        "value": "Build a small Python CLI notes app in /workspace/myproject: notes.py with add/list/delete commands storing notes in notes.json, plus test_notes.py with passing pytest tests. Work incrementally; reply with a short summary of what you did this pass."
+      },
+      "x": 40,
+      "y": 160
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "type": "agent_loop_start",
+      "label": "loop start",
+      "config": {
+        "max_iterations": 5
+      },
+      "x": 240,
+      "y": 160
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "type": "agent",
+      "label": "worker (builds app)",
+      "config": {
+        "model": "MiniMax-M2.7",
+        "project": "/workspace/myproject",
+        "system_prompt": "You are a developer working in /workspace/myproject. Each input is either the task or judge feedback. Use your tools to create/edit files and run commands. Keep replies short: what you changed this pass."
+      },
+      "x": 440,
+      "y": 160
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "type": "prompt",
+      "label": "judge instructions",
+      "config": {
+        "value": "Review the worker's app in /workspace/myproject. Use your tools to read the files and run the app/tests (e.g. python3 -m pytest -q). If anything is missing or failing, call loop_decision with decision='continue' and ONE specific actionable fix. If notes.py works and the tests pass, call loop_decision with decision='exit' and feedback summarizing the finished app."
+      },
+      "x": 440,
+      "y": 340
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "type": "agent_loop_end",
+      "label": "judge (checks work)",
+      "config": {
+        "model": "MiniMax-M2.7",
+        "project": "/workspace/myproject"
+      },
+      "x": 660,
+      "y": 160
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "type": "output",
+      "label": "result",
+      "config": {
+        "output_name": "result"
+      },
+      "x": 880,
+      "y": 160
+    }
+  ],
+  "edges": [
+    {
+      "source": "00000000-0000-4000-8000-000000000001",
+      "source_port": "out",
+      "target": "00000000-0000-4000-8000-000000000002",
+      "target_port": "in"
+    },
+    {
+      "source": "00000000-0000-4000-8000-000000000002",
+      "source_port": "out",
+      "target": "00000000-0000-4000-8000-000000000003",
+      "target_port": "in"
+    },
+    {
+      "source": "00000000-0000-4000-8000-000000000003",
+      "source_port": "out",
+      "target": "00000000-0000-4000-8000-000000000005",
+      "target_port": "in"
+    },
+    {
+      "source": "00000000-0000-4000-8000-000000000004",
+      "source_port": "out",
+      "target": "00000000-0000-4000-8000-000000000005",
+      "target_port": "prompt_in"
+    },
+    {
+      "source": "00000000-0000-4000-8000-000000000002",
+      "source_port": "loop_count",
+      "target": "00000000-0000-4000-8000-000000000005",
+      "target_port": "loop_count"
+    },
+    {
+      "source": "00000000-0000-4000-8000-000000000005",
+      "source_port": "out",
+      "target": "00000000-0000-4000-8000-000000000006",
+      "target_port": "in"
+    }
+  ]
+}

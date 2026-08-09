@@ -38,3 +38,20 @@ curl -s http://localhost:8421/api/runs/$RID/output
 Expected: `loop_iteration` events (judge said continue), then
 `graph_completed` with `results.tagline` = the final tagline. Requires a
 configured MiniMax-M2.7 model (daedalus SettingsStore).
+
+## app-builder-loop.hivemind.json
+
+The Agent Loop doing real work:
+
+- **worker** (`agent`, project `/workspace/myproject`) builds a Python CLI
+  notes app (`notes.py` add/list/delete + `notes.json` + passing pytest
+  tests) — incrementally, across loop iterations.
+- **judge** (`agent_loop_end`, same project) reads the files and runs the
+  tests with its own tools, then calls `loop_decision`: `continue` with
+  ONE specific fix, or `exit` with a summary when the app works.
+- `max_iterations: 5` caps the loop.
+
+Requires: `mkdir -p /workspace/myproject`, MiniMax-M2.7 in the daedalus
+SettingsStore. Expected result: `loop_iteration` events while the judge
+rejects drafts, then `results.result` = judge summary, and a working app
+in `/workspace/myproject`.

@@ -95,7 +95,13 @@ AgentLoopEndExecutor::execute(const Node& node,
     daedalus::AgentConfig cfg;
     cfg.model_name   = model;
     cfg.session_id   = run_id + "-" + node.id;
-    cfg.project_root = fs::current_path().string();
+    // Judge can be pointed at a project dir (e.g. to inspect the worker's
+    // output files); default cwd.
+    std::string project;
+    if (node.config_json.contains("project") && node.config_json["project"].is_string())
+        project = node.config_json["project"].get<std::string>();
+    cfg.project_root = (!project.empty() && fs::exists(project))
+                           ? project : fs::current_path().string();
     cfg.auto_approve = true;
     cfg.mcp_enabled  = false;
     cfg.max_agent_iterations = 6;   // bound flailing; one tool call is enough
