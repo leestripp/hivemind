@@ -124,31 +124,41 @@ int main(int argc, char* argv[]) {
             try {
                 const std::string now = hm::now_iso_local();
                 for (auto& t : store.list_due_schedules(now)) {
-                    auto g = store.get_graph(t.graph_id);
-                    if (!g) {
-                        std::cerr << "[scheduler] trigger " << t.id
-                                  << ": graph gone, disabling\n";
-                        store.mark_trigger_fired(t.id, now, "", true);
-                        continue;
-                    }
-                    json cfg = json::parse(t.config_json, nullptr, false);
-                    std::unordered_map<std::string, std::string> inputs;
-                    if (cfg.is_object() && cfg.contains("inputs") && cfg["inputs"].is_object())
-                        for (auto& [k, v] : cfg["inputs"].items())
-                            if (v.is_string()) inputs[k] = v.get<std::string>();
+                    // Per-trigger guard: a failing trigger must not abort the
+                    // tick for the others, nor stay due and re-fire / spam
+                    // the log every 30s forever — disable it on failure.
+                    try {
+                        auto g = store.get_graph(t.graph_id);
+                        if (!g) {
+                            std::cerr << "[scheduler] trigger " << t.id
+                                      << ": graph gone, disabling\n";
+                            store.mark_trigger_fired(t.id, now, "", true);
+                            continue;
+                        }
+                        json cfg = json::parse(t.config_json, nullptr, false);
+                        std::unordered_map<std::string, std::string> inputs;
+                        if (cfg.is_object() && cfg.contains("inputs") && cfg["inputs"].is_object())
+                            for (auto& [k, v] : cfg["inputs"].items())
+                                if (v.is_string()) inputs[k] = v.get<std::string>();
 
-                    std::string run_id = start_graph_run(store, registry, std::move(*g),
-                                                         std::move(inputs));
-                    const bool once = cfg.is_object() && cfg.contains("schedule")
-                        && cfg["schedule"].is_object()
-                        && cfg["schedule"].value("type", "") == "once";
-                    auto next = once ? std::nullopt
-                        : hm::compute_next_fire(cfg.value("schedule", json::object()),
-                                                now, t.created_at);
-                    store.mark_trigger_fired(t.id, now,
-                                             next.value_or(""), once || !next);
-                    std::cout << "[scheduler] fired trigger " << t.id
-                              << " (graph " << t.graph_id << ") → run " << run_id << "\n";
+                        std::string run_id = start_graph_run(store, registry, std::move(*g),
+                                                             std::move(inputs));
+                        const bool once = cfg.is_object() && cfg.contains("schedule")
+                            && cfg["schedule"].is_object()
+                            && cfg["schedule"].value("type", "") == "once";
+                        auto next = once ? std::nullopt
+                            : hm::compute_next_fire(cfg.value("schedule", json::object()),
+                                                    now, t.created_at);
+                        store.mark_trigger_fired(t.id, now,
+                                                 next.value_or(""), once || !next);
+                        std::cout << "[scheduler] fired trigger " << t.id
+                                  << " (graph " << t.graph_id << ") → run " << run_id << "\n";
+                    } catch (const std::exception& e) {
+                        std::cerr << "[scheduler] trigger " << t.id
+                                  << " failed, disabling: " << e.what() << "\n";
+                        try { store.mark_trigger_fired(t.id, now, "", true); }
+                        catch (...) {}
+                    }
                 }
             } catch (const std::exception& e) {
                 std::cerr << "[scheduler] tick failed: " << e.what() << "\n";

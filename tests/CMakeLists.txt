@@ -53,6 +53,10 @@ macro(hivemind_test name)
         ${CMAKE_SOURCE_DIR}/build/_deps/omninet-build/libOmniNet.a
         -Wl,--end-group
     )
+    # Tests rely on assert(); Release builds define NDEBUG which compiles
+    # every assert() away and turns the suite into a no-op. Undefine it for
+    # test targets so assertions are always live.
+    target_compile_options(${name} PRIVATE -UNDEBUG)
     add_test(NAME ${name} COMMAND ${name})
 endmacro()
 

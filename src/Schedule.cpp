@@ -148,8 +148,11 @@ std::string describe_schedule(const json& sch) {
     if (type == "interval") {
         long m = sch.value("every_minutes", 0L);
         if (m == 1) return "Every minute";
+        if (m % (60 * 24) == 0) {  // check days before hours (1440 % 60 == 0)
+            long d = m / (60 * 24);
+            return "Every " + std::to_string(d) + " day" + (d > 1 ? "s" : "");
+        }
         if (m % 60 == 0) return "Every " + std::to_string(m / 60) + " hour" + (m / 60 > 1 ? "s" : "");
-        if (m % (60 * 24) == 0) return "Every " + std::to_string(m / (60 * 24)) + " days";
         return "Every " + std::to_string(m) + " minutes";
     }
     if (type == "daily")

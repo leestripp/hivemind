@@ -71,7 +71,10 @@ run_graph(GraphStore& store, ExecutorRegistry& reg, Graph g,
                        std::unordered_map<std::string, std::string>{std::move(inputs)}};
     runner.set_event_callback([&log](json e) { log.push(std::move(e)); });
     runner.run_sync();
-    assert(!runner.failed() && "run failed: " + runner.fail_error());
+    if (runner.failed()) {
+        std::cerr << "run failed: " << runner.fail_error() << "\n";
+        assert(false && "run failed");
+    }
     auto run = store.get_run(run_id);
     assert(run.has_value());
     return run->results;
@@ -172,6 +175,38 @@ int main() {
         const std::string& v = results.at("result");
         assert(v.find("AAA") != std::string::npos && v.find("BBB") != std::string::npos);
         std::cout << "✓ test 3: parallel fan-out merged both branches\n";
+    }
+
+    // ── Test 4: agent_loop_start registered with LoopEngine (regression) ──
+    // Regression test: agent_loop_start used to be skipped by the
+    // GraphRunner's LoopEngine registration, so loop_end_reached() always
+    // returned false and the loop exited after one iteration. Pair an
+    // agent_loop_start with a PLAIN loop_end (no judge agent → no LLM
+    // needed) — the loop machinery must still honor max_iterations.
+    {
+        Graph g; g.meta.id = gid; g.meta.name = "agent-loop-machinery";
+        g.nodes = {
+            mk_node("als", "agent_loop_start", "start", {{"max_iterations", 3}}),
+            mk_node("bp",  "prompt",           "body",  {{"value", "BODY"}}),
+            mk_node("le",  "loop_end",         "end"),
+            mk_node("o1",  "output",           "result", {{"output_name", "result"}}),
+        };
+        g.edges = {
+            mk_edge("e1", "als", "out",        "bp", "in"),
+            mk_edge("e2", "bp",  "out",        "le", "in"),
+            mk_edge("e3", "als", "loop_count", "le", "loop_count"),
+            mk_edge("e4", "le",  "out",        "o1", "in"),
+        };
+        EventLog log;
+        auto results = run_graph(store, registry, g, gid, {}, log);
+
+        assert(log.count("node_started", "bp") == 3);   // body ran 3 times
+        assert(log.count("loop_iteration") == 2);       // jumped back twice
+        assert(log.count("node_completed", "le") == 1); // completes on final iter
+        assert(log.count("graph_completed") == 1);
+        auto it = results.find("result");
+        assert(it != results.end() && it->second == "BODY");
+        std::cout << "✓ test 4: agent_loop_start honors max_iterations\n";
     }
 
     fs::remove_all(dir);

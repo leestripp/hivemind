@@ -68,6 +68,9 @@ public:
      */
     void cancel();
 
+    // True once cancel() has been requested (takes effect between nodes).
+    bool cancelled() const { return cancelled_.load(); }
+
     // True once a node executor has thrown; fail_error() has the message.
     bool failed() const { return failed_.load(); }
     const std::string& fail_error() const { return fail_error_; }

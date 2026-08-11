@@ -169,6 +169,15 @@ Poll until `"finished": true` (`status` ∈ `completed | failed | cancelled`).
 Final stored state: status, error, `results` (keyed by `node_id:port`, or
 by `output_name` for `output` nodes), `completed_nodes`.
 
+### `POST /api/runs/:rid/cancel`
+Request cooperative cancellation of an in-flight run. Takes effect at the
+next node boundary (an agent node mid-execution cannot be interrupted).
+The run ends with `status = "cancelled"` and a `graph_cancelled` event.
+```json
+{ "run_id": "uuid", "status": "cancelling" }
+```
+Returns `409` if the run already finished, `404` if unknown.
+
 ---
 
 ## Triggers (scheduled + webhook)

@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -58,12 +59,38 @@ struct RunState {
     std::mutex                                  m;
     std::string                                  output;        // appended text
     bool                                        finished = false;
-    std::string                                 status  = "running"; // running|completed|failed
+    std::string                                 status  = "running"; // running|completed|failed|cancelled
     std::string                                 error;
+    std::chrono::steady_clock::time_point       finished_at{};   // for pruning
 };
 
 static std::unordered_map<std::string, std::shared_ptr<RunState>> g_runs;
 static std::mutex g_runs_mtx;
+
+// Live runners (run_id → GraphRunner*) so POST /api/runs/:rid/cancel can
+// reach in-flight runs. Entries are added/removed by the run thread itself;
+// the pointer is only dereferenced via cancel() (atomic flag) while holding
+// g_runners_mtx, and removal also happens under g_runners_mtx — safe.
+static std::unordered_map<std::string, GraphRunner*> g_runners;
+static std::mutex g_runners_mtx;
+
+// Cap on retained finished-run buffers; beyond this the oldest finished
+// runs are dropped (their DB rows remain — only the live buffer goes).
+static constexpr size_t kMaxRetainedRuns = 256;
+
+static void prune_finished_runs() {
+    std::lock_guard<std::mutex> lk{g_runs_mtx};
+    if (g_runs.size() <= kMaxRetainedRuns) return;
+    std::vector<std::pair<std::chrono::steady_clock::time_point, std::string>> done;
+    for (auto& [rid, rs] : g_runs) {
+        std::lock_guard<std::mutex> rlk{rs->m};
+        if (rs->finished) done.emplace_back(rs->finished_at, rid);
+    }
+    std::sort(done.begin(), done.end());
+    size_t to_drop = g_runs.size() - kMaxRetainedRuns;
+    for (size_t i = 0; i < to_drop && i < done.size(); ++i)
+        g_runs.erase(done[i].second);
+}
 
 static std::shared_ptr<RunState> get_or_create_run(const std::string& run_id) {
     std::lock_guard<std::mutex> lk{g_runs_mtx};
@@ -105,10 +132,14 @@ static void finish_run(const std::string& run_id, const std::string& status,
                       const std::string& error = "") {
     auto rs = get_run_state(run_id);
     if (!rs) return;
-    std::lock_guard<std::mutex> lk{rs->m};
-    rs->finished = true;
-    rs->status = status;
-    rs->error = error;
+    {
+        std::lock_guard<std::mutex> lk{rs->m};
+        rs->finished = true;
+        rs->status = status;
+        rs->error = error;
+        rs->finished_at = std::chrono::steady_clock::now();
+    }
+    prune_finished_runs();
 }
 
 // ─── Shared run starter ────────────────────────────────────────────────
@@ -132,9 +163,15 @@ std::string start_graph_run(
         runner.set_event_callback([&run_id](json event) {
             append_run_output_ws(run_id, event.dump() + "\n");
         });
+        {
+            std::lock_guard<std::mutex> lk{g_runners_mtx};
+            g_runners[run_id] = &runner;
+        }
         try {
             runner.run_sync();
-            if (runner.failed()) {
+            if (runner.cancelled()) {
+                finish_run(run_id, "cancelled");   // DB row already set by run()
+            } else if (runner.failed()) {
                 finish_run(run_id, "failed", runner.fail_error());
                 try { store.update_run(run_id, "failed", runner.fail_error()); }
                 catch (...) {}
@@ -149,6 +186,10 @@ std::string start_graph_run(
             finish_run(run_id, "failed", e.what());
             try { store.update_run(run_id, "failed", e.what()); }
             catch (...) {}
+        }
+        {
+            std::lock_guard<std::mutex> lk{g_runners_mtx};
+            g_runners.erase(run_id);
         }
     }};
     t.detach();
@@ -217,6 +258,35 @@ void register_run_routes(OmniNet::HTTP::Server& server,
             resp = OmniNet::HTTP::Response::ok();
             resp.setContentType("application/json");
             resp.setBody(out.dump());
+        });
+
+    // POST /api/runs/:rid/cancel — request cancellation of an in-flight run.
+    // Cooperative: takes effect at the next node boundary (an agent node
+    // mid-execution cannot be interrupted).
+    server.post("/api/runs/:rid/cancel",
+        [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            std::string rid{req.pathParam(0)};
+            GraphRunner* runner = nullptr;
+            {
+                std::lock_guard<std::mutex> lk{g_runners_mtx};
+                auto it = g_runners.find(rid);
+                if (it != g_runners.end()) runner = it->second;
+            }
+            if (!runner) {
+                // Not in-flight — either unknown or already finished.
+                if (get_run_state(rid)) {
+                    resp.setStatus(OmniNet::HTTP::StatusCode::CONFLICT);
+                    resp.setContentType("application/json");
+                    resp.setBody(json{{"error", "run already finished"}}.dump());
+                } else {
+                    resp = OmniNet::HTTP::Response::notFound("run not found");
+                }
+                return;
+            }
+            runner->cancel();
+            resp = OmniNet::HTTP::Response::ok();
+            resp.setContentType("application/json");
+            resp.setBody(json{{"run_id", rid}, {"status", "cancelling"}}.dump());
         });
 
     // GET /api/runs/:rid/output — tail the live output buffer

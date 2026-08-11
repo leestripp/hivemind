@@ -62,16 +62,25 @@ GraphRunner::GraphRunner(GraphStore& store,
         }
     }
 
-    // Register loop nodes with the engine
+    // Register loop nodes with the engine. Both loop kinds must be
+    // registered — without an entry, loop_end_reached() returns false and
+    // the loop silently exits after the first iteration (this broke the
+    // agent_loop continue path: only loop_start was registered).
     for (auto& n : graph_.nodes) {
-        if (n.type == "loop_start") {
-            int count = 1;
-            if (n.config_json.contains("loop_count") && n.config_json["loop_count"].is_number_integer())
-                count = n.config_json["loop_count"].get<int>();
-            else if (n.config_json.contains("loop_count") && n.config_json["loop_count"].is_string())
-                count = std::stoi(n.config_json["loop_count"].get<std::string>());
-            loop_engine_.register_loop(n.id, count);
+        const bool is_loop  = n.type == "loop_start";
+        const bool is_aloop = n.type == "agent_loop_start";
+        if (!is_loop && !is_aloop) continue;
+        const char* key = is_loop ? "loop_count" : "max_iterations";
+        int count = 1;
+        if (n.config_json.contains(key)) {
+            const auto& v = n.config_json[key];
+            if (v.is_number_integer()) count = v.get<int>();
+            else if (v.is_string()) {
+                try { count = std::stoi(v.get<std::string>()); } catch (...) {}
+            }
         }
+        if (count < 1) count = 1;
+        loop_engine_.register_loop(n.id, count);
     }
 }
 
@@ -268,12 +277,17 @@ void GraphRunner::execute_node(const Node& node) {
         std::string body_text = inputs.count("in") ? inputs.at("in") : std::string{};
         bool jump_back = handle_loop_end(node, body_text);
         if (!jump_back) {
-            // Final iteration: emit loop_end's out port and mark it completed.
-            std::lock_guard<std::mutex> lk{state_mtx_};
-            resolved_[node.id + ":out"] = body_text;
+            // Final iteration: publish loop_end's out port and mark completed.
+            {
+                std::lock_guard<std::mutex> lk{state_mtx_};
+                resolved_[node.id + ":out"] = body_text;
+                completed_.insert(node.id);
+            }
+            // Store writes + event emission happen outside state_mtx_ so a
+            // slow subscriber (WS send) can't stall sibling worker threads.
             store_.set_run_result(run_id_, node.id, "out", body_text);
             emit_event({{"event", "node_output"}, {"node_id", node.id}, {"chunk", body_text}});
-            completed_.insert(node.id);
+            emit_event({{"event", "node_completed"}, {"node_id", node.id}});
         }
         // If jump_back is true, leave loop_end uncompleted in memory so the
         // ready queue can re-add it on the next iteration.
@@ -295,29 +309,34 @@ void GraphRunner::execute_node(const Node& node) {
             jumped = handle_loop_end(node, cont_feedback);
         }
         if (!jumped) {
-            std::lock_guard<std::mutex> lk{state_mtx_};
-            resolved_[node.id + ":out"] = final_text;
+            {
+                std::lock_guard<std::mutex> lk{state_mtx_};
+                resolved_[node.id + ":out"] = final_text;
+                completed_.insert(node.id);
+            }
             store_.set_run_result(run_id_, node.id, "out", final_text);
             emit_event({{"event", "node_output"}, {"node_id", node.id}, {"chunk", final_text}});
-            completed_.insert(node.id);
+            emit_event({{"event", "node_completed"}, {"node_id", node.id}});
         }
         store_.add_run_completed(run_id_, node.id);
         return;
     }
 
-    // Record results (lock: resolved_ / completed_ are shared with other workers)
+    // Record results into shared state (lock: resolved_ / completed_ are
+    // shared with other workers). SQLite writes and event emission happen
+    // AFTER the lock is released — they can block (busy timeout, WS send)
+    // and must not stall sibling worker threads.
     {
         std::lock_guard<std::mutex> lk{state_mtx_};
-        for (auto& r : results) {
-            std::string key = r.node_id + ":" + r.output_port;
-            resolved_[key] = r.value;
-            store_.set_run_result(run_id_, r.node_id, r.output_port, r.value);
-            emit_event({{"event", "node_output"}, {"node_id", node.id}, {"chunk", r.value}});
-        }
-
-        emit_event({{"event", "node_completed"}, {"node_id", node.id}});
+        for (auto& r : results)
+            resolved_[r.node_id + ":" + r.output_port] = r.value;
         completed_.insert(node.id);
     }
+    for (auto& r : results) {
+        store_.set_run_result(run_id_, r.node_id, r.output_port, r.value);
+        emit_event({{"event", "node_output"}, {"node_id", node.id}, {"chunk", r.value}});
+    }
+    emit_event({{"event", "node_completed"}, {"node_id", node.id}});
     store_.add_run_completed(run_id_, node.id);
 
     // Check if any downstream nodes are now ready
@@ -372,9 +391,12 @@ bool GraphRunner::handle_loop_end(const Node& node, const std::string& body_text
         }
     }
     if (start_id.empty()) {
-        // Fallback: use the first loop_start in the graph (no nested loops).
+        // Fallback: use the first loop-start node in the graph (no nested loops).
         for (auto& n : graph_.nodes) {
-            if (n.type == "loop_start") { start_id = n.id; break; }
+            if (n.type == "loop_start" || n.type == "agent_loop_start") {
+                start_id = n.id;
+                break;
+            }
         }
     }
     if (start_id.empty()) return false;
@@ -391,17 +413,19 @@ bool GraphRunner::handle_loop_end(const Node& node, const std::string& body_text
             if (desc.count(n.id) && anc.count(n.id)) body_nodes.insert(n.id);
         }
 
-        std::lock_guard<std::mutex> lk{state_mtx_};
-        // Remove stale outputs so body nodes don't run on old data.
-        resolved_.erase(start_id + ":out");
-        resolved_.erase(start_id + ":loop_count");
-        // Clear completed status for start, body, and end so they can re-run.
-        completed_.erase(start_id);
-        for (auto& bid : body_nodes) completed_.erase(bid);
-        completed_.erase(node.id);
-        // Feed the body text back into loop_start:in for the next iteration.
-        loop_feedback_[start_id] = body_text;
-        ready_.push_back(start_id);
+        {
+            std::lock_guard<std::mutex> lk{state_mtx_};
+            // Remove stale outputs so body nodes don't run on old data.
+            resolved_.erase(start_id + ":out");
+            resolved_.erase(start_id + ":loop_count");
+            // Clear completed status for start, body, and end so they can re-run.
+            completed_.erase(start_id);
+            for (auto& bid : body_nodes) completed_.erase(bid);
+            completed_.erase(node.id);
+            // Feed the body text back into loop_start:in for the next iteration.
+            loop_feedback_[start_id] = body_text;
+            ready_.push_back(start_id);
+        }
         emit_event({{"event", "loop_iteration"},
                     {"node_id", start_id},
                     {"iteration", loop_engine_.current_iteration(start_id)}});
