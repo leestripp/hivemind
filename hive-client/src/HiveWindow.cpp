@@ -242,12 +242,23 @@ int palette_index(const std::string& name) {
 // Hexagon hive-bot avatar from the bundled SVG set. palette_index keeps an
 // agent's bot consistent across the roster and every bubble; the user gets
 // the person-silhouette hex.
-Gtk::Widget* make_avatar(const std::string& name, bool is_user) {
+//
+// HiDPI (Wayland/4K): GTK works in logical pixels and the compositor scales;
+// for raster content to stay crisp the pixbuf must carry scale × logical
+// pixels. Our avatars are SVG, so supersampling is free — render at 2× the
+// logical size and let Gtk::Image downscale to the logical allocation. On a
+// 2× surface the full data is used (crisp); on 1× it just looks smoother.
+constexpr int AVATAR_LOGICAL = 64;    // bubble avatar edge, logical px
+constexpr int AVATAR_SUPERSAMPLE = 2; // HiDPI oversampling factor
+
+Gtk::Widget* make_avatar(const std::string& name, bool is_user,
+                         int logical = AVATAR_LOGICAL) {
     const std::string res = is_user
         ? "user"
         : "avatar-" + std::to_string(palette_index(name));
     auto* img = Gtk::make_managed<Gtk::Image>();
-    img->set(avatar_pixbuf(res, 32));
+    img->set(avatar_pixbuf(res, logical * AVATAR_SUPERSAMPLE));
+    img->set_pixel_size(logical);
     img->set_valign(Gtk::Align::START);
     return img;
 }
@@ -739,7 +750,12 @@ void HiveWindow::rebuild_roster() {
     while (auto* row = roster_list_.get_row_at_index(0))
         roster_list_.remove(*row);
     for (auto& a : agents_) {
+        auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
+        row_box->set_margin_top(4);
+        row_box->set_margin_bottom(4);
+        row_box->append(*make_avatar(a.value("name", "?"), false, 40));
         auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+        box->set_valign(Gtk::Align::CENTER);
         auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
         name->set_halign(Gtk::Align::START);
         name->add_css_class("heading");
@@ -750,9 +766,9 @@ void HiveWindow::rebuild_roster() {
         role->add_css_class("dim-label");
         box->append(*name);
         box->append(*role);
-        box->set_margin(4);
+        row_box->append(*box);
         auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
-        row->set_child(*box);
+        row->set_child(*row_box);
         row->set_data("agent_id", new std::string(a.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
         roster_list_.append(*row);
