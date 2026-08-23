@@ -1,0 +1,36 @@
+# Containerfile.hive-agent-browser — computer-use variant (Phase 6).
+# Builds on the base agent image with a headless browser stack so agents
+# can operate websites that have no API/MCP. UNTESTED in the dev sandbox
+# (no working podman there) — build/verify on a real Ubuntu 26.04 box:
+#   podman build -t localhost/hive-agent:browser \
+#       -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
+#
+# Login handoff flow (designed, implementation follows with Phase 6 UI):
+#   1. Agent hits a login wall and reports it in the thread.
+#   2. User opens the session via noVNC (container exposes :6080) or the
+#      client's embedded view, authenticates, hands control back.
+#   3. Browser profile persists in the agent's /home/hive mount, so the
+#      session survives container restarts.
+
+FROM localhost/hive-agent:latest
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium-browser \
+        xvfb \
+        x11vnc \
+        novnc \
+        websockify \
+        python3-playwright \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m playwright install-deps chromium || true
+
+USER hive
+WORKDIR /workspace
+
+# Xvfb on :99, x11vnc on :5900, noVNC/websockify on :6080.
+# The CMD keeps the sandbox idle; the display stack starts on demand via
+# container_exec (Phase 6 tooling will wrap this).
+ENV DISPLAY=:99
+EXPOSE 6080
+CMD ["sleep", "infinity"]

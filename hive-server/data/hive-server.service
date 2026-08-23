@@ -1,0 +1,26 @@
+# systemd user unit for hive-server (HiveMind 2.0, Plan.md Phase 8).
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp hive-server/data/hive-server.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hive-server
+# (Optional: loginctl enable-linger $USER so agents keep working after logout.)
+
+[Unit]
+Description=HiveMind server (always-on AI agent team)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust the repo path to your checkout:
+WorkingDirectory=%h/Hive-Mind
+ExecStart=%h/Hive-Mind/build/hive-server/hive-server --port 8421
+Restart=on-failure
+RestartSec=5
+# Graceful stop persists agent conversation history (Agent::shutdown).
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

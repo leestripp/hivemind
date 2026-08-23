@@ -71,6 +71,7 @@ private:
     Gtk::Button new_agent_btn_{"+ Agent"};
     Gtk::Button new_thread_btn_{"+ Thread"};
     Gtk::Button approvals_btn_{"Approvals"};
+    Gtk::Button workflows_btn_{"Workflows"};
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
     Gtk::Box sidebar_{Gtk::Orientation::VERTICAL};

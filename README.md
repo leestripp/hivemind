@@ -1,114 +1,86 @@
-# ⚡ HiveMind Node Graph
+# ⚡ HiveMind 2.0
 
-A visual **multi-agent orchestration system**. Build workflows out of small,
-single-purpose nodes on a canvas, wire them together, and click **Run** — the
-server walks the graph and executes each node, including full AI agents with
-tool use, MCP servers, and skills.
+A **self-hosted team of always-on AI agents** for Linux. Create named
+teammates, message them like colleagues, and hand off real work — they run
+in their own podman containers with sudo, remember everything, coordinate
+with each other, and only come back when they need your approval.
 
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
+![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2026.04)-orange)
 
 ---
 
 ## What it does
 
-- **Canvas editor** — drag nodes, wire ports, pan/zoom, auto-layout. No frontend
-  build step; the UI is a single vanilla-JS page.
-- **8 node types** — `input`, `prompt`, `agent`, `merge`, `loop_start`,
-  `loop_end`, `output`, `log`.
-- **Real AI agents** — the `agent` node embeds
-  [daedalus](https://gitlab.com/leestripp/daedalus): LLM streaming, tool calls,
-  MCP, skills, context compression. Each agent node is its own isolated agent;
-  fan-out → merge → fan-out multi-agent graphs run in parallel.
-- **Loops** — bounded iteration with body-text feedback (`loop_start`/`loop_end`).
-- **Workflow management** — save to SQLite, switch between workflows, New /
-  Export / Import portable `.hivemind.json` files.
-- **Live runs** — click Run and poll the event/output stream per node.
+- **Persistent named agents** — each teammate is a long-lived
+  [daedalus](https://gitlab.com/leestripp/daedalus) agent with its own memory
+  and conversation history that survives restarts.
+- **Chat, not config** — talk to agents in threads (DMs or group threads);
+  no workflow builder required. (The node-graph canvas still lives in the
+  web UI for explicit orchestration.)
+- **A computer of their own** — agents work inside rootless **podman
+  containers** as user `hive` with passwordless sudo: they `apt install`
+  whatever CLI tools the job needs. Shared company `/workspace` volume +
+  private `/home/hive` per agent.
+- **Teamwork** — agents discover, message and delegate to each other
+  (`list_agents` / `message_agent` / `create_agent` tools). A chief-of-staff
+  agent can run the whole team.
+- **Approvals** — flip `require_approval` on an agent and its commands park
+  in an approval queue until you approve/deny them.
+- **Routines & skills** — scheduled prompts ("watch this, ping me daily")
+  and Anthropic-format agent skills per teammate.
+- **Native GTK4 client** (`hive-client`) — roster, threads, live chat,
+  approvals inbox. Plus the web UI as workflow studio + fallback.
+- **Any model** — daedalus' SettingsStore owns providers/credentials; pick
+  per agent. No vendor lock-in.
 
-## Quick start
+## Quick start (Ubuntu 26.04)
 
 ```bash
-# 1. System packages (Ubuntu)
+# 1. System packages
 sudo apt install -y cmake g++ libcurl4-gnutls-dev nlohmann-json3-dev \
-    sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev
+    sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev \
+    libgtkmm-4.0-dev podman
 
 # 2. Build & run
-./start.sh --build          # configure + build + start on :8421
-# or:
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-./build/hivemind --port 8421
-
-# 3. Open the UI
-xdg-open http://localhost:8421/
+./hivemindctl build
+./hivemindctl start          # server on :8421
+./hivemindctl client         # native GTK client
+# or the web UI: xdg-open http://localhost:8421/
 ```
 
-CMake fetches [daedalus](https://gitlab.com/leestripp/daedalus) (agent engine,
-tag `0.9.6`) and [OmniNet](https://gitlab.com/leestripp/omninet) (HTTP server)
-automatically on first configure.
+CMake fetches [daedalus](https://gitlab.com/leestripp/daedalus) (agent
+engine) and [OmniNet](https://gitlab.com/leestripp/omninet) (HTTP server)
+automatically.
 
 ### Models
 
-`agent` nodes need a model configured in the daedalus **SettingsStore**
-(`~/.local/share/daedalus/daedalus.db`) — the same store the
-[icarus](https://gitlab.com/leestripp/icarus) CLI manages. HiveMind reads it
-for `/api/models` and passes `config.model` straight to daedalus; it never
-stores credentials itself. Once a model exists, pick it in the Agent
-inspector's **Provider/Model** dropdown.
+Agents need a model in the daedalus **SettingsStore**
+(`~/.local/share/daedalus/daedalus.db`) — manage it with
+[icarus](https://gitlab.com/leestripp/icarus). Pass the model name when
+creating an agent (blank = store default).
 
-## Using the canvas
-
-| Action | How |
-|--------|-----|
-| Add a node | Right-click canvas → **Add node** |
-| Wire nodes | Drag from an output port to an input port (ESC cancels) |
-| Move a node | Left-drag |
-| Delete node / wire | Select it → **Delete**, or right-click → Delete |
-| Pan | Middle-drag, or hold **Space** + drag |
-| Zoom | Scroll wheel |
-| Toggle panels | `]` inspector, `\` output stream |
-| Configure a node | Click it → Inspector (model picker, project **Browse…**, tools/skills/MCP, etc.) |
-| Run | **▶ Run** in the toolbar; output streams to the bottom panel |
-| Workflows | Toolbar: switcher dropdown, **New**, **Save**, **Export**, **Import** |
-
-## HTTP API (selected)
+## Layout
 
 ```
-GET  /api/health                     liveness
-GET  /api/node-types                 registered node types + port shapes
-GET  /api/models                     models from the daedalus SettingsStore
-GET  /api/agent/tools|skills|mcp     agent capability introspection
-GET  /api/graphs                     list workflows
-POST /api/graphs                     create workflow
-GET/PUT/DELETE /api/graphs/:id       read / update / delete
-POST /api/graphs/:gid/nodes|edges    add nodes / wires
-POST /api/graphs/:gid/run            start a run → { run_id }
-GET  /api/runs/:rid/output           poll the run's event/output stream
-GET  /api/graphs/:id/export          download .hivemind.json
-POST /api/graphs/import              upload .hivemind.json
-GET  /api/fs/browse?path=…           server-side directory listing (project picker)
+hive-server/   C++23 + OmniNet server: roster, threads, approvals,
+               routines, containers, graph runner, web UI (web/dist)
+hive-client/   GTK4/gtkmm4 native client
+tests/         ctest suite (9 tests)
+hivemindctl    build/start/stop/status/logs/client/test
 ```
 
-Full route table: `docs/design.md` §5.
-
-## Tests
-
-```bash
-ctest --test-dir build --output-on-failure   # 3 suites: loop engine, node ports, daedalus smoke
-```
-
-## Project layout
+## API sketch
 
 ```
-src/            C++ server (main, GraphRunner, GraphStore, executors/)
-include/hivemind/   public headers + routes/ (one file per API group)
-web/dist/       the canvas UI (index.html, app.js, styles.css — served raw)
-tests/          CTest suites
-docs/design.md  architecture deep-dive
-AGENTS.md       contributor/agent quick-start
-NEXT.md         current work queue
+POST/GET/PATCH/DELETE /api/agents[/:id]
+POST/GET/DELETE       /api/threads[/:id]      GET/POST …/messages
+GET  /api/threads/:id/activity                live turn state
+GET  /api/approvals?status=pending            POST …/:id/approve|deny
+POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
+GET/POST/DELETE       /api/agents/:id/skills[/name]
+GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 ```
 
-## License
-
-MIT — © Lee A. Stripp. See `LICENSE`.
+See `docs/api.md` and `Plan.md` (roadmap, phases 0–8) for details.

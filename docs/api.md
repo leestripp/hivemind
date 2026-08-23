@@ -297,3 +297,53 @@ curl -s -X POST $BASE/api/graphs/$GID/triggers -d '{"kind":"schedule","schedule"
 RID=$(curl -s -X POST $BASE/api/graphs/$GID/run -d '{"inputs":{"topic":"test"}}' | jq -r .run_id)
 curl -s $BASE/api/runs/$RID/output   # poll until "finished": true
 ```
+
+---
+
+## HiveMind 2.0 endpoints (added 2026-08-23)
+
+### Roster
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/agents` | Create agent `{name, role?, model?, workspace_mode?, require_approval?}` |
+| GET | `/api/agents` | List roster |
+| GET | `/api/agents/:id` | Get one |
+| PATCH | `/api/agents/:id` | Update name/role/model/workspace_mode/require_approval |
+| DELETE | `/api/agents/:id` | Remove from roster |
+
+### Threads & chat
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/threads` | Create `{title?, agent_ids[]}` (multi-agent ⇒ group) |
+| GET | `/api/threads` | List (newest first) |
+| GET | `/api/threads/:id` | Thread + participants |
+| DELETE | `/api/threads/:id` | Delete thread + messages |
+| GET | `/api/threads/:id/messages?after=<msg_id>` | Messages (incremental) |
+| POST | `/api/threads/:id/messages` | `{body}` → 202; agent turns run in background |
+| GET | `/api/threads/:id/activity` | `{busy, turns[]}` live streaming state |
+
+### Approvals
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/approvals?status=pending` | List approvals (default all) |
+| POST | `/api/approvals/:id/approve` | Approve a parked action |
+| POST | `/api/approvals/:id/deny` | Deny it |
+
+### Routines & skills
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/routines` | `{agent_id, name, prompt, schedule}` (schedule = trigger format) |
+| GET | `/api/routines` | List |
+| POST | `/api/routines/:id/run` | Fire now (off-schedule) |
+| POST | `/api/routines/:id/enabled` | `{enabled}` |
+| DELETE | `/api/routines/:id` | Remove |
+| GET/POST | `/api/agents/:id/skills` | List / create SKILL.md `{name, description, content}` |
+| DELETE | `/api/agents/:id/skills/:name` | Remove skill |
+
+### Containers
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/agents/:id/container/status` | `{exists, running, container, image, podman_available}` |
+| POST | `/api/agents/:id/container/start` | Create+start (idempotent) |
+| POST | `/api/agents/:id/container/stop` | Stop |
+| POST | `/api/agents/:id/container/exec` | `{command, timeout?}` (admin/debug) |

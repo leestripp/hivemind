@@ -49,8 +49,14 @@ HiveWindow::HiveWindow() {
         sigc::mem_fun(*this, &HiveWindow::on_new_thread));
     approvals_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_approvals));
+    // Phase 7-lite: the node-graph canvas stays in the web UI — the client
+    // deep-links to it instead of reimplementing it.
+    workflows_btn_.signal_clicked().connect([] {
+        Gio::AppInfo::launch_default_for_uri("http://127.0.0.1:8421/");
+    });
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
+    header_.pack_start(workflows_btn_);
     header_.pack_end(approvals_btn_);
     root_.append(header_);
 
