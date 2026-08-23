@@ -23,6 +23,7 @@ struct RosterAgent {
     std::string model;          // daedalus SettingsStore model name ("" = store default)
     std::string workspace_mode; // "shared" (company /workspace) — containers land in Phase 2
     std::string container_id;   // "" until Phase 2
+    bool require_approval = false; // Phase 3: gate shell commands for human review
     std::string created_at;
     std::string updated_at;
 };
@@ -37,7 +38,8 @@ public:
     RosterAgent create_agent(const std::string& name,
                              const std::string& role = "",
                              const std::string& model = "",
-                             const std::string& workspace_mode = "shared");
+                             const std::string& workspace_mode = "shared",
+                             bool require_approval = false);
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);
@@ -49,7 +51,8 @@ public:
                              const std::string& name,
                              const std::string& role,
                              const std::string& model,
-                             const std::string& workspace_mode);
+                             const std::string& workspace_mode,
+                             bool require_approval);
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

@@ -47,20 +47,21 @@ int main() {
     assert(!store.get_agent("no-such-id"));
 
     // ── update ────────────────────────────────────────────────────────────
-    auto updated = store.update_agent(a.id, "Nova", "ops lead", "", "shared");
+    auto updated = store.update_agent(a.id, "Nova", "ops lead", "", "shared", true);
     assert(updated.role == "ops lead");
     assert(updated.model.empty());
     assert(updated.updated_at >= a.created_at);
+    assert(updated.require_approval == true);
 
     // name clash on update rejected
     threw = false;
-    try { store.update_agent(a.id, "Pixel", "", "", ""); }
+    try { store.update_agent(a.id, "Pixel", "", "", "", false); }
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 
     // updating a missing agent rejected
     threw = false;
-    try { store.update_agent("no-such-id", "X", "", "", ""); }
+    try { store.update_agent("no-such-id", "X", "", "", "", false); }
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 

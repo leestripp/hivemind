@@ -6,6 +6,7 @@
 #include "hivemind/AgentSerialization.h"
 #include "hivemind/ContainerManager.h"
 #include "hivemind/ContainerTools.h"
+#include "hivemind/AgentTools.h"
 
 #include "daedalus/settings.h"
 #include "daedalus/default_paths.h"
@@ -87,9 +88,18 @@ public:
         std::fputc('\n', stderr);
     }
 
-    // Chat context has no approval UI yet — auto-approve (Phase 3 adds the
-    // approvals service that gates these).
-    bool request_command_approval(std::string_view /*cmd*/) override { return true; }
+    // Phase 3: routed through the approval callback when the roster agent
+    // has require_approval=true (AgentHost sets it per turn); default allow.
+    bool request_command_approval(std::string_view cmd) override {
+        std::lock_guard<std::mutex> lk(m_);
+        if (approval_fn_) return approval_fn_(cmd);
+        return true;
+    }
+
+    void set_approval_fn(std::function<bool(std::string_view)> fn) {
+        std::lock_guard<std::mutex> lk(m_);
+        approval_fn_ = std::move(fn);
+    }
 
     std::string output() const {
         std::lock_guard<std::mutex> lk(m_);
@@ -99,6 +109,7 @@ public:
 
 private:
     DeltaFn on_delta_;
+    std::function<bool(std::string_view)> approval_fn_;
     mutable std::mutex m_;
     std::string output_;
     std::atomic<bool> errored_{false};
@@ -177,8 +188,11 @@ private:
 
 // ─── AgentHost ──────────────────────────────────────────────────────────────
 
-AgentHost::AgentHost(RosterAgent info, fs::path dir)
+AgentHost::AgentHost(RosterAgent info, fs::path dir,
+                     AgentStore& agents, ApprovalStore& approvals,
+                     AgentRegistry& registry)
     : info_(std::move(info)), dir_(std::move(dir)),
+      agents_(agents), approvals_(approvals), registry_(registry),
       proxy_sink_(std::make_shared<ProxySink>()) {
     fs::create_directories(dir_);
 }
@@ -186,7 +200,7 @@ AgentHost::AgentHost(RosterAgent info, fs::path dir)
 AgentHost::~AgentHost() {
     // daedalus 0.9.6: destruct under the global serialization mutex too
     // (shared global state — see AgentSerialization.h).
-    std::lock_guard<std::mutex> lk{agent_exec_mutex()};
+    std::lock_guard<std::recursive_mutex> lk{agent_exec_mutex()};
     agent_.reset();
 }
 
@@ -214,7 +228,10 @@ void AgentHost::ensure_agent() {
     cfg.agent_name  = sanitize_agent_name(info_.name);
     cfg.project_root = dir_;
     cfg.model_name  = info_.model;   // "" = SettingsStore default
-    cfg.auto_approve = true;         // no approval UI until Phase 3
+    // Phase 3: require_approval agents get auto_approve OFF so daedalus
+    // asks the sink before running commands; the sink blocks on the
+    // human approval queue (set per turn in run_turn).
+    cfg.auto_approve = !info_.require_approval;
 
     std::string prompt_addendum;
     if (containerized_) {
@@ -266,9 +283,27 @@ void AgentHost::ensure_agent() {
     agent_->install_crash_handlers();
 
     if (containerized) {
-        // Container-backed execute_bash (built-in disabled via config above).
-        agent_->register_tool(std::make_unique<ContainerBashTool>(info_.id));
+        // Container-backed command execution (host built-in disabled above).
+        // Same approval gate as the sink path: host tools bypass daedalus'
+        // own command approval, so the tool enforces it itself.
+        auto tool = std::make_unique<ContainerBashTool>(info_.id);
+        if (info_.require_approval) {
+            tool->set_approval_fn([this](std::string_view cmd) -> bool {
+                std::string id = approvals_.create(info_.id, info_.name,
+                                                   "command", std::string{cmd});
+                return approvals_.wait(id, /*timeout_s=*/600);
+            });
+        }
+        agent_->register_tool(std::move(tool));
     }
+
+    // Phase 3 collaboration tools — every roster agent gets these.
+    agent_->register_tool(std::make_unique<ListAgentsTool>(agents_));
+    agent_->register_tool(
+        std::make_unique<MessageAgentTool>(info_.id, agents_, registry_));
+    agent_->register_tool(std::make_unique<CreateAgentTool>(agents_));
+    agent_->register_tool(
+        std::make_unique<RunIcarusTool>(info_.id, dir_.string()));
 }
 
 std::string AgentHost::run_turn(const std::string& prompt,
@@ -277,17 +312,27 @@ std::string AgentHost::run_turn(const std::string& prompt,
 
     // Whole turn (construct-first-time + run) under the global agent mutex —
     // daedalus 0.9.6 global state is not multi-agent safe.
-    std::lock_guard<std::mutex> global_lk{agent_exec_mutex()};
+    std::lock_guard<std::recursive_mutex> global_lk{agent_exec_mutex()};
 
     ensure_agent();
 
     // daedalus takes the sink at construction and the Agent outlives turns,
     // so the stable ProxySink forwards to this turn's StreamingSink.
     auto sink = std::make_shared<StreamingSink>(std::move(on_delta));
+    // Approval gate: require_approval agents park the command in the
+    // approval queue and block the turn until a human resolves it.
+    sink->set_approval_fn([this](std::string_view cmd) -> bool {
+        std::string id = approvals_.create(info_.id, info_.name,
+                                           "command", std::string{cmd});
+        return approvals_.wait(id, /*timeout_s=*/600);
+    });
     proxy_sink_->set_target(sink);
 
+    // Depth guard for agent→agent nested turns (message_agent tool).
+    ++MessageAgentTool::depth_;
     agent_->submit_user_message(prompt.empty() ? "(no input)" : prompt);
     agent_->run_one_turn();
+    --MessageAgentTool::depth_;
     proxy_sink_->set_target(nullptr);
 
     std::string out = sink->output();
@@ -298,7 +343,7 @@ std::string AgentHost::run_turn(const std::string& prompt,
 
 void AgentHost::shutdown() {
     std::lock_guard<std::mutex> turn_lk{turn_mtx_};
-    std::lock_guard<std::mutex> global_lk{agent_exec_mutex()};
+    std::lock_guard<std::recursive_mutex> global_lk{agent_exec_mutex()};
     if (!agent_) return;
     try {
         agent_->shutdown();   // → LLMClient::cleanup() → messages_->save()
@@ -313,7 +358,8 @@ AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
     auto it = hosts_.find(agent.id);
     if (it == hosts_.end()) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
-        auto host = std::make_unique<AgentHost>(agent, dir);
+        auto host = std::make_unique<AgentHost>(agent, dir, agents_,
+                                                approvals_, *this);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
     return *it->second;

@@ -2,6 +2,7 @@
 
 #include <daedalus.h>
 
+#include <functional>
 #include <string>
 
 /**
@@ -21,6 +22,12 @@
 class ContainerBashTool final : public daedalus::BaseTool {
 public:
     explicit ContainerBashTool(std::string agent_id) : agent_id_(std::move(agent_id)) {}
+
+    /// Optional approval hook (Phase 3): when set, every command is parked
+    /// in the approval queue first and only runs if the hook returns true.
+    void set_approval_fn(std::function<bool(std::string_view)> fn) {
+        approval_fn_ = std::move(fn);
+    }
 
     [[nodiscard]] std::string get_name() const override { return "container_exec"; }
 
@@ -58,4 +65,5 @@ public:
 
 private:
     std::string agent_id_;
+    std::function<bool(std::string_view)> approval_fn_;
 };

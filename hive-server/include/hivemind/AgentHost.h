@@ -2,6 +2,7 @@
 
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/ApprovalStore.h"
 
 #include <daedalus.h>
 
@@ -29,10 +30,13 @@
  * parallel agent execution is a daedalus upgrade question, not our bug.
  */
 class ProxySink;  // forwards AgentSink callbacks to a per-turn target
+class AgentRegistry;
 
 class AgentHost {
 public:
-    AgentHost(RosterAgent info, std::filesystem::path dir);
+    AgentHost(RosterAgent info, std::filesystem::path dir,
+              AgentStore& agents, ApprovalStore& approvals,
+              AgentRegistry& registry);
     ~AgentHost();
 
     AgentHost(const AgentHost&) = delete;
@@ -59,6 +63,9 @@ private:
 
     RosterAgent info_;
     std::filesystem::path dir_;
+    AgentStore& agents_;
+    ApprovalStore& approvals_;
+    AgentRegistry& registry_;
     bool containerized_ = false;            // workspace_mode != "host"
     std::mutex turn_mtx_;                   // one turn at a time per agent
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
@@ -68,6 +75,9 @@ private:
 /// AgentRegistry — process-wide map of live AgentHosts, keyed by agent id.
 class AgentRegistry {
 public:
+    AgentRegistry(AgentStore& agents, ApprovalStore& approvals)
+        : agents_(agents), approvals_(approvals) {}
+
     /// Get the live host for a roster agent, constructing it on first use.
     AgentHost& get_or_create(const RosterAgent& agent);
 
@@ -79,6 +89,8 @@ public:
     void shutdown_all();
 
 private:
+    AgentStore& agents_;
+    ApprovalStore& approvals_;
     std::mutex m_;
     std::unordered_map<std::string, std::unique_ptr<AgentHost>> hosts_;
 };

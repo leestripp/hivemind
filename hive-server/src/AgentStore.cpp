@@ -62,12 +62,13 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.container_id   = col(5);
     a.created_at     = col(6);
     a.updated_at     = col(7);
+    a.require_approval = sqlite3_column_int(st, 8) != 0;
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
-    "       created_at, updated_at FROM agents";
+    "       created_at, updated_at, require_approval FROM agents";
 
 } // namespace
 
@@ -113,13 +114,18 @@ void AgentStore::ensure_schema() {
         "  created_at TEXT NOT NULL,"
         "  updated_at TEXT NOT NULL"
         ")");
+    // Schema migration (idempotent): require_approval added 2026-08-23.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN require_approval"
+                     " INTEGER NOT NULL DEFAULT 0",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 }
 
 RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& role,
                                      const std::string& model,
-                                     const std::string& workspace_mode) {
+                                     const std::string& workspace_mode,
+                                     bool require_approval) {
     if (name.empty())
         throw std::invalid_argument("agent name must not be empty");
     if (get_agent_by_name(name))
@@ -131,6 +137,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.role           = role;
     a.model          = model;
     a.workspace_mode = workspace_mode.empty() ? "shared" : workspace_mode;
+    a.require_approval = require_approval;
     a.created_at     = iso_now();
     a.updated_at     = a.created_at;
 
@@ -138,8 +145,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
-        "                   container_id, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,'',?,?)";
+        "                   container_id, created_at, updated_at, require_approval)"
+        " VALUES (?,?,?,?,?,'',?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -152,6 +159,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     bind_text(st, 5, a.workspace_mode);
     bind_text(st, 6, a.created_at);
     bind_text(st, 7, a.updated_at);
+    sqlite3_bind_int(st, 8, a.require_approval ? 1 : 0);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -204,7 +212,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& name,
                                      const std::string& role,
                                      const std::string& model,
-                                     const std::string& workspace_mode) {
+                                     const std::string& workspace_mode,
+                                     bool require_approval) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -217,8 +226,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;
     const char* sql =
-        "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?, updated_at=?"
-        " WHERE id=?";
+        "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?,"
+        " updated_at=?, require_approval=? WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -229,7 +238,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 3, model);
     bind_text(st, 4, workspace_mode.empty() ? "shared" : workspace_mode);
     bind_text(st, 5, now);
-    bind_text(st, 6, id);
+    sqlite3_bind_int(st, 6, require_approval ? 1 : 0);
+    bind_text(st, 7, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

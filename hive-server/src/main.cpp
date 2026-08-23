@@ -33,9 +33,11 @@
 #include "hivemind/routes/AgentRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/routes/ContainerRoutes.h"
+#include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/AgentHost.h"
+#include "hivemind/ApprovalStore.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -81,7 +83,8 @@ int main(int argc, char* argv[]) {
     // HiveMind 2.0 — roster / chat state (Plan.md Phase 1)
     AgentStore agent_store;
     ThreadStore thread_store;
-    AgentRegistry agent_registry;
+    ApprovalStore approval_store;
+    AgentRegistry agent_registry{agent_store, approval_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
 
     // ─── Routes (REGISTERED IN ORDER — first match wins) ────────────
@@ -106,6 +109,7 @@ int main(int argc, char* argv[]) {
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service);
     register_container_routes(server, agent_store);
+    register_approval_routes(server, approval_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);

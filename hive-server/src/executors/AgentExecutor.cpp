@@ -156,7 +156,7 @@ AgentExecutor::execute(const Node& node,
                       const std::string& run_id)
 {
     // Serialize agent lifecycles — see AgentSerialization.h.
-    std::lock_guard<std::mutex> agent_lock{agent_exec_mutex()};
+    std::lock_guard<std::recursive_mutex> agent_lock{agent_exec_mutex()};
 
     // ── 1. Model selection ───────────────────────────────────────────────
     // daedalus owns model/provider settings (SQLite SettingsStore under

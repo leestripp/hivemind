@@ -43,6 +43,7 @@ json agent_json(const RosterAgent& a) {
         {"id", a.id}, {"name", a.name}, {"role", a.role},
         {"model", a.model}, {"workspace_mode", a.workspace_mode},
         {"container_id", a.container_id},
+        {"require_approval", a.require_approval},
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
 }
@@ -81,8 +82,9 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string role = body.value("role", "");
             std::string model = body.value("model", "");
             std::string ws = body.value("workspace_mode", "shared");
+            bool req_appr = body.value("require_approval", false);
             try {
-                auto a = agents.create_agent(name, role, model, ws);
+                auto a = agents.create_agent(name, role, model, ws, req_appr);
                 send_json(resp, agent_json(a), 201);
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());
@@ -124,7 +126,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     body.value("name", existing->name),
                     body.value("role", existing->role),
                     body.value("model", existing->model),
-                    body.value("workspace_mode", existing->workspace_mode));
+                    body.value("workspace_mode", existing->workspace_mode),
+                    body.value("require_approval", existing->require_approval));
                 // Name/model changes must not leak into a live host.
                 registry.evict(a.id);
                 send_json(resp, agent_json(a));
