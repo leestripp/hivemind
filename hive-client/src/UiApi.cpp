@@ -97,6 +97,12 @@ void UiApi::start() {
         });
 
     // Same code path as the header theme toggle button.
+    server_->post("/ui/action/open-dialog",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            send_json(resp, w.ui_open_dialog(
+                body_json(req).value("name", "")));
+        });
+
     server_->post("/ui/action/theme",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_toggle_theme());

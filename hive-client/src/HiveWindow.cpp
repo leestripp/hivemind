@@ -265,6 +265,20 @@ Gtk::Widget* make_avatar(const std::string& name, bool is_user,
 
 } // namespace
 
+// Install a HeaderBar as a dialog's titlebar (CSD) so the compositor doesn't
+// draw a second server-side title bar above it — same fix as the main
+// window's set_titlebar(). Close button only, matching GNOME dialog style.
+static void install_dialog_titlebar(Gtk::Dialog& dialog,
+                                    const std::string& title) {
+    auto* hb = Gtk::make_managed<Gtk::HeaderBar>();
+    hb->set_decoration_layout(":close");   // dialogs: no min/max
+    hb->set_show_title_buttons(true);
+    auto* label = Gtk::make_managed<Gtk::Label>(title);
+    label->add_css_class("title");
+    hb->set_title_widget(*label);
+    dialog.set_titlebar(*hb);
+}
+
 void HiveWindow::setup_icons() {
     // Build the persistent widget structure exactly once. Retinting on theme
     // change only swaps pixbufs into these same Gtk::Image widgets —
@@ -308,6 +322,16 @@ void HiveWindow::refresh_themed_icons() {
         dark_mode_ ? "theme-light" : "theme-dark", 16, dark_mode_));
     theme_btn_.set_tooltip_text(dark_mode_ ? "Switch to light mode"
                                            : "Switch to dark mode");
+}
+
+nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
+    return invoke_on_ui([this, name] {
+        if (name == "new-thread")      on_new_thread();
+        else if (name == "new-agent")  on_new_agent();
+        else if (name == "approvals")  on_approvals();
+        else return json{{"error", "unknown dialog"}};
+        return json{{"opened", name}};
+    });
 }
 
 nlohmann::json HiveWindow::ui_toggle_theme() {
@@ -507,6 +531,7 @@ void HiveWindow::maybe_show_connect_dialog() {
 
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     connect_dialog_ = dialog;
+    install_dialog_titlebar(*dialog, "Connect to server");
     dialog->signal_destroy().connect([this] { connect_dialog_ = nullptr; });
 
     dialog->set_title("Connect to hive-server");
@@ -941,6 +966,7 @@ void HiveWindow::on_send() {
 void HiveWindow::on_new_agent() {
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("New agent");
+    install_dialog_titlebar(*dialog, "New agent");
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
@@ -1002,6 +1028,7 @@ void HiveWindow::on_new_thread() {
     if (agents_.empty()) { set_status("Create an agent first"); return; }
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("New thread");
+    install_dialog_titlebar(*dialog, "New thread");
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
@@ -1088,6 +1115,7 @@ void HiveWindow::on_delete_thread() {
     if (current_thread_.empty()) return;
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("Delete thread?");
+    install_dialog_titlebar(*dialog, "Delete thread?");
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
@@ -1239,6 +1267,7 @@ nlohmann::json HiveWindow::ui_delete_thread(const std::string& id) {
 void HiveWindow::on_approvals() {
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("Approvals");
+    install_dialog_titlebar(*dialog, "Approvals");
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->set_default_size(560, 360);
