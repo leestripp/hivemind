@@ -61,105 +61,80 @@
     </div>
   </div>
   <div id="page-keys" class="page hidden">
-    <div class="page-body">
-      <h2>🔑 API Keys</h2>
-      <p class="muted">
-        Every API call needs a bearer key. Mint scoped keys here — the raw key
-        is shown <b>once</b>. The master key (printed at first server start)
-        cannot be revoked from here.
-      </p>
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>🔑 API Keys</h2>
+          <p class="muted">
+            Every API call needs a bearer key. The raw key is shown <b>once</b>
+            at creation. The master key cannot be revoked here.
+          </p>
+        </div>
+        <button class="btn primary" id="keys-open-add">+ Add Key</button>
+      </div>
 
-      <section class="settings-section">
-        <h3>New key</h3>
-        <div class="trig-form-row">
-          <label>Name</label>
+      <table class="kv-table" id="keys-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Key</th><th>Scopes</th><th>Created</th>
+            <th>Status</th><th class="col-actions"></th>
+          </tr>
+        </thead>
+        <tbody id="keys-list">
+          <tr><td colspan="6" class="muted">loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- New-key modal -->
+  <div id="keys-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head">
+        <h3 id="keys-modal-title">New API key</h3>
+        <button class="icon-btn" id="keys-modal-close" title="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M6 6l12 12M18 6L6 18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div id="keys-form">
+        <div class="form-row">
+          <label for="keys-name">Name</label>
           <input type="text" id="keys-name" class="btn" placeholder="my-laptop"
                  autocomplete="off" spellcheck="false">
         </div>
-        <div class="trig-form-row">
-          <label>Scopes</label>
+        <div class="form-row">
+          <label for="keys-scopes">Scopes</label>
           <select id="keys-scopes" class="btn">
             <option value="agent">agent — full daily use (default)</option>
             <option value="read">read — GET only</option>
             <option value="admin">admin — keys + debug exec</option>
           </select>
         </div>
-        <div class="trig-form-row">
-          <label></label>
+        <div class="form-err" id="keys-err"></div>
+        <div class="modal-actions">
+          <button class="btn" id="keys-cancel">Cancel</button>
           <button class="btn primary" id="keys-add">Create key</button>
         </div>
-        <div class="insp-help" id="keys-err"></div>
-      </section>
+      </div>
 
-      <section class="settings-section hidden" id="keys-new">
-        <h3>⚠ New key — copy it now, it is never shown again</h3>
-        <div class="trig-form-row">
-          <code id="keys-new-value" style="user-select:all;word-break:break-all"></code>
-        </div>
-        <div class="browse-actions">
-          <button class="btn" id="keys-dismiss">Dismiss</button>
+      <div id="keys-reveal" class="hidden">
+        <p class="reveal-warn">⚠ Copy it now — it is never shown again.</p>
+        <code id="keys-new-value" class="reveal-key"></code>
+        <div class="modal-actions">
+          <button class="btn" id="keys-done">Done</button>
           <button class="btn primary" id="keys-copy">Copy</button>
         </div>
-      </section>
-
-      <section class="settings-section">
-        <h3>Existing keys</h3>
-        <div id="keys-list" class="trig-rows"></div>
-      </section>
+      </div>
     </div>
+  </div>
   </div>
   </div><!-- /content -->
 </div>
 
-  <!-- Add/Edit trigger modal -->
-  <div id="trig-modal" class="browse-overlay hidden">
-    <div class="browse-card" style="width: 480px">
-      <h3 id="trig-modal-title">Add trigger</h3>
-      <div class="trig-form-row">
-        <label>Workflow</label>
-        <select id="trig-wf" class="btn"></select>
-      </div>
-      <div class="trig-form-row">
-        <label>Type</label>
-        <select id="trig-kind" class="btn">
-          <option value="once">Once — date + time</option>
-          <option value="daily">Daily — every day at a time</option>
-          <option value="weekly">Weekly — chosen days at a time</option>
-          <option value="interval">Interval — every N minutes</option>
-          <option value="webhook">Webhook — external HTTP POST</option>
-        </select>
-      </div>
-      <div class="trig-form-row" data-kinds="once">
-        <label>When</label>
-        <input type="datetime-local" id="trig-once-at" class="btn">
-      </div>
-      <div class="trig-form-row hidden" data-kinds="daily weekly">
-        <label>Time</label>
-        <input type="time" id="trig-time" class="btn" value="09:00">
-      </div>
-      <div class="trig-form-row hidden" data-kinds="weekly">
-        <label>Days</label>
-        <div id="trig-days" class="trig-days">
-          <label><input type="checkbox" value="1" checked>Mon</label>
-          <label><input type="checkbox" value="2">Tue</label>
-          <label><input type="checkbox" value="3">Wed</label>
-          <label><input type="checkbox" value="4">Thu</label>
-          <label><input type="checkbox" value="5">Fri</label>
-          <label><input type="checkbox" value="6">Sat</label>
-          <label><input type="checkbox" value="0">Sun</label>
-        </div>
-      </div>
-      <div class="trig-form-row hidden" data-kinds="interval">
-        <label>Every</label>
-        <span><input type="number" id="trig-mins" class="btn" min="1" value="60" style="width:80px"> minutes</span>
-      </div>
-      <div class="insp-help" id="trig-form-err"></div>
-      <div class="browse-actions">
-        <button class="btn" id="trig-cancel">Cancel</button>
-        <button class="btn primary" id="trig-save">Save</button>
-      </div>
-    </div>
-  </div>
 
 <script type="module" src="js/main.js?v=20260823a"></script>
 </body>
