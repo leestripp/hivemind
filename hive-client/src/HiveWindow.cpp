@@ -1,4 +1,7 @@
 #include "HiveWindow.h"
+#include <giomm/memoryinputstream.h>
+#include <giomm/resource.h>
+#include <gdkmm/pixbuf.h>
 #include <future>
 
 #include <cstdlib>
@@ -193,31 +196,99 @@ std::string format_msg_time(const std::string& iso) {
     return std::string(buf) + ", " + hm;
 }
 
+// ── GResource SVG icons ───────────────────────────────────────────────────
+// Icons ship as currentColor-stroked SVGs bundled into the binary. GTK's
+// pixbuf loader doesn't resolve currentColor from CSS, so we substitute the
+// theme foreground explicitly — this is what makes icons follow dark/light
+// mode. Avatars carry their own identity colors and load verbatim.
+extern "C" { GResource* hivemind_get_resource(void); }
+
+static std::string resource_text(const std::string& path) {
+    auto bytes = Gio::Resource::lookup_data_global(path);
+    if (!bytes) return {};
+    gsize sz = 0;
+    auto* data = static_cast<const char*>(bytes->get_data(sz));
+    return {data, sz};
+}
+
+static Glib::RefPtr<Gdk::Pixbuf> svg_pixbuf(const std::string& svg, int size) {
+    auto stream = Gio::MemoryInputStream::create();
+    stream->add_bytes(Glib::Bytes::create(svg.data(), svg.size()));
+    return Gdk::Pixbuf::create_from_stream_at_scale(stream, size, size, true);
+}
+
+static Glib::RefPtr<Gdk::Pixbuf> themed_icon_pixbuf(const std::string& name,
+                                                    int size, bool dark) {
+    std::string svg = resource_text("/com/hivemind/client/icons/" + name + ".svg");
+    const std::string fg = dark ? "#eeeeec" : "#241f31";
+    std::string::size_type pos = 0;
+    while ((pos = svg.find("currentColor", pos)) != std::string::npos) {
+        svg.replace(pos, 12, fg);
+    }
+    return svg_pixbuf(svg, size);
+}
+
+static Glib::RefPtr<Gdk::Pixbuf> avatar_pixbuf(const std::string& name, int size) {
+    return svg_pixbuf(resource_text("/com/hivemind/client/avatars/" + name + ".svg"),
+                      size);
+}
+
 // Stable per-agent palette index — avatar and name label share it so an
 // agent is identifiable by color across a busy multi-agent thread.
 int palette_index(const std::string& name) {
     return (int)(std::hash<std::string>{}(name) % 6);
 }
 
-// Circular avatar with the sender's initial, color-hashed per name so every
-// agent gets a stable color. Swap the Gtk::Label for a Gtk::Image here when
-// the roster gains avatar art — the bubble layout won't change.
-Gtk::Label* make_avatar(const std::string& name, bool is_user) {
-    std::string initial = "?";
-    if (!name.empty()) {
-        // first UTF-8 codepoint (good enough for ASCII names)
-        initial = name.substr(0, 1);
-        for (auto& ch : initial) ch = (char)std::toupper((unsigned char)ch);
-    }
-    auto* a = Gtk::make_managed<Gtk::Label>(initial);
-    a->add_css_class("hv-avatar");
-    if (is_user) a->add_css_class("hv-avatar-user");
-    else a->add_css_class("hv-avatar-" + std::to_string(palette_index(name)));
-    a->set_valign(Gtk::Align::START);
-    return a;
+// Hexagon hive-bot avatar from the bundled SVG set. palette_index keeps an
+// agent's bot consistent across the roster and every bubble; the user gets
+// the person-silhouette hex.
+Gtk::Widget* make_avatar(const std::string& name, bool is_user) {
+    const std::string res = is_user
+        ? "user"
+        : "avatar-" + std::to_string(palette_index(name));
+    auto* img = Gtk::make_managed<Gtk::Image>();
+    img->set(avatar_pixbuf(res, 32));
+    img->set_valign(Gtk::Align::START);
+    return img;
 }
 
 } // namespace
+
+void HiveWindow::set_button_icon(Gtk::Button& btn, const std::string& icon,
+                                 const std::string& tooltip) {
+    auto* img = Gtk::make_managed<Gtk::Image>();
+    img->set(themed_icon_pixbuf(icon, 16, dark_mode_));
+    btn.set_child(*img);
+    if (!tooltip.empty()) btn.set_tooltip_text(tooltip);
+}
+
+void HiveWindow::refresh_themed_icons() {
+    set_button_icon(new_agent_btn_,     "agent-add",   "Create a new agent");
+    set_button_icon(new_thread_btn_,    "thread-add",  "Start a new thread");
+    set_button_icon(workflows_btn_,     "workflows",   "Open workflow canvas (web UI)");
+    set_button_icon(connect_btn_,       "connect",     "Connect to a hive-server");
+    set_button_icon(stop_btn_,          "stop",        "Cancel the running turn in this thread");
+    set_button_icon(delete_thread_btn_, "trash",       "Delete the selected thread");
+    set_button_icon(send_btn_,          "send",        "Send message");
+    // Theme button shows the mode you'd switch TO.
+    set_button_icon(theme_btn_, dark_mode_ ? "theme-light" : "theme-dark",
+                    dark_mode_ ? "Switch to light mode" : "Switch to dark mode");
+    // Approvals keeps its count label beside the icon.
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+    auto* img = Gtk::make_managed<Gtk::Image>();
+    img->set(themed_icon_pixbuf("approvals", 16, dark_mode_));
+    box->append(*img);
+    box->append(approvals_label_);
+    approvals_btn_.set_child(*box);
+    approvals_btn_.set_tooltip_text("Pending approvals");
+}
+
+void HiveWindow::apply_theme() {
+    Gtk::Settings::get_default()
+        ->property_gtk_application_prefer_dark_theme()
+        .set_value(dark_mode_);
+    refresh_themed_icons();
+}
 
 HiveWindow::HiveWindow() {
     set_title("HiveMind");
@@ -246,17 +317,22 @@ HiveWindow::HiveWindow() {
     });
     connect_btn_.signal_clicked().connect(
         [this] { maybe_show_connect_dialog(); });
+    theme_btn_.signal_clicked().connect([this] {
+        dark_mode_ = !dark_mode_;
+        apply_theme();
+        save_config();
+    });
+    theme_btn_.set_tooltip_text("Switch theme");
     stop_btn_.signal_clicked().connect([this] { on_stop(); });
     stop_btn_.set_sensitive(false);   // enabled while a turn is running
     stop_btn_.add_css_class("destructive-action");
-    stop_btn_.set_tooltip_text("Cancel the running turn in this thread");
     delete_thread_btn_.signal_clicked().connect([this] { on_delete_thread(); });
     delete_thread_btn_.set_sensitive(false);  // enabled with a selection
-    delete_thread_btn_.set_tooltip_text("Delete the selected thread");
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
     header_.pack_start(workflows_btn_);
     header_.pack_end(connect_btn_);
+    header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
     header_.pack_end(approvals_btn_);
@@ -336,6 +412,7 @@ HiveWindow::HiveWindow() {
     }, 1500);
 
     load_config();
+    apply_theme();   // also populates all button icons
     set_status("Connecting to hive-server…");
     if (api_.api_key().empty())
         maybe_show_connect_dialog();
@@ -361,6 +438,7 @@ void HiveWindow::load_config() {
         server_url_ = j.value("server", server_url_);
         api_.set_base_url(server_url_);
         api_.set_api_key(j.value("api_key", ""));
+        dark_mode_ = j.value("dark_mode", false);
     } catch (...) {}
 }
 
@@ -372,7 +450,8 @@ void HiveWindow::save_config() {
     fs::create_directories(dir, ec);
     fs::path file = dir / "config.json";
     std::ofstream f{file, std::ios::trunc};
-    f << json{{"server", server_url_}, {"api_key", api_.api_key()}}.dump(2);
+    f << json{{"server", server_url_}, {"api_key", api_.api_key()},
+              {"dark_mode", dark_mode_}}.dump(2);
     f.close();
     fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
 }
@@ -616,7 +695,7 @@ void HiveWindow::poll_approvals() {
                 int n = (int)ap.value("approvals", json::array()).size();
                 if (n != pending_approvals_) {
                     pending_approvals_ = n;
-                    approvals_btn_.set_label(n > 0
+                    approvals_label_.set_label(n > 0
                         ? "Approvals (" + std::to_string(n) + ")"
                         : "Approvals");
                     if (n > 0) approvals_btn_.add_css_class("destructive-action");

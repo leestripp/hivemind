@@ -1,4 +1,6 @@
 #include "HiveApplication.h"
+#include <gio/gio.h>
+extern "C" { GResource* hivemind_get_resource(void); }
 #include "HiveWindow.h"
 #include "UiApi.h"
 
@@ -15,6 +17,7 @@ Glib::RefPtr<HiveApplication> HiveApplication::create() {
 HiveApplication::~HiveApplication() = default;
 
 void HiveApplication::on_activate() {
+    g_resources_register(hivemind_get_resource());
     auto* window = new HiveWindow();
     add_window(*window);
     window->present();

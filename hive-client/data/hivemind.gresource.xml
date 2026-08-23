@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/com/hivemind/client">
+    <file>icons/agent-add.svg</file>
+    <file>icons/approvals.svg</file>
+    <file>icons/connect.svg</file>
+    <file>icons/hive.svg</file>
+    <file>icons/refresh.svg</file>
+    <file>icons/search.svg</file>
+    <file>icons/send.svg</file>
+    <file>icons/settings.svg</file>
+    <file>icons/stop.svg</file>
+    <file>icons/theme-dark.svg</file>
+    <file>icons/theme-light.svg</file>
+    <file>icons/thread-add.svg</file>
+    <file>icons/trash.svg</file>
+    <file>icons/workflows.svg</file>
+    <file>avatars/avatar-0.svg</file>
+    <file>avatars/avatar-1.svg</file>
+    <file>avatars/avatar-2.svg</file>
+    <file>avatars/avatar-3.svg</file>
+    <file>avatars/avatar-4.svg</file>
+    <file>avatars/avatar-5.svg</file>
+    <file>avatars/user.svg</file>
+  </gresource>
+</gresources>

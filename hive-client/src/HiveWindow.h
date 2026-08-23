@@ -44,6 +44,10 @@ private:
     // ── connection config (Phase 9) ───────────────────────────────────────
     void load_config();          // ~/.config/hivemind/config.json
     void save_config();
+    void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
+    void refresh_themed_icons();
+    void set_button_icon(Gtk::Button& btn, const std::string& icon,
+                         const std::string& tooltip);
     void maybe_show_connect_dialog();   // when no key is configured
 
     // ── data loading (worker threads → dispatcher → UI) ───────────────────
@@ -93,13 +97,17 @@ private:
     // ── widgets ───────────────────────────────────────────────────────────
     Gtk::Box root_{Gtk::Orientation::VERTICAL};
     Gtk::HeaderBar header_;
-    Gtk::Button new_agent_btn_{"+ Agent"};
-    Gtk::Button new_thread_btn_{"+ Thread"};
-    Gtk::Button approvals_btn_{"Approvals"};
-    Gtk::Button workflows_btn_{"Workflows"};
-    Gtk::Button connect_btn_{"Connect"};
-    Gtk::Button stop_btn_{"Stop"};
-    Gtk::Button delete_thread_btn_{"Delete thread"};
+    // Icon-only buttons (icons are GResource SVGs, re-tinted per theme).
+    Gtk::Button new_agent_btn_;
+    Gtk::Button new_thread_btn_;
+    Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
+    Gtk::Label approvals_label_;         // child of approvals_btn_
+    Gtk::Button workflows_btn_;
+    Gtk::Button theme_btn_;              // dark/light toggle
+    Gtk::Button connect_btn_;
+    Gtk::Button stop_btn_;
+    Gtk::Button delete_thread_btn_;
+    bool dark_mode_ = false;             // persisted in config.json
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
     Gtk::Box sidebar_{Gtk::Orientation::VERTICAL};
@@ -116,7 +124,7 @@ private:
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
     Gtk::Entry entry_;
-    Gtk::Button send_btn_{"Send"};
+    Gtk::Button send_btn_;
 
     sigc::connection poll_timer_;
 

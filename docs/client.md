@@ -30,6 +30,21 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 - **Workflows:** opens the node-graph canvas (web UI) in your browser —
   the workflow studio stays web-based.
 
+## Theme & icons
+
+- **Dark/light mode**: header-bar moon/sun button toggles
+  `gtk-application-prefer-dark-theme`; the choice persists as
+  `"dark_mode": true|false` in `~/.config/hivemind/config.json`.
+- **Icons** (`data/icons/*.svg`) are 24×24 `currentColor`-stroked SVGs
+  bundled into the binary via GResource (`glib-compile-resources`).
+  GTK's pixbuf loader doesn't resolve `currentColor` from CSS, so
+  `themed_icon_pixbuf()` string-replaces it with the theme foreground
+  (`#eeeeec` dark / `#241f31` light) before rendering — that is what
+  makes icons follow the theme.
+- **Avatars** (`data/avatars/*.svg`) are hexagonal hive-bots, one per
+  `palette_index(name)` color plus `user.svg`. They are self-contained
+  (identity colors, dark visor + white eyes) so they read on both themes.
+
 ## Notes for contributors
 
 - `ApiClient` calls are blocking by design — always invoked on detached
