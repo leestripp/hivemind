@@ -8,7 +8,7 @@
 #include "hivemind/ContainerTools.h"
 #include "hivemind/AgentTools.h"
 
-#include "daedalus/settings.h"
+#include "hivemind/LLMStore.h"
 #include "daedalus/default_paths.h"
 
 #include <algorithm>
@@ -215,9 +215,10 @@ private:
 
 AgentHost::AgentHost(RosterAgent info, fs::path dir,
                      AgentStore& agents, ApprovalStore& approvals,
-                     AgentRegistry& registry)
+                     AgentRegistry& registry, LLMStore& llm)
     : info_(std::move(info)), dir_(std::move(dir)),
       agents_(agents), approvals_(approvals), registry_(registry),
+      llm_(llm),
       proxy_sink_(std::make_shared<ProxySink>()) {
     fs::create_directories(dir_);
 }
@@ -297,14 +298,31 @@ void AgentHost::ensure_agent() {
             "HiveMind system." + prompt_addendum;
     }
 
-    // Fail fast on unknown model names (same guard as AgentExecutor).
-    if (!cfg.model_name.empty()) {
-        auto& store = daedalus::SettingsStore::instance();
-        auto resolved = store.resolve_model(cfg.model_name);
-        if (!resolved || resolved->host.empty())
+    // Phase 13: resolve the model in HiveMind's own LLMStore and inject
+    // credentials via AgentConfig's explicit fields. daedalus' SettingsStore
+    // is never consulted (model_name carries the remote model_id, not a
+    // daedalus settings key, so make_app_config falls through to these).
+    if (!info_.model.empty()) {
+        auto r = llm_.resolve(info_.model);
+        if (!r)
             throw std::invalid_argument(
-                "unknown model '" + cfg.model_name + "' for agent '" +
-                info_.name + "'");
+                "unknown model '" + info_.model + "' for agent '" +
+                info_.name + "' — configure it on the Models page");
+        cfg.api_host       = r->host;
+        cfg.api_key        = r->api_key;
+        cfg.chat_endpoint  = r->chat_endpoint;
+        cfg.model_name     = r->model_id;
+        cfg.max_context_size = r->max_context_size;
+        cfg.temperature    = r->temperature;
+    } else if (auto d = llm_.resolve("")) {
+        // No per-agent model: LLMStore default wins; empty store falls back
+        // to daedalus' own SettingsStore default (legacy path).
+        cfg.api_host       = d->host;
+        cfg.api_key        = d->api_key;
+        cfg.chat_endpoint  = d->chat_endpoint;
+        cfg.model_name     = d->model_id;
+        cfg.max_context_size = d->max_context_size;
+        cfg.temperature    = d->temperature;
     }
 
     bool containerized = containerized_;
@@ -504,7 +522,7 @@ AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
     if (it == hosts_.end()) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
         auto host = std::make_unique<AgentHost>(agent, dir, agents_,
-                                                approvals_, *this);
+                                                approvals_, *this, llm_);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
     return *it->second;

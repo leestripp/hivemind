@@ -33,6 +33,7 @@
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
 #include "hivemind/RoutineStore.h"
+#include "hivemind/LLMStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/AgentHost.h"
@@ -82,8 +83,9 @@ int main(int argc, char* argv[]) {
     ThreadStore thread_store;
     ApprovalStore approval_store;
     RoutineStore routine_store;
+    LLMStore llm_store;
     AuthStore auth_store;
-    AgentRegistry agent_registry{agent_store, approval_store};
+    AgentRegistry agent_registry{agent_store, approval_store, llm_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
 
     // ─── Auth (Phase 9) ─────────────────────────────────────────────
@@ -139,7 +141,7 @@ int main(int argc, char* argv[]) {
     });
 
     // 2. Domain routes (all registered before the static catch-all).
-    register_model_routes(server);
+    register_model_routes(server, llm_store);
     register_project_routes(server);
     register_agent_routes(server);
     // Phase 12: graph/workflow/trigger/run routes REMOVED — workflow engine

@@ -34,6 +34,7 @@
  */
 class ProxySink;  // forwards AgentSink callbacks to a per-turn target
 class AgentRegistry;
+class LLMStore;
 
 /// Sanitize a roster display name into a valid daedalus agent_name
 /// (also determines the on-disk `.daedalus/daedalus-<name>` namespace).
@@ -43,7 +44,7 @@ class AgentHost {
 public:
     AgentHost(RosterAgent info, std::filesystem::path dir,
               AgentStore& agents, ApprovalStore& approvals,
-              AgentRegistry& registry);
+              AgentRegistry& registry, LLMStore& llm);
     ~AgentHost();
 
     AgentHost(const AgentHost&) = delete;
@@ -97,6 +98,7 @@ private:
     AgentStore& agents_;
     ApprovalStore& approvals_;
     AgentRegistry& registry_;
+    LLMStore& llm_;
     bool containerized_ = false;            // workspace_mode != "host"
     std::mutex turn_mtx_;                   // one turn at a time per agent
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
@@ -120,8 +122,9 @@ private:
 /// for the whole process lifetime. No refcounting anywhere.
 class AgentRegistry {
 public:
-    AgentRegistry(AgentStore& agents, ApprovalStore& approvals)
-        : agents_(agents), approvals_(approvals) {}
+    AgentRegistry(AgentStore& agents, ApprovalStore& approvals,
+                  LLMStore& llm)
+        : agents_(agents), approvals_(approvals), llm_(llm) {}
 
     /// Get the live host for a roster agent, constructing it on first use.
     /// An evicted (dead) host is replaced with a fresh one.
@@ -143,6 +146,7 @@ public:
 private:
     AgentStore& agents_;
     ApprovalStore& approvals_;
+    LLMStore& llm_;
     std::mutex m_;
     std::unordered_map<std::string, std::unique_ptr<AgentHost>> hosts_;
     std::vector<std::unique_ptr<AgentHost>> graveyard_;  // dead, not freed

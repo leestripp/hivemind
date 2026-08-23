@@ -275,3 +275,34 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .badge.st-idle   { color: #8b93a1; }
 .badge.st-busy   { color: #a3be8c; border-color: #3a4a35; background: rgba(163,190,140,.10); }
 .badge.st-cancelling { color: #ebcb8b; border-color: #55492e; background: rgba(235,203,139,.10); }
+
+/* ── Phase 13: models page ─────────────────────────────────────────── */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 22px 0 8px;
+}
+.section-head h3 { margin: 0; font-size: 14px; }
+.modal-panel form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: #8b93a1; margin-bottom: 12px;
+}
+.modal-panel form label.check { flex-direction: row; align-items: center; gap: 8px; }
+.modal-panel form input, .modal-panel form select {
+  background: #0f1319; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--fg); padding: 8px 10px; font-size: 13px;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-head h3 { margin: 0; font-size: 15px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.discover-list { max-height: 320px; overflow-y: auto; margin-bottom: 10px; }
+.discover-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 6px 4px; border-bottom: 1px solid #1c212b;
+  font-size: 13px;
+}
+.star { color: #6c7280; }
+.star-on { color: #ebcb8b; }
+.badge-ok { color: #a3be8c; border-color: #3a4a35; background: rgba(163,190,140,.10); }

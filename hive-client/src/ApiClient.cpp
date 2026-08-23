@@ -130,6 +130,7 @@ nlohmann::json ApiClient::resolve_approval(const std::string& id, bool approve) 
 // ── misc ────────────────────────────────────────────────────────────────────
 
 nlohmann::json ApiClient::models() { return request("GET", "/api/models"); }
+nlohmann::json ApiClient::providers() { return request("GET", "/api/providers"); }
 
 bool ApiClient::healthy() {
     try { return request("GET", "/api/health").value("status", "") == "ok"; }

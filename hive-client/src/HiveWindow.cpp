@@ -975,8 +975,48 @@ void HiveWindow::on_new_agent() {
     name->set_placeholder_text("Name (e.g. Nova)");
     auto* role = Gtk::make_managed<Gtk::Entry>();
     role->set_placeholder_text("Role (e.g. research assistant)");
-    auto* model = Gtk::make_managed<Gtk::Entry>();
-    model->set_placeholder_text("Model (blank = store default)");
+    // Phase 13: provider/model dropdowns from the server's LLMStore —
+    // no more hand-typed model names.
+    struct ModelEntry { std::string name, provider, label; };
+    std::vector<std::string> provider_names;
+    std::vector<ModelEntry>  model_entries;
+    std::string default_model;
+    try {
+        for (auto& p : api_.providers().value("providers", nlohmann::json::array()))
+            provider_names.push_back(p.value("name", ""));
+        for (auto& m : api_.models()) {
+            model_entries.push_back({m.value("name", ""), m.value("provider", ""),
+                                     m.value("name", "") + "  (" + m.value("model", "") + ")"});
+            if (m.value("is_default", false)) default_model = m.value("name", "");
+        }
+    } catch (...) { /* server unreachable — dropdowns stay empty */ }
+
+    std::vector<Glib::ustring> prov_items(provider_names.begin(), provider_names.end());
+    auto* provider = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create(prov_items));
+    auto* model = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create({}));
+
+    // Repopulate the model list for the selected provider. First entry is
+    // always "(server default)" → sends "" (server picks the default model).
+    auto* model_names = new std::vector<std::string>();   // owned via dialog lifetime below
+    auto refill_models = [model, model_entries, model_names, default_model](const std::string& prov) {
+        std::vector<Glib::ustring> items;
+        model_names->clear();
+        items.push_back(default_model.empty() ? "(server default)"
+                                              : "(server default: " + default_model + ")");
+        model_names->push_back("");
+        for (auto& me : model_entries)
+            if (me.provider == prov) { items.push_back(me.label); model_names->push_back(me.name); }
+        auto sl = Gtk::StringList::create(items);
+        model->set_model(sl);
+        model->set_selected(0);
+    };
+    if (!provider_names.empty()) refill_models(provider_names[0]);
+    provider->property_selected().signal_changed().connect(
+        [provider, provider_names, refill_models] {
+            const auto sel = provider->get_selected();
+            if (sel < provider_names.size()) refill_models(provider_names[sel]);
+        });
     auto* mode = Gtk::make_managed<Gtk::DropDown>(
         Gtk::StringList::create({"shared (container)", "host (no container)"}));
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
@@ -990,18 +1030,22 @@ void HiveWindow::on_new_agent() {
     };
     add_row("Name", name, 0);
     add_row("Role", role, 1);
-    add_row("Model", model, 2);
-    add_row("Workspace", mode, 3);
-    grid->attach(*appr, 1, 4);
+    add_row("Provider", provider, 2);
+    add_row("Model", model, 3);
+    add_row("Workspace", mode, 4);
+    grid->attach(*appr, 1, 5);
 
     dialog->get_content_area()->append(*grid);
-    dialog->signal_response().connect([this, dialog, name, role, model, mode, appr](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
                 std::string ws = mode->get_selected() == 1 ? "host" : "shared";
+                const auto msel = model->get_selected();
+                std::string m = msel < model_names->size() ? (*model_names)[msel] : "";
+                delete model_names;
                 run_async([this, n, r2 = role->get_text().raw(),
-                           m = model->get_text().raw(), ws,
+                           m, ws,
                            ap = appr->get_active()] {
                     api_.create_agent(n, r2, m, ws, ap);
                     {

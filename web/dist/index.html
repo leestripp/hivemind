@@ -25,6 +25,13 @@
         <circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/>
       </svg>
     </button>
+    <button class="ab-item" data-page="models" title="Models">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="5" y="5" width="14" height="14" rx="2"/>
+        <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
+        <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke-linecap="round"/>
+      </svg>
+    </button>
     <button class="ab-item" data-page="settings" title="Settings">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="3.2"/>
@@ -81,6 +88,80 @@
       <div id="agents-grid" class="agents-grid">
         <p class="muted">loading…</p>
       </div>
+    </div>
+  </div>
+
+  <div id="page-models" class="page hidden">
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>🧠 Models</h2>
+          <p class="muted">
+            LLM providers and models — the configuration agents are created
+            with. Keys are stored server-side and never shown here.
+          </p>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h3>Providers</h3>
+        <button id="providers-add" class="btn">+ Add Provider</button>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th>Name</th><th>Host</th><th>Key</th><th>Timeout</th><th></th></tr></thead>
+        <tbody id="providers-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
+      </table>
+
+      <div class="section-head">
+        <h3>Models</h3>
+        <button id="models-add" class="btn">+ Add Model</button>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th></th><th>Name</th><th>Provider</th><th>Model ID</th><th>Context</th><th>Temp</th><th></th></tr></thead>
+        <tbody id="models-tbody"><tr><td colspan="7" class="muted">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="provider-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head"><h3>Add Provider</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <form>
+        <label>Name <input name="name" required placeholder="kimi"></label>
+        <label>Host <input name="host" required placeholder="https://api.example.com"></label>
+        <label>API key <input name="api_key" type="password" placeholder="sk-… (blank for local)"></label>
+        <label>Timeout (s) <input name="timeout_seconds" type="number" value="30" min="5"></label>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="model-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head"><h3>Add Model</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <form>
+        <label>Name <input id="model-name" name="name" required placeholder="kimi-k2.7"></label>
+        <label>Provider <select id="model-provider" name="provider" required></select></label>
+        <label>Model ID <input id="model-model-id" name="model_id" required placeholder="kimi-for-coding"></label>
+        <label>Context (tokens) <input name="max_context_size" type="number" value="0" min="0"></label>
+        <label>Temperature <input name="temperature" type="number" step="0.1" value="0" min="0" max="2"></label>
+        <label class="check"><input name="is_default" type="checkbox"> Make default model</label>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="discover-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head"><h3 id="discover-title">Discover</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <div id="discover-list" class="discover-list"></div>
+      <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>
     </div>
   </div>
 

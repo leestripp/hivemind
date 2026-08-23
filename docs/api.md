@@ -211,8 +211,26 @@ See `docs/containers.md`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/models` | Models from the daedalus SettingsStore |
+### Providers & models (Phase 13)
+
+HiveMind owns LLM configuration in its own LLMStore
+(`~/.local/share/hivemind/llm.db`); first run imports from daedalus.db.
+Credentials are resolved server-side and injected into each agent at
+spawn — daedalus' SettingsStore is no longer consulted by HiveMind.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/providers` | List providers (keys never returned, `has_key` only) |
+| POST | `/api/providers` | Create provider `{name, host, api_key?, timeout_seconds?}` |
+| PATCH | `/api/providers/:name` | Update provider fields |
+| DELETE | `/api/providers/:name` | Delete (400 while models reference it) |
+| GET | `/api/providers/:name/discover` | Live `GET /v1/models` at the provider → `{models: [{id}]}` |
+| GET | `/api/models` | List models (resolved host/has_key included) |
+| POST | `/api/models` | Create `{name, provider, model_id, max_context_size?, temperature?, is_default?}` |
 | GET | `/api/models/:name` | One model |
+| PATCH | `/api/models/:name` | Update model fields |
+| POST | `/api/models/:name/default` | Make the default model |
+| DELETE | `/api/models/:name` | Delete model |
 
 HiveMind never stores credentials — providers/keys live in the daedalus
 SettingsStore (`~/.local/share/daedalus/daedalus.db`), managed by icarus.

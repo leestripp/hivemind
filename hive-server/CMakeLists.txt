@@ -15,6 +15,7 @@ set(CORE_SOURCES
     src/ApprovalStore.cpp
     src/AgentTools.cpp
     src/RoutineStore.cpp
+    src/LLMStore.cpp
     src/AuthStore.cpp
     src/ServerConfig.cpp
 )

@@ -50,6 +50,7 @@ public:
 
     // ── misc ──────────────────────────────────────────────────────────────
     nlohmann::json models();                                         // GET /api/models
+    nlohmann::json providers();                                      // GET /api/providers
     bool healthy();                                                  // GET /api/health
 
 private:
