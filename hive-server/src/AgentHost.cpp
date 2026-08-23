@@ -709,3 +709,12 @@ bool ChatService::busy(const std::string& thread_id) {
         if (!t->done) return true;
     return false;
 }
+
+std::unordered_map<std::string, ChatService::LiveTurn> ChatService::agent_activity() {
+    std::lock_guard<std::mutex> lk(m_);
+    std::unordered_map<std::string, LiveTurn> out;
+    for (auto& [tid, turns] : live_)
+        for (auto& t : turns)
+            if (!t->done) out[t->agent_id] = *t;  // later threads overwrite; fine for status
+    return out;
+}

@@ -89,6 +89,20 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"agents", list}});
         });
 
+    // ── GET /api/agents/activity ──────────────────────────────────────────
+    // Per-agent live status across all threads (web UI Agents page).
+    // Registered BEFORE /api/agents/:id so the literal path wins.
+    server.get("/api/agents/activity",
+        [&chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            json m = json::object();
+            for (auto& [aid, t] : chat.agent_activity())
+                m[aid] = json{{"busy", true},
+                              {"cancelling", t.cancelling},
+                              {"agent_name", t.agent_name},
+                              {"partial_len", (int)t.partial.size()}};
+            send_json(resp, json{{"agents", m}});
+        });
+
     // ── GET/PATCH/DELETE /api/agents/:id ──────────────────────────────────
     server.get("/api/agents/:id",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {

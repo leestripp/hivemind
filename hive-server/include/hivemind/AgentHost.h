@@ -176,6 +176,10 @@ public:
     /// True while any turn for this thread is still running.
     bool busy(const std::string& thread_id);
 
+    /// Latest live turn per agent across ALL threads (web UI roster status).
+    /// Only agents with a not-yet-done turn appear in the map.
+    std::unordered_map<std::string, LiveTurn> agent_activity();
+
     /// Shutdown support (Phase 10): stop accepting new messages and wait
     /// until every in-flight turn thread has fully finished (including its
     /// final message write). Call before the stores go out of scope.

@@ -245,3 +245,33 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   color: var(--accent); font-size: 13px;
   user-select: all; word-break: break-all;
 }
+
+/* ── Phase 13: agents page (roster cards) ────────────────────────── */
+.agents-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.agent-card {
+  background: var(--bg1, #151923); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+  transition: border-color .15s;
+}
+.agent-card:hover { border-color: #3d4552; }
+.agent-card.status-busy { border-color: #2e4a54; }
+.agent-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.agent-avatar { flex: 0 0 auto; display: flex; }
+.agent-id-block { flex: 1; min-width: 0; }
+.agent-name { font-size: 15px; font-weight: 600; }
+.agent-role {
+  font-size: 12px; color: #8b93a1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.agent-meta div { font-size: 12px; color: var(--fg); }
+.agent-meta span {
+  display: block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .05em; color: #6c7280; margin-bottom: 1px;
+}
+.badge.st-idle   { color: #8b93a1; }
+.badge.st-busy   { color: #a3be8c; border-color: #3a4a35; background: rgba(163,190,140,.10); }
+.badge.st-cancelling { color: #ebcb8b; border-color: #55492e; background: rgba(235,203,139,.10); }
