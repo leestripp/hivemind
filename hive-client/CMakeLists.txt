@@ -14,6 +14,7 @@ add_executable(hive-client
     src/HiveApplication.cpp
     src/HiveWindow.cpp
     src/ApiClient.cpp
+    src/UiApi.cpp
 )
 
 target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -21,6 +22,7 @@ target_link_libraries(hive-client PRIVATE
     PkgConfig::GTKMM
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    OmniNet
 )
 
 install(TARGETS hive-client DESTINATION "bin")

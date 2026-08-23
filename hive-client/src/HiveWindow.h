@@ -26,7 +26,21 @@ public:
     HiveWindow();
     ~HiveWindow() override;
 
+    // ── UiApi hooks (Phase 11.5) — called from OmniNet worker threads. ────
+    // Every method marshals onto the GTK main loop and drives the SAME code
+    // paths the buttons use; the REST layer adds no parallel logic.
+    nlohmann::json ui_state();                       // GET /ui/state
+    nlohmann::json ui_messages();                    // GET /ui/messages
+    nlohmann::json ui_create_thread(const std::string& title,
+                                    const std::vector<std::string>& ids);
+    nlohmann::json ui_select_thread(const std::string& id);
+    nlohmann::json ui_send(const std::string& body);
+    nlohmann::json ui_stop();
+    nlohmann::json ui_delete_thread(const std::string& id);
+
 private:
+    /// Run fn on the GTK main thread and return its result (blocks caller).
+    nlohmann::json invoke_on_ui(std::function<nlohmann::json()> fn);
     // ── connection config (Phase 9) ───────────────────────────────────────
     void load_config();          // ~/.config/hivemind/config.json
     void save_config();
@@ -46,13 +60,16 @@ private:
     void on_new_agent();
     void on_new_thread();
     void on_approvals();
+    void on_stop();
+    void on_delete_thread();
 
     // ── rendering helpers ─────────────────────────────────────────────────
     void rebuild_roster();
     void rebuild_thread_list();
     void append_message_bubble(const std::string& sender_kind,
                                const std::string& sender_label,
-                               const std::string& body);
+                               const std::string& body,
+                               const std::string& created_at = "");
     void set_status(const std::string& text);
 
     ApiClient api_;
@@ -64,7 +81,9 @@ private:
     std::string current_thread_;
     std::string last_message_id_;
     int pending_approvals_ = 0;
+    bool thread_busy_ = false;
     bool alive_ = true;
+    std::vector<nlohmann::json> rendered_;   // bubbles actually on screen
 
     // async marshalling
     Glib::Dispatcher dispatcher_;
@@ -78,6 +97,9 @@ private:
     Gtk::Button new_thread_btn_{"+ Thread"};
     Gtk::Button approvals_btn_{"Approvals"};
     Gtk::Button workflows_btn_{"Workflows"};
+    Gtk::Button connect_btn_{"Connect"};
+    Gtk::Button stop_btn_{"Stop"};
+    Gtk::Button delete_thread_btn_{"Delete thread"};
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
     Gtk::Box sidebar_{Gtk::Orientation::VERTICAL};
@@ -97,6 +119,10 @@ private:
     Gtk::Button send_btn_{"Send"};
 
     sigc::connection poll_timer_;
+
+    // at most one connect dialog may exist — guards against the 1.5 s poll
+    // timer spawning a fresh modal dialog on every 401 response
+    Gtk::Dialog* connect_dialog_ = nullptr;
 };
 
 } // namespace hive

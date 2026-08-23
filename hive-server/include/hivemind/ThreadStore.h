@@ -40,6 +40,11 @@ public:
     ~ThreadStore();
 
     /// Create a thread with the given agent participants. Returns the Thread.
+    /// Existing 1:1 dm thread with this agent, if any (Phase 11 dedup:
+    /// clicking an agent in the roster must reopen the SAME conversation,
+    /// not mint a fresh empty DM every time).
+    std::optional<Thread> find_dm(const std::string& agent_id);
+
     Thread create_thread(const std::string& title,
                          const std::string& kind,
                          const std::vector<std::string>& agent_ids);

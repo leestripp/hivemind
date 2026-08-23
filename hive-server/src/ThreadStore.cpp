@@ -115,6 +115,14 @@ std::vector<std::string> ThreadStore::participants_of(sqlite3* db,
     return out;
 }
 
+std::optional<Thread> ThreadStore::find_dm(const std::string& agent_id) {
+    for (auto& t : list_threads()) {
+        if (t.kind != "dm" || t.agent_ids.size() != 1) continue;
+        if (t.agent_ids[0] == agent_id) return t;
+    }
+    return std::nullopt;
+}
+
 Thread ThreadStore::create_thread(const std::string& title,
                                   const std::string& kind,
                                   const std::vector<std::string>& agent_ids) {

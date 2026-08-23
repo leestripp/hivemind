@@ -13,6 +13,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -33,6 +38,7 @@ public:
         {
             std::lock_guard<std::mutex> lk(m_);
             output_ += text;
+            user_output_ += text;   // natural-language text is user-facing
         }
         if (on_delta_) on_delta_(text);
     }
@@ -60,7 +66,7 @@ public:
         output_ += "]\n";
     }
 
-    void on_tool_result(std::string_view /*name*/,
+    void on_tool_result(std::string_view name,
                         std::string_view /*call_id*/,
                         const nlohmann::json& result) noexcept override {
         std::lock_guard<std::mutex> lk(m_);
@@ -70,6 +76,17 @@ public:
         output_ += "  → ";
         output_ += r;
         output_ += "\n";
+        // tell_user carries a complete user-facing message (monkeybyte §7.3):
+        // capture it UNTRUNCATED — it is exactly what the chat should show.
+        if (name == "tell_user") {
+            const std::string content = result.value("content", "");
+            if (!content.empty()) {
+                if (!user_output_.empty() && user_output_.back() != '\n')
+                    user_output_ += '\n';
+                user_output_ += '\n';
+                user_output_ += content;
+            }
+        }
     }
 
     void on_error(daedalus::ErrorKind /*kind*/,
@@ -106,6 +123,12 @@ public:
         std::lock_guard<std::mutex> lk(m_);
         return output_;
     }
+    // Everything intended for the user, in arrival order: assistant prose
+    // plus full tell_user payloads. This is what gets posted to the thread.
+    std::string user_output() const {
+        std::lock_guard<std::mutex> lk(m_);
+        return user_output_;
+    }
     bool errored() const { return errored_.load(); }
 
 private:
@@ -113,6 +136,7 @@ private:
     std::function<bool(std::string_view)> approval_fn_;
     mutable std::mutex m_;
     std::string output_;
+    std::string user_output_;
     std::atomic<bool> errored_{false};
 };
 
@@ -314,24 +338,59 @@ void AgentHost::ensure_agent() {
         std::make_unique<RunIcarusTool>(info_.id, dir_.string()));
 }
 
-std::string AgentHost::run_turn(const std::string& prompt,
-                                std::function<void(std::string_view)> on_delta) {
+void AgentHost::enqueue(PendingTurn turn) {
     if (dead_)
         throw std::runtime_error("agent '" + info_.name +
                                  "' was deleted or replaced");
+    {
+        std::lock_guard<std::mutex> lk(queue_m_);
+        if (stopping_)
+            throw std::runtime_error("agent '" + info_.name +
+                                     "' is shutting down");
+        queue_.push_back(std::move(turn));
+        if (!driver_running_) {
+            driver_running_ = true;
+            std::thread([this] { driver_loop(); }).detach();
+        }
+    }
+    queue_cv_.notify_one();
+}
+
+void AgentHost::driver_loop() {
+    for (;;) {
+        PendingTurn turn;
+        {
+            std::unique_lock<std::mutex> lk(queue_m_);
+            queue_cv_.wait(lk, [&] { return !queue_.empty(); });
+            turn = std::move(queue_.front());
+            queue_.pop_front();
+            if (queue_.empty()) driver_running_ = false;   // exit when idle
+        }
+        try { run_one(turn); }
+        catch (const std::exception& e) {
+            try { turn.on_done("", e.what()); } catch (...) {}
+        }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            if (!queue_.empty()) driver_running_ = true;   // more work queued
+            else return;   // idle — a later enqueue() restarts the driver
+        }
+    }
+}
+
+void AgentHost::run_one(PendingTurn& turn) {
+    // turn_mtx_ serializes against shutdown()/evict(); the driver thread
+    // already serializes turns against each other.
     std::lock_guard<std::mutex> turn_lk{turn_mtx_};
 
-    // Whole turn (construct-first-time + run) under the global agent mutex —
-    // daedalus 0.9.6 global state is not multi-agent safe.
+    // Whole turn under the global agent mutex — daedalus 0.9.6 global state
+    // is not multi-agent safe. Held only for the LLM round, never while
+    // waiting on the queue.
     std::lock_guard<std::recursive_mutex> global_lk{agent_exec_mutex()};
 
     ensure_agent();
 
-    // daedalus takes the sink at construction and the Agent outlives turns,
-    // so the stable ProxySink forwards to this turn's StreamingSink.
-    auto sink = std::make_shared<StreamingSink>(std::move(on_delta));
-    // Approval gate: require_approval agents park the command in the
-    // approval queue and block the turn until a human resolves it.
+    auto sink = std::make_shared<StreamingSink>(std::move(turn.on_delta));
     sink->set_approval_fn([this](std::string_view cmd) -> bool {
         std::string id = approvals_.create(info_.id, info_.name,
                                            "command", std::string{cmd});
@@ -339,10 +398,8 @@ std::string AgentHost::run_turn(const std::string& prompt,
     });
     proxy_sink_->set_target(sink);
 
-    // RAII guard (Phase 10 fix): a throwing turn must still restore the
-    // delegation depth and detach the per-turn sink — otherwise delegation
-    // is permanently broken on this thread and the next turn leaks into the
-    // old sink.
+    // RAII guard: a throwing turn must still restore delegation depth and
+    // detach the per-turn sink.
     struct TurnGuard {
         ProxySink* proxy;
         ~TurnGuard() {
@@ -353,13 +410,78 @@ std::string AgentHost::run_turn(const std::string& prompt,
     ++MessageAgentTool::depth_;
     TurnGuard guard{proxy_sink_.get()};
 
-    agent_->submit_user_message(prompt.empty() ? "(no input)" : prompt);
-    agent_->run_one_turn();
+    // Watchdog: a hung LLM call blocks this agent's queue forever; cancel
+    // past the timeout so later queued turns unblock.
+    static const long kTurnTimeoutS = [] {
+        const char* e = std::getenv("HIVEMIND_TURN_TIMEOUT_S");
+        return (e && std::atol(e) > 0) ? std::atol(e) : 240;
+    }();
+    std::atomic<bool> turn_done{false};
+    std::thread([this, &turn_done] {
+        for (long i = 0;
+             i < kTurnTimeoutS && !turn_done.load(std::memory_order_acquire);
+             ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!turn_done.load(std::memory_order_acquire) && agent_)
+            agent_->cancel();
+    }).detach();
 
-    std::string out = sink->output();
+    agent_->submit_user_message(turn.prompt.empty() ? "(no input)"
+                                                    : turn.prompt);
+    agent_->run_one_turn();
+    turn_done.store(true, std::memory_order_release);
+
+    // daedalus warns submit/run_one_turn pairs must stay 1:1 — catch drift.
+    if (agent_->pending_count() != 0)
+        std::fprintf(stderr,
+            "[hivemind] WARN agent '%s' queue drift: pending_count=%zu\n",
+            info_.name.c_str(), agent_->pending_count());
+
+    std::string out = sink->user_output();
+    if (out.empty()) out = sink->output();   // never lose a turn entirely
+    static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
+    if (debug) {
+        namespace fs = std::filesystem;
+        fs::path dir = fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
+                     / ".local" / "share" / "hivemind";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        std::ofstream f{dir / "turn-transcripts.log", std::ios::app};
+        f << "=== " << info_.name << " ===\n" << sink->output() << "\n\n";
+    }
     if (sink->errored())
-        throw std::runtime_error("agent reported errors (see output)");
-    return out.empty() ? "(agent produced no output)" : out;
+        turn.on_done("", "agent reported errors (see output)");
+    else
+        turn.on_done(out.empty() ? "" : out, "");
+}
+
+void AgentHost::cancel() noexcept {
+    // daedalus: cancel() is stop_token-equivalent and noexcept. Idle agents
+    // ignore it. agent_ is process-immortal during turns (graveyard rule).
+    try { if (agent_) agent_->cancel(); } catch (...) {}
+}
+
+std::string AgentHost::run_turn(const std::string& prompt,
+                                std::function<void(std::string_view)> on_delta) {
+    // Synchronous compat wrapper over the queue (Phase 11.1).
+    auto p = std::make_shared<std::promise<std::string>>();
+    auto fut = p->get_future();
+    PendingTurn t;
+    t.prompt = prompt;
+    t.on_delta = std::move(on_delta);
+    t.on_done = [p](std::string out, std::string err) {
+        if (!err.empty()) {
+            if (out.empty())
+                p->set_exception(std::make_exception_ptr(
+                    std::runtime_error(err)));
+            else
+                p->set_value(out + "\n[error] " + err);
+        } else {
+            p->set_value(out.empty() ? "(agent produced no output)" : out);
+        }
+    };
+    enqueue(std::move(t));
+    return fut.get();
 }
 
 void AgentHost::shutdown() {
@@ -386,6 +508,12 @@ AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
     return *it->second;
+}
+
+AgentHost* AgentRegistry::find(const std::string& agent_id) {
+    std::lock_guard<std::mutex> lk(m_);
+    auto it = hosts_.find(agent_id);
+    return it != hosts_.end() ? it->second.get() : nullptr;
 }
 
 void AgentRegistry::evict(const std::string& agent_id) {
@@ -422,6 +550,105 @@ void AgentRegistry::shutdown_all() {
 
 // ─── ChatService ────────────────────────────────────────────────────────────
 
+void ChatService::fan_in(const std::string& thread_id,
+                         const RosterAgent& agent,
+                         const std::string& sender_label,
+                         const std::string& body,
+                         int generation) {
+    // First time an agent participates in a thread, prepend a backlog of
+    // recent messages so its daedalus history starts with full context.
+    // After that the queue+history accumulates everything naturally.
+    std::string prompt;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (seen_.insert({agent.id, thread_id}).second) {
+            auto msgs = threads_.list_messages(thread_id);
+            if (msgs.size() > 20) msgs.erase(msgs.begin(), msgs.end() - 20);
+            std::string backlog;
+            std::size_t budget = 12000;
+            for (auto& m : msgs) {
+                if (m.body == body && m.sender_kind != "agent") continue;
+                std::string who;
+                if (m.sender_kind == "user") who = "You";
+                else if (m.sender_kind == "agent") {
+                    auto a = agents_.get_agent(m.sender_id);
+                    who = a ? a->name : "agent";
+                } else who = "system";
+                std::string b = m.body.size() > 1500
+                    ? m.body.substr(0, 1500) + "\u2026" : m.body;
+                std::string entry = who + ": " + b + "\n\n";
+                if (entry.size() > budget) break;
+                budget -= entry.size();
+                backlog += entry;
+            }
+            if (!backlog.empty())
+                prompt = "[Thread history so far]\n" + backlog +
+                         "[End of history]\n\n";
+        }
+    }
+    prompt += "[" + sender_label + "] " + body;
+
+    auto live = std::make_shared<LiveTurn>();
+    live->agent_id = agent.id;
+    live->agent_name = agent.name;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        auto& vec = live_[thread_id];
+        vec.erase(std::remove_if(vec.begin(), vec.end(),
+                                 [](const auto& t) { return t->done; }),
+                  vec.end());
+        if (vec.size() >= kMaxLivePerThread)
+            vec.erase(vec.begin());
+        vec.push_back(live);
+    }
+
+    ++active_turns_;
+    auto& host = registry_.get_or_create(agent);
+    AgentHost::PendingTurn t;
+    t.prompt = std::move(prompt);
+    t.on_delta = [live](std::string_view delta) { live->partial += delta; };
+    t.on_done = [this, thread_id, agent_id = agent.id,
+                 agent_name = agent.name, live, generation](
+                    std::string out, std::string err) mutable {
+        struct Dec { std::atomic<int>& n; ~Dec() { --n; } } dec{active_turns_};
+        if (!err.empty()) {
+            live->error = err;
+            if (!out.empty())
+                out += "\n\n*(turn ended with errors)*";
+        }
+        // Post only substantive user-facing output; context-only turns that
+        // produced nothing (the common agent→agent fan-in terminator) stay
+        // silent instead of flooding the thread with acknowledgements.
+        if (!out.empty() && out != "(agent produced no output)") {
+            try {
+                threads_.add_message(thread_id, "agent", agent_id, out);
+                // Agent→agent fan-in: peers hear the reply, generation-capped
+                // so two agents can't talk to each other forever.
+                if (generation < kMaxFanInGenerations) {
+                    auto thread = threads_.get_thread(thread_id);
+                    if (thread) {
+                        for (const auto& peer_id : thread->agent_ids) {
+                            if (peer_id == agent_id) continue;
+                            auto peer = agents_.get_agent(peer_id);
+                            if (peer)
+                                fan_in(thread_id, *peer, agent_name, out,
+                                       generation + 1);
+                        }
+                    }
+                }
+            } catch (...) { /* thread deleted mid-turn, or shutting down */ }
+        }
+        live->done = true;
+    };
+    try {
+        host.enqueue(std::move(t));
+    } catch (const std::exception& e) {
+        live->error = e.what();
+        live->done = true;
+        --active_turns_;
+    }
+}
+
 std::string ChatService::post_user_message(const std::string& thread_id,
                                            const std::string& body) {
     if (stopping_)
@@ -435,48 +662,28 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;  // participant deleted from roster — skip
-
-        auto live = std::make_shared<LiveTurn>();
-        live->agent_id = agent->id;
-        live->agent_name = agent->name;
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            auto& vec = live_[thread_id];
-            // Prune completed turns so the map can't grow without bound
-            // (Phase 10 fix) — completed replies live in the messages table.
-            vec.erase(std::remove_if(vec.begin(), vec.end(),
-                                     [](const auto& t) { return t->done; }),
-                      vec.end());
-            if (vec.size() >= kMaxLivePerThread)
-                vec.erase(vec.begin());
-            vec.push_back(live);
-        }
-
-        ++active_turns_;
-        std::thread([this, thread_id, agent = *agent, body, live]() mutable {
-            struct Dec { std::atomic<int>& n; ~Dec() { --n; } } dec{active_turns_};
-            try {
-                // Registry hosts are process-immortal (graveyard rule) —
-                // a plain reference is safe for the whole turn.
-                auto& host = registry_.get_or_create(agent);
-                std::string final = host.run_turn(body,
-                    [live](std::string_view delta) {
-                        live->partial += delta;
-                    });
-                if (final.empty()) final = live->partial;
-                threads_.add_message(thread_id, "agent", agent.id, final);
-            } catch (const std::exception& e) {
-                live->error = e.what();
-                try {
-                    threads_.add_message(thread_id, "agent", agent.id,
-                                         std::string{"[turn failed] "} + e.what());
-                } catch (...) { /* shutting down */ }
-            }
-            live->done = true;
-        }).detach();
+        fan_in(thread_id, *agent, "You", body, /*generation=*/0);
     }
 
     return msg_id;
+}
+
+void ChatService::cancel_thread(const std::string& thread_id) {
+    std::vector<std::string> agent_ids;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = live_.find(thread_id);
+        if (it == live_.end()) return;
+        for (auto& t : it->second) {
+            if (!t->done) {
+                t->cancelling = true;
+                agent_ids.push_back(t->agent_id);
+            }
+        }
+    }
+    for (const auto& id : agent_ids)
+        if (auto* host = registry_.find(id))
+            host->cancel();
 }
 
 void ChatService::quiesce() {

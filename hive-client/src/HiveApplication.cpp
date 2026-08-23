@@ -1,5 +1,6 @@
 #include "HiveApplication.h"
 #include "HiveWindow.h"
+#include "UiApi.h"
 
 namespace hive {
 
@@ -11,10 +12,21 @@ Glib::RefPtr<HiveApplication> HiveApplication::create() {
     return Glib::RefPtr<HiveApplication>(new HiveApplication());
 }
 
+HiveApplication::~HiveApplication() = default;
+
 void HiveApplication::on_activate() {
     auto* window = new HiveWindow();
     add_window(*window);
     window->present();
+    // Localhost REST test surface (Phase 11.5) — started after the window
+    // exists so handlers can marshal onto the GTK main loop.
+    ui_api_ = std::make_unique<UiApi>(*window);
+    ui_api_->start();
+}
+
+void HiveApplication::on_shutdown() {
+    if (ui_api_) { ui_api_->stop(); ui_api_.reset(); }
+    Gtk::Application::on_shutdown();
 }
 
 } // namespace hive

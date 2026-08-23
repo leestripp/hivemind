@@ -175,6 +175,16 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     send_error(resp, 400, "unknown agent id: " + id); return;
                 }
             }
+            // DM dedup (Phase 11): reopen the existing 1:1 conversation —
+            // but ONLY when the caller asks for it (roster click). An
+            // explicit "New thread" must always create a fresh one.
+            if (body.value("reuse_dm", false) && agent_ids.size() == 1
+                && body.value("kind", "dm") != "group") {
+                if (auto existing = threads.find_dm(agent_ids[0])) {
+                    send_json(resp, thread_json(*existing), 200);
+                    return;
+                }
+            }
             auto t = threads.create_thread(body.value("title", ""),
                                            body.value("kind", "dm"), agent_ids);
             send_json(resp, thread_json(t), 201);
@@ -199,13 +209,27 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.delete_("/api/threads/:id",
-        [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&threads, &chat](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            chat.cancel_thread(seg[2]);   // stop live turns before deleting
             if (!threads.delete_thread(seg[2])) {
                 send_error(resp, 404, "thread not found"); return;
             }
             send_json(resp, json{{"deleted", true}});
+        });
+
+    // ── POST /api/threads/:id/cancel — stop live turns (Phase 11.3) ──────
+    server.post("/api/threads/:id/cancel",
+        [&threads, &chat](const OmniNet::HTTP::Request& req,
+                          OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api threads :id cancel
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            if (!threads.get_thread(seg[2])) {
+                send_error(resp, 404, "thread not found"); return;
+            }
+            chat.cancel_thread(seg[2]);
+            send_json(resp, json{{"cancelled", true}}, 202);
         });
 
     // ── GET /api/threads/:id/messages?after=<msg_id> ──────────────────────
@@ -262,7 +286,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 turns.push_back({
                     {"agent_id", t.agent_id}, {"agent_name", t.agent_name},
                     {"partial", t.partial}, {"error", t.error},
-                    {"done", t.done},
+                    {"done", t.done}, {"cancelling", t.cancelling},
                 });
             }
             send_json(resp, json{{"busy", chat.busy(seg[2])},

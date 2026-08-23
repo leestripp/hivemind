@@ -92,8 +92,10 @@ nlohmann::json ApiClient::container_status(const std::string& agent_id) {
 nlohmann::json ApiClient::list_threads() { return request("GET", "/api/threads"); }
 
 nlohmann::json ApiClient::create_thread(const std::string& title,
-                                        const std::vector<std::string>& agent_ids) {
-    nlohmann::json body{{"title", title}, {"agent_ids", agent_ids}};
+                                        const std::vector<std::string>& agent_ids,
+                                        bool reuse_dm) {
+    nlohmann::json body{{"title", title}, {"agent_ids", agent_ids},
+                        {"reuse_dm", reuse_dm}};
     return request("POST", "/api/threads", &body);
 }
 
@@ -132,6 +134,15 @@ nlohmann::json ApiClient::models() { return request("GET", "/api/models"); }
 bool ApiClient::healthy() {
     try { return request("GET", "/api/health").value("status", "") == "ok"; }
     catch (...) { return false; }
+}
+
+
+void ApiClient::cancel_thread(const std::string& thread_id) {
+    request("POST", "/api/threads/" + thread_id + "/cancel");
+}
+
+void ApiClient::delete_thread(const std::string& thread_id) {
+    request("DELETE", "/api/threads/" + thread_id);
 }
 
 } // namespace hive

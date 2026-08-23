@@ -34,12 +34,15 @@ public:
     // ── threads / chat ────────────────────────────────────────────────────
     nlohmann::json list_threads();                                   // GET /api/threads
     nlohmann::json create_thread(const std::string& title,
-                                 const std::vector<std::string>& agent_ids);
+                                 const std::vector<std::string>& agent_ids,
+                                 bool reuse_dm = false);
     nlohmann::json list_messages(const std::string& thread_id,
                                  const std::string& after_id = "");
     nlohmann::json post_message(const std::string& thread_id,
                                 const std::string& body);
     nlohmann::json activity(const std::string& thread_id);           // GET …/activity
+    void cancel_thread(const std::string& thread_id);      // POST …/cancel
+    void delete_thread(const std::string& thread_id);      // DELETE …/:id
 
     // ── approvals ─────────────────────────────────────────────────────────
     nlohmann::json list_approvals(const std::string& status = "pending");
