@@ -32,6 +32,7 @@
 #include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/AgentRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/AgentHost.h"
@@ -104,6 +105,7 @@ int main(int argc, char* argv[]) {
     register_ws_run_routes(server);
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service);
+    register_container_routes(server, agent_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);

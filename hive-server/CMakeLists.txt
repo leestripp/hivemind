@@ -16,6 +16,8 @@ set(CORE_SOURCES
     src/AgentStore.cpp
     src/ThreadStore.cpp
     src/AgentHost.cpp
+    src/ContainerManager.cpp
+    src/ContainerTools.cpp
 )
 
 set(EXECUTOR_SOURCES
@@ -42,6 +44,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/AgentRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
+    include/hivemind/routes/ContainerRoutes.cpp
 )
 
 # Everything except main.cpp — shared by the server binary and the test suite.

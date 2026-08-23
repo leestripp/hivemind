@@ -1,0 +1,46 @@
+# Containerfile.hive-agent — base image for HiveMind agent sandboxes.
+# Built per machine on first use:  podman build -t localhost/hive-agent:latest \
+#     -f hive-server/data/Containerfile.hive-agent hive-server/data
+#
+# The agent runs as named user `hive` with passwordless sudo so it can
+# install CLI tools mid-task (apt/pip/etc). Work happens in /workspace
+# (the shared "company" volume); /home/hive is a per-agent bind mount.
+
+ARG BASE=docker.io/library/ubuntu:26.04
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sudo \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        python3 \
+        python3-pip \
+        python3-venv \
+        build-essential \
+        pkg-config \
+        jq \
+        unzip \
+        less \
+        vim-tiny \
+    && rm -rf /var/lib/apt/lists/*
+
+# Named agent user with passwordless sudo.
+RUN useradd -m -s /bin/bash hive \
+    && echo "hive ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/hive \
+    && chmod 0440 /etc/sudoers.d/hive
+
+# Company workspace mount point (shared volume is mounted here at create).
+RUN mkdir -p /workspace && chown hive:hive /workspace
+
+# TODO(Phase 3): bake the icarus binary in (COPY icarus /usr/local/bin/)
+# once the run_icarus delegation tool lands — or bind-mount a host build.
+
+USER hive
+WORKDIR /workspace
+
+# Sandbox idles until hive-server execs into it.
+CMD ["sleep", "infinity"]

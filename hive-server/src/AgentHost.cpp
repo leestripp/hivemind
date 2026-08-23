@@ -4,6 +4,8 @@
 // =============================================================================
 #include "hivemind/AgentHost.h"
 #include "hivemind/AgentSerialization.h"
+#include "hivemind/ContainerManager.h"
+#include "hivemind/ContainerTools.h"
 
 #include "daedalus/settings.h"
 #include "daedalus/default_paths.h"
@@ -191,18 +193,59 @@ AgentHost::~AgentHost() {
 void AgentHost::ensure_agent() {
     if (agent_) return;  // caller holds turn_mtx_
 
+    // ── Container mode (Plan.md Phase 2) ─────────────────────────────
+    // workspace_mode "host" is the explicit escape hatch (dev boxes
+    // without podman); every other mode ("shared" today, dept volumes
+    // later) means the agent's command execution happens in its podman
+    // container as user `hive` with passwordless sudo.
+    containerized_ = info_.workspace_mode != "host";
+    std::string container_err;
+    if (containerized_) {
+        try {
+            container_manager().ensure_running(info_.id);
+        } catch (const std::exception& e) {
+            // Degrade gracefully: chat still works, command execution
+            // returns the runtime error to the agent at call time.
+            container_err = e.what();
+        }
+    }
+
     daedalus::AgentConfig cfg;
     cfg.agent_name  = sanitize_agent_name(info_.name);
     cfg.project_root = dir_;
     cfg.model_name  = info_.model;   // "" = SettingsStore default
     cfg.auto_approve = true;         // no approval UI until Phase 3
 
+    std::string prompt_addendum;
+    if (containerized_) {
+        // The built-in host-side execute_bash is replaced by the
+        // container-backed tool registered below (same name).
+        cfg.tools_disabled.insert("execute_bash");
+        prompt_addendum =
+            "\n\nEnvironment: you work inside your own Linux container "
+            "(Ubuntu, user 'hive' with passwordless sudo — install CLI tools "
+            "with apt/pip as needed). /workspace is the shared company "
+            "workspace visible to your teammates; /home/hive is private to "
+            "you. Use the container_exec tool for ALL command execution — it "
+            "runs inside your container (there is no host shell).";
+        if (!container_err.empty())
+            prompt_addendum +=
+                "\n\nWARNING: the container runtime is currently unavailable ("
+                + container_err +
+                "). container_exec will return errors until it is fixed — "
+                "tell the user if you need to run commands.";
+    }
+
     if (!info_.role.empty()) {
         cfg.system_prompt =
             "You are " + info_.name + ", a persistent AI teammate in the "
             "HiveMind system. The user messages you like a colleague and you "
             "finish work end to end, reporting back in the conversation.\n\n"
-            "Your role: " + info_.role;
+            "Your role: " + info_.role + prompt_addendum;
+    } else if (!prompt_addendum.empty()) {
+        cfg.system_prompt =
+            "You are " + info_.name + ", a persistent AI teammate in the "
+            "HiveMind system." + prompt_addendum;
     }
 
     // Fail fast on unknown model names (same guard as AgentExecutor).
@@ -215,11 +258,17 @@ void AgentHost::ensure_agent() {
                 info_.name + "'");
     }
 
+    bool containerized = containerized_;
     agent_ = std::make_unique<daedalus::Agent>(std::move(cfg), proxy_sink_);
     agent_->initialize();
     // So a SIGSEGV/SIGABRT still writes messages.json.crash (daedalus crash
     // resilience) — the normal save path only runs on shutdown().
     agent_->install_crash_handlers();
+
+    if (containerized) {
+        // Container-backed execute_bash (built-in disabled via config above).
+        agent_->register_tool(std::make_unique<ContainerBashTool>(info_.id));
+    }
 }
 
 std::string AgentHost::run_turn(const std::string& prompt,

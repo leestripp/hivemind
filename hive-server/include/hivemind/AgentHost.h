@@ -59,6 +59,7 @@ private:
 
     RosterAgent info_;
     std::filesystem::path dir_;
+    bool containerized_ = false;            // workspace_mode != "host"
     std::mutex turn_mtx_;                   // one turn at a time per agent
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
     std::unique_ptr<daedalus::Agent> agent_;
