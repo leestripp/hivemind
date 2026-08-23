@@ -306,3 +306,10 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .star { color: #6c7280; }
 .star-on { color: #ebcb8b; }
 .badge-ok { color: #a3be8c; border-color: #3a4a35; background: rgba(163,190,140,.10); }
+
+/* ── tasks page ────────────────────────────────────────────────────── */
+.day-picker { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.day-picker label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.modal-panel textarea { width: 100%; box-sizing: border-box; background: #2e3440;
+  border: 1px solid #4c566a; border-radius: 6px; color: inherit; padding: 6px 8px;
+  font: inherit; resize: vertical; }
