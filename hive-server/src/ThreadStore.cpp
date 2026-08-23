@@ -1,6 +1,7 @@
 // =============================================================================
 // src/ThreadStore.cpp — chat thread persistence (HiveMind 2.0, Plan.md Phase 1)
 // =============================================================================
+#include "hivemind/DbUtil.h"
 #include "hivemind/ThreadStore.h"
 
 #include <array>
@@ -11,51 +12,26 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-std::string uuid_v4() {
-    std::array<unsigned char, 16> buf{};
-    FILE* f = std::fopen("/dev/urandom", "rb");
-    if (f) { std::fread(buf.data(), 1, 16, f); std::fclose(f); }
-    char out[37];
-    std::snprintf(out, sizeof(out),
-        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        buf[0],buf[1],buf[2],buf[3], buf[4],buf[5],
-        (buf[6] & 0x0f) | 0x40, buf[7],
-        (buf[8] & 0x3f) | 0x80, buf[9], buf[10],buf[11],
-        buf[12],buf[13],buf[14],buf[15]);
-    return out;
+using hivemind::db::uuid_v4;
+inline std::string iso_now() { return hivemind::db::iso_now_us(); }
+using hivemind::db::bind_text;
+using hivemind::db::col_text;
+inline void exec_sql(sqlite3* db, const char* sql) {
+    hivemind::db::exec_sql(db, sql, "ThreadStore");
 }
+
+
+
 
 // ISO timestamp with a monotonic microsecond suffix so messages posted in
 // the same second still sort in insertion order.
-std::string iso_now() {
-    using namespace std::chrono;
-    auto now = system_clock::now();
-    auto t = system_clock::to_time_t(now);
-    auto us = duration_cast<microseconds>(now.time_since_epoch()).count() % 1000000;
-    char buf[80];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&t));
-    std::snprintf(buf + 19, sizeof(buf) - 19, ".%06lldZ", static_cast<long long>(us));
-    return buf;
-}
 
-inline void bind_text(sqlite3_stmt* st, int idx, const std::string& v) {
-    sqlite3_bind_text(st, idx, v.c_str(), -1, SQLITE_TRANSIENT);
-}
 
-inline void exec_sql(sqlite3* db, const char* sql) {
-    char* err = nullptr;
-    if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
-        std::string msg = err ? err : "unknown";
-        sqlite3_free(err);
-        throw std::runtime_error("ThreadStore exec failed: " + msg);
-    }
-}
 
-const char* col_text(sqlite3_stmt* st, int i) {
-    const auto* p = sqlite3_column_text(st, i);
-    return p ? reinterpret_cast<const char*>(p) : "";
-}
+
+
+
+
 
 ThreadMessage row_to_message(sqlite3_stmt* st) {
     ThreadMessage m;

@@ -94,12 +94,12 @@ json MessageAgentTool::execute(const json& args, daedalus::HostToolContext&) {
     // Run the teammate's turn inline. Nested turns are same-thread, so the
     // recursive agent_exec_mutex admits them; cross-thread serialization is
     // unchanged. Depth guard above prevents delegation loops.
-    auto& host = registry_.get_or_create(*agent);
+    auto host = registry_.get_or_create(*agent);  // shared_ptr: survives evict
     std::string prompt = "Message from your teammate " +
         ([&]{ auto s = agents_.get_agent(sender_id_); return s ? s->name : sender_id_; }()) +
         ": " + message;
     try {
-        std::string reply = host.run_turn(prompt, nullptr);
+        std::string reply = host->run_turn(prompt, nullptr);
         if (reply.size() > 4000) reply = reply.substr(0, 3997) + "...";
         return ok({{"from", agent->name}, {"reply", reply}});
     } catch (const std::exception& e) {

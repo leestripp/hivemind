@@ -274,6 +274,9 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "\nShutting down...\n";
+    // Stop chat first: no new turns, and in-flight turn threads finish
+    // their final message writes before the stores go away (Phase 10).
+    chat_service.quiesce();
     // Persist roster-agent conversation history (daedalus only saves on
     // Agent::shutdown — its destructor doesn't).
     agent_registry.shutdown_all();

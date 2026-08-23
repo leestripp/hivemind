@@ -32,6 +32,10 @@
 class ProxySink;  // forwards AgentSink callbacks to a per-turn target
 class AgentRegistry;
 
+/// Sanitize a roster display name into a valid daedalus agent_name
+/// (also determines the on-disk `.daedalus/daedalus-<name>` namespace).
+std::string sanitize_agent_name(std::string name);
+
 class AgentHost {
 public:
     AgentHost(RosterAgent info, std::filesystem::path dir,
@@ -79,7 +83,9 @@ public:
         : agents_(agents), approvals_(approvals) {}
 
     /// Get the live host for a roster agent, constructing it on first use.
-    AgentHost& get_or_create(const RosterAgent& agent);
+    /// shared_ptr (Phase 10 fix): a caller mid-turn keeps the host alive
+    /// even if PATCH/DELETE evicts it from the registry meanwhile.
+    std::shared_ptr<AgentHost> get_or_create(const RosterAgent& agent);
 
     /// Drop the live host (e.g. after the roster row is deleted or renamed).
     void evict(const std::string& agent_id);
@@ -92,7 +98,7 @@ private:
     AgentStore& agents_;
     ApprovalStore& approvals_;
     std::mutex m_;
-    std::unordered_map<std::string, std::unique_ptr<AgentHost>> hosts_;
+    std::unordered_map<std::string, std::shared_ptr<AgentHost>> hosts_;
 };
 
 /// ChatService — glues threads to agents: posts user messages, runs agent
@@ -122,6 +128,11 @@ public:
     /// True while any turn for this thread is still running.
     bool busy(const std::string& thread_id);
 
+    /// Shutdown support (Phase 10): stop accepting new messages and wait
+    /// until every in-flight turn thread has fully finished (including its
+    /// final message write). Call before the stores go out of scope.
+    void quiesce();
+
 private:
     AgentStore& agents_;
     ThreadStore& threads_;
@@ -129,4 +140,7 @@ private:
 
     std::mutex m_;
     std::unordered_map<std::string, std::vector<std::shared_ptr<LiveTurn>>> live_;
+    std::atomic<int> active_turns_{0};
+    std::atomic<bool> stopping_{false};
+    static constexpr std::size_t kMaxLivePerThread = 32;
 };

@@ -67,7 +67,6 @@ private:
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);
 
     static constexpr const char* kImage = "localhost/hive-agent:latest";
-    static constexpr const char* kWorkspaceVolume = "hive-workspace";
 };
 
 /// Process-wide shared instance.

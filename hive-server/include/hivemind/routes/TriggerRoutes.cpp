@@ -6,6 +6,7 @@
 // the REST /run route. Runner is untouched — triggers just inject inputs.
 // =============================================================================
 
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/TriggerRoutes.h"
 #include "hivemind/routes/RunRoutes.h"   // start_graph_run
 #include "hivemind/GraphStore.h"
@@ -22,18 +23,12 @@
 using json = nlohmann::json;
 
 namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
 
-std::vector<std::string> path_segments(std::string_view path) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < path.size()) {
-        size_t j = path.find('/', i);
-        if (j == std::string_view::npos) j = path.size();
-        if (j > i) out.emplace_back(path.substr(i, j - i));
-        i = j + 1;
-    }
-    return out;
-}
+
+
 
 json trigger_to_json(const Trigger& t, const std::string& base_url_hint = "") {
     json j{
@@ -62,12 +57,7 @@ json trigger_to_json(const Trigger& t, const std::string& base_url_hint = "") {
     return j;
 }
 
-void send_json(OmniNet::HTTP::Response& resp, json body,
-               OmniNet::HTTP::Response r = OmniNet::HTTP::Response::ok()) {
-    r.setContentType("application/json");
-    r.setBody(body.dump());
-    resp = r;
-}
+
 
 } // namespace
 
@@ -124,16 +114,13 @@ void register_trigger_routes(OmniNet::HTTP::Server& server,
                 // Read it back so the response has the generated secret.
                 for (auto& t : store.list_triggers(gid)) {
                     if (t.id == id) {
-                        send_json(resp, trigger_to_json(t),
-                                  OmniNet::HTTP::Response::created(id));
+                        send_json(resp, trigger_to_json(t), 201);
                         return;
                     }
                 }
-                send_json(resp, json{{"id", id}},
-                          OmniNet::HTTP::Response::created(id));
+                send_json(resp, json{{"id", id}}, 201);
             } catch (const std::exception& e) {
-                send_json(resp, json{{"error", e.what()}},
-                          OmniNet::HTTP::Response::badRequest(e.what()));
+                send_json(resp, json{{"error", e.what()}}, 400);
             }
         });
 
@@ -220,8 +207,7 @@ void register_trigger_routes(OmniNet::HTTP::Server& server,
                 store.delete_trigger(seg[2]);
                 send_json(resp, json{{"deleted", seg[2]}});
             } catch (const std::exception& e) {
-                send_json(resp, json{{"error", e.what()}},
-                          OmniNet::HTTP::Response::badRequest(e.what()));
+                send_json(resp, json{{"error", e.what()}}, 400);
             }
         });
 
@@ -287,10 +273,9 @@ void register_trigger_routes(OmniNet::HTTP::Server& server,
                     {"trigger_id", trig->id},
                     {"status",     "running"},
                     {"output_url", "/api/runs/" + run_id + "/output"},
-                }, OmniNet::HTTP::Response::created(run_id));
+                }, 201);
             } catch (const std::exception& e) {
-                send_json(resp, json{{"error", e.what()}},
-                          OmniNet::HTTP::Response::badRequest(e.what()));
+                send_json(resp, json{{"error", e.what()}}, 400);
             }
         });
 }

@@ -1,3 +1,4 @@
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/GraphStore.h"
 #include "hivemind/Graph.h"
 #include <OmniNet.h>
@@ -6,23 +7,14 @@
 #include <vector>
 
 using json = nlohmann::json;
+using hivemind::routes::path_segments;
 
 
 // OmniNet v0.9.7 stores path params in an unordered_map keyed "0","1",…;
 // indexed pathParam(i) iterates that map in hash order, so multi-param
 // routes get their captures back in an unreliable order (observed: swapped).
 // Extract positional segments from the raw path instead — deterministic.
-static std::vector<std::string> path_segments(std::string_view path) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < path.size()) {
-        size_t j = path.find('/', i);
-        if (j == std::string_view::npos) j = path.size();
-        if (j > i) out.emplace_back(path.substr(i, j - i));
-        i = j + 1;
-    }
-    return out;
-}
+
 
 static std::optional<json> parse_body(std::string_view sv) {
     try { return json::parse(sv); }

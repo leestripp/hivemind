@@ -5,7 +5,9 @@
 // positional segments from req.path() instead (see project memory).
 // -----------------------------------------------------------------------------
 
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/AgentHost.h"
 
 #include <nlohmann/json.hpp>
 
@@ -15,28 +17,16 @@
 using json = nlohmann::json;
 
 namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
 
-std::vector<std::string> path_segments(std::string_view path) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : path) {
-        if (c == '/') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
 
-void send_json(OmniNet::HTTP::Response& resp, const json& j, int status = 200) {
-    resp = OmniNet::HTTP::Response::ok();
-    resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(status));
-    resp.setContentType("application/json");
-    resp.setBody(j.dump());
-}
 
-void send_error(OmniNet::HTTP::Response& resp, int status, const std::string& msg) {
-    send_json(resp, json{{"error", msg}}, status);
-}
+
+
+
+
 
 json agent_json(const RosterAgent& a) {
     return {
@@ -130,6 +120,21 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     body.value("require_approval", existing->require_approval));
                 // Name/model changes must not leak into a live host.
                 registry.evict(a.id);
+                // Phase 10 fix: renaming an agent must carry its daedalus
+                // namespace (messages/memory) along — the dir is keyed by
+                // the sanitized agent name.
+                if (a.name != existing->name) {
+                    try {
+                        namespace fs = std::filesystem;
+                        fs::path base = AgentStore::agents_base_dir() / a.id
+                                      / ".daedalus";
+                        fs::path oldns = base / ("daedalus-" + sanitize_agent_name(existing->name));
+                        fs::path newns = base / ("daedalus-" + sanitize_agent_name(a.name));
+                        std::error_code ec;
+                        if (fs::exists(oldns, ec) && !fs::exists(newns, ec))
+                            fs::rename(oldns, newns, ec);
+                    } catch (...) { /* best effort — old dir remains */ }
+                }
                 send_json(resp, agent_json(a));
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());

@@ -1,4 +1,5 @@
 // include/hivemind/routes/ConfigRoutes.cpp — server config REST API.
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/ServerConfig.h"
 
@@ -9,17 +10,14 @@
 using json = nlohmann::json;
 
 namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
 
-void send_json(OmniNet::HTTP::Response& resp, const json& j, int status = 200) {
-    resp = OmniNet::HTTP::Response::ok();
-    resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(status));
-    resp.setContentType("application/json");
-    resp.setBody(j.dump());
-}
 
-void send_error(OmniNet::HTTP::Response& resp, int status, const std::string& msg) {
-    send_json(resp, json{{"error", msg}}, status);
-}
+
+
+
 
 } // namespace
 

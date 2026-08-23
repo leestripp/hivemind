@@ -1,6 +1,7 @@
 // =============================================================================
 // src/AgentStore.cpp — roster persistence (HiveMind 2.0, Plan.md Phase 1)
 // =============================================================================
+#include "hivemind/DbUtil.h"
 #include "hivemind/AgentStore.h"
 
 #include <array>
@@ -12,41 +13,22 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-std::string uuid_v4() {
-    std::array<unsigned char, 16> buf{};
-    FILE* f = std::fopen("/dev/urandom", "rb");
-    if (f) { std::fread(buf.data(), 1, 16, f); std::fclose(f); }
-    char out[37];
-    std::snprintf(out, sizeof(out),
-        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        buf[0],buf[1],buf[2],buf[3], buf[4],buf[5],
-        (buf[6] & 0x0f) | 0x40, buf[7],
-        (buf[8] & 0x3f) | 0x80, buf[9], buf[10],buf[11],
-        buf[12],buf[13],buf[14],buf[15]);
-    return out;
-}
-
-std::string iso_now() {
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    char buf[64];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
-    return buf;
-}
-
-inline void bind_text(sqlite3_stmt* st, int idx, const std::string& v) {
-    sqlite3_bind_text(st, idx, v.c_str(), -1, SQLITE_TRANSIENT);
-}
-
+using hivemind::db::uuid_v4;
+using hivemind::db::iso_now;
+using hivemind::db::bind_text;
+using hivemind::db::col_text;
 inline void exec_sql(sqlite3* db, const char* sql) {
-    char* err = nullptr;
-    if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
-        std::string msg = err ? err : "unknown";
-        sqlite3_free(err);
-        throw std::runtime_error("AgentStore exec failed: " + msg);
-    }
+    hivemind::db::exec_sql(db, sql, "AgentStore");
 }
+
+
+
+
+
+
+
+
+
 
 RosterAgent row_to_agent(sqlite3_stmt* st) {
     RosterAgent a;

@@ -55,11 +55,7 @@ inline bool exec_sql(sqlite3* db, const char* sql) {
         throw std::runtime_error("exec failed: " + msg);
     }
 
-    // Schema migration (idempotent): schedule-trigger columns added 2026-08-08.
-    sqlite3_exec(db, "ALTER TABLE triggers ADD COLUMN config_json TEXT NOT NULL DEFAULT ''",
-                 nullptr, nullptr, nullptr);
-    sqlite3_exec(db, "ALTER TABLE triggers ADD COLUMN next_fire_at TEXT NOT NULL DEFAULT ''",
-                 nullptr, nullptr, nullptr);
+    return true;
     return true;
 }
 
@@ -94,6 +90,10 @@ sqlite3* GraphStore::open_conn() {
 
 void GraphStore::ensure_schema() {
     auto* db = open_conn();
+    // Schema migrations (idempotent): schedule-trigger columns.
+    sqlite3_exec(db, "ALTER TABLE triggers ADD COLUMN config_json TEXT NOT NULL DEFAULT ''", nullptr, nullptr, nullptr);
+    sqlite3_exec(db, "ALTER TABLE triggers ADD COLUMN next_fire_at TEXT NOT NULL DEFAULT ''", nullptr, nullptr, nullptr);
+
     const char* sql = R"(
         CREATE TABLE IF NOT EXISTS graphs (
             id          TEXT PRIMARY KEY,

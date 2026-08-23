@@ -3,6 +3,7 @@
 // Routines (scheduled agent prompts) + agent skills (HiveMind 2.0, Phase 5).
 // -----------------------------------------------------------------------------
 
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/Schedule.h"
 
@@ -17,28 +18,16 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
 
-std::vector<std::string> path_segments(std::string_view path) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : path) {
-        if (c == '/') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
 
-void send_json(OmniNet::HTTP::Response& resp, const json& j, int status = 200) {
-    resp = OmniNet::HTTP::Response::ok();
-    resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(status));
-    resp.setContentType("application/json");
-    resp.setBody(j.dump());
-}
 
-void send_error(OmniNet::HTTP::Response& resp, int status, const std::string& msg) {
-    send_json(resp, json{{"error", msg}}, status);
-}
+
+
+
+
 
 json routine_json(const Routine& r) {
     json sched;

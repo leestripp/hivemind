@@ -11,6 +11,7 @@
 #include "daedalus/settings.h"
 #include "daedalus/default_paths.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <thread>
@@ -116,6 +117,8 @@ private:
 };
 
 
+} // namespace
+
 // Sanitize a roster display name into a valid daedalus agent_name
 // (^[A-Za-z0-9_.-]+$, 1..64 chars, no leading '.'/'-').
 std::string sanitize_agent_name(std::string name) {
@@ -131,8 +134,6 @@ std::string sanitize_agent_name(std::string name) {
         throw std::invalid_argument("name is not usable as an agent name");
     return name;
 }
-
-} // namespace
 
 // ─── ProxySink ─────────────────────────────────────────────────────────────
 // Stable sink handed to daedalus::Agent at construction; forwards every
@@ -199,9 +200,16 @@ AgentHost::AgentHost(RosterAgent info, fs::path dir,
 
 AgentHost::~AgentHost() {
     // daedalus 0.9.6: destruct under the global serialization mutex too
-    // (shared global state — see AgentSerialization.h).
+    // (shared global state — see AgentSerialization.h; recursive, so a
+    // turn thread releasing the last ref mid-hold is safe).
     std::lock_guard<std::recursive_mutex> lk{agent_exec_mutex()};
-    agent_.reset();
+    // Phase 10 fix: ~Agent does NOT save history — only shutdown() does.
+    // Without this, evicting an idle-but-unsaved host (PATCH/DELETE)
+    // silently discarded its conversation.
+    if (agent_) {
+        try { agent_->shutdown(); } catch (...) {}
+        agent_.reset();
+    }
 }
 
 void AgentHost::ensure_agent() {
@@ -328,12 +336,22 @@ std::string AgentHost::run_turn(const std::string& prompt,
     });
     proxy_sink_->set_target(sink);
 
-    // Depth guard for agent→agent nested turns (message_agent tool).
+    // RAII guard (Phase 10 fix): a throwing turn must still restore the
+    // delegation depth and detach the per-turn sink — otherwise delegation
+    // is permanently broken on this thread and the next turn leaks into the
+    // old sink.
+    struct TurnGuard {
+        ProxySink* proxy;
+        ~TurnGuard() {
+            --MessageAgentTool::depth_;
+            proxy->set_target(nullptr);
+        }
+    };
     ++MessageAgentTool::depth_;
+    TurnGuard guard{proxy_sink_.get()};
+
     agent_->submit_user_message(prompt.empty() ? "(no input)" : prompt);
     agent_->run_one_turn();
-    --MessageAgentTool::depth_;
-    proxy_sink_->set_target(nullptr);
 
     std::string out = sink->output();
     if (sink->errored())
@@ -353,16 +371,16 @@ void AgentHost::shutdown() {
 
 // ─── AgentRegistry ──────────────────────────────────────────────────────────
 
-AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
+std::shared_ptr<AgentHost> AgentRegistry::get_or_create(const RosterAgent& agent) {
     std::lock_guard<std::mutex> lk(m_);
     auto it = hosts_.find(agent.id);
     if (it == hosts_.end()) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
-        auto host = std::make_unique<AgentHost>(agent, dir, agents_,
+        auto host = std::make_shared<AgentHost>(agent, dir, agents_,
                                                 approvals_, *this);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
-    return *it->second;
+    return it->second;
 }
 
 void AgentRegistry::evict(const std::string& agent_id) {
@@ -381,6 +399,8 @@ void AgentRegistry::shutdown_all() {
 
 std::string ChatService::post_user_message(const std::string& thread_id,
                                            const std::string& body) {
+    if (stopping_)
+        throw std::invalid_argument("server is shutting down");
     auto thread = threads_.get_thread(thread_id);
     if (!thread)
         throw std::invalid_argument("thread not found: " + thread_id);
@@ -396,13 +416,24 @@ std::string ChatService::post_user_message(const std::string& thread_id,
         live->agent_name = agent->name;
         {
             std::lock_guard<std::mutex> lk(m_);
-            live_[thread_id].push_back(live);
+            auto& vec = live_[thread_id];
+            // Prune completed turns so the map can't grow without bound
+            // (Phase 10 fix) — completed replies live in the messages table.
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                                     [](const auto& t) { return t->done; }),
+                      vec.end());
+            if (vec.size() >= kMaxLivePerThread)
+                vec.erase(vec.begin());
+            vec.push_back(live);
         }
 
+        ++active_turns_;
         std::thread([this, thread_id, agent = *agent, body, live]() mutable {
+            struct Dec { std::atomic<int>& n; ~Dec() { --n; } } dec{active_turns_};
             try {
-                auto& host = registry_.get_or_create(agent);
-                std::string final = host.run_turn(body,
+                // shared_ptr: the host survives an evict() mid-turn.
+                auto host = registry_.get_or_create(agent);
+                std::string final = host->run_turn(body,
                     [live](std::string_view delta) {
                         live->partial += delta;
                     });
@@ -410,14 +441,22 @@ std::string ChatService::post_user_message(const std::string& thread_id,
                 threads_.add_message(thread_id, "agent", agent.id, final);
             } catch (const std::exception& e) {
                 live->error = e.what();
-                threads_.add_message(thread_id, "agent", agent.id,
-                                     std::string{"[turn failed] "} + e.what());
+                try {
+                    threads_.add_message(thread_id, "agent", agent.id,
+                                         std::string{"[turn failed] "} + e.what());
+                } catch (...) { /* shutting down */ }
             }
             live->done = true;
         }).detach();
     }
 
     return msg_id;
+}
+
+void ChatService::quiesce() {
+    stopping_ = true;
+    while (active_turns_.load() > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 std::vector<ChatService::LiveTurn> ChatService::activity(const std::string& thread_id) {

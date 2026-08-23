@@ -4,6 +4,7 @@
 // Multi-param path segments parsed manually (OmniNet pathParam caveat).
 // -----------------------------------------------------------------------------
 
+#include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/ContainerManager.h"
 
@@ -15,28 +16,16 @@
 using json = nlohmann::json;
 
 namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
 
-std::vector<std::string> path_segments(std::string_view path) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : path) {
-        if (c == '/') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
 
-void send_json(OmniNet::HTTP::Response& resp, const json& j, int status = 200) {
-    resp = OmniNet::HTTP::Response::ok();
-    resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(status));
-    resp.setContentType("application/json");
-    resp.setBody(j.dump());
-}
 
-void send_error(OmniNet::HTTP::Response& resp, int status, const std::string& msg) {
-    send_json(resp, json{{"error", msg}}, status);
-}
+
+
+
+
 
 } // namespace
 
