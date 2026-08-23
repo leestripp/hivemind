@@ -34,6 +34,8 @@
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/routes/ApprovalRoutes.h"
+#include "hivemind/routes/RoutineRoutes.h"
+#include "hivemind/RoutineStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/AgentHost.h"
@@ -84,6 +86,7 @@ int main(int argc, char* argv[]) {
     AgentStore agent_store;
     ThreadStore thread_store;
     ApprovalStore approval_store;
+    RoutineStore routine_store;
     AgentRegistry agent_registry{agent_store, approval_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
 
@@ -110,6 +113,8 @@ int main(int argc, char* argv[]) {
                            agent_registry, chat_service);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store);
+    register_routine_routes(server, routine_store, agent_store,
+                            thread_store, chat_service);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);
@@ -134,7 +139,8 @@ int main(int argc, char* argv[]) {
     // (server-local time), then recompute their next fire. Once-triggers
     // disable themselves after firing. The actual run goes through the
     // same start_graph_run() path as the REST Run button and webhooks.
-    std::jthread scheduler{[&store, &registry](std::stop_token st) {
+    std::jthread scheduler{[&store, &registry, &routine_store,
+                            &chat_service](std::stop_token st) {
         while (!st.stop_requested()) {
             for (int i = 0; i < 30 && !st.stop_requested(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -180,6 +186,34 @@ int main(int argc, char* argv[]) {
                 }
             } catch (const std::exception& e) {
                 std::cerr << "[scheduler] tick failed: " << e.what() << "\n";
+            }
+
+            // ── Agent routines (Phase 5): fire due routine prompts into
+            // their threads. Per-routine guard mirrors the trigger policy.
+            try {
+                const std::string now = hm::now_iso_local();
+                for (auto& r : routine_store.list_due(now)) {
+                    try {
+                        chat_service.post_user_message(r.thread_id, r.prompt);
+                        json sched = json::parse(r.schedule_json, nullptr, false);
+                        const bool once = sched.is_object()
+                            && sched.value("type", "") == "once";
+                        auto next = once ? std::nullopt
+                            : hm::compute_next_fire(sched, now, r.created_at);
+                        routine_store.mark_fired(r.id, now,
+                                                 next.value_or(""),
+                                                 once || !next);
+                        std::cout << "[scheduler] fired routine " << r.id
+                                  << " (" << r.name << ")\n";
+                    } catch (const std::exception& e) {
+                        std::cerr << "[scheduler] routine " << r.id
+                                  << " failed, disabling: " << e.what() << "\n";
+                        try { routine_store.mark_fired(r.id, now, "", true); }
+                        catch (...) {}
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[scheduler] routine tick failed: " << e.what() << "\n";
             }
         }
     }};
