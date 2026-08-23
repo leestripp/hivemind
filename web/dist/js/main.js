@@ -2,7 +2,7 @@
 import { $ } from './util.js';
 import { initNodes } from './pages/nodes.js';
 import { enterTriggers } from './pages/triggers.js';
-import { enterSettings } from './pages/settings.js';
+import { enterSettings, initSettings } from './pages/settings.js';
 import { enterKeys, initKeys } from './pages/keys.js';
 
 const PAGES = ['nodes', 'triggers', 'settings', 'keys'];   // sidebar order
@@ -27,4 +27,5 @@ document.querySelectorAll('.ab-item').forEach(b =>
 // then land on the page named in the hash — default: Nodes.
 initNodes();
 initKeys();
+initSettings();
 showPage((location.hash || '').replace('#/', '') || 'nodes');

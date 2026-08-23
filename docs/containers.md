@@ -26,9 +26,9 @@ podman build -t localhost/hive-agent:latest \
 
 ## What an agent gets
 
-| Inside the container | Source |
+| Inside the container | Host source |
 |---|---|
-| `/workspace` | **Shared** named volume `hive-workspace` — every agent sees it ("the company") |
+| `/workspace` | **Shared company folder** — the `workspace_root` setting, bind-mounted into every agent container. Default `~/.local/share/hivemind/workspace`; set your own (e.g. `~/projects`) in the web UI **Settings → Company workspace** or `PUT /api/config` (admin key). Applies to containers created after the change. |
 | `/home/hive` | **Private** per-agent bind mount from `~/.local/share/hivemind/agents/<id>/home` |
 | user `hive` + `sudo` (no password) | base image |
 | git, curl, python3+pip, build-essential, jq, … | base image |

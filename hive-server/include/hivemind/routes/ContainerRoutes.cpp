@@ -54,6 +54,7 @@ void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents
             send_json(resp, json{
                 {"exists", st.exists}, {"running", st.running},
                 {"container", st.container}, {"image", st.image},
+                {"workspace", st.workspace},
                 {"podman_available", ContainerManager::podman_available()},
             });
         });

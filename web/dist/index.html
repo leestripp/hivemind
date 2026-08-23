@@ -197,6 +197,22 @@
     <div class="page-body">
       <h2>⚙ Settings</h2>
       <section class="settings-section"><h3>Server</h3><div id="set-server" class="kv"></div></section>
+      <section class="settings-section">
+        <h3>Company workspace</h3>
+        <p class="muted">Host folder bind-mounted at <code>/workspace</code> in every agent
+        container — this is how teammates share files. Applies to containers created
+        after the change (remove old containers to remount).</p>
+        <div class="trig-form-row">
+          <label>Host folder</label>
+          <input type="text" id="set-workspace" class="btn" style="min-width:320px"
+                 placeholder="~/projects" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="trig-form-row">
+          <label></label>
+          <button class="btn primary" id="set-workspace-save">Save</button>
+        </div>
+        <div class="insp-help" id="set-workspace-msg"></div>
+      </section>
       <section class="settings-section"><h3>Models (daedalus SettingsStore)</h3><div id="set-models" class="kv"></div></section>
       <section class="settings-section"><h3>Agent engine</h3><div id="set-agent" class="kv"></div></section>
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>

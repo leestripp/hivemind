@@ -29,6 +29,7 @@ public:
         bool running = false;
         std::string container;   // hive-<agent_id>
         std::string image;
+        std::string workspace;   // host folder mounted at /workspace
     };
 
     /// True if a podman binary is on PATH (does not prove it can run

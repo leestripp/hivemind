@@ -137,9 +137,12 @@ podman).
 - `ContainerManager` wraps the **podman CLI** (no libpod). Containers are
   `hive-<agent_id>`, image `localhost/hive-agent:latest`, auto-built from
   `hive-server/data/Containerfile.hive-agent` on first use.
-- **Company workspace model:** `/workspace` is a shared named volume
-  (`hive-workspace`) every agent sees; `/home/hive` is a per-agent bind
-  mount from the host agent dir. Department volumes are a future extension.
+- **Company workspace model:** `/workspace` is the configured host folder
+  (`workspace_root` in server.json, default
+  `~/.local/share/hivemind/workspace`; set via Settings page or
+  `PUT /api/config`, admin-only) bind-mounted into every agent container;
+  `/home/hive` is a per-agent bind mount from the host agent dir.
+  Department volumes are a future extension.
 - The in-container user is `hive` with **passwordless sudo** — agents
   install their own CLI tools mid-task.
 - **ExecBridge:** the built-in host `execute_bash` is disabled for
@@ -235,6 +238,8 @@ different (deliberate) lifecycle from roster agents. Merging the two
 | Approvals | `~/.local/share/hivemind/approvals.db` |
 | Routines | `~/.local/share/hivemind/routines.db` |
 | Agent runtime state (history, memory, skills) | `~/.local/share/hivemind/agents/<id>/` |
+| API keys | `~/.local/share/hivemind/auth.db` (hashes only) |
+| Server config (workspace_root) | `~/.local/share/hivemind/server.json` |
 | Models/providers/credentials | daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`) |
 | Containers/images/volumes | podman (rootless, per-user) |
 

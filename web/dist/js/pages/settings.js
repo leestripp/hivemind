@@ -3,7 +3,29 @@ import { $, esc, log } from '../util.js';
 import { S } from '../state.js';
 
 
-export function enterSettings() { loadSettingsPage(); }
+export function enterSettings() { loadSettingsPage(); loadWorkspace(); }
+
+// ─── Company workspace (PUT /api/config — admin scope) ─────────────────
+async function loadWorkspace() {
+  try {
+    const c = await API.get('/api/config');
+    $('set-workspace').value = c.workspace_root || '';
+  } catch { /* leave placeholder */ }
+}
+
+export function initSettings() {
+  $('set-workspace-save').addEventListener('click', async () => {
+    const msg = $('set-workspace-msg');
+    msg.textContent = '';
+    try {
+      const r = await API.req('PUT', '/api/config',
+                              { workspace_root: $('set-workspace').value.trim() });
+      msg.textContent = '✓ workspace set to ' + r.workspace_root;
+    } catch (e) {
+      msg.textContent = '✗ ' + e.message;
+    }
+  });
+}
 
 // ─── Settings page ──────────────────────────────────────────────────────
 async function loadSettingsPage() {

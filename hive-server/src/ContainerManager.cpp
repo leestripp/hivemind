@@ -2,6 +2,7 @@
 // src/ContainerManager.cpp — podman sandbox lifecycle (HiveMind 2.0, Phase 2)
 // =============================================================================
 #include "hivemind/ContainerManager.h"
+#include "hivemind/ServerConfig.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -108,6 +109,7 @@ ContainerManager::Status ContainerManager::status(const std::string& agent_id) {
     Status s;
     s.container = container_name(agent_id);
     s.image = kImage;
+    s.workspace = ServerConfig::instance().workspace_root();
     if (!podman_available()) return s;
 
     auto r = run("podman inspect --format '{{.State.Status}}' " +
@@ -124,8 +126,9 @@ std::string ContainerManager::ensure_running(const std::string& agent_id) {
 
     ensure_image();
 
-    // Shared company workspace volume (idempotent create).
-    run(std::string{"podman volume create "} + kWorkspaceVolume);
+    // Company workspace: the configured HOST folder, bind-mounted into
+    // every agent container at /workspace (Plan.md — company model).
+    const std::string ws = ServerConfig::instance().workspace_root();
 
     const std::string cname = container_name(agent_id);
     auto st = status(agent_id);
@@ -136,7 +139,7 @@ std::string ContainerManager::ensure_running(const std::string& agent_id) {
         std::string cmd =
             std::string{"podman create --name "} + shell_quote(cname) +
             " --memory 4g --cpus 2"
-            " -v " + kWorkspaceVolume + ":/workspace"
+            " -v " + shell_quote(ws) + ":/workspace"
             " -v " + shell_quote(home.string()) + ":/home/hive:U"
             " -w /workspace " + kImage;
         auto r = run(cmd);

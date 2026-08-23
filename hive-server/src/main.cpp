@@ -36,6 +36,7 @@
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/routes/KeyRoutes.h"
+#include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/AgentStore.h"
@@ -122,7 +123,9 @@ int main(int argc, char* argv[]) {
         // Scope policy: admin-only routes, then read-only keys.
         const bool admin = AuthStore::has_scope(*scopes, "admin");
         if (path.rfind("/api/keys", 0) == 0 ||
-            path.find("/container/exec") != std::string::npos) {
+            path.find("/container/exec") != std::string::npos ||
+            (path == "/api/config" &&
+             req.method() != OmniNet::HTTP::Method::GET)) {
             if (!admin) return deny(403, "admin scope required");
         }
         if (!admin && AuthStore::has_scope(*scopes, "read") &&
@@ -157,6 +160,7 @@ int main(int argc, char* argv[]) {
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store);
     register_key_routes(server, auth_store);
+    register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
 

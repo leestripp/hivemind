@@ -54,6 +54,8 @@ Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 | GET | `/api/agent/tools` | Built-in + MCP tools visible to graph agent nodes |
 | GET | `/api/agent/skills` | Skills visible to graph agent nodes |
 | GET | `/api/agent/mcp` | MCP server status |
+| GET | `/api/config` | Server config (`workspace_root` — the company share host folder) |
+| PUT | `/api/config` | Update config `{workspace_root}` — **admin scope**; applies to containers created after the change |
 
 ## 2. Roster (agents)
 
