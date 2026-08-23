@@ -31,6 +31,10 @@
 #include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/AgentRoutes.h"
+#include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/AgentStore.h"
+#include "hivemind/ThreadStore.h"
+#include "hivemind/AgentHost.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -73,6 +77,12 @@ int main(int argc, char* argv[]) {
     GraphStore store;
     ExecutorRegistry registry;
 
+    // HiveMind 2.0 — roster / chat state (Plan.md Phase 1)
+    AgentStore agent_store;
+    ThreadStore thread_store;
+    AgentRegistry agent_registry;
+    ChatService chat_service{agent_store, thread_store, agent_registry};
+
     // ─── Routes (REGISTERED IN ORDER — first match wins) ────────────
     // 1. Health probe (most specific, no params)
     server.get("/api/health", [](const OmniNet::HTTP::Request& req,
@@ -92,6 +102,8 @@ int main(int argc, char* argv[]) {
     register_trigger_routes(server, store, registry);
     register_run_routes(server, store, registry);
     register_ws_run_routes(server);
+    register_roster_routes(server, agent_store, thread_store,
+                           agent_registry, chat_service);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);
@@ -174,6 +186,9 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "\nShutting down...\n";
+    // Persist roster-agent conversation history (daedalus only saves on
+    // Agent::shutdown — its destructor doesn't).
+    agent_registry.shutdown_all();
     server.stop();
     OmniNet::cleanup();
     return 0;

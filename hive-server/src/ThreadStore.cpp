@@ -1,0 +1,324 @@
+// =============================================================================
+// src/ThreadStore.cpp — chat thread persistence (HiveMind 2.0, Plan.md Phase 1)
+// =============================================================================
+#include "hivemind/ThreadStore.h"
+
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <stdexcept>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+std::string uuid_v4() {
+    std::array<unsigned char, 16> buf{};
+    FILE* f = std::fopen("/dev/urandom", "rb");
+    if (f) { std::fread(buf.data(), 1, 16, f); std::fclose(f); }
+    char out[37];
+    std::snprintf(out, sizeof(out),
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        buf[0],buf[1],buf[2],buf[3], buf[4],buf[5],
+        (buf[6] & 0x0f) | 0x40, buf[7],
+        (buf[8] & 0x3f) | 0x80, buf[9], buf[10],buf[11],
+        buf[12],buf[13],buf[14],buf[15]);
+    return out;
+}
+
+// ISO timestamp with a monotonic microsecond suffix so messages posted in
+// the same second still sort in insertion order.
+std::string iso_now() {
+    using namespace std::chrono;
+    auto now = system_clock::now();
+    auto t = system_clock::to_time_t(now);
+    auto us = duration_cast<microseconds>(now.time_since_epoch()).count() % 1000000;
+    char buf[80];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&t));
+    std::snprintf(buf + 19, sizeof(buf) - 19, ".%06lldZ", static_cast<long long>(us));
+    return buf;
+}
+
+inline void bind_text(sqlite3_stmt* st, int idx, const std::string& v) {
+    sqlite3_bind_text(st, idx, v.c_str(), -1, SQLITE_TRANSIENT);
+}
+
+inline void exec_sql(sqlite3* db, const char* sql) {
+    char* err = nullptr;
+    if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
+        std::string msg = err ? err : "unknown";
+        sqlite3_free(err);
+        throw std::runtime_error("ThreadStore exec failed: " + msg);
+    }
+}
+
+const char* col_text(sqlite3_stmt* st, int i) {
+    const auto* p = sqlite3_column_text(st, i);
+    return p ? reinterpret_cast<const char*>(p) : "";
+}
+
+ThreadMessage row_to_message(sqlite3_stmt* st) {
+    ThreadMessage m;
+    m.id          = col_text(st, 0);
+    m.thread_id   = col_text(st, 1);
+    m.sender_kind = col_text(st, 2);
+    m.sender_id   = col_text(st, 3);
+    m.body        = col_text(st, 4);
+    m.created_at  = col_text(st, 5);
+    return m;
+}
+
+} // namespace
+
+ThreadStore::ThreadStore() {
+    db_path_ = fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
+             / ".local" / "share" / "hivemind" / "threads.db";
+    fs::create_directories(db_path_.parent_path());
+    ensure_schema();
+}
+
+ThreadStore::ThreadStore(fs::path db) : db_path_(std::move(db)) {
+    fs::create_directories(db_path_.parent_path());
+    ensure_schema();
+}
+
+ThreadStore::~ThreadStore() = default;
+
+sqlite3* ThreadStore::open_conn() {
+    sqlite3* db = nullptr;
+    if (sqlite3_open(db_path_.string().c_str(), &db) != SQLITE_OK) {
+        std::string msg = db ? sqlite3_errmsg(db) : "out of memory";
+        if (db) sqlite3_close(db);
+        throw std::runtime_error("ThreadStore open failed: " + msg);
+    }
+    return db;
+}
+
+void ThreadStore::ensure_schema() {
+    sqlite3* db = open_conn();
+    exec_sql(db,
+        "CREATE TABLE IF NOT EXISTS threads ("
+        "  id TEXT PRIMARY KEY,"
+        "  title TEXT NOT NULL DEFAULT '',"
+        "  kind TEXT NOT NULL DEFAULT 'dm',"
+        "  created_at TEXT NOT NULL"
+        ")");
+    exec_sql(db,
+        "CREATE TABLE IF NOT EXISTS thread_participants ("
+        "  thread_id TEXT NOT NULL,"
+        "  agent_id TEXT NOT NULL,"
+        "  PRIMARY KEY (thread_id, agent_id)"
+        ")");
+    exec_sql(db,
+        "CREATE TABLE IF NOT EXISTS messages ("
+        "  id TEXT PRIMARY KEY,"
+        "  thread_id TEXT NOT NULL,"
+        "  sender_kind TEXT NOT NULL,"
+        "  sender_id TEXT NOT NULL DEFAULT '',"
+        "  body TEXT NOT NULL DEFAULT '',"
+        "  created_at TEXT NOT NULL"
+        ")");
+    exec_sql(db,
+        "CREATE INDEX IF NOT EXISTS idx_messages_thread"
+        " ON messages(thread_id, created_at)");
+    sqlite3_close(db);
+}
+
+std::vector<std::string> ThreadStore::participants_of(sqlite3* db,
+                                                      const std::string& thread_id) {
+    std::vector<std::string> out;
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT agent_id FROM thread_participants WHERE thread_id = ?"
+        " ORDER BY rowid ASC";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        while (sqlite3_step(st) == SQLITE_ROW) out.emplace_back(col_text(st, 0));
+        sqlite3_finalize(st);
+    }
+    return out;
+}
+
+Thread ThreadStore::create_thread(const std::string& title,
+                                  const std::string& kind,
+                                  const std::vector<std::string>& agent_ids) {
+    Thread t;
+    t.id = uuid_v4();
+    t.title = title;
+    t.kind = (kind == "group" || agent_ids.size() > 1) ? "group" : "dm";
+    t.created_at = iso_now();
+    t.agent_ids = agent_ids;
+
+    sqlite3* db = open_conn();
+    exec_sql(db, "BEGIN");
+    try {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "INSERT INTO threads (id, title, kind, created_at) VALUES (?,?,?,?)",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, t.id);
+        bind_text(st, 2, t.title);
+        bind_text(st, 3, t.kind);
+        bind_text(st, 4, t.created_at);
+        if (sqlite3_step(st) != SQLITE_DONE)
+            throw std::runtime_error("thread insert failed");
+        sqlite3_finalize(st);
+
+        for (const auto& aid : agent_ids) {
+            sqlite3_stmt* ps = nullptr;
+            if (sqlite3_prepare_v2(db,
+                    "INSERT INTO thread_participants (thread_id, agent_id)"
+                    " VALUES (?,?)", -1, &ps, nullptr) != SQLITE_OK)
+                throw std::runtime_error(sqlite3_errmsg(db));
+            bind_text(ps, 1, t.id);
+            bind_text(ps, 2, aid);
+            if (sqlite3_step(ps) != SQLITE_DONE)
+                throw std::runtime_error("participant insert failed");
+            sqlite3_finalize(ps);
+        }
+        exec_sql(db, "COMMIT");
+    } catch (...) {
+        exec_sql(db, "ROLLBACK");
+        sqlite3_close(db);
+        throw;
+    }
+    sqlite3_close(db);
+    return t;
+}
+
+std::optional<Thread> ThreadStore::get_thread(const std::string& id) {
+    sqlite3* db = open_conn();
+    std::optional<Thread> out;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "SELECT id, title, kind, created_at FROM threads WHERE id = ?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            Thread t;
+            t.id = col_text(st, 0);
+            t.title = col_text(st, 1);
+            t.kind = col_text(st, 2);
+            t.created_at = col_text(st, 3);
+            out = std::move(t);
+        }
+        sqlite3_finalize(st);
+    }
+    if (out) out->agent_ids = participants_of(db, id);
+    sqlite3_close(db);
+    return out;
+}
+
+std::vector<Thread> ThreadStore::list_threads() {
+    sqlite3* db = open_conn();
+    std::vector<Thread> out;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "SELECT id, title, kind, created_at FROM threads"
+            " ORDER BY created_at DESC", -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            Thread t;
+            t.id = col_text(st, 0);
+            t.title = col_text(st, 1);
+            t.kind = col_text(st, 2);
+            t.created_at = col_text(st, 3);
+            out.push_back(std::move(t));
+        }
+        sqlite3_finalize(st);
+    }
+    for (auto& t : out) t.agent_ids = participants_of(db, t.id);
+    sqlite3_close(db);
+    return out;
+}
+
+bool ThreadStore::delete_thread(const std::string& id) {
+    sqlite3* db = open_conn();
+    exec_sql(db, "BEGIN");
+    bool ok = false;
+    try {
+        sqlite3_stmt* st = nullptr;
+        auto del = [&](const char* sql) {
+            if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK)
+                throw std::runtime_error(sqlite3_errmsg(db));
+            bind_text(st, 1, id);
+            bool done = sqlite3_step(st) == SQLITE_DONE;
+            int changes = sqlite3_changes(db);
+            sqlite3_finalize(st);
+            return done && changes > 0;
+        };
+        del("DELETE FROM messages WHERE thread_id = ?");
+        del("DELETE FROM thread_participants WHERE thread_id = ?");
+        ok = del("DELETE FROM threads WHERE id = ?");
+        exec_sql(db, "COMMIT");
+    } catch (...) {
+        exec_sql(db, "ROLLBACK");
+        sqlite3_close(db);
+        throw;
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+std::string ThreadStore::add_message(const std::string& thread_id,
+                                     const std::string& sender_kind,
+                                     const std::string& sender_id,
+                                     const std::string& body) {
+    std::string id = uuid_v4();
+    std::string now = iso_now();
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "INSERT INTO messages (id, thread_id, sender_kind, sender_id, body,"
+        "                     created_at) VALUES (?,?,?,?,?,?)";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        std::string msg = sqlite3_errmsg(db);
+        sqlite3_close(db);
+        throw std::runtime_error("ThreadStore message prepare failed: " + msg);
+    }
+    bind_text(st, 1, id);
+    bind_text(st, 2, thread_id);
+    bind_text(st, 3, sender_kind);
+    bind_text(st, 4, sender_id);
+    bind_text(st, 5, body);
+    bind_text(st, 6, now);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (!ok) throw std::runtime_error("ThreadStore message insert failed");
+    return id;
+}
+
+std::vector<ThreadMessage> ThreadStore::list_messages(const std::string& thread_id,
+                                                      const std::string& after_id) {
+    sqlite3* db = open_conn();
+    std::vector<ThreadMessage> out;
+
+    std::string after_ts;
+    if (!after_id.empty()) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT created_at FROM messages WHERE id = ?",
+                -1, &st, nullptr) == SQLITE_OK) {
+            bind_text(st, 1, after_id);
+            if (sqlite3_step(st) == SQLITE_ROW) after_ts = col_text(st, 0);
+            sqlite3_finalize(st);
+        }
+    }
+
+    sqlite3_stmt* st = nullptr;
+    const char* sql = after_ts.empty()
+        ? "SELECT id, thread_id, sender_kind, sender_id, body, created_at"
+          " FROM messages WHERE thread_id = ? ORDER BY created_at ASC"
+        : "SELECT id, thread_id, sender_kind, sender_id, body, created_at"
+          " FROM messages WHERE thread_id = ? AND created_at > ?"
+          " ORDER BY created_at ASC";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        if (!after_ts.empty()) bind_text(st, 2, after_ts);
+        while (sqlite3_step(st) == SQLITE_ROW) out.push_back(row_to_message(st));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}

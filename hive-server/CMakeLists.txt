@@ -13,6 +13,9 @@ set(CORE_SOURCES
     src/Schedule.cpp
     src/GraphRunner.cpp
     src/Settings.cpp
+    src/AgentStore.cpp
+    src/ThreadStore.cpp
+    src/AgentHost.cpp
 )
 
 set(EXECUTOR_SOURCES
@@ -38,6 +41,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/AgentRoutes.cpp
+    include/hivemind/routes/RosterRoutes.cpp
 )
 
 # Everything except main.cpp — shared by the server binary and the test suite.
