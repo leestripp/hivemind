@@ -254,33 +254,62 @@ Gtk::Widget* make_avatar(const std::string& name, bool is_user) {
 
 } // namespace
 
-void HiveWindow::set_button_icon(Gtk::Button& btn, const std::string& icon,
-                                 const std::string& tooltip) {
-    auto* img = Gtk::make_managed<Gtk::Image>();
-    img->set(themed_icon_pixbuf(icon, 16, dark_mode_));
-    btn.set_child(*img);
-    if (!tooltip.empty()) btn.set_tooltip_text(tooltip);
-}
+void HiveWindow::setup_icons() {
+    // Build the persistent widget structure exactly once. Retinting on theme
+    // change only swaps pixbufs into these same Gtk::Image widgets —
+    // reparenting a managed member widget on retint let GTK destroy
+    // approvals_label_ and crashed poll_approvals (2026-08-23).
+    auto slot = [this](Gtk::Button& btn, const std::string& icon,
+                       const std::string& tip) {
+        auto* img = Gtk::make_managed<Gtk::Image>();
+        img->set(themed_icon_pixbuf(icon, 16, dark_mode_));
+        btn.set_child(*img);
+        btn.set_tooltip_text(tip);
+        icon_slots_.push_back({&btn, img, icon});
+    };
+    slot(new_agent_btn_,     "agent-add",  "Create a new agent");
+    slot(new_thread_btn_,    "thread-add", "Start a new thread");
+    slot(workflows_btn_,     "workflows",  "Open workflow canvas (web UI)");
+    slot(connect_btn_,       "connect",    "Connect to a hive-server");
+    slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
+    slot(delete_thread_btn_, "trash",      "Delete the selected thread");
+    slot(send_btn_,          "send",       "Send message");
 
-void HiveWindow::refresh_themed_icons() {
-    set_button_icon(new_agent_btn_,     "agent-add",   "Create a new agent");
-    set_button_icon(new_thread_btn_,    "thread-add",  "Start a new thread");
-    set_button_icon(workflows_btn_,     "workflows",   "Open workflow canvas (web UI)");
-    set_button_icon(connect_btn_,       "connect",     "Connect to a hive-server");
-    set_button_icon(stop_btn_,          "stop",        "Cancel the running turn in this thread");
-    set_button_icon(delete_thread_btn_, "trash",       "Delete the selected thread");
-    set_button_icon(send_btn_,          "send",        "Send message");
-    // Theme button shows the mode you'd switch TO.
-    set_button_icon(theme_btn_, dark_mode_ ? "theme-light" : "theme-dark",
-                    dark_mode_ ? "Switch to light mode" : "Switch to dark mode");
-    // Approvals keeps its count label beside the icon.
+    // Theme toggle: single image, swaps sun/moon (shows the mode you'd get).
+    theme_icon_ = Gtk::make_managed<Gtk::Image>();
+    theme_btn_.set_child(*theme_icon_);
+
+    // Approvals: icon + live count label, stable structure.
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
-    auto* img = Gtk::make_managed<Gtk::Image>();
-    img->set(themed_icon_pixbuf("approvals", 16, dark_mode_));
-    box->append(*img);
+    approvals_icon_.set(themed_icon_pixbuf("approvals", 16, dark_mode_));
+    approvals_label_.set_label("Approvals");
+    box->append(approvals_icon_);
     box->append(approvals_label_);
     approvals_btn_.set_child(*box);
     approvals_btn_.set_tooltip_text("Pending approvals");
+}
+
+void HiveWindow::refresh_themed_icons() {
+    for (auto& s : icon_slots_)
+        s.img->set(themed_icon_pixbuf(s.icon, 16, dark_mode_));
+    approvals_icon_.set(themed_icon_pixbuf("approvals", 16, dark_mode_));
+    theme_icon_->set(themed_icon_pixbuf(
+        dark_mode_ ? "theme-light" : "theme-dark", 16, dark_mode_));
+    theme_btn_.set_tooltip_text(dark_mode_ ? "Switch to light mode"
+                                           : "Switch to dark mode");
+}
+
+nlohmann::json HiveWindow::ui_toggle_theme() {
+    return invoke_on_ui([this] {
+        on_theme_toggle();
+        return json{{"dark_mode", dark_mode_}};
+    });
+}
+
+void HiveWindow::on_theme_toggle() {
+    dark_mode_ = !dark_mode_;
+    apply_theme();
+    save_config();
 }
 
 void HiveWindow::apply_theme() {
@@ -317,12 +346,8 @@ HiveWindow::HiveWindow() {
     });
     connect_btn_.signal_clicked().connect(
         [this] { maybe_show_connect_dialog(); });
-    theme_btn_.signal_clicked().connect([this] {
-        dark_mode_ = !dark_mode_;
-        apply_theme();
-        save_config();
-    });
-    theme_btn_.set_tooltip_text("Switch theme");
+    theme_btn_.signal_clicked().connect(
+        sigc::mem_fun(*this, &HiveWindow::on_theme_toggle));
     stop_btn_.signal_clicked().connect([this] { on_stop(); });
     stop_btn_.set_sensitive(false);   // enabled while a turn is running
     stop_btn_.add_css_class("destructive-action");
@@ -412,7 +437,8 @@ HiveWindow::HiveWindow() {
     }, 1500);
 
     load_config();
-    apply_theme();   // also populates all button icons
+    setup_icons();   // persistent icon structure, once
+    apply_theme();   // dark/light + initial pixbuf tint
     set_status("Connecting to hive-server…");
     if (api_.api_key().empty())
         maybe_show_connect_dialog();
@@ -986,9 +1012,12 @@ void HiveWindow::on_new_thread() {
     }
     // Enable Create only once at least one participant is checked.
     for (auto& [cb, id] : picks)
-        cb->signal_toggled().connect([create_btn, err, &picks_ref = picks] {
+        // NB: capture picks BY VALUE — on_new_thread returns right after
+        // present(), so a reference capture dangles the moment a checkbox
+        // toggles (use-after-scope crash).
+        cb->signal_toggled().connect([create_btn, err, picks] {
             bool any = false;
-            for (auto& [b, i] : picks_ref) any = any || b->get_active();
+            for (auto& [b, i] : picks) any = any || b->get_active();
             create_btn->set_sensitive(any);
             if (any) err->set_visible(false);
         });

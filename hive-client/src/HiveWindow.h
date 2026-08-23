@@ -35,6 +35,7 @@ public:
                                     const std::vector<std::string>& ids);
     nlohmann::json ui_select_thread(const std::string& id);
     nlohmann::json ui_send(const std::string& body);
+    nlohmann::json ui_toggle_theme();                // POST /ui/action/theme
     nlohmann::json ui_stop();
     nlohmann::json ui_delete_thread(const std::string& id);
 
@@ -45,9 +46,16 @@ private:
     void load_config();          // ~/.config/hivemind/config.json
     void save_config();
     void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
-    void refresh_themed_icons();
+    void on_theme_toggle();
+    void refresh_themed_icons();  // re-tints pixbufs in place (no reparenting!)
     void set_button_icon(Gtk::Button& btn, const std::string& icon,
                          const std::string& tooltip);
+    // Persistent icon widgets, created ONCE in setup_icons() — retinted, never
+    // reparented (reparenting a managed member widget can destroy it → crash).
+    struct IconSlot { Gtk::Button* btn; Gtk::Image* img; std::string icon; };
+    std::vector<IconSlot> icon_slots_;
+    Gtk::Image* theme_icon_ = nullptr;   // swaps sun/moon per mode
+    void setup_icons();
     void maybe_show_connect_dialog();   // when no key is configured
 
     // ── data loading (worker threads → dispatcher → UI) ───────────────────
@@ -102,6 +110,7 @@ private:
     Gtk::Button new_thread_btn_;
     Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
     Gtk::Label approvals_label_;         // child of approvals_btn_
+    Gtk::Image approvals_icon_;          // child of approvals_btn_
     Gtk::Button workflows_btn_;
     Gtk::Button theme_btn_;              // dark/light toggle
     Gtk::Button connect_btn_;

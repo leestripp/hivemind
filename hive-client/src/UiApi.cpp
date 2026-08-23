@@ -96,6 +96,12 @@ void UiApi::start() {
             else send_json(resp, r, 202);
         });
 
+    // Same code path as the header theme toggle button.
+    server_->post("/ui/action/theme",
+        [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            send_json(resp, w.ui_toggle_theme());
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());

@@ -79,6 +79,10 @@ Same as the Send button: fills the composer entry and fires `on_send()`
 (posts to the selected thread, async agent turns). `400` if no thread is
 selected or body empty.
 
+### POST /ui/action/theme
+→ `{"dark_mode": true|false}`. Same as the header moon/sun button: toggles
+the theme, retints all icons in place, persists to config.json.
+
 ### POST /ui/action/stop
 → `{"cancel_requested": true}`. Same as the Stop button: `POST
 /api/threads/:id/cancel` on the selected thread (cancels live agent turns
