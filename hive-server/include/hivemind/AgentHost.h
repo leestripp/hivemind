@@ -48,6 +48,11 @@ public:
 
     const RosterAgent& info() const { return info_; }
 
+    /// Evicted hosts are marked dead (new turns rejected) but never
+    /// destroyed mid-process — see AgentRegistry's graveyard rule.
+    void mark_dead() noexcept { dead_ = true; }
+    bool dead() const noexcept { return dead_; }
+
     /// Run one full turn. `on_delta` fires with streamed assistant text
     /// (possibly from a background thread inside daedalus). Returns the
     /// complete assistant output. Throws std::runtime_error on agent errors.
@@ -67,6 +72,7 @@ private:
 
     RosterAgent info_;
     std::filesystem::path dir_;
+    std::atomic<bool> dead_{false};
     AgentStore& agents_;
     ApprovalStore& approvals_;
     AgentRegistry& registry_;
@@ -77,28 +83,38 @@ private:
 };
 
 /// AgentRegistry — process-wide map of live AgentHosts, keyed by agent id.
+///
+/// OWNERSHIP RULE (Phase 10, hardened): the registry is the SOLE owner
+/// (unique_ptr). Hosts are NEVER destroyed mid-process — evict() marks a
+/// host dead and moves it to the graveyard_, which is torn down only by
+/// shutdown_all() at process exit (after ChatService::quiesce() has drained
+/// every turn). References returned by get_or_create() are therefore valid
+/// for the whole process lifetime. No refcounting anywhere.
 class AgentRegistry {
 public:
     AgentRegistry(AgentStore& agents, ApprovalStore& approvals)
         : agents_(agents), approvals_(approvals) {}
 
     /// Get the live host for a roster agent, constructing it on first use.
-    /// shared_ptr (Phase 10 fix): a caller mid-turn keeps the host alive
-    /// even if PATCH/DELETE evicts it from the registry meanwhile.
-    std::shared_ptr<AgentHost> get_or_create(const RosterAgent& agent);
+    /// An evicted (dead) host is replaced with a fresh one.
+    AgentHost& get_or_create(const RosterAgent& agent);
 
-    /// Drop the live host (e.g. after the roster row is deleted or renamed).
+    /// Mark the host dead and retire it to the graveyard (stays allocated
+    /// until shutdown_all). In-flight turns finish safely; new turns on the
+    /// dead host are rejected.
     void evict(const std::string& agent_id);
 
-    /// Gracefully shut down every live host (persists conversation history).
-    /// Call from the server's signal-shutdown path.
+    /// Shut down (persist history) and destroy every host, live and
+    /// graveyard. Call after ChatService::quiesce(), from the server's
+    /// signal-shutdown path.
     void shutdown_all();
 
 private:
     AgentStore& agents_;
     ApprovalStore& approvals_;
     std::mutex m_;
-    std::unordered_map<std::string, std::shared_ptr<AgentHost>> hosts_;
+    std::unordered_map<std::string, std::unique_ptr<AgentHost>> hosts_;
+    std::vector<std::unique_ptr<AgentHost>> graveyard_;  // dead, not freed
 };
 
 /// ChatService — glues threads to agents: posts user messages, runs agent

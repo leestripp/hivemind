@@ -50,6 +50,13 @@ The 1.x node-graph workflow engine (web canvas) is kept intact.
    that matches your own shell's command line.
 10. Run the server from the **repo root** (web/dist and the Containerfile
     are resolved relative to cwd).
+11. **Ownership rule (no refcount band-aids):** the AgentRegistry is the
+    SOLE owner of AgentHosts (`unique_ptr`). Hosts are never destroyed
+    mid-process — `evict()` marks dead, saves history (shutdown()), and
+    retires to the graveyard; destruction happens once, in
+    `shutdown_all()`, after `ChatService::quiesce()` has drained all turns.
+    References from `get_or_create()` are valid for the process lifetime.
+    Do NOT reintroduce shared_ptr here.
 
 ## 3. Layout map
 

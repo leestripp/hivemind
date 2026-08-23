@@ -316,6 +316,9 @@ void AgentHost::ensure_agent() {
 
 std::string AgentHost::run_turn(const std::string& prompt,
                                 std::function<void(std::string_view)> on_delta) {
+    if (dead_)
+        throw std::runtime_error("agent '" + info_.name +
+                                 "' was deleted or replaced");
     std::lock_guard<std::mutex> turn_lk{turn_mtx_};
 
     // Whole turn (construct-first-time + run) under the global agent mutex —
@@ -371,21 +374,37 @@ void AgentHost::shutdown() {
 
 // ─── AgentRegistry ──────────────────────────────────────────────────────────
 
-std::shared_ptr<AgentHost> AgentRegistry::get_or_create(const RosterAgent& agent) {
+AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
     std::lock_guard<std::mutex> lk(m_);
     auto it = hosts_.find(agent.id);
+    if (it != hosts_.end() && it->second->dead())
+        it = hosts_.end();   // evicted since — construct a fresh host below
     if (it == hosts_.end()) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
-        auto host = std::make_shared<AgentHost>(agent, dir, agents_,
+        auto host = std::make_unique<AgentHost>(agent, dir, agents_,
                                                 approvals_, *this);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
-    return it->second;
+    return *it->second;
 }
 
 void AgentRegistry::evict(const std::string& agent_id) {
+    std::unique_ptr<AgentHost> host;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = hosts_.find(agent_id);
+        if (it == hosts_.end()) return;
+        it->second->mark_dead();
+        host = std::move(it->second);
+        hosts_.erase(it);
+    }
+    // Persist history BEFORE retiring: daedalus only saves on shutdown().
+    // Blocks until any in-flight turn on this host finishes (turn_mtx_) —
+    // correct by construction; the reference the turn holds stays valid
+    // because the object lives on in the graveyard.
+    try { host->shutdown(); } catch (...) {}
     std::lock_guard<std::mutex> lk(m_);
-    hosts_.erase(agent_id);
+    graveyard_.push_back(std::move(host));   // dead + saved, not freed
 }
 
 void AgentRegistry::shutdown_all() {
@@ -393,6 +412,12 @@ void AgentRegistry::shutdown_all() {
     for (auto& [id, host] : hosts_) {
         try { host->shutdown(); } catch (...) {}
     }
+    for (auto& host : graveyard_) {
+        try { host->shutdown(); } catch (...) {}
+    }
+    // All turns drained (quiesce ran first) — safe to destroy everything.
+    hosts_.clear();
+    graveyard_.clear();
 }
 
 // ─── ChatService ────────────────────────────────────────────────────────────
@@ -431,9 +456,10 @@ std::string ChatService::post_user_message(const std::string& thread_id,
         std::thread([this, thread_id, agent = *agent, body, live]() mutable {
             struct Dec { std::atomic<int>& n; ~Dec() { --n; } } dec{active_turns_};
             try {
-                // shared_ptr: the host survives an evict() mid-turn.
-                auto host = registry_.get_or_create(agent);
-                std::string final = host->run_turn(body,
+                // Registry hosts are process-immortal (graveyard rule) —
+                // a plain reference is safe for the whole turn.
+                auto& host = registry_.get_or_create(agent);
+                std::string final = host.run_turn(body,
                     [live](std::string_view delta) {
                         live->partial += delta;
                     });
