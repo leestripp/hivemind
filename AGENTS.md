@@ -92,6 +92,11 @@ name. **Add a test:** `tests/test_foo.cpp` + `hivemind_test(test_foo)`.
 
 ## 6. Current status
 
-Phases 0–5 + 7 done (see Plan.md for the checked items). Open: Phase 6
+Phases 0–5 + 7 done, Phase 9 token auth done (see Plan.md). Open: Phase 6
 browser tools (blocked on sandbox), Phase 8 remainder (remote workers,
-Flatpak, `/ws/runs` live fan-out fix, perf pass).
+Flatpak, `/ws/runs` fix, perf pass), Phase 9 remainder (TLS, CORS
+allowlist, deploy doc).
+
+**Auth:** all `/api/*` calls need `Authorization: Bearer <key>`; the master
+key prints once at first start (`hivemindctl logs`). curl examples need
+`-H "Authorization: Bearer $KEY"`.

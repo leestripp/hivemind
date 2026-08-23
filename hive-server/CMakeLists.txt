@@ -21,6 +21,7 @@ set(CORE_SOURCES
     src/ApprovalStore.cpp
     src/AgentTools.cpp
     src/RoutineStore.cpp
+    src/AuthStore.cpp
 )
 
 set(EXECUTOR_SOURCES
@@ -50,6 +51,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/ContainerRoutes.cpp
     include/hivemind/routes/ApprovalRoutes.cpp
     include/hivemind/routes/RoutineRoutes.cpp
+    include/hivemind/routes/KeyRoutes.cpp
 )
 
 # Everything except main.cpp — shared by the server binary and the test suite.

@@ -1,5 +1,8 @@
 #include "HiveWindow.h"
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <utility>
 
 using nlohmann::json;
@@ -130,13 +133,86 @@ HiveWindow::HiveWindow() {
         return alive_;
     }, 1500);
 
+    load_config();
     set_status("Connecting to hive-server…");
-    refresh_all();
+    if (api_.api_key().empty())
+        maybe_show_connect_dialog();
+    else
+        refresh_all();
 }
 
 HiveWindow::~HiveWindow() {
     alive_ = false;
     poll_timer_.disconnect();
+}
+
+// ── connection config (Phase 9) ─────────────────────────────────────────────
+
+void HiveWindow::load_config() {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
+                 / ".config" / "hivemind";
+    std::ifstream f{dir / "config.json"};
+    if (!f) return;
+    try {
+        auto j = json::parse(f);
+        server_url_ = j.value("server", server_url_);
+        api_.set_base_url(server_url_);
+        api_.set_api_key(j.value("api_key", ""));
+    } catch (...) {}
+}
+
+void HiveWindow::save_config() {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
+                 / ".config" / "hivemind";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    fs::path file = dir / "config.json";
+    std::ofstream f{file, std::ios::trunc};
+    f << json{{"server", server_url_}, {"api_key", api_.api_key()}}.dump(2);
+    f.close();
+    fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
+}
+
+void HiveWindow::maybe_show_connect_dialog() {
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title("Connect to hive-server");
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Connect", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::OK);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_margin(12);
+    grid->set_row_spacing(8);
+    grid->set_column_spacing(8);
+    auto* server = Gtk::make_managed<Gtk::Entry>();
+    server->set_text(server_url_);
+    auto* key = Gtk::make_managed<Gtk::Entry>();
+    key->set_placeholder_text("API key (hm_…)");
+    key->set_visibility(false);
+    auto* sl = Gtk::make_managed<Gtk::Label>("Server");
+    sl->set_halign(Gtk::Align::END);
+    auto* kl = Gtk::make_managed<Gtk::Label>("API key");
+    kl->set_halign(Gtk::Align::END);
+    grid->attach(*sl, 0, 0);
+    grid->attach(*server, 1, 0);
+    grid->attach(*kl, 0, 1);
+    grid->attach(*key, 1, 1);
+    server->set_hexpand(true);
+    key->set_hexpand(true);
+    dialog->get_content_area()->append(*grid);
+
+    dialog->signal_response().connect([this, dialog, server, key](int) {
+        server_url_ = server->get_text();
+        api_.set_base_url(server_url_);
+        api_.set_api_key(key->get_text());
+        save_config();
+        dialog->destroy();
+        refresh_all();
+    });
+    dialog->present();
 }
 
 // ── async plumbing ──────────────────────────────────────────────────────────
@@ -148,7 +224,12 @@ void HiveWindow::run_async(std::function<void()> work) {
             {
                 std::lock_guard<std::mutex> lk(queue_m_);
                 done_queue_.push_back([this, msg] {
-                    if (alive_) set_status("Error: " + msg);
+                    if (!alive_) return;
+                    set_status("Error: " + msg);
+                    if (msg.find("401") != std::string::npos ||
+                        msg.find("bearer") != std::string::npos ||
+                        msg.find("api key") != std::string::npos)
+                        maybe_show_connect_dialog();
                 });
             }
             dispatcher_.emit();

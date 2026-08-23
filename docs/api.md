@@ -6,6 +6,25 @@
 >
 > **Path params:** examples use `:id` segments literally; substitute real ids.
 
+## Authentication (Phase 9)
+
+Every `/api/*` route except `/api/health` requires a bearer key:
+
+```
+Authorization: Bearer hm_...
+```
+
+The **master key** is printed once at first server start (also in
+`hivemindctl logs`). Create/revoke more via `/api/keys` (admin scope).
+Scopes: `admin` (everything), `agent` (default), `read` (GET only).
+Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/keys` | List keys (public ids only) — admin |
+| POST | `/api/keys` | `{name, scopes}` → returns raw key **once** — admin |
+| DELETE | `/api/keys/:id` | Revoke by public id — admin |
+
 ## Contents
 
 1. [Health & meta](#1-health--meta)

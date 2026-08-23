@@ -17,6 +17,12 @@ public:
     explicit ApiClient(std::string base_url = "http://127.0.0.1:8421")
         : base_(std::move(base_url)) {}
 
+    /// Phase 9: bearer key sent on every request; base URL configurable
+    /// for remote servers.
+    void set_api_key(std::string key) { api_key_ = std::move(key); }
+    void set_base_url(std::string url) { base_ = std::move(url); }
+    const std::string& api_key() const { return api_key_; }
+
     // ── roster ────────────────────────────────────────────────────────────
     nlohmann::json list_agents();                                    // GET /api/agents
     nlohmann::json create_agent(const std::string& name, const std::string& role,
@@ -47,6 +53,7 @@ private:
     nlohmann::json request(const std::string& method, const std::string& path,
                            const nlohmann::json* body = nullptr);
     std::string base_;
+    std::string api_key_;
 };
 
 } // namespace hive

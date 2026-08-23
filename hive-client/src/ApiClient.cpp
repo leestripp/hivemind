@@ -24,6 +24,10 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
     std::string response;
     std::string payload;
     struct curl_slist* headers = nullptr;
+    if (!api_key_.empty()) {
+        std::string auth = "Authorization: Bearer " + api_key_;
+        headers = curl_slist_append(headers, auth.c_str());
+    }
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);

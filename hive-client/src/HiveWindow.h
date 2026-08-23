@@ -27,6 +27,11 @@ public:
     ~HiveWindow() override;
 
 private:
+    // ── connection config (Phase 9) ───────────────────────────────────────
+    void load_config();          // ~/.config/hivemind/config.json
+    void save_config();
+    void maybe_show_connect_dialog();   // when no key is configured
+
     // ── data loading (worker threads → dispatcher → UI) ───────────────────
     void run_async(std::function<void()> work);
     void refresh_all();
@@ -51,6 +56,7 @@ private:
     void set_status(const std::string& text);
 
     ApiClient api_;
+    std::string server_url_ = "http://127.0.0.1:8421";
 
     // state (GUI thread only)
     nlohmann::json agents_ = nlohmann::json::array();

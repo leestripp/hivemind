@@ -35,6 +35,8 @@
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
+#include "hivemind/routes/KeyRoutes.h"
+#include "hivemind/AuthStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
@@ -87,8 +89,49 @@ int main(int argc, char* argv[]) {
     ThreadStore thread_store;
     ApprovalStore approval_store;
     RoutineStore routine_store;
+    AuthStore auth_store;
     AgentRegistry agent_registry{agent_store, approval_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
+
+    // ─── Auth (Phase 9) ─────────────────────────────────────────────
+    // First run prints the master key once; every /api/* route except
+    // /api/health then requires `Authorization: Bearer <key>`.
+    auth_store.ensure_master_key(/*print=*/true);
+
+    // Global auth middleware — runs before every handler; guards /api/*.
+    server.use([&auth_store](const OmniNet::HTTP::Request& req,
+                             OmniNet::HTTP::Response& resp) -> bool {
+        std::string path{req.path()};
+        if (path.rfind("/api/", 0) != 0) return true;  // static UI, admin
+        if (path == "/api/health") return true;       // probe stays open
+
+        auto deny = [&](int code, const std::string& msg) {
+            resp = OmniNet::HTTP::Response::ok();
+            resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(code));
+            resp.setContentType("application/json");
+            resp.setBody("{\"error\":\"" + msg + "\"}");
+            return false;
+        };
+
+        auto hdr = req.header("Authorization");
+        if (!hdr || hdr->substr(0, 7) != "Bearer ")
+            return deny(401, "missing bearer token");
+        auto scopes = auth_store.validate(std::string{hdr->substr(7)});
+        if (!scopes) return deny(401, "invalid or revoked api key");
+
+        // Scope policy: admin-only routes, then read-only keys.
+        const bool admin = AuthStore::has_scope(*scopes, "admin");
+        if (path.rfind("/api/keys", 0) == 0 ||
+            path.find("/container/exec") != std::string::npos) {
+            if (!admin) return deny(403, "admin scope required");
+        }
+        if (!admin && AuthStore::has_scope(*scopes, "read") &&
+            !AuthStore::has_scope(*scopes, "agent")) {
+            if (req.method() != OmniNet::HTTP::Method::GET)
+                return deny(403, "read-only key");
+        }
+        return true;
+    });
 
     // ─── Routes (REGISTERED IN ORDER — first match wins) ────────────
     // 1. Health probe (most specific, no params)
@@ -113,6 +156,7 @@ int main(int argc, char* argv[]) {
                            agent_registry, chat_service);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store);
+    register_key_routes(server, auth_store);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
 

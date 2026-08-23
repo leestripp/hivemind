@@ -11,7 +11,11 @@ Settings load_settings(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg{argv[i]};
-        if (arg == "--port" || arg == "-p") {
+        if (arg == "--bind" || arg == "-b") {
+            if (i + 1 < argc) {
+                s.address = argv[++i];
+            }
+        } else if (arg == "--port" || arg == "-p") {
             if (i + 1 < argc) {
                 try {
                     s.port = std::stoi(argv[++i]);
@@ -20,7 +24,7 @@ Settings load_settings(int argc, char* argv[]) {
                 }
             }
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: hivemind [--port N] [--help]\n";
+            std::cout << "Usage: hivemind [--bind ADDR] [--port N] [--help]\n";
             std::exit(0);
         }
     }
