@@ -3,10 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>HiveMind — Node Graph</title>
+<title>HiveMind</title>
 <link rel="stylesheet" href="css/base.css?v=20260823a">
-  <link rel="stylesheet" href="css/nodes.css?v=20260823a">
-  <link rel="stylesheet" href="css/triggers.css?v=20260823a">
   <link rel="stylesheet" href="css/settings.css?v=20260823a">
 </head>
 <body>
@@ -14,31 +12,12 @@
 
   <header class="toolbar">
     <div class="brand">⚡ HiveMind</div>
-    <div class="brand-sub">Node Graph · multi-agent DAG</div>
+    <div class="brand-sub">agent server</div>
     <div class="spacer"></div>
     <span class="status" id="status">ready</span>
-    <select class="btn" id="wf-switcher" title="Open workflow"><option value="">workflow…</option></select>
-    <button class="btn primary" id="btn-run">▶ Run</button>
-    <button class="btn" id="btn-new" title="Create a new empty workflow">New</button>
-    <button class="btn" id="btn-save" title="Save to server">Save</button>
-    <button class="btn" id="btn-export" title="Download .hivemind.json">Export</button>
-    <button class="btn" id="btn-import" title="Import .hivemind.json">Import</button>
-    <input type="file" id="wf-file" accept=".json,.hivemind.json" style="display:none">
-    <button class="btn" id="btn-reset">Reset layout</button>
   </header>
 
   <nav class="activity-bar">
-    <button class="ab-item" data-page="nodes" title="Nodes">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
-        <circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="12" cy="18" r="2.6"/>
-        <path d="M8.3 7.3l6 8M15.7 7.3l-6 8M8.6 6h6.8"/>
-      </svg>
-    </button>
-    <button class="ab-item" data-page="triggers" title="Triggers">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-        <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
-      </svg>
-    </button>
     <button class="ab-item" data-page="settings" title="Settings">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="3.2"/>
@@ -55,143 +34,6 @@
   </nav>
 
   <div class="content">
-  <div id="page-nodes" class="page">
-  <main class="main">
-    <section class="canvas-wrap" id="canvas-wrap">
-      <svg id="edges" class="edges"></svg>
-      <div id="nodes" class="nodes"></div>
-      <div class="canvas-hint" id="hint">Right-click canvas to add nodes. Middle-drag or Space+drag to pan. Scroll to zoom.</div>
-      <button class="help-btn" id="btn-help" title="Show controls">?</button>
-    </section>
-
-    <div class="splitter splitter-v" id="split-insp" role="separator"
-         aria-orientation="vertical" aria-label="Resize inspector" tabindex="0"
-         title="Drag to resize · double-click to collapse"></div>
-
-    <aside class="inspector" id="inspector">
-      <div class="panel-head">
-        <div class="panel-title">Inspector</div>
-        <button class="panel-toggle" id="btn-collapse-insp" title="Collapse inspector">⟨</button>
-      </div>
-      <div class="panel-body" id="inspector-body">
-        <p class="muted">Click a node to see its config.</p>
-      </div>
-      <div class="panel-strip-v" role="button" tabindex="0" title="Expand inspector (] key)">
-        <span class="strip-chevron">⟩</span>
-        <span class="strip-label">Inspector</span>
-      </div>
-    </aside>
-  </main>
-
-  <!-- Right-click context menu -->
-  <div id="context-menu" class="context-menu hidden">
-    <div class="ctx-item" id="ctx-add-node">Add node ▸</div>
-    <div class="ctx-sub hidden" id="ctx-sub-add-node">
-      <div class="ctx-item ctx-node" data-type="input"><span class="dot input"></span>Input</div>
-      <div class="ctx-item ctx-node" data-type="prompt"><span class="dot prompt"></span>Prompt</div>
-      <div class="ctx-item ctx-node" data-type="agent"><span class="dot agent"></span>AI Agent</div>
-      <div class="ctx-item ctx-node" data-type="merge"><span class="dot merge"></span>Merge</div>
-      <div class="ctx-item ctx-node" data-type="output"><span class="dot output"></span>Output</div>
-      <div class="ctx-item ctx-node" data-type="log"><span class="dot log"></span>Log</div>
-      <div class="ctx-item ctx-node" data-type="loop"><span class="dot loop"></span>Loop</div>
-    </div>
-    <div class="ctx-sep"></div>
-    <div class="ctx-item ctx-danger hidden" id="ctx-delete-node">Delete node</div>
-    <div class="ctx-item ctx-danger hidden" id="ctx-delete-edge">Delete connection</div>
-    <div class="ctx-sep"></div>
-    <div class="ctx-item" id="ctx-reset-view">Reset view</div>
-    <div class="ctx-item" id="ctx-auto-layout">Auto layout</div>
-  </div>
-
-  <!-- Help overlay -->
-  <div id="help-overlay" class="help-overlay hidden">
-    <div class="help-card">
-      <h3>Controls</h3>
-      <ul>
-        <li><b>Left drag</b> a node to move it.</li>
-        <li><b>Drag</b> from any port to a matching port to wire nodes (ESC cancels).</li>
-        <li><b>Delete a node</b>: select it and press <b>Delete</b>, or <b>right-click</b> it → Delete node (its wires go too).</li>
-        <li><b>Break a wire</b>: click it and press <b>Delete</b>, or <b>right-click</b> it → Delete connection.</li>
-        <li><b>Right-click</b> the canvas to add nodes.</li>
-        <li><b>Right-click → Auto layout</b> arranges nodes left-to-right by data flow.</li>
-        <li><b>Middle-drag</b> or hold <b>Space</b> and drag to pan.</li>
-        <li><b>Scroll</b> to zoom in/out.</li>
-        <li><b>]</b> toggles the Inspector panel, <b>\</b> toggles the Output panel.</li>
-      </ul>
-      <button class="btn" id="btn-help-close">Close</button>
-    </div>
-  </div>
-
-  <!-- New workflow name prompt -->
-  <div id="newwf-overlay" class="browse-overlay hidden">
-    <div class="browse-card" style="width: 360px">
-      <h3>New workflow</h3>
-      <div class="insp-field">
-        <label class="insp-label" for="newwf-name">Name</label>
-        <input class="insp-input" id="newwf-name" type="text" placeholder="my-workflow"
-               autocomplete="off" spellcheck="false">
-        <div class="insp-help">Creates an empty workflow; the current canvas is replaced.</div>
-      </div>
-      <div class="browse-actions">
-        <button class="btn" id="newwf-cancel">Cancel</button>
-        <button class="btn primary" id="newwf-create">Create</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Directory browser (Agent project root picker) -->
-  <div id="browse-overlay" class="browse-overlay hidden">
-    <div class="browse-card">
-      <h3>Choose project directory</h3>
-      <div class="browse-pathbar">
-        <button class="btn" id="browse-up" title="Go to parent directory">↑ Up</button>
-        <div class="browse-path" id="browse-path" title="Current directory">…</div>
-        <label class="browse-hidden-toggle" title="Show dotfiles">
-          <input type="checkbox" id="browse-hidden"> hidden
-        </label>
-      </div>
-      <div class="browse-quick" id="browse-quick"></div>
-      <div class="browse-list" id="browse-list"><p class="muted">loading…</p></div>
-      <div class="browse-actions">
-        <button class="btn" id="browse-cancel">Cancel</button>
-        <button class="btn primary" id="browse-select">Select this folder</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="splitter splitter-h" id="split-out" role="separator"
-       aria-orientation="horizontal" aria-label="Resize output panel" tabindex="0"
-       title="Drag to resize · double-click to collapse"></div>
-
-  <footer class="output" id="output">
-    <div class="panel-head">
-      <div class="panel-title">Output stream</div>
-      <button class="panel-toggle" id="btn-collapse-out" title="Collapse output">▾</button>
-    </div>
-    <div class="panel-body" id="output-body">
-      <pre id="output-log">(empty)</pre>
-    </div>
-    <div class="panel-strip-h" role="button" tabindex="0" title="Expand output (\ key)">
-      <span class="strip-chevron">▴</span>
-      <span class="strip-label">Output stream</span>
-    </div>
-  </footer>
-  </div><!-- /page-nodes -->
-
-  <div id="page-triggers" class="page hidden">
-    <div class="page-body">
-      <h2>⚡ Triggers</h2>
-      <p class="muted">
-        Run workflows automatically — on a schedule (server-local time), or via an
-        external webhook call.
-      </p>
-
-      <button class="btn primary" id="trig-add" style="margin:12px 0 18px">+ Add Trigger</button>
-
-      <div id="trig-list" class="trig-rows"></div>
-    </div>
-
-  </div>
 
   <div id="page-settings" class="page hidden">
     <div class="page-body">

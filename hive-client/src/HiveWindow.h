@@ -112,7 +112,6 @@ private:
     Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
     Gtk::Label approvals_label_;         // child of approvals_btn_
     Gtk::Image approvals_icon_;          // child of approvals_btn_
-    Gtk::Button workflows_btn_;
     Gtk::Button theme_btn_;              // dark/light toggle
     Gtk::Button connect_btn_;
     Gtk::Button stop_btn_;

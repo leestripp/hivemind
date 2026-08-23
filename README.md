@@ -17,8 +17,8 @@ with each other, and only come back when they need your approval.
   [daedalus](https://gitlab.com/leestripp/daedalus) agent with its own memory
   and conversation history that survives restarts.
 - **Chat, not config** — talk to agents in threads (DMs or group threads);
-  no workflow builder required. (The node-graph canvas still lives in the
-  web UI for explicit orchestration.)
+  no workflow builder required. (The 1.x node-graph engine was retired in
+  Phase 12 — threads + fan-in are the orchestration model.)
 - **A computer of their own** — agents work inside rootless **podman
   containers** as user `hive` with passwordless sudo: they `apt install`
   whatever CLI tools the job needs. Shared company `/workspace` volume +
@@ -31,7 +31,8 @@ with each other, and only come back when they need your approval.
 - **Routines & skills** — scheduled prompts ("watch this, ping me daily")
   and Anthropic-format agent skills per teammate.
 - **Native GTK4 client** (`hive-client`) — roster, threads, live chat,
-  approvals inbox. Plus the web UI as workflow studio + fallback.
+  approvals inbox. Plus the web UI for keys/settings (ops dashboard in
+  Phase 13).
 - **Any model** — daedalus' SettingsStore owns providers/credentials; pick
   per agent. No vendor lock-in.
 
@@ -65,7 +66,7 @@ creating an agent (blank = store default).
 
 ```
 hive-server/   C++23 + OmniNet server: roster, threads, approvals,
-               routines, containers, graph runner, web UI (web/dist)
+               routines, containers, web UI (web/dist)
 hive-client/   GTK4/gtkmm4 native client
 tests/         ctest suite (9 tests)
 hivemindctl    build/start/stop/status/logs/client/test

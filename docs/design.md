@@ -18,7 +18,7 @@
 8. [Approvals](#8-approvals)
 9. [Routines & skills](#9-routines--skills)
 10. [GTK client](#10-gtk-client)
-11. [Graph workflow engine (1.x, kept)](#11-graph-workflow-engine-1x-kept)
+11. [Web UI](#11-web-ui)
 12. [Persistence map](#12-persistence-map)
 13. [Concurrency rules](#13-concurrency-rules)
 14. [Extension points](#14-extension-points)
@@ -58,9 +58,8 @@ Hive-Mind/
 │   ├── src/                  # server sources
 │   └── data/                 # Containerfiles, systemd unit
 ├── hive-client/              # GTK4/gtkmm4 native client
-├── web/dist/                 # web UI (workflow studio + zero-install fallback)
+├── web/dist/                 # web UI (keys/settings; ops dashboard in Phase 13)
 ├── tests/                    # ctest suite (linked against hivemind_core)
-├── workflows/                # sample .hivemind.json graphs
 └── docs/
 ```
 
@@ -77,14 +76,12 @@ OmniNet HTTP server
  ├── Approval routes     → ApprovalStore
  ├── Routine routes      → RoutineStore  (fired by the 30 s scheduler tick)
  ├── Container routes    → ContainerManager (podman CLI)
- ├── Graph/run/trigger routes (1.x engine) → GraphStore / GraphRunner
  └── static catch-all    → web/dist (must be registered LAST)
 ```
 
 Application state is constructed in `main.cpp` and passed to route
 registrars by reference: `AgentStore`, `ThreadStore`, `ApprovalStore`,
-`RoutineStore`, `AgentRegistry`, `ChatService`, plus the 1.x `GraphStore`
-and `ExecutorRegistry`.
+`RoutineStore`, `AgentRegistry`, `ChatService`.
 
 **Shutdown path matters:** daedalus only persists conversation history from
 `Agent::shutdown()` (its destructor does not save). The SIGTERM/SIGINT path
@@ -198,7 +195,7 @@ Statuses: `pending → approved | denied | expired`.
 ## 9. Routines & skills
 
 - **Routines** (`routines.db`): named prompt + schedule (once/interval/
-  daily/weekly — the 1.x trigger spec). Each routine owns a thread; the 30 s
+  daily/weekly — same schedule spec the 1.x triggers used). Each routine owns a thread; the 30 s
   scheduler tick posts due prompts into it via `ChatService`, so the agent's
   reply lands in a thread the user can read. A routine that throws is
   disabled rather than re-firing every tick.
@@ -215,24 +212,22 @@ Statuses: `pending → approved | denied | expired`.
   results marshalled to the GTK loop via a `Glib::Dispatcher` queue.
 - `HiveWindow`: roster sidebar (double-click → DM), thread list, chat
   transcript (CSS bubbles), composer, approvals inbox with pending badge,
-  new-agent/new-thread dialogs, **Workflows** button that opens the web UI
-  canvas in the browser (the graph canvas deliberately stays web-only).
+  new-agent/new-thread dialogs. (The 1.x **Workflows** deep-link button was
+  removed in Phase 12 with the graph engine.)
 - Polling (1.5 s) drives messages/activity/approvals — no WebSocket yet.
 
-## 11. Graph workflow engine (1.x, kept)
+## 11. Web UI
 
-The node-graph engine is untouched: `GraphStore` (graphs/nodes/edges),
-`GraphRunner` + `LoopEngine` + executors, triggers/webhooks/scheduler,
-portable `.hivemind.json` import/export, web canvas in `web/dist`.
-Graph `agent` nodes create one-shot daedalus agents per execution — a
-different (deliberate) lifecycle from roster agents. Merging the two
-(graph nodes referencing roster agents) is a future item.
+Static SPA served from `web/dist` by the catch-all route. Phase 12 removed
+the 1.x node-graph workflow engine (GraphStore/GraphRunner/executors,
+triggers/webhooks, canvas pages); the web UI currently serves API-key and
+server-settings pages. Phase 13 rebuilds it as an agent ops dashboard
+(fleet status, threads, approvals, routines).
 
 ## 12. Persistence map
 
 | What | Where |
 |---|---|
-| Graphs/runs/triggers (1.x) | `~/.local/share/hivemind/hivemind.db` |
 | Roster | `~/.local/share/hivemind/agents.db` |
 | Threads/messages | `~/.local/share/hivemind/threads.db` |
 | Approvals | `~/.local/share/hivemind/approvals.db` |

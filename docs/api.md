@@ -35,12 +35,7 @@ Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 6. [Skills](#6-skills)
 7. [Containers](#7-containers)
 8. [Models](#8-models)
-9. [Graphs (workflow engine)](#9-graphs-workflow-engine)
-10. [Runs](#10-runs)
-11. [Triggers & webhooks](#11-triggers--webhooks)
-12. [Workflow import/export](#12-workflow-importexport)
-13. [Projects & files](#13-projects--files)
-14. [WebSocket](#14-websocket)
+9. [Projects & files](#9-projects--files)
 
 ---
 
@@ -49,10 +44,9 @@ Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/health` | `{"status":"ok","service":"hivemind"}` |
-| GET | `/api/node-types` | Node types available to graph workflows |
 | GET | `/api/agent/status` | daedalus agent-engine status |
-| GET | `/api/agent/tools` | Built-in + MCP tools visible to graph agent nodes |
-| GET | `/api/agent/skills` | Skills visible to graph agent nodes |
+| GET | `/api/agent/tools` | Built-in + MCP tools available to roster agents |
+| GET | `/api/agent/skills` | Skills visible to roster agents |
 | GET | `/api/agent/mcp` | MCP server status |
 | GET | `/api/config` | Server config (`workspace_root` — the company share host folder) |
 | PUT | `/api/config` | Update config `{workspace_root}` — **admin scope**; applies to containers created after the change |
@@ -223,63 +217,10 @@ See `docs/containers.md`.
 HiveMind never stores credentials — providers/keys live in the daedalus
 SettingsStore (`~/.local/share/daedalus/daedalus.db`), managed by icarus.
 
-## 9. Graphs (workflow engine)
-
-The node-graph engine (web UI canvas) is unchanged from HiveMind 1.x.
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/graphs` | List graphs |
-| POST | `/api/graphs` | Create `{name, description?}` |
-| GET | `/api/graphs/:id` | Full graph (nodes + edges) |
-| PUT | `/api/graphs/:id` | Rename/re-describe |
-| DELETE | `/api/graphs/:id` | Delete graph + nodes + edges |
-| POST | `/api/graphs/:gid/nodes` | Add node |
-| PUT | `/api/graphs/:gid/nodes/:nid` | Update node (label/config/position) |
-| DELETE | `/api/graphs/:gid/nodes/:nid` | Remove node |
-| POST | `/api/graphs/:gid/edges` | Wire nodes |
-| DELETE | `/api/graphs/:gid/edges/:eid` | Remove edge |
-
-## 10. Runs
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/graphs/:gid/run` | Start a run `{inputs?}` → `{run_id}` |
-| GET | `/api/graphs/:gid/runs/:rid` | Run status + per-node state |
-| GET | `/api/runs/:rid/output` | Event/output stream (polling) |
-| POST | `/api/runs/:rid/cancel` | Cancel at next node boundary |
-
-## 11. Triggers & webhooks
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/triggers` | List all triggers |
-| GET | `/api/graphs/:gid/triggers` | Triggers for a graph |
-| POST | `/api/graphs/:gid/triggers` | Create (webhook or schedule) |
-| PUT | `/api/triggers/:id` | Update/enable/disable |
-| DELETE | `/api/triggers/:id` | Remove |
-| POST | `/api/hooks/:gid/:secret` | Fire a webhook trigger |
-
-Schedule-trigger specs share the format in [§5](#5-routines). The 30 s
-scheduler tick fires both graph triggers and agent routines.
-
-## 12. Workflow import/export
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/graphs/:id/export` | Download portable `.hivemind.json` |
-| POST | `/api/graphs/import` | Import JSON → new graph (ids remapped) |
-
-## 13. Projects & files
+## 9. Projects & files
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/projects` | Known projects |
 | GET | `/api/projects/:name` | Project detail |
 | GET | `/api/fs/browse` | Filesystem browser for the web UI picker |
-
-## 14. WebSocket
-
-| Path | Description |
-|---|---|
-| `/ws/runs` | Run event stream (backfill on connect; live fan-out is a known gap — clients should poll `/api/runs/:rid/output`, see Plan.md §6) |

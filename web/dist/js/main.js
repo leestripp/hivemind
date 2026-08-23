@@ -1,21 +1,19 @@
-// js/main.js — boot + page router. Nodes is the default landing page.
+// js/main.js — boot + page router. Keys is the default landing page.
+// Phase 12: workflow canvas (nodes) and triggers pages removed with the
+// graph engine; Phase 13 rebuilds this UI as an agent ops dashboard.
 import { $ } from './util.js';
-import { initNodes } from './pages/nodes.js';
-import { enterTriggers } from './pages/triggers.js';
 import { enterSettings, initSettings } from './pages/settings.js';
 import { enterKeys, initKeys } from './pages/keys.js';
 
-const PAGES = ['nodes', 'triggers', 'settings', 'keys'];   // sidebar order
+const PAGES = ['keys', 'settings'];   // sidebar order
 
 function showPage(name) {
-  if (!PAGES.includes(name)) name = 'nodes';
+  if (!PAGES.includes(name)) name = 'keys';
   for (const pg of PAGES)
     $('page-' + pg).classList.toggle('hidden', pg !== name);
   document.querySelectorAll('.ab-item').forEach(b =>
     b.classList.toggle('active', b.dataset.page === name));
   if (location.hash !== '#/' + name) history.replaceState(null, '', '#/' + name);
-  if (name === 'nodes')    { /* canvas already live; nothing to refetch */ }
-  if (name === 'triggers') enterTriggers();
   if (name === 'settings') enterSettings();
   if (name === 'keys')     enterKeys();
 }
@@ -23,9 +21,6 @@ function showPage(name) {
 document.querySelectorAll('.ab-item').forEach(b =>
   b.addEventListener('click', () => showPage(b.dataset.page)));
 
-// Boot: node editor state first (canvas must render even when hidden),
-// then land on the page named in the hash — default: Nodes.
-initNodes();
 initKeys();
 initSettings();
-showPage((location.hash || '').replace('#/', '') || 'nodes');
+showPage((location.hash || '').replace('#/', '') || 'keys');

@@ -5,13 +5,7 @@
 # ============================================================================
 
 set(CORE_SOURCES
-    src/Graph.cpp
-    src/GraphStore.cpp
-    src/NodeExecutor.cpp
-    src/ExecutorRegistry.cpp
-    src/LoopEngine.cpp
     src/Schedule.cpp
-    src/GraphRunner.cpp
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp
@@ -26,24 +20,9 @@ set(CORE_SOURCES
 )
 
 set(EXECUTOR_SOURCES
-    src/executors/PromptExecutor.cpp
-    src/executors/AgentExecutor.cpp
-    src/executors/LoopStartExecutor.cpp
-    src/executors/AgentLoopStartExecutor.cpp
-    src/executors/AgentLoopEndExecutor.cpp
-    src/executors/LoopEndExecutor.cpp
-    src/executors/InputExecutor.cpp
-    src/executors/OutputExecutor.cpp
-    src/executors/LogExecutor.cpp
-    src/executors/MergeExecutor.cpp
 )
 
 set(ROUTE_SOURCES
-    include/hivemind/routes/GraphRoutes.cpp
-    include/hivemind/routes/RunRoutes.cpp
-    include/hivemind/routes/WsRunRoutes.cpp
-    include/hivemind/routes/TriggerRoutes.cpp
-    include/hivemind/routes/WorkflowRoutes.cpp
     include/hivemind/routes/StaticRoutes.cpp
     include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp

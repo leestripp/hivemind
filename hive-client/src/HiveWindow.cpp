@@ -294,7 +294,6 @@ void HiveWindow::setup_icons() {
     };
     slot(new_agent_btn_,     "agent-add",  "Create a new agent");
     slot(new_thread_btn_,    "thread-add", "Start a new thread");
-    slot(workflows_btn_,     "workflows",  "Open workflow canvas (web UI)");
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
     slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
     slot(delete_thread_btn_, "trash",      "Delete the selected thread");
@@ -374,11 +373,6 @@ HiveWindow::HiveWindow() {
         sigc::mem_fun(*this, &HiveWindow::on_new_thread));
     approvals_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_approvals));
-    // Phase 7-lite: the node-graph canvas stays in the web UI — the client
-    // deep-links to it instead of reimplementing it.
-    workflows_btn_.signal_clicked().connect([] {
-        Gio::AppInfo::launch_default_for_uri("http://127.0.0.1:8421/");
-    });
     connect_btn_.signal_clicked().connect(
         [this] { maybe_show_connect_dialog(); });
     theme_btn_.signal_clicked().connect(
@@ -390,7 +384,6 @@ HiveWindow::HiveWindow() {
     delete_thread_btn_.set_sensitive(false);  // enabled with a selection
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
-    header_.pack_start(workflows_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);

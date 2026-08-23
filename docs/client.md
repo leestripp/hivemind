@@ -27,8 +27,6 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 - **+ Thread:** pick one or more participants (multi-select = group thread).
 - **Approvals:** header button shows a live pending count; open it to
   approve/deny parked commands inline.
-- **Workflows:** opens the node-graph canvas (web UI) in your browser —
-  the workflow studio stays web-based.
 
 ## Theme & icons
 
