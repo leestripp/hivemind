@@ -71,6 +71,11 @@ private:
     void on_thread_selected();
     void on_send();
     void on_new_agent();
+    void show_agent_dialog(const nlohmann::json* existing);  // nullptr = create
+    void on_edit_agent(const nlohmann::json& agent);
+    void on_delete_agent(const nlohmann::json& agent);
+    void show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
+                         double x, double y);
     void on_new_thread();
     void on_approvals();
     void on_stop();

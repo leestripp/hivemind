@@ -85,6 +85,24 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
     return request("POST", "/api/agents", &body);
 }
 
+nlohmann::json ApiClient::update_agent(const std::string& id,
+                                       const std::string& name,
+                                       const std::string& role,
+                                       const std::string& model,
+                                       const std::string& workspace_mode,
+                                       bool require_approval,
+                                       const std::string& avatar) {
+    nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
+                        {"workspace_mode", workspace_mode},
+                        {"require_approval", require_approval},
+                        {"avatar", avatar}};
+    return request("PATCH", "/api/agents/" + id, &body);
+}
+
+nlohmann::json ApiClient::delete_agent(const std::string& id) {
+    return request("DELETE", "/api/agents/" + id);
+}
+
 nlohmann::json ApiClient::container_status(const std::string& agent_id) {
     return request("GET", "/api/agents/" + agent_id + "/container/status");
 }

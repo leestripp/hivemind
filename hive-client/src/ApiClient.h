@@ -30,6 +30,13 @@ public:
                                 const std::string& workspace_mode,
                                 bool require_approval,
                                 const std::string& avatar = "");       // POST /api/agents
+    nlohmann::json update_agent(const std::string& id,
+                                const std::string& name, const std::string& role,
+                                const std::string& model,
+                                const std::string& workspace_mode,
+                                bool require_approval,
+                                const std::string& avatar);            // PATCH /api/agents/:id
+    nlohmann::json delete_agent(const std::string& id);                // DELETE /api/agents/:id
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
 
     // ── threads / chat ────────────────────────────────────────────────────

@@ -58,6 +58,10 @@ const char* kCss = R"(
   box-shadow: 0 0 0 2px @accent_color;
 }
 .avatar-pick-auto { padding: 8px 10px; font-size: 12px; opacity: 0.8; }
+
+/* Context menus (right-click roster/threads) */
+.hv-menu-item { padding: 6px 12px; min-width: 140px; }
+.hv-menu-item label { margin: 0; }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -803,6 +807,15 @@ void HiveWindow::rebuild_roster() {
         row->set_child(*row_box);
         row->set_data("agent_id", new std::string(a.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
+        // Right-click → agent context menu (Edit / Delete)
+        auto rc = Gtk::GestureClick::create();
+        rc->set_button(0);   // listen to all buttons, filter in the handler
+        rc->signal_pressed().connect(
+            [this, rc, agent = a](int, double x, double y) {
+                if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
+                    show_agent_menu(*rc->get_widget(), agent, x, y);
+            });
+        row->add_controller(rc);
         roster_list_.append(*row);
     }
 }
@@ -976,14 +989,80 @@ void HiveWindow::on_send() {
     });
 }
 
+void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
+                                 double x, double y) {
+    auto* pop = Gtk::make_managed<Gtk::Popover>();
+    pop->set_has_arrow(false);
+    pop->set_autohide(true);
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    box->set_margin(4);
+    auto mk = [&](const char* label, const char* css,
+                  std::function<void()> fn) {
+        auto* b = Gtk::make_managed<Gtk::Button>(label);
+        b->set_has_frame(false);
+        b->add_css_class("hv-menu-item");
+        if (css) b->add_css_class(css);
+        b->signal_clicked().connect([pop, fn = std::move(fn)] {
+            pop->popdown();
+            fn();
+        });
+        box->append(*b);
+    };
+    mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
+    mk("Delete Agent", "destructive-action", [this, agent] { on_delete_agent(agent); });
+    pop->set_child(*box);
+    pop->set_parent(anchor);
+    Gdk::Rectangle rect((int)x, (int)y, 1, 1);
+    pop->set_pointing_to(rect);
+    pop->signal_closed().connect([pop] { pop->unparent(); });
+    pop->popup();
+}
+
+void HiveWindow::on_edit_agent(const nlohmann::json& agent) {
+    show_agent_dialog(&agent);   // dialog reads fields during construction only
+}
+
+void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
+    const std::string id   = agent.value("id", "");
+    const std::string name = agent.value("name", "?");
+    auto dlg = Gtk::AlertDialog::create(
+        "Delete agent \u201C" + name + "\u201D?");
+    dlg->set_detail("This removes the agent from the roster. Its workspace and "
+                    "conversation history are kept on disk.");
+    dlg->set_buttons({"Cancel", "Delete"});
+    dlg->set_cancel_button(0);
+    dlg->set_default_button(0);
+    dlg->choose(*this, [this, id, dlg](Glib::RefPtr<Gio::AsyncResult>& res) {
+        int btn = -1;
+        try { btn = dlg->choose_finish(res); } catch (...) { return; }
+        if (btn != 1 || !alive_) return;
+        run_async([this, id] {
+            api_.delete_agent(id);
+            {
+                std::lock_guard<std::mutex> lk(queue_m_);
+                done_queue_.push_back([this] { if (alive_) refresh_all(); });
+            }
+            dispatcher_.emit();
+        });
+    });
+}
+
 void HiveWindow::on_new_agent() {
+    show_agent_dialog(nullptr);
+}
+
+// Shared create/edit dialog. existing == nullptr → create mode; otherwise the
+// dialog is prefilled from the roster agent and OK PATCHes /api/agents/:id.
+void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
+    const bool editing = existing != nullptr;
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
-    dialog->set_title("New agent");
-    install_dialog_titlebar(*dialog, "New agent");
+    const char* title = editing ? "Edit agent" : "New agent";
+    dialog->set_title(title);
+    install_dialog_titlebar(*dialog, title);
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Create", Gtk::ResponseType::OK);
+    dialog->add_button(editing ? "Save" : "Create", Gtk::ResponseType::OK);
     dialog->set_default_response(Gtk::ResponseType::OK);
 
     auto* grid = Gtk::make_managed<Gtk::Grid>();
@@ -995,6 +1074,10 @@ void HiveWindow::on_new_agent() {
     name->set_placeholder_text("Name (e.g. Nova)");
     auto* role = Gtk::make_managed<Gtk::Entry>();
     role->set_placeholder_text("Role (e.g. research assistant)");
+    if (existing) {
+        name->set_text(existing->value("name", ""));
+        role->set_text(existing->value("role", ""));
+    }
     // Phase 13: provider/model dropdowns from the server's LLMStore —
     // no more hand-typed model names.
     struct ModelEntry { std::string name, provider, label; };
@@ -1037,23 +1120,43 @@ void HiveWindow::on_new_agent() {
             const auto sel = provider->get_selected();
             if (sel < provider_names.size()) refill_models(provider_names[sel]);
         });
+    // Edit mode: preselect the agent's current model + its provider.
+    if (editing) {
+        const std::string cur = existing->value("model", "");
+        if (!cur.empty())
+            for (size_t i = 0; i < provider_names.size(); ++i) {
+                bool here = false;
+                for (auto& me : model_entries)
+                    if (me.name == cur && me.provider == provider_names[i]) { here = true; break; }
+                if (!here) continue;
+                provider->set_selected(i);   // fires the refill above
+                for (size_t j = 0; j < model_names->size(); ++j)
+                    if ((*model_names)[j] == cur) { model->set_selected(j); break; }
+                break;
+            }
+    }
     auto* mode = Gtk::make_managed<Gtk::DropDown>(
         Gtk::StringList::create({"shared (container)", "host (no container)"}));
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
+    if (existing) {
+        mode->set_selected(existing->value("workspace_mode", "shared") == "host" ? 1 : 0);
+        appr->set_active(existing->value("require_approval", false));
+    }
 
     // Avatar picker: grid of the bundled hive-bot SVGs. "Auto" (default)
     // keeps the name-hash palette color. ToggleButton group = radio behavior.
     auto* avatar_grid = Gtk::make_managed<Gtk::Grid>();
     avatar_grid->set_column_spacing(6);
     avatar_grid->set_row_spacing(6);
-    auto* chosen_avatar = new std::string("");   // freed in response lambda
+    auto* chosen_avatar = new std::string(
+        existing ? existing->value("avatar", "") : "");   // freed in response lambda
     Gtk::ToggleButton* group_leader = nullptr;
     auto add_tile = [&](const std::string& val, Gtk::Widget* content, int pos) {
         auto* b = Gtk::make_managed<Gtk::ToggleButton>();
         b->set_child(*content);
         b->add_css_class("avatar-pick");
-        if (!group_leader) { group_leader = b; b->set_active(true); }
-        else b->set_group(*group_leader);
+        if (!group_leader) { group_leader = b; if (chosen_avatar->empty()) b->set_active(true); }
+        else { b->set_group(*group_leader); if (val == *chosen_avatar) b->set_active(true); }
         b->signal_toggled().connect([b, chosen_avatar, val] {
             if (b->get_active()) *chosen_avatar = val;
         });
@@ -1087,7 +1190,8 @@ void HiveWindow::on_new_agent() {
     grid->attach(*appr, 1, 6);
 
     dialog->get_content_area()->append(*grid);
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar](int r) {
+    const std::string edit_id = editing ? existing->value("id", "") : "";
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar, edit_id](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -1098,9 +1202,12 @@ void HiveWindow::on_new_agent() {
                 delete chosen_avatar;
                 delete model_names;
                 run_async([this, n, r2 = role->get_text().raw(),
-                           m, ws, av,
+                           m, ws, av, edit_id,
                            ap = appr->get_active()] {
-                    api_.create_agent(n, r2, m, ws, ap, av);
+                    if (edit_id.empty())
+                        api_.create_agent(n, r2, m, ws, ap, av);
+                    else
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });
