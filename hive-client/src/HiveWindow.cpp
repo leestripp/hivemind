@@ -372,7 +372,9 @@ HiveWindow::HiveWindow() {
     header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
     header_.pack_end(approvals_btn_);
-    root_.append(header_);
+    // CSD: install our HeaderBar AS the window titlebar so the compositor
+    // doesn't draw a second (server-side) title bar above it.
+    set_titlebar(header_);
 
     // ── sidebar ───────────────────────────────────────────────────────────
     roster_label_.add_css_class("hv-section");
