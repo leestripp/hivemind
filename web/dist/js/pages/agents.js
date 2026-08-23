@@ -71,7 +71,9 @@ async function refresh() {
       card.className = 'agent-card status-' + status;
       card.innerHTML = `
         <div class="agent-top">
-          <div class="agent-avatar">${hexBot(PALETTE[paletteIndex(a.name)], 44)}</div>
+          <div class="agent-avatar">${a.avatar
+            ? `<img src="/avatars/${esc(a.avatar)}.svg" width="44" height="44" alt="">`
+            : hexBot(PALETTE[paletteIndex(a.name)], 44)}</div>
           <div class="agent-id-block">
             <div class="agent-name">${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>

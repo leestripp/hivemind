@@ -50,6 +50,14 @@ const char* kCss = R"(
 .hv-name-4 { color: #9141ac; }
 .hv-name-5 { color: #e01b24; }
 .hv-name-user { color: @accent_color; }
+
+/* Avatar picker grid (New Agent dialog) */
+.avatar-pick { padding: 4px; border-radius: 10px; }
+.avatar-pick:checked {
+  background: alpha(@accent_color, 0.18);
+  box-shadow: 0 0 0 2px @accent_color;
+}
+.avatar-pick-auto { padding: 8px 10px; font-size: 12px; opacity: 0.8; }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -252,10 +260,13 @@ constexpr int AVATAR_LOGICAL = 64;    // bubble avatar edge, logical px
 constexpr int AVATAR_SUPERSAMPLE = 2; // HiDPI oversampling factor
 
 Gtk::Widget* make_avatar(const std::string& name, bool is_user,
-                         int logical = AVATAR_LOGICAL) {
+                         int logical = AVATAR_LOGICAL,
+                         const std::string& avatar = "") {
+    // Chosen avatar wins; "" = auto palette hash of the agent's name.
     const std::string res = is_user
         ? "user"
-        : "avatar-" + std::to_string(palette_index(name));
+        : (avatar.empty() ? "avatar-" + std::to_string(palette_index(name))
+                          : avatar);
     auto* img = Gtk::make_managed<Gtk::Image>();
     img->set(avatar_pixbuf(res, logical * AVATAR_SUPERSAMPLE));
     img->set_pixel_size(logical);
@@ -773,7 +784,8 @@ void HiveWindow::rebuild_roster() {
         auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
         row_box->set_margin_top(4);
         row_box->set_margin_bottom(4);
-        row_box->append(*make_avatar(a.value("name", "?"), false, 40));
+        row_box->append(*make_avatar(a.value("name", "?"), false, 40,
+                                     a.value("avatar", "")));
         auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
         box->set_valign(Gtk::Align::CENTER);
         auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
@@ -858,7 +870,15 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
     // Bubble row: avatar | (name + time / content)
     auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     row->add_css_class(sender_kind == "user" ? "hv-msg-user" : "hv-msg-agent");
-    row->append(*make_avatar(sender_label, sender_kind == "user"));
+    std::string sender_avatar;
+    if (sender_kind == "agent")
+        for (auto& a : agents_)
+            if (a.value("name", "") == sender_label) {
+                sender_avatar = a.value("avatar", "");
+                break;
+            }
+    row->append(*make_avatar(sender_label, sender_kind == "user",
+                             AVATAR_LOGICAL, sender_avatar));
 
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
     box->set_hexpand(true);
@@ -1021,6 +1041,36 @@ void HiveWindow::on_new_agent() {
         Gtk::StringList::create({"shared (container)", "host (no container)"}));
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
 
+    // Avatar picker: grid of the bundled hive-bot SVGs. "Auto" (default)
+    // keeps the name-hash palette color. ToggleButton group = radio behavior.
+    auto* avatar_grid = Gtk::make_managed<Gtk::Grid>();
+    avatar_grid->set_column_spacing(6);
+    avatar_grid->set_row_spacing(6);
+    auto* chosen_avatar = new std::string("");   // freed in response lambda
+    Gtk::ToggleButton* group_leader = nullptr;
+    auto add_tile = [&](const std::string& val, Gtk::Widget* content, int pos) {
+        auto* b = Gtk::make_managed<Gtk::ToggleButton>();
+        b->set_child(*content);
+        b->add_css_class("avatar-pick");
+        if (!group_leader) { group_leader = b; b->set_active(true); }
+        else b->set_group(*group_leader);
+        b->signal_toggled().connect([b, chosen_avatar, val] {
+            if (b->get_active()) *chosen_avatar = val;
+        });
+        avatar_grid->attach(*b, pos % 4, pos / 4);
+    };
+    {
+        auto* lbl = Gtk::make_managed<Gtk::Label>("Auto");
+        lbl->add_css_class("avatar-pick-auto");
+        add_tile("", lbl, 0);
+    }
+    for (int i = 0; i < 6; ++i) {
+        auto* img = Gtk::make_managed<Gtk::Image>();
+        img->set(avatar_pixbuf("avatar-" + std::to_string(i), 64));
+        img->set_pixel_size(32);
+        add_tile("avatar-" + std::to_string(i), img, i + 1);
+    }
+
     auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(label);
         l->set_halign(Gtk::Align::END);
@@ -1033,21 +1083,24 @@ void HiveWindow::on_new_agent() {
     add_row("Provider", provider, 2);
     add_row("Model", model, 3);
     add_row("Workspace", mode, 4);
-    grid->attach(*appr, 1, 5);
+    add_row("Avatar", avatar_grid, 5);
+    grid->attach(*appr, 1, 6);
 
     dialog->get_content_area()->append(*grid);
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
                 std::string ws = mode->get_selected() == 1 ? "host" : "shared";
                 const auto msel = model->get_selected();
                 std::string m = msel < model_names->size() ? (*model_names)[msel] : "";
+                const std::string av = *chosen_avatar;
+                delete chosen_avatar;
                 delete model_names;
                 run_async([this, n, r2 = role->get_text().raw(),
-                           m, ws,
+                           m, ws, av,
                            ap = appr->get_active()] {
-                    api_.create_agent(n, r2, m, ws, ap);
+                    api_.create_agent(n, r2, m, ws, ap, av);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });
@@ -1056,6 +1109,7 @@ void HiveWindow::on_new_agent() {
                 });
             }
         }
+        if (r != (int)Gtk::ResponseType::OK) delete chosen_avatar;
         dialog->destroy();
     });
     dialog->present();

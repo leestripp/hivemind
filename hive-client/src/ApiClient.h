@@ -28,7 +28,8 @@ public:
     nlohmann::json create_agent(const std::string& name, const std::string& role,
                                 const std::string& model,
                                 const std::string& workspace_mode,
-                                bool require_approval);              // POST /api/agents
+                                bool require_approval,
+                                const std::string& avatar = "");       // POST /api/agents
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
 
     // ── threads / chat ────────────────────────────────────────────────────

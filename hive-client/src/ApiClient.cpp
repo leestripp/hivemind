@@ -76,10 +76,12 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& role,
                                        const std::string& model,
                                        const std::string& workspace_mode,
-                                       bool require_approval) {
+                                       bool require_approval,
+                                       const std::string& avatar) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
-                        {"require_approval", require_approval}};
+                        {"require_approval", require_approval},
+                        {"avatar", avatar}};
     return request("POST", "/api/agents", &body);
 }
 
