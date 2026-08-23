@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind — Node Graph</title>
-<link rel="stylesheet" href="css/base.css?v=20260808c">
-  <link rel="stylesheet" href="css/nodes.css?v=20260808c">
-  <link rel="stylesheet" href="css/triggers.css?v=20260808c">
-  <link rel="stylesheet" href="css/settings.css?v=20260808c">
+<link rel="stylesheet" href="css/base.css?v=20260823a">
+  <link rel="stylesheet" href="css/nodes.css?v=20260823a">
+  <link rel="stylesheet" href="css/triggers.css?v=20260823a">
+  <link rel="stylesheet" href="css/settings.css?v=20260823a">
 </head>
 <body>
 <div class="app">
@@ -43,6 +43,12 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="3.2"/>
         <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>
+      </svg>
+    </button>
+    <button class="ab-item" data-page="keys" title="API Keys">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="8" cy="15" r="4.2"/>
+        <path d="M11.3 11.7 20 3M15.5 6l2.5 2.5M12.8 8.7l2.4 2.4"/>
       </svg>
     </button>
     <div class="ab-spacer"></div>
@@ -196,6 +202,54 @@
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>
     </div>
   </div>
+  <div id="page-keys" class="page hidden">
+    <div class="page-body">
+      <h2>🔑 API Keys</h2>
+      <p class="muted">
+        Every API call needs a bearer key. Mint scoped keys here — the raw key
+        is shown <b>once</b>. The master key (printed at first server start)
+        cannot be revoked from here.
+      </p>
+
+      <section class="settings-section">
+        <h3>New key</h3>
+        <div class="trig-form-row">
+          <label>Name</label>
+          <input type="text" id="keys-name" class="btn" placeholder="my-laptop"
+                 autocomplete="off" spellcheck="false">
+        </div>
+        <div class="trig-form-row">
+          <label>Scopes</label>
+          <select id="keys-scopes" class="btn">
+            <option value="agent">agent — full daily use (default)</option>
+            <option value="read">read — GET only</option>
+            <option value="admin">admin — keys + debug exec</option>
+          </select>
+        </div>
+        <div class="trig-form-row">
+          <label></label>
+          <button class="btn primary" id="keys-add">Create key</button>
+        </div>
+        <div class="insp-help" id="keys-err"></div>
+      </section>
+
+      <section class="settings-section hidden" id="keys-new">
+        <h3>⚠ New key — copy it now, it is never shown again</h3>
+        <div class="trig-form-row">
+          <code id="keys-new-value" style="user-select:all;word-break:break-all"></code>
+        </div>
+        <div class="browse-actions">
+          <button class="btn" id="keys-dismiss">Dismiss</button>
+          <button class="btn primary" id="keys-copy">Copy</button>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h3>Existing keys</h3>
+        <div id="keys-list" class="trig-rows"></div>
+      </section>
+    </div>
+  </div>
   </div><!-- /content -->
 </div>
 
@@ -249,6 +303,6 @@
     </div>
   </div>
 
-<script type="module" src="js/main.js?v=20260808c"></script>
+<script type="module" src="js/main.js?v=20260823a"></script>
 </body>
 </html>

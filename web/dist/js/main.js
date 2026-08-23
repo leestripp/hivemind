@@ -3,8 +3,9 @@ import { $ } from './util.js';
 import { initNodes } from './pages/nodes.js';
 import { enterTriggers } from './pages/triggers.js';
 import { enterSettings } from './pages/settings.js';
+import { enterKeys, initKeys } from './pages/keys.js';
 
-const PAGES = ['nodes', 'triggers', 'settings'];   // sidebar order
+const PAGES = ['nodes', 'triggers', 'settings', 'keys'];   // sidebar order
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'nodes';
@@ -16,6 +17,7 @@ function showPage(name) {
   if (name === 'nodes')    { /* canvas already live; nothing to refetch */ }
   if (name === 'triggers') enterTriggers();
   if (name === 'settings') enterSettings();
+  if (name === 'keys')     enterKeys();
 }
 
 document.querySelectorAll('.ab-item').forEach(b =>
@@ -24,4 +26,5 @@ document.querySelectorAll('.ab-item').forEach(b =>
 // Boot: node editor state first (canvas must render even when hidden),
 // then land on the page named in the hash — default: Nodes.
 initNodes();
+initKeys();
 showPage((location.hash || '').replace('#/', '') || 'nodes');
