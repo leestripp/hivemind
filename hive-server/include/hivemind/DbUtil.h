@@ -40,6 +40,15 @@ inline std::string iso_now() {
     return buf;
 }
 
+/// UTC ISO-8601 `seconds` in the past (nudge/eviction thresholds).
+inline std::string iso_ago(int64_t seconds) {
+    auto t = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now() - std::chrono::seconds(seconds));
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+    return buf;
+}
+
 /// UTC ISO-8601 with microsecond suffix — messages posted in the same
 /// second still sort in insertion order (ThreadStore).
 inline std::string iso_now_us() {

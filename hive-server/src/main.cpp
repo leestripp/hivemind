@@ -20,6 +20,7 @@
 
 #include "hivemind/Settings.h"
 #include "hivemind/Schedule.h"
+#include "hivemind/DbUtil.h"
 
 #include "hivemind/routes/StaticRoutes.h"
 #include "hivemind/routes/ModelRoutes.h"
@@ -213,7 +214,7 @@ int main(int argc, char* argv[]) {
     // disable themselves after firing. The actual run goes through the
     // same start_graph_run() path as the REST Run button and webhooks.
     std::jthread scheduler{[&routine_store, &chat_service,
-                            &agent_registry](std::stop_token st) {
+                            &agent_registry, &thread_store](std::stop_token st) {
         while (!st.stop_requested()) {
             for (int i = 0; i < 30 && !st.stop_requested(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -248,6 +249,27 @@ int main(int argc, char* argv[]) {
                 }
             } catch (const std::exception& e) {
                 std::cerr << "[scheduler] routine tick failed: " << e.what() << "\n";
+            }
+            // ── Proactive nudges (gap analysis): a user message that sat
+            // unanswered for 15+ minutes means the turn was dropped (LLM
+            // error, crash, restart). Post ONE system nudge — the nudge
+            // itself becomes the latest message, so the thread drops out
+            // of the query until the user speaks again. No state table.
+            try {
+                for (auto& t : thread_store.threads_awaiting_agent(
+                         hivemind::db::iso_ago(15 * 60))) {
+                    if (chat_service.busy(t.id)) continue;   // turn in flight
+                    const std::string msg =
+                        "[nudge] The user message above has been waiting "
+                        "over 15 minutes without a reply. If your previous "
+                        "turn was interrupted, please continue now; "
+                        "otherwise briefly acknowledge.";
+                    chat_service.post_nudge(t.id, msg);
+                    std::cout << "[scheduler] nudged thread " << t.id
+                              << " (" << t.title << ")\n";
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[scheduler] nudge tick failed: " << e.what() << "\n";
             }
         }
     }};

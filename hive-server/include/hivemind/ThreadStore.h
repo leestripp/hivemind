@@ -58,6 +58,12 @@ public:
     bool add_participant(const std::string& thread_id,
                          const std::string& agent_id);
 
+    /// Threads whose LATEST message is from the user and older than
+    /// `older_than_iso`, with at least one agent participant — i.e. the
+    /// agent never answered (dropped/failed turn). Agent/system replies
+    /// and fresh messages exclude the thread (proactive nudges).
+    std::vector<Thread> threads_awaiting_agent(const std::string& older_than_iso);
+
     /// Append a message; returns its id.
     std::string add_message(const std::string& thread_id,
                             const std::string& sender_kind,

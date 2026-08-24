@@ -199,6 +199,15 @@ public:
     std::string post_user_message(const std::string& thread_id,
                                   const std::string& body);
 
+    /// Proactive nudge (gap analysis): post a sender_kind="system" message
+    /// into a thread and fan it in to agent participants like a user
+    /// message. Used by the scheduler when a thread's latest message is an
+    /// unanswered user message — the system message itself then excludes
+    /// the thread from further nudges until the user speaks again.
+    /// Returns the message id; throws if the thread does not exist.
+    std::string post_nudge(const std::string& thread_id,
+                           const std::string& body);
+
     /// Snapshot of in-progress (and just-finished) turns for a thread.
     std::vector<LiveTurn> activity(const std::string& thread_id);
 

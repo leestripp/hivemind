@@ -223,6 +223,44 @@ std::vector<Thread> ThreadStore::list_threads() {
     return out;
 }
 
+std::vector<Thread> ThreadStore::threads_awaiting_agent(
+    const std::string& older_than_iso) {
+    sqlite3* db = open_conn();
+    std::vector<Thread> out;
+    sqlite3_stmt* st = nullptr;
+    // Latest message per thread (created_at + rowid tiebreak) must be a
+    // user message older than the threshold; thread needs a participant.
+    // The nudge itself is posted as sender_kind 'system', so a nudged
+    // thread drops out of this set until the next user message — one
+    // nudge per unanswered message, no state table needed.
+    const char* sql =
+        "SELECT t.id, t.title, t.kind, t.created_at"
+        " FROM threads t"
+        " WHERE EXISTS (SELECT 1 FROM thread_participants p"
+        "              WHERE p.thread_id = t.id)"
+        "   AND (SELECT m.sender_kind FROM messages m"
+        "        WHERE m.thread_id = t.id"
+        "        ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) = 'user'"
+        "   AND (SELECT m.created_at FROM messages m"
+        "        WHERE m.thread_id = t.id"
+        "        ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) < ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, older_than_iso.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            Thread t;
+            t.id = col_text(st, 0);
+            t.title = col_text(st, 1);
+            t.kind = col_text(st, 2);
+            t.created_at = col_text(st, 3);
+            out.push_back(std::move(t));
+        }
+        sqlite3_finalize(st);
+    }
+    for (auto& t : out) t.agent_ids = participants_of(db, t.id);
+    sqlite3_close(db);
+    return out;
+}
+
 bool ThreadStore::add_participant(const std::string& thread_id,
                                   const std::string& agent_id) {
     sqlite3* db = open_conn();

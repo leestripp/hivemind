@@ -733,6 +733,25 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     return msg_id;
 }
 
+std::string ChatService::post_nudge(const std::string& thread_id,
+                                    const std::string& body) {
+    if (stopping_)
+        throw std::invalid_argument("server is shutting down");
+    auto thread = threads_.get_thread(thread_id);
+    if (!thread)
+        throw std::invalid_argument("thread not found: " + thread_id);
+
+    std::string msg_id =
+        threads_.add_message(thread_id, "system", "hivemind", body);
+
+    for (const auto& agent_id : thread->agent_ids) {
+        auto agent = agents_.get_agent(agent_id);
+        if (!agent) continue;
+        fan_in(thread_id, *agent, "HiveMind", body, /*generation=*/0);
+    }
+    return msg_id;
+}
+
 void ChatService::cancel_thread(const std::string& thread_id) {
     std::vector<std::string> agent_ids;
     {
