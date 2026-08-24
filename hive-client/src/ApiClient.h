@@ -62,7 +62,14 @@ public:
     nlohmann::json list_messages(const std::string& thread_id,
                                  const std::string& after_id = "");
     nlohmann::json post_message(const std::string& thread_id,
-                                const std::string& body);
+                                const std::string& body,
+                                const nlohmann::json& attachments
+                                    = nlohmann::json::array());
+    /// Phase 18: raw-binary upload → <workspace>/attachments/<thread>/.
+    /// Returns the server's attachment metadata {name, path, host_path, size}.
+    nlohmann::json upload_attachment(const std::string& thread_id,
+                                     const std::string& filename,
+                                     const std::string& bytes);
     nlohmann::json activity(const std::string& thread_id);           // GET …/activity
     void cancel_thread(const std::string& thread_id);      // POST …/cancel
     void delete_thread(const std::string& thread_id);      // DELETE …/:id

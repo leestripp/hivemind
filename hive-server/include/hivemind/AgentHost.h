@@ -201,8 +201,13 @@ public:
     /// Record a user message and kick off a background turn for every agent
     /// participant of the thread. Returns the user message id.
     /// Throws std::invalid_argument if the thread does not exist.
+    /// `attachments_json` (Phase 18): JSON array of {"name","path",...}
+    /// where path is the container-visible /workspace/... location — the
+    /// agent prompt gets an explicit reference list so the LLM knows the
+    /// files exist and where to read them.
     std::string post_user_message(const std::string& thread_id,
-                                  const std::string& body);
+                                  const std::string& body,
+                                  const std::string& attachments_json = "[]");
 
     /// Proactive nudge (gap analysis): post a sender_kind="system" message
     /// into a thread and fan it in to agent participants like a user

@@ -7,8 +7,9 @@ import { enterModels, initModels } from './pages/models.js';
 import { enterTasks, initTasks } from './pages/tasks.js';
 import { enterSkills, initSkills } from './pages/skills.js';
 import { enterSecrets, initSecrets } from './pages/secrets.js';
+import { enterFiles, initFiles } from './pages/files.js';
 
-const PAGES = ['agents', 'tasks', 'skills', 'secrets', 'models', 'keys', 'settings'];   // sidebar order
+const PAGES = ['agents', 'tasks', 'files', 'skills', 'secrets', 'models', 'keys', 'settings'];   // sidebar order
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'agents';
@@ -21,6 +22,7 @@ function showPage(name) {
   if (name === 'models')   enterModels();
   if (name === 'tasks')    enterTasks();
   if (name === 'skills')   enterSkills();
+  if (name === 'files')    enterFiles();
   if (name === 'secrets')  enterSecrets();
   if (name === 'settings') enterSettings();
   if (name === 'keys')     enterKeys();
@@ -34,6 +36,7 @@ initKeys();
 initModels();
 initTasks();
 initSkills();
+initFiles();
 initSecrets();
 initSettings();
 showPage((location.hash || '').replace('#/', '') || 'agents');

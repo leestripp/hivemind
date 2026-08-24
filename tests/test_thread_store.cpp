@@ -68,6 +68,20 @@ int main() {
         assert(t2 && t2->agent_ids.size() == 2);
     }
 
+    // ── Phase 18: attachments round-trip ─────────────────────────────────
+    const std::string atts = R"([{"name":"r.pdf","path":"/workspace/attachments/)"
+        + dm.id + R"(/r.pdf","host_path":"/tmp/ws/attachments/)"
+        + dm.id + R"(/r.pdf","size":1234}])";
+    auto m4 = store.add_message(dm.id, "user", "", "see attached", atts);
+    auto with_att = store.list_messages(dm.id);
+    assert(with_att.size() == 4);
+    assert(with_att[3].attachments_json == atts);
+    // default is "[]" and survives the after_id path too
+    assert(with_att[0].attachments_json == "[]");
+    auto tail = store.list_messages(dm.id, m3);
+    assert(tail.size() == 1 && tail[0].id == m4);
+    assert(tail[0].attachments_json == atts);
+
     // ── delete cascades ───────────────────────────────────────────────────
     assert(store.delete_thread(dm.id));
     assert(!store.get_thread(dm.id));

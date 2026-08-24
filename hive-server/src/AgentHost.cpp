@@ -590,6 +590,29 @@ void AgentRegistry::evict(const std::string& agent_id) {
 }
 
 /// Phase 8: evict hosts idle longer than `timeout` (and not busy).
+namespace {
+
+/// Phase 18: render a message's attachments as an explicit file-reference
+/// block for the LLM (the agent's container sees the shared workspace at
+/// /workspace). Empty when the message has no attachments.
+std::string attachment_refs(const std::string& attachments_json) {
+    if (attachments_json.empty() || attachments_json == "[]") return "";
+    auto atts = nlohmann::json::parse(attachments_json, nullptr, false);
+    if (!atts.is_array() || atts.empty()) return "";
+    std::string out = "\n\n[Attached files in the shared workspace:";
+    bool any = false;
+    for (auto& a : atts) {
+        const std::string p = a.value("path", "");
+        if (p.empty()) continue;
+        out += "\n- " + p;
+        any = true;
+    }
+    if (!any) return "";
+    return out + "]\n";
+}
+
+} // namespace
+
 /// Eviction persists history via shutdown() — the host lazily re-creates
 /// on next use, so idle eviction is pure memory relief.
 void AgentRegistry::evict_idle(std::chrono::steady_clock::duration timeout) {
@@ -647,6 +670,7 @@ void ChatService::fan_in(const std::string& thread_id,
                 } else who = "system";
                 std::string b = m.body.size() > 1500
                     ? m.body.substr(0, 1500) + "\u2026" : m.body;
+                b += attachment_refs(m.attachments_json);
                 std::string entry = who + ": " + b + "\n\n";
                 if (entry.size() > budget) break;
                 budget -= entry.size();
@@ -721,19 +745,25 @@ void ChatService::fan_in(const std::string& thread_id,
 }
 
 std::string ChatService::post_user_message(const std::string& thread_id,
-                                           const std::string& body) {
+                                           const std::string& body,
+                                           const std::string& attachments_json) {
     if (stopping_)
         throw std::invalid_argument("server is shutting down");
     auto thread = threads_.get_thread(thread_id);
     if (!thread)
         throw std::invalid_argument("thread not found: " + thread_id);
 
-    std::string msg_id = threads_.add_message(thread_id, "user", "", body);
+    std::string msg_id =
+        threads_.add_message(thread_id, "user", "", body, attachments_json);
+
+    // The LLM gets an explicit reference list; the stored body stays clean
+    // (attachments render as chips in the client from attachments_json).
+    const std::string prompt_body = body + attachment_refs(attachments_json);
 
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;  // participant deleted from roster — skip
-        fan_in(thread_id, *agent, "You", body, /*generation=*/0);
+        fan_in(thread_id, *agent, "You", prompt_body, /*generation=*/0);
     }
 
     return msg_id;

@@ -461,8 +461,28 @@ HiveWindow::HiveWindow() {
     entry_.signal_activate().connect([this] { on_send(); });
     send_btn_.signal_clicked().connect([this] { on_send(); });
     send_btn_.add_css_class("suggested-action");
+    // Phase 18: 📎 attach files (uploaded into the shared workspace).
+    attach_btn_.set_label("📎");
+    attach_btn_.set_tooltip_text(
+        "Attach a file — saved into the shared workspace where agents can read it");
+    attach_btn_.signal_clicked().connect([this] { on_attach(); });
+    attach_clear_btn_.set_label("✕");
+    attach_clear_btn_.set_tooltip_text("Drop pending attachments");
+    attach_clear_btn_.add_css_class("flat");
+    attach_clear_btn_.signal_clicked().connect([this] {
+        pending_attachments_ = nlohmann::json::array();
+        update_attach_row();
+    });
+    attach_label_.set_halign(Gtk::Align::START);
+    attach_label_.set_hexpand(true);
+    attach_label_.set_ellipsize(Pango::EllipsizeMode::END);
+    attach_row_.set_margin_start(6);
+    attach_row_.append(attach_label_);
+    attach_row_.append(attach_clear_btn_);
+    attach_row_.set_visible(false);
     composer_.set_margin(6);
     composer_.set_spacing(6);
+    composer_.append(attach_btn_);
     composer_.append(entry_);
     composer_.append(send_btn_);
 
@@ -473,6 +493,7 @@ HiveWindow::HiveWindow() {
     chat_box_.append(thread_title_);
     chat_box_.append(status_label_);
     chat_box_.append(chat_scroll_);
+    chat_box_.append(attach_row_);
     chat_box_.append(composer_);
 
     paned_.set_start_child(sidebar_);
@@ -754,7 +775,8 @@ void HiveWindow::poll_chat() {
                             ? agent_name_of(agents_, m.value("sender_id", ""))
                             : (m.value("sender_kind", "") == "user" ? "You" : "system"),
                         m.value("body", ""),
-                        m.value("created_at", ""));
+                        m.value("created_at", ""),
+                        m.value("attachments", json::array()));
                     last_message_id_ = m.value("id", last_message_id_);
                 }
                 if (!arr.empty()) {
@@ -960,11 +982,13 @@ void HiveWindow::update_thread_title() {
 void HiveWindow::append_message_bubble(const std::string& sender_kind,
                                        const std::string& sender_label,
                                        const std::string& body,
-                                       const std::string& created_at) {
+                                       const std::string& created_at,
+                                       const nlohmann::json& attachments) {
     rendered_.push_back({{"sender_kind", sender_kind},
                          {"sender_label", sender_label},
                          {"body", body},
-                         {"created_at", created_at}});
+                         {"created_at", created_at},
+                         {"attachments", attachments}});
     // Raw transcript to debug log when HIVEMIND_DEBUG=1
     static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
     if (debug) {
@@ -1041,6 +1065,25 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
         }
         box->append(*text);
     }
+
+    // Phase 18: attachment chips — click opens the local copy (the
+    // workspace is a host folder; agents see it at /workspace).
+    if (attachments.is_array() && !attachments.empty()) {
+        auto* chips = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+        for (auto& a : attachments) {
+            const std::string name = a.value("name", "file");
+            const std::string host = a.value("host_path", "");
+            auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
+            chip->add_css_class("flat");
+            chip->set_tooltip_text(host.empty() ? name : host);
+            if (!host.empty())
+                chip->signal_clicked().connect([host] {
+                    Gio::AppInfo::launch_default_for_uri("file://" + host);
+                });
+            chips->append(*chip);
+        }
+        box->append(*chips);
+    }
     row->append(*box);
     messages_box_.append(*row);
 }
@@ -1093,16 +1136,65 @@ void HiveWindow::on_thread_selected() {
 
 void HiveWindow::on_send() {
     std::string text = entry_.get_text();
-    if (text.empty() || current_thread_.empty()) return;
+    if (current_thread_.empty()) return;
+    if (text.empty() && pending_attachments_.empty()) return;
     entry_.set_text("");
+    json atts = pending_attachments_;            // take
+    pending_attachments_ = json::array();
+    update_attach_row();
     std::string tid = current_thread_;
-    run_async([this, tid, text] {
-        api_.post_message(tid, text);
+    run_async([this, tid, text, atts] {
+        api_.post_message(tid, text, atts);
         {
             std::lock_guard<std::mutex> lk(queue_m_);
             done_queue_.push_back([this] { if (alive_) poll_chat(); });
         }
         dispatcher_.emit();
+    });
+}
+
+void HiveWindow::update_attach_row() {
+    const auto n = pending_attachments_.size();
+    if (n == 0) { attach_row_.set_visible(false); return; }
+    std::string s = "📎 " + pending_attachments_[0].value("name", "file");
+    if (n > 1) s += "  (+" + std::to_string(n - 1) + " more)";
+    attach_label_.set_label(s);
+    attach_row_.set_visible(true);
+}
+
+void HiveWindow::on_attach() {
+    if (current_thread_.empty()) return;
+    auto dialog = Gtk::FileDialog::create();   // refcounted — kept by capture
+    dialog->set_title("Attach a file");
+    dialog->open(*this, [this, dialog](Glib::RefPtr<Gio::AsyncResult>& result) {
+        Glib::RefPtr<Gio::File> file;
+        try { file = dialog->open_finish(result); }
+        catch (...) { return; }                // user cancelled
+        if (!file) return;
+        const std::string path = file->get_path();
+        const std::string tid = current_thread_;
+        if (path.empty() || tid.empty()) return;
+        run_async([this, tid, path] {
+            std::ifstream in(path, std::ios::binary);
+            std::string bytes{std::istreambuf_iterator<char>(in),
+                              std::istreambuf_iterator<char>()};
+            if (bytes.empty())
+                throw std::runtime_error("cannot read (or empty): " + path);
+            namespace fs = std::filesystem;
+            auto meta = api_.upload_attachment(
+                tid, fs::path(path).filename().string(), bytes);
+            {
+                std::lock_guard<std::mutex> lk(queue_m_);
+                done_queue_.push_back([this, meta] {
+                    if (!alive_) return;
+                    pending_attachments_.push_back(meta);
+                    update_attach_row();
+                    set_status("Attached " + meta.value("name", "file") +
+                               " — send a message to deliver it");
+                });
+            }
+            dispatcher_.emit();
+        });
     });
 }
 

@@ -69,6 +69,8 @@ private:
     // ── UI callbacks ──────────────────────────────────────────────────────
     void on_agent_selected();
     void on_thread_selected();
+    void on_attach();   // Phase 18: pick + upload files
+
     void on_send();
     void on_new_agent();
     void show_agent_dialog(const nlohmann::json* existing);  // nullptr = create
@@ -97,7 +99,9 @@ private:
     void append_message_bubble(const std::string& sender_kind,
                                const std::string& sender_label,
                                const std::string& body,
-                               const std::string& created_at = "");
+                               const std::string& created_at = "",
+                               const nlohmann::json& attachments
+                                   = nlohmann::json::array());
     void set_status(const std::string& text);
 
     ApiClient api_;
@@ -153,8 +157,14 @@ private:
     Gtk::ScrolledWindow chat_scroll_;
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
+    Gtk::Button attach_btn_;             // Phase 18: 📎 attach files
     Gtk::Entry entry_;
     Gtk::Button send_btn_;
+    Gtk::Box attach_row_{Gtk::Orientation::HORIZONTAL, 6};
+    Gtk::Label attach_label_;            // pending-attachment summary line
+    Gtk::Button attach_clear_btn_;       // drops pending attachments
+    nlohmann::json pending_attachments_ = nlohmann::json::array();
+    void update_attach_row();
 
     sigc::connection poll_timer_;
 

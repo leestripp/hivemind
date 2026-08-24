@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <stdexcept>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -35,12 +36,13 @@ inline void exec_sql(sqlite3* db, const char* sql) {
 
 ThreadMessage row_to_message(sqlite3_stmt* st) {
     ThreadMessage m;
-    m.id          = col_text(st, 0);
-    m.thread_id   = col_text(st, 1);
-    m.sender_kind = col_text(st, 2);
-    m.sender_id   = col_text(st, 3);
-    m.body        = col_text(st, 4);
-    m.created_at  = col_text(st, 5);
+    m.id               = col_text(st, 0);
+    m.thread_id        = col_text(st, 1);
+    m.sender_kind      = col_text(st, 2);
+    m.sender_id        = col_text(st, 3);
+    m.body             = col_text(st, 4);
+    m.attachments_json = col_text(st, 5);
+    m.created_at       = col_text(st, 6);
     return m;
 }
 
@@ -97,6 +99,23 @@ void ThreadStore::ensure_schema() {
     exec_sql(db,
         "CREATE INDEX IF NOT EXISTS idx_messages_thread"
         " ON messages(thread_id, created_at)");
+    // Phase 18 migration: attachments column on pre-existing DBs.
+    bool has_att = false;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(messages)",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* n = col_text(st, 1);
+            if (n && std::string_view{n} == "attachments_json") {
+                has_att = true; break;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    if (!has_att)
+        exec_sql(db,
+            "ALTER TABLE messages ADD COLUMN attachments_json"
+            " TEXT NOT NULL DEFAULT '[]'");
     sqlite3_close(db);
 }
 
@@ -329,14 +348,16 @@ bool ThreadStore::delete_thread(const std::string& id) {
 std::string ThreadStore::add_message(const std::string& thread_id,
                                      const std::string& sender_kind,
                                      const std::string& sender_id,
-                                     const std::string& body) {
+                                     const std::string& body,
+                                     const std::string& attachments_json) {
     std::string id = uuid_v4();
     std::string now = iso_now();
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "INSERT INTO messages (id, thread_id, sender_kind, sender_id, body,"
-        "                     created_at) VALUES (?,?,?,?,?,?)";
+        "                     attachments_json, created_at)"
+        " VALUES (?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -347,7 +368,8 @@ std::string ThreadStore::add_message(const std::string& thread_id,
     bind_text(st, 3, sender_kind);
     bind_text(st, 4, sender_id);
     bind_text(st, 5, body);
-    bind_text(st, 6, now);
+    bind_text(st, 6, attachments_json.empty() ? "[]" : attachments_json);
+    bind_text(st, 7, now);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -374,9 +396,11 @@ std::vector<ThreadMessage> ThreadStore::list_messages(const std::string& thread_
 
     sqlite3_stmt* st = nullptr;
     const char* sql = after_ts.empty()
-        ? "SELECT id, thread_id, sender_kind, sender_id, body, created_at"
+        ? "SELECT id, thread_id, sender_kind, sender_id, body,"
+          " attachments_json, created_at"
           " FROM messages WHERE thread_id = ? ORDER BY created_at ASC"
-        : "SELECT id, thread_id, sender_kind, sender_id, body, created_at"
+        : "SELECT id, thread_id, sender_kind, sender_id, body,"
+          " attachments_json, created_at"
           " FROM messages WHERE thread_id = ? AND created_at > ?"
           " ORDER BY created_at ASC";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {

@@ -31,6 +31,10 @@ struct ThreadMessage {
     std::string sender_kind; // "user" | "agent" | "system"
     std::string sender_id;   // agent id, "" for user/system
     std::string body;
+    // Phase 18: JSON array of {"name","path","size"} — files the user
+    // attached; they live under <workspace>/attachments/<thread_id>/.
+    // "[]" when the message has none.
+    std::string attachments_json;
     std::string created_at;
 };
 
@@ -68,7 +72,8 @@ public:
     std::string add_message(const std::string& thread_id,
                             const std::string& sender_kind,
                             const std::string& sender_id,
-                            const std::string& body);
+                            const std::string& body,
+                            const std::string& attachments_json = "[]");
 
     /// Messages in chronological order. If after_id is non-empty, only
     /// messages created after that message (exclusive) are returned.

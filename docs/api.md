@@ -118,9 +118,12 @@ Response reports what happened:
 | GET | `/api/threads` | List threads by latest activity, incl. participants + `last_activity` (latest message ts — drives unread badges) |
 | GET | `/api/threads/:id` | Thread + `agent_ids` |
 | DELETE | `/api/threads/:id` | Delete thread, messages and participants |
-| GET | `/api/threads/:id/messages` | Messages, chronological |
+| GET | `/api/threads/:id/messages` | Messages, chronological; each has an `attachments` array (`[]` default, Phase 18) |
 | GET | `/api/threads/:id/messages?after=<msg_id>` | Incremental fetch (polling) |
-| POST | `/api/threads/:id/messages` | Post user message → **202** `{message_id, status:"processing"}` |
+| POST | `/api/threads/:id/messages` | Post user message → **202** `{message_id, status:"processing"}`. Optional `attachments` array (Phase 18) — metadata from prior attachment uploads |
+| POST | `/api/threads/:id/attachments?name=<fn>` | Upload a file (raw body, ≤10 MB) → **201** `{name, rel_path, path, host_path, size}`. Saved under `<workspace>/attachments/:id/`; containers see it at `/workspace/…` |
+| GET | `/api/files?path=<rel>` | List a workspace directory (dirs first) → `{path, entries:[{name, path, kind, size, mtime}]}`. Confined to the workspace root |
+| GET | `/api/files/download?path=<rel>` | Download one workspace file (`Content-Disposition: attachment`) |
 | GET | `/api/threads/:id/activity` | Live turn state (see below) |
 
 **Create thread body:** `{"title": "optional", "agent_ids": ["<id>", ...]}`

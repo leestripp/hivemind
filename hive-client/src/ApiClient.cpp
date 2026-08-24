@@ -169,9 +169,54 @@ nlohmann::json ApiClient::list_messages(const std::string& thread_id,
 }
 
 nlohmann::json ApiClient::post_message(const std::string& thread_id,
-                                       const std::string& body_text) {
+                                       const std::string& body_text,
+                                       const nlohmann::json& attachments) {
     nlohmann::json body{{"body", body_text}};
+    if (!attachments.empty()) body["attachments"] = attachments;
     return request("POST", "/api/threads/" + thread_id + "/messages", &body);
+}
+
+nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
+                                            const std::string& filename,
+                                            const std::string& bytes) {
+    CURL* curl = curl_easy_init();
+    if (!curl) throw std::runtime_error("curl init failed");
+
+    char* esc = curl_easy_escape(curl, filename.c_str(), 0);
+    std::string url = base_ + "/api/threads/" + thread_id +
+                      "/attachments?name=" + (esc ? esc : "file");
+    if (esc) curl_free(esc);
+
+    std::string response;
+    struct curl_slist* headers = nullptr;
+    if (!api_key_.empty()) {
+        std::string auth = "Authorization: Bearer " + api_key_;
+        headers = curl_slist_append(headers, auth.c_str());
+    }
+    headers = curl_slist_append(headers,
+                                "Content-Type: application/octet-stream");
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, bytes.data());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)bytes.size());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    CURLcode rc = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (rc != CURLE_OK)
+        throw std::runtime_error(std::string{"upload failed: "} +
+                                 curl_easy_strerror(rc));
+    if (http_code < 200 || http_code >= 300)
+        throw std::runtime_error("upload failed: HTTP " +
+                                 std::to_string(http_code) + " " + response);
+    return nlohmann::json::parse(response);
 }
 
 nlohmann::json ApiClient::activity(const std::string& thread_id) {

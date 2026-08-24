@@ -31,6 +31,11 @@
         <path d="M12 9.5v3.5l2.5 2.5M9 2.5h6"/>
       </svg>
     </button>
+    <button class="ab-item" data-page="files" title="Files">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
     <button class="ab-item" data-page="skills" title="Skills">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
         <path d="M14 3h4a1 1 0 0 1 1 1v4h-2.5a2 2 0 1 0 0 4H19v4a1 1 0 0 1-1 1h-4v-2.5a2 2 0 1 0-4 0V17H6a1 1 0 0 1-1-1v-4h2.5a2 2 0 1 1 0-4H5V4a1 1 0 0 1 1-1h4v2.5a2 2 0 1 0 4 0Z"/>
@@ -187,6 +192,30 @@
       <table class="kv-table">
         <thead><tr><th>Name / Prompt</th><th>Agent</th><th>Schedule</th><th>Next Fire</th><th>Last Fired</th><th>Status</th><th></th></tr></thead>
         <tbody id="tasks-tbody"><tr><td colspan="7" class="muted">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="page-files" class="page hidden">
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>📁 Files</h2>
+          <p class="muted">
+            The shared company workspace — everything agents read and write in
+            their containers lives here (mounted at /workspace). Chat
+            attachments land under attachments/&lt;thread&gt;/; agent outputs
+            are artifacts you can download from this browser.
+          </p>
+        </div>
+      </div>
+      <div class="section-head">
+        <h3 id="files-crumbs">📁 workspace</h3>
+        <div><button id="files-refresh" class="btn">↻ Refresh</button></div>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th>Name</th><th>Kind</th><th>Size</th><th>Modified</th></tr></thead>
+        <tbody id="files-tbody"><tr><td colspan="4" class="muted">loading…</td></tr></tbody>
       </table>
     </div>
   </div>

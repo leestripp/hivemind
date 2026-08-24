@@ -49,10 +49,14 @@ json thread_json(const Thread& t) {
 }
 
 json message_json(const ThreadMessage& m) {
+    // attachments (Phase 18): pass through as parsed JSON; "[]" default.
+    json atts = json::parse(m.attachments_json, nullptr, false);
+    if (!atts.is_array()) atts = json::array();
     return {
         {"id", m.id}, {"thread_id", m.thread_id},
         {"sender_kind", m.sender_kind}, {"sender_id", m.sender_id},
         {"body", m.body}, {"created_at", m.created_at},
+        {"attachments", atts},
     };
 }
 
@@ -338,10 +342,22 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
             std::string text = body.value("body", "");
-            if (text.empty()) { send_error(resp, 400, "body must not be empty"); return; }
+            // Phase 18: optional attachments array (metadata from prior
+            // POST /attachments calls — {name, path, host_path, size}).
+            std::string atts = "[]";
+            if (body.contains("attachments")) {
+                if (!body["attachments"].is_array()) {
+                    send_error(resp, 400, "attachments must be an array");
+                    return;
+                }
+                atts = body["attachments"].dump();
+            }
+            if (text.empty() && atts == "[]") {
+                send_error(resp, 400, "body must not be empty"); return;
+            }
 
             try {
-                std::string msg_id = chat.post_user_message(seg[2], text);
+                std::string msg_id = chat.post_user_message(seg[2], text, atts);
                 send_json(resp, json{{"message_id", msg_id},
                                      {"status", "processing"}}, 202);
             } catch (const std::invalid_argument& e) {

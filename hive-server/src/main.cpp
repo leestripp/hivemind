@@ -27,6 +27,7 @@
 #include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/AgentRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/routes/FileRoutes.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
@@ -180,6 +181,7 @@ int main(int argc, char* argv[]) {
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service, routine_store);
+    register_file_routes(server, thread_store);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store, agent_store);
     register_key_routes(server, auth_store);
