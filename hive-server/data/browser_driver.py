@@ -36,8 +36,10 @@ def emit(obj):
 def chromium_binary():
     """Playwright's bundled chromium (the snap stub can't run here)."""
     import glob
-    hits = sorted(glob.glob(os.path.expanduser(
-        "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")))
+    hits = sorted(glob.glob(
+        "/opt/ms-playwright/chromium-*/chrome-linux/chrome") +
+        glob.glob(os.path.expanduser(
+            "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")))
     if not hits:  # system fallback for non-container runs
         for c in ("chromium", "chromium-browser", "google-chrome"):
             if subprocess.run(["which", c], capture_output=True).returncode == 0:

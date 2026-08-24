@@ -33,14 +33,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
         novnc \
         websockify \
-        python3-playwright \
         meson ninja-build build-essential pkg-config xz-utils \
         libglib2.0-dev libvncserver-dev libpipewire-0.3-dev libsecret-1-dev \
         libxkbcommon-dev libepoxy-dev libdrm-dev libfuse3-dev libtss2-dev \
         libnotify-dev libcairo2-dev libgirepository1.0-dev libei-dev \
         libdbus-1-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && python3 -m playwright install chromium --with-deps || true
+    && rm -rf /var/lib/apt/lists/*
+
+# Playwright: the Ubuntu deb strips the node driver (unusable); the PyPI
+# wheel bundles it. Browsers go to a shared, world-readable path — the
+# container runs as hive at runtime, but the build install runs as root.
+RUN pip install --no-cache-dir --break-system-packages playwright \
+    && playwright install chromium --with-deps \
+    && chmod -R a+rX /opt/ms-playwright
 
 # Ubuntu builds gnome-remote-desktop with -Dvnc=false (meson default) —
 # no VNC in grdctl at all. Rebuild GRD 50.2 from upstream with the VNC
@@ -68,5 +73,6 @@ WORKDIR /workspace
 # /run is root-owned in the container and the agent runs as hive — the
 # runtime dir lives in the per-agent home mount instead (0700, writable).
 ENV XDG_RUNTIME_DIR=/home/hive/.run
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 EXPOSE 6080
 CMD ["sleep", "infinity"]
