@@ -53,7 +53,7 @@ Dashboard for routines (the server's 30 s scheduler tick):
   Su–Sa day picker)
 - **🧹 Cleanup Completed** — bulk-deletes fired one-shot tasks
 
-### Skills (`#/skills`)
+### Skills (incl. Install-from-Git modal) (`#/skills`)
 
 Global skill library manager — see `docs/skills.md` for the design.
 Table with per-agent toggle chips, + Add Skill modal, delete (unlinks from

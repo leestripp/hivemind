@@ -58,7 +58,7 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/agents` | Create agent |
-| GET | `/api/agents` | List roster |
+| GET | `/api/agents` | List roster (each carries `busy` = has a live turn) |
 | GET | `/api/agents/:id` | Get one agent |
 | PATCH | `/api/agents/:id` | Update fields (partial) |
 | DELETE | `/api/agents/:id` | Remove from roster + **cascade** (see below). `?reassign_to=<id>` hands routines to another agent |
@@ -109,7 +109,7 @@ Response reports what happened:
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/threads` | Create thread → 201 thread object |
-| GET | `/api/threads` | List threads (newest first, incl. participants) |
+| GET | `/api/threads` | List threads by latest activity, incl. participants + `last_activity` (latest message ts — drives unread badges) |
 | GET | `/api/threads/:id` | Thread + `agent_ids` |
 | DELETE | `/api/threads/:id` | Delete thread, messages and participants |
 | GET | `/api/threads/:id/messages` | Messages, chronological |
@@ -210,6 +210,7 @@ managed by the server, and **local skills** owned by each agent.
 | GET | `/api/skills` | Library list: `{name, description, version, enabled_agents[]}` |
 | POST | `/api/skills` | Create `{name, description, content}` → 201 (409 if exists) |
 | DELETE | `/api/skills/:name` | Remove from library **and unlink every agent** |
+| POST | `/api/skills/install` | Install from git `{git_url, path?}` — shallow clone, validate SKILL.md, copy into library (409 on name conflict, 502 on clone failure) |
 | GET | `/api/agents/:id/global-skills` | Enabled global skill names for the agent |
 | POST | `/api/agents/:id/global-skills` | Toggle: `{name, enabled}` — creates/removes a relative symlink in the agent's `.agents/skills/` (409 if a local skill owns the name) |
 

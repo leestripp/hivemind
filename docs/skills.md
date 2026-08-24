@@ -6,6 +6,13 @@
 
 ---
 
+## Installing from Git
+
+`POST /api/skills/install {git_url, path?}` shallow-clones a repo, finds
+SKILL.md (repo root or the `path` subdirectory), validates the frontmatter
+name, and copies the skill into the global library. 409 on name conflict.
+The web Skills page has an "Install from Git" button wrapping this.
+
 ## The two kinds of skills
 
 | | **Global skills** | **Local skills** |
