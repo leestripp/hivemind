@@ -44,6 +44,8 @@ public:
                                   const std::string& prompt,
                                   const nlohmann::json& schedule);     // POST /api/routines
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
+    nlohmann::json container_start(const std::string& agent_id);     // POST …/container/start
+    nlohmann::json container_stop(const std::string& agent_id);      // POST …/container/stop
 
     // ── skills (Phase 14.2) ───────────────────────────────────────────────
     nlohmann::json list_global_skills();                              // GET /api/skills

@@ -1128,6 +1128,7 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
+    mk("Inspector\u2026", nullptr, [this, agent] { show_inspector(agent); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
     mk("Delete Agent", "destructive-action", [this, agent] { on_delete_agent(agent); });
     pop->set_child(*box);
@@ -1288,6 +1289,136 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                     list->append(*note);
                 }
                 outer->append(*scroll);
+            });
+        }
+        dispatcher_.emit();
+    });
+}
+
+// ── Phase 14.4: agent inspector ─────────────────────────────────────────────
+// Read-only details (model, workspace, timestamps, on-disk path) + live
+// container status with Start/Stop. Config editing stays in Edit Agent.
+void HiveWindow::show_inspector(const nlohmann::json& agent) {
+    const std::string agent_id = agent.value("id", "");
+    if (agent_id.empty()) return;
+    auto* dialog = Gtk::make_managed<Gtk::Window>();
+    dialog->set_title("Inspector — " + agent.value("name", "?"));
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->set_default_size(520, 380);
+
+    auto* outer = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
+    outer->set_margin(16);
+
+    auto kv = [&](const std::string& k, const std::string& v) {
+        auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+        auto* kl = Gtk::make_managed<Gtk::Label>(k);
+        kl->add_css_class("dim-label");
+        kl->set_halign(Gtk::Align::START);
+        kl->set_size_request(130, -1);
+        auto* vl = Gtk::make_managed<Gtk::Label>(v.empty() ? "—" : v);
+        vl->set_halign(Gtk::Align::START);
+        vl->set_selectable(true);
+        vl->set_wrap(true);
+        vl->set_xalign(0);
+        row->append(*kl);
+        row->append(*vl);
+        outer->append(*row);
+    };
+    kv("Model", agent.value("model", ""));
+    kv("Workspace mode", agent.value("workspace_mode", ""));
+    kv("Require approval", agent.value("require_approval", false) ? "yes" : "no");
+    kv("Created", agent.value("created_at", ""));
+    kv("Updated", agent.value("updated_at", ""));
+    kv("Data directory", "~/.local/share/hivemind/agents/" + agent_id + "/");
+
+    auto* ch = Gtk::make_managed<Gtk::Label>("Container");
+    ch->set_halign(Gtk::Align::START);
+    ch->add_css_class("heading");
+    outer->append(*ch);
+    auto* cbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
+    outer->append(*cbox);
+    dialog->set_child(*outer);
+    dialog->present();
+    load_inspector_container(cbox, dialog, agent_id);
+}
+
+void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
+                                          const std::string& agent_id) {
+    auto* loading = Gtk::make_managed<Gtk::Label>("Checking container…");
+    loading->add_css_class("dim-label");
+    loading->set_halign(Gtk::Align::START);
+    box->append(*loading);
+    run_async([this, box, dialog, loading, agent_id] {
+        json st; std::string err;
+        try { st = api_.container_status(agent_id); }
+        catch (const std::exception& e) { err = e.what(); }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, box, dialog, loading, agent_id, st, err] {
+                if (!alive_) return;
+                box->remove(*loading);
+                if (!err.empty()) {
+                    auto* l = Gtk::make_managed<Gtk::Label>("Status failed: " + err);
+                    l->add_css_class("error");
+                    box->append(*l);
+                    return;
+                }
+                if (!st.value("podman_available", false)) {
+                    auto* l = Gtk::make_managed<Gtk::Label>("podman not available on the server");
+                    l->add_css_class("dim-label");
+                    box->append(*l);
+                    return;
+                }
+                const bool exists = st.value("exists", false);
+                const bool running = st.value("running", false);
+                auto* sl = Gtk::make_managed<Gtk::Label>(
+                    running ? "\u25CF running" : (exists ? "\u25CB stopped" : "not created yet"));
+                sl->set_halign(Gtk::Align::START);
+                sl->add_css_class(running ? "hv-unread-dot" : "dim-label");
+                box->append(*sl);
+                auto ck = [&](const std::string& k, const std::string& v) {
+                    if (v.empty()) return;
+                    auto* l = Gtk::make_managed<Gtk::Label>(k + ": " + v);
+                    l->set_halign(Gtk::Align::START);
+                    l->add_css_class("dim-label");
+                    l->set_selectable(true);
+                    box->append(*l);
+                };
+                ck("container", st.value("container", ""));
+                ck("image", st.value("image", ""));
+                ck("workspace", st.value("workspace", ""));
+                auto* btns = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+                auto act = [&](const char* label, bool sensitive, bool start) {
+                    auto* b = Gtk::make_managed<Gtk::Button>(label);
+                    b->set_sensitive(sensitive);
+                    b->signal_clicked().connect([this, box, dialog, agent_id, start] {
+                        while (auto* c = box->get_first_child()) box->remove(*c);
+                        run_async([this, agent_id, start] {
+                            std::string err;
+                            try { start ? (void)api_.container_start(agent_id)
+                                        : (void)api_.container_stop(agent_id); }
+                            catch (const std::exception& e) { err = e.what(); }
+                            {
+                                std::lock_guard<std::mutex> lk(queue_m_);
+                                done_queue_.push_back([this, err] {
+                                    if (!alive_) return;
+                                    if (!err.empty()) set_status("Container: " + err);
+                                });
+                            }
+                            dispatcher_.emit();
+                        });
+                        // re-poll status shortly after (start/stop can take a moment)
+                        Glib::signal_timeout().connect_once(
+                            [this, box, dialog, agent_id] {
+                                if (alive_) load_inspector_container(box, dialog, agent_id);
+                            }, 1500);
+                    });
+                    btns->append(*b);
+                };
+                act("Start", !running, true);
+                act("Stop", running, false);
+                box->append(*btns);
             });
         }
         dispatcher_.emit();

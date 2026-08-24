@@ -141,6 +141,14 @@ nlohmann::json ApiClient::container_status(const std::string& agent_id) {
     return request("GET", "/api/agents/" + agent_id + "/container/status");
 }
 
+nlohmann::json ApiClient::container_start(const std::string& agent_id) {
+    return request("POST", "/api/agents/" + agent_id + "/container/start");
+}
+
+nlohmann::json ApiClient::container_stop(const std::string& agent_id) {
+    return request("POST", "/api/agents/" + agent_id + "/container/stop");
+}
+
 // ── threads / chat ──────────────────────────────────────────────────────────
 
 nlohmann::json ApiClient::list_threads() { return request("GET", "/api/threads"); }
