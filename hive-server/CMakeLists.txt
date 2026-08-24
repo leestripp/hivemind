@@ -8,6 +8,7 @@ set(CORE_SOURCES
     src/Schedule.cpp
     src/Files.cpp
     src/Vault.cpp
+    src/ConnectorStore.cpp
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp
@@ -35,6 +36,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/AgentRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
     include/hivemind/routes/FileRoutes.cpp
+    include/hivemind/routes/ConnectorRoutes.cpp
     include/hivemind/routes/SkillRoutes.cpp
     include/hivemind/routes/SecretRoutes.cpp
     include/hivemind/routes/ContainerRoutes.cpp

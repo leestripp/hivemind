@@ -118,6 +118,31 @@
         <p class="muted">Display-only prefs — stored in this browser. Schedules still
         fire in server-local time; this only changes how times render.</p>
       </section>
+      <section class="settings-section">
+        <h3>🔌 Connectors (OAuth)</h3>
+        <p class="muted">Connect external services. Tokens land in the secret broker as
+        <code>NAME_ACCESS_TOKEN</code> — grant them to agents from the Secrets page.</p>
+        <div id="connectors-list" class="kv"></div>
+        <details>
+          <summary class="muted" style="cursor:pointer">+ Register a connector</summary>
+          <form id="connector-form" style="margin-top:8px">
+            <div class="trig-form-row"><label>Name</label>
+              <input name="name" required placeholder="github" pattern="[a-z0-9-]+" class="btn"></div>
+            <div class="trig-form-row"><label>Authorize URL</label>
+              <input name="auth_url" required placeholder="https://provider.example/oauth/authorize" class="btn" style="min-width:320px"></div>
+            <div class="trig-form-row"><label>Token URL</label>
+              <input name="token_url" required placeholder="https://provider.example/oauth/token" class="btn" style="min-width:320px"></div>
+            <div class="trig-form-row"><label>Client ID</label>
+              <input name="client_id" required class="btn"></div>
+            <div class="trig-form-row"><label>Client secret</label>
+              <input name="client_secret" type="password" autocomplete="off" class="btn"></div>
+            <div class="trig-form-row"><label>Scopes</label>
+              <input name="scopes" placeholder="repo read:user" class="btn"></div>
+            <div class="trig-form-row"><label></label>
+              <button type="submit" class="btn primary">Register</button></div>
+          </form>
+        </details>
+      </section>
       <section class="settings-section"><h3>Models (daedalus SettingsStore)</h3><div id="set-models" class="kv"></div></section>
       <section class="settings-section"><h3>Agent engine</h3><div id="set-agent" class="kv"></div></section>
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>

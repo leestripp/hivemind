@@ -3,7 +3,47 @@ import { $, esc, log, getTheme, setTheme, getTimezone, setTimezone } from '../ut
 import { S } from '../state.js';
 
 
-export function enterSettings() { loadSettingsPage(); loadWorkspace(); }
+export function enterSettings() { loadSettingsPage(); loadWorkspace(); loadConnectors(); }
+
+// ── Phase 23: OAuth connectors ────────────────────────────────────────
+async function loadConnectors() {
+  const host = $('connectors-list');
+  try {
+    const d = await API.get('/api/connectors');
+    const cs = d.connectors || [];
+    if (!cs.length) { host.innerHTML = '<div class="muted">No connectors registered yet.</div>'; return; }
+    host.innerHTML = '';
+    for (const c of cs) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0';
+      row.innerHTML = `<strong>${esc(c.name)}</strong>
+        <span class="muted">${esc(c.scopes || '')}</span>
+        <span class="badge">${c.connected ? '✓ connected' : 'not connected'}</span>
+        <code class="muted" style="font-size:11px">${esc(c.token_secret)}</code>`;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-sm';
+      btn.textContent = c.connected ? 'Reconnect' : 'Connect';
+      btn.onclick = async () => {
+        try {
+          const r = await API.get('/api/connectors/' + encodeURIComponent(c.name) + '/auth-url');
+          window.open(r.url, '_blank');
+        } catch (err) { alert(err.message); }
+      };
+      const del = document.createElement('button');
+      del.className = 'icon-btn icon-danger';
+      del.textContent = '🗑';
+      del.title = 'Remove connector (stored tokens stay in the broker)';
+      del.onclick = async () => {
+        if (!confirm(`Remove connector "${c.name}"? Stored tokens are kept.`)) return;
+        try { await API.del('/api/connectors/' + encodeURIComponent(c.name)); loadConnectors(); }
+        catch (err) { alert(err.message); }
+      };
+      row.appendChild(btn);
+      row.appendChild(del);
+      host.appendChild(row);
+    }
+  } catch (e) { host.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+}
 
 // ─── Company workspace (PUT /api/config — admin scope) ─────────────────
 async function loadWorkspace() {
@@ -14,6 +54,23 @@ async function loadWorkspace() {
 }
 
 export function initSettings() {
+  $('connector-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await API.post('/api/connectors', {
+        name: f.name.value.trim(),
+        auth_url: f.auth_url.value.trim(),
+        token_url: f.token_url.value.trim(),
+        client_id: f.client_id.value.trim(),
+        client_secret: f.client_secret.value,
+        scopes: f.scopes.value.trim(),
+      });
+      f.reset();
+      loadConnectors();
+    } catch (err) { alert(err.message); }
+  });
+
   // Phase 19: appearance + timezone (client-side, instant).
   const themeSel = $('set-theme');
   themeSel.value = getTheme();

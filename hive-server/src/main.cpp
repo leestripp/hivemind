@@ -28,6 +28,8 @@
 #include "hivemind/routes/AgentRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/routes/FileRoutes.h"
+#include "hivemind/routes/ConnectorRoutes.h"
+#include "hivemind/ConnectorStore.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
@@ -95,6 +97,7 @@ int main(int argc, char* argv[]) {
     LLMStore llm_store;
     AuthStore auth_store;
     hivemind::SecretStore secret_store;
+    ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,
                                  routine_store, thread_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
@@ -141,6 +144,9 @@ int main(int argc, char* argv[]) {
         std::string path{req.path()};
         if (path.rfind("/api/", 0) != 0) return true;  // static UI, admin
         if (path == "/api/health") return true;       // probe stays open
+        // Phase 23: the OAuth provider redirect carries no bearer — the
+        // one-shot state token in the query IS the credential.
+        if (path == "/api/oauth/callback") return true;
 
         auto deny = [&](int code, const std::string& msg) {
             hivemind::routes::send_error(resp, code, msg);
@@ -157,6 +163,8 @@ int main(int argc, char* argv[]) {
         const bool admin = AuthStore::has_scope(*scopes, "admin");
         if (path.rfind("/api/keys", 0) == 0 ||
             path.rfind("/api/secrets", 0) == 0 ||
+            (path.rfind("/api/connectors", 0) == 0 &&
+             req.method() != OmniNet::HTTP::Method::GET) ||
             path.find("/container/exec") != std::string::npos ||
             (path == "/api/config" &&
              req.method() != OmniNet::HTTP::Method::GET)) {
@@ -189,6 +197,7 @@ int main(int argc, char* argv[]) {
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service, routine_store);
     register_file_routes(server, thread_store);
+    register_connector_routes(server, connector_store, secret_store);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store, agent_store);
     register_key_routes(server, auth_store);
