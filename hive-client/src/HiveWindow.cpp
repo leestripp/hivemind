@@ -895,7 +895,8 @@ void HiveWindow::rebuild_roster() {
         // ("acting", "planning", "verifying", …).
         // The daedalus state is authoritative (straight from the Agent);
         // the LiveTurn 'busy' flag misses some turn paths — OR them.
-        const std::string st_ = a.value("state", "");
+        std::string st_ = a.value("state", "");
+        for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
         const bool working = a.value("busy", false) ||
             (!st_.empty() && st_ != "idle" && st_ != "done" &&
              st_ != "cancelled" && st_ != "error");

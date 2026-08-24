@@ -829,7 +829,11 @@ std::vector<ChatService::LiveTurn> ChatService::activity(const std::string& thre
 
 std::string AgentHost::state_name() const noexcept {
     if (!agent_) return "idle";
-    return daedalus::to_string(agent_->state());
+    // daedalus to_string is capitalized ("Acting") — the API contract is
+    // lowercase (client filters compare case-sensitively).
+    std::string s = daedalus::to_string(agent_->state());
+    for (auto& ch : s) ch = (char)tolower((unsigned char)ch);
+    return s;
 }
 
 std::string AgentRegistry::agent_state(const std::string& agent_id) {
