@@ -344,11 +344,9 @@ std::string ContainerManager::screen_password(const std::string& agent_id) {
     // it (permission denied != missing — the direct read silently failed).
     auto r = run("podman exec " + shell_quote(container_name(agent_id)) +
                  " cat /home/hive/.vnc-password");
-    fprintf(stderr, "[screen_pw] rc=%d out=[%s]\n", r.exit_code,
-            r.output.substr(0, 200).c_str());
     if (r.exit_code != 0) return "";
     std::string pw = r.output;
-    while (!pw.empty() && !isspace((unsigned char)pw.back()))
+    while (!pw.empty() && isspace((unsigned char)pw.back()))
         pw.pop_back();
     return pw;
 }
