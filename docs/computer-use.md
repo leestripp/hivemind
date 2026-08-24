@@ -99,6 +99,16 @@ podman exec hive-<id> sh -c 'tail /tmp/{xvfb,openbox,x11vnc,websockify,chromium}
 zombie-safe (PID 1 is `sleep`, never reaps; liveness checks read
 `/proc/<pid>/stat` state).
 
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| "opens but can't connect" | `path=` must be absolute (`%2Fscreen%2Fws…`) — fdb7fa5 |
+| black screen | nothing on the display — openbox + chrome launch in hive-screen.sh |
+| **Chrome "Page Unresponsive" dialogs** | podman's default 64MB /dev/shm starves the renderer — `--shm-size 1g` at container create + `--disable-dev-shm-usage --disable-gpu` launch flags (719b9a9). Note: existing containers keep old flags until recreated — `ensure_screen` only recreates on image-digest change, so `podman rm -f hive-<id>` by hand after a flags-only change |
+| Chrome won't start: "profile in use on another computer" | stale `SingletonLock` from a dead container in the persistent profile — cleared automatically before launch (7236649) |
+| "Chromium for Testing" branding / site sign-in refused | playwright's build is a test build — the image ships real Google Chrome stable (8d51320) |
+
 ## Test with a REAL client, always
 
 Raw TCP/curl probes are pathological RFB clients and misled us for hours
