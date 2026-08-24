@@ -1127,6 +1127,7 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     };
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
+    mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
     mk("Delete Agent", "destructive-action", [this, agent] { on_delete_agent(agent); });
     pop->set_child(*box);
@@ -1139,6 +1140,158 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
 
 void HiveWindow::on_edit_agent(const nlohmann::json& agent) {
     show_agent_dialog(&agent);   // dialog reads fields during construction only
+}
+
+// ── Phase 14.2: per-agent skills dialog ─────────────────────────────────────
+// Two sections: the SHARED global library (toggle per skill — creates/removes
+// the agent's symlink via POST /api/agents/:id/global-skills) and the agent's
+// own learned skills (read-only — those are the agent's to manage).
+void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
+    const std::string agent_id = agent.value("id", "");
+    const std::string aname = agent.value("name", "?");
+    if (agent_id.empty()) return;
+
+    auto* dialog = Gtk::make_managed<Gtk::Window>();
+    dialog->set_title("Skills — " + aname);
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->set_default_size(480, 440);
+
+    auto* outer = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 10);
+    outer->set_margin(14);
+    auto* loading = Gtk::make_managed<Gtk::Label>("Loading…");
+    loading->add_css_class("dim-label");
+    outer->append(*loading);
+    dialog->set_child(*outer);
+    dialog->present();
+
+    run_async([this, dialog, outer, loading, agent_id, aname] {
+        json global, enabled, local;
+        std::string err;
+        try {
+            global  = api_.list_global_skills();
+            enabled = api_.agent_global_skills(agent_id);
+            local   = api_.list_agent_skills(agent_id);
+        } catch (const std::exception& e) { err = e.what(); }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, dialog, outer, loading, agent_id, aname,
+                                   global, enabled, local, err] {
+                if (!alive_) return;
+                outer->remove(*loading);
+                if (!err.empty()) {
+                    auto* l = Gtk::make_managed<Gtk::Label>("Failed to load skills: " + err);
+                    l->add_css_class("error");
+                    outer->append(*l);
+                    return;
+                }
+                std::set<std::string> enabled_set;
+                for (auto& s : enabled.value("skills", json::array()))
+                    enabled_set.insert(s.get<std::string>());
+
+                auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+                scroll->set_vexpand(true);
+                auto* list = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 4);
+                scroll->set_child(*list);
+
+                auto* gh = Gtk::make_managed<Gtk::Label>("Shared library");
+                gh->set_halign(Gtk::Align::START);
+                gh->add_css_class("heading");
+                list->append(*gh);
+
+                auto skills = global.value("skills", json::array());
+                if (skills.empty()) {
+                    auto* l = Gtk::make_managed<Gtk::Label>(
+                        "The global library is empty — add skills on the web Skills page.");
+                    l->set_halign(Gtk::Align::START);
+                    l->set_wrap(true);
+                    l->add_css_class("dim-label");
+                    list->append(*l);
+                }
+                for (auto& s : skills) {
+                    const std::string sname = s.value("name", "");
+                    auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+                    auto* text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+                    text->set_hexpand(true);
+                    std::string title = sname;
+                    std::string ver = s.value("version", "");
+                    if (!ver.empty()) title += "  v" + ver;
+                    auto* nl = Gtk::make_managed<Gtk::Label>(title);
+                    nl->set_halign(Gtk::Align::START);
+                    nl->add_css_class("heading");
+                    text->append(*nl);
+                    std::string desc = s.value("description", "");
+                    if (!desc.empty()) {
+                        auto* dl = Gtk::make_managed<Gtk::Label>(desc);
+                        dl->set_halign(Gtk::Align::START);
+                        dl->set_wrap(true);
+                        dl->set_xalign(0);
+                        dl->add_css_class("dim-label");
+                        text->append(*dl);
+                    }
+                    row->append(*text);
+                    auto* sw = Gtk::make_managed<Gtk::Switch>();
+                    sw->set_valign(Gtk::Align::CENTER);
+                    sw->set_active(enabled_set.count(sname) > 0);
+                    // Optimistic toggle: apply visually, POST async, revert on
+                    // failure (guard suppresses the recursive signal_changed).
+                    auto guard = std::make_shared<bool>(false);
+                    sw->property_active().signal_changed().connect(
+                        [this, sw, agent_id, sname, guard] {
+                            if (*guard) return;
+                            const bool on = sw->get_active();
+                            sw->set_sensitive(false);
+                            run_async([this, sw, agent_id, sname, on, guard] {
+                                std::string err;
+                                try { api_.set_global_skill(agent_id, sname, on); }
+                                catch (const std::exception& e) { err = e.what(); }
+                                {
+                                    std::lock_guard<std::mutex> lk(queue_m_);
+                                    done_queue_.push_back([this, sw, on, guard, err] {
+                                        if (!alive_) return;
+                                        sw->set_sensitive(true);
+                                        if (!err.empty()) {
+                                            *guard = true;
+                                            sw->set_active(!on);
+                                            *guard = false;
+                                            set_status("Skill toggle failed: " + err);
+                                        }
+                                    });
+                                }
+                                dispatcher_.emit();
+                            });
+                        });
+                    row->append(*sw);
+                    list->append(*row);
+                }
+
+                auto locals = local.value("skills", json::array());
+                if (!locals.empty()) {
+                    auto* lh = Gtk::make_managed<Gtk::Label>("Learned by " + aname);
+                    lh->set_halign(Gtk::Align::START);
+                    lh->add_css_class("heading");
+                    lh->set_margin_top(10);
+                    list->append(*lh);
+                    for (auto& s : locals) {
+                        auto* l = Gtk::make_managed<Gtk::Label>(
+                            "\u2022  " + s.get<std::string>());
+                        l->set_halign(Gtk::Align::START);
+                        l->add_css_class("dim-label");
+                        list->append(*l);
+                    }
+                    auto* note = Gtk::make_managed<Gtk::Label>(
+                        "Local skills belong to " + aname + " — it manages them itself.");
+                    note->set_halign(Gtk::Align::START);
+                    note->set_wrap(true);
+                    note->set_xalign(0);
+                    note->add_css_class("dim-label");
+                    list->append(*note);
+                }
+                outer->append(*scroll);
+            });
+        }
+        dispatcher_.emit();
+    });
 }
 
 void HiveWindow::on_delete_agent(const nlohmann::json& agent) {

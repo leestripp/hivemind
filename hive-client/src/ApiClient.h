@@ -45,6 +45,13 @@ public:
                                   const nlohmann::json& schedule);     // POST /api/routines
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
 
+    // ── skills (Phase 14.2) ───────────────────────────────────────────────
+    nlohmann::json list_global_skills();                              // GET /api/skills
+    nlohmann::json agent_global_skills(const std::string& agent_id);  // GET /api/agents/:id/global-skills
+    nlohmann::json set_global_skill(const std::string& agent_id,      // POST /api/agents/:id/global-skills
+                                    const std::string& name, bool enabled);
+    nlohmann::json list_agent_skills(const std::string& agent_id);    // GET /api/agents/:id/skills (local)
+
     // ── threads / chat ────────────────────────────────────────────────────
     nlohmann::json list_threads();                                   // GET /api/threads
     nlohmann::json create_thread(const std::string& title,

@@ -78,6 +78,7 @@ private:
                          double x, double y);
     void on_new_task();
     void show_task_dialog(const std::string& preselect_agent_id = "");
+    void show_skills_dialog(const nlohmann::json& agent);   // Phase 14.2
     void update_thread_title();
     void notify(const Glib::ustring& title, const Glib::ustring& body);
     /// Badge/notify pass over threads_ after a refresh (Phase 14.1).

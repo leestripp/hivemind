@@ -110,6 +110,24 @@ nlohmann::json ApiClient::list_routines() {
     return request("GET", "/api/routines");
 }
 
+nlohmann::json ApiClient::list_global_skills() {
+    return request("GET", "/api/skills");
+}
+
+nlohmann::json ApiClient::agent_global_skills(const std::string& agent_id) {
+    return request("GET", "/api/agents/" + agent_id + "/global-skills");
+}
+
+nlohmann::json ApiClient::set_global_skill(const std::string& agent_id,
+                                           const std::string& name, bool enabled) {
+    nlohmann::json body{{"name", name}, {"enabled", enabled}};
+    return request("POST", "/api/agents/" + agent_id + "/global-skills", &body);
+}
+
+nlohmann::json ApiClient::list_agent_skills(const std::string& agent_id) {
+    return request("GET", "/api/agents/" + agent_id + "/skills");
+}
+
 nlohmann::json ApiClient::create_routine(const std::string& agent_id,
                                          const std::string& name,
                                          const std::string& prompt,
