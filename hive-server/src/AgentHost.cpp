@@ -280,7 +280,9 @@ void AgentHost::ensure_agent() {
             "with apt/pip as needed). /workspace is the shared company "
             "workspace visible to your teammates; /home/hive is private to "
             "you. Use the container_exec tool for ALL command execution — it "
-            "runs inside your container (there is no host shell).";
+            "runs inside your container (there is no host shell). "
+            "Before doing file work in /workspace, read /workspace/index.md "
+            "— it maps the company drive (departments, projects, conventions).";
         if (!container_err.empty())
             prompt_addendum +=
                 "\n\nWARNING: the container runtime is currently unavailable ("
