@@ -43,7 +43,8 @@ json agent_json(const RosterAgent& a) {
 json thread_json(const Thread& t) {
     return {
         {"id", t.id}, {"title", t.title}, {"kind", t.kind},
-        {"created_at", t.created_at}, {"agent_ids", t.agent_ids},
+        {"created_at", t.created_at}, {"last_activity", t.last_activity},
+        {"agent_ids", t.agent_ids},
     };
 }
 
@@ -86,10 +87,16 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     // ── GET /api/agents ───────────────────────────────────────────────────
+    // busy: agent has a live turn in any thread (Phase 14.1 roster dots).
     server.get("/api/agents",
-        [&agents](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+        [&agents, &chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            auto live = chat.agent_activity();
             json list = json::array();
-            for (auto& a : agents.list_agents()) list.push_back(agent_json(a));
+            for (auto& a : agents.list_agents()) {
+                auto j = agent_json(a);
+                j["busy"] = live.count(a.id) > 0;
+                list.push_back(std::move(j));
+            }
             send_json(resp, json{{"agents", list}});
         });
 

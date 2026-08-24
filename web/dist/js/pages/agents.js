@@ -75,7 +75,7 @@ async function refresh() {
             ? `<img src="/avatars/${esc(a.avatar)}.svg" width="44" height="44" alt="">`
             : hexBot(PALETTE[paletteIndex(a.name)], 44)}</div>
           <div class="agent-id-block">
-            <div class="agent-name">${esc(a.name)}</div>
+            <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>
           </div>
           <span class="badge st-${status}">${status === 'busy' ? '● busy' : status === 'cancelling' ? '◌ cancelling' : 'idle'}</span>

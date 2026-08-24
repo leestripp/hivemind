@@ -72,6 +72,7 @@ const char* kCss = R"(
                    border-radius: 8px; }
 .hv-prompt-frame textview { padding: 6px; }
 .error { color: @error_color; }
+.hv-unread-dot { color: @accent_color; font-weight: bold; }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -698,6 +699,7 @@ void HiveWindow::refresh_all() {
                 if (!alive_) return;
                 agents_ = agents.value("agents", json::array());
                 threads_ = threads.value("threads", json::array());
+                process_thread_activity();
                 rebuild_roster();
                 rebuild_thread_list();
                 // Chat-first UX: open the most recent conversation automatically.
@@ -725,6 +727,7 @@ void HiveWindow::refresh_threads() {
             done_queue_.push_back([this, threads] {
                 if (!alive_) return;
                 threads_ = threads.value("threads", json::array());
+                process_thread_activity();
                 rebuild_thread_list();
             });
         }
@@ -786,6 +789,10 @@ void HiveWindow::poll_approvals() {
                 if (!alive_) return;
                 int n = (int)ap.value("approvals", json::array()).size();
                 if (n != pending_approvals_) {
+                    // Phase 14.1: a NEW parked approval deserves a notification.
+                    if (pending_approvals_ >= 0 && n > pending_approvals_)
+                        notify("Approval needed",
+                               std::to_string(n) + " command(s) waiting for review");
                     pending_approvals_ = n;
                     approvals_label_.set_label(n > 0
                         ? "Approvals (" + std::to_string(n) + ")"
@@ -815,6 +822,14 @@ void HiveWindow::rebuild_roster() {
         auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
         name->set_halign(Gtk::Align::START);
         name->add_css_class("heading");
+        // Phase 14.1: busy dot while the agent has a live turn anywhere.
+        if (a.value("busy", false)) {
+            auto* dot = Gtk::make_managed<Gtk::Label>("\u25CF");
+            dot->add_css_class("hv-unread-dot");
+            dot->set_valign(Gtk::Align::CENTER);
+            dot->set_tooltip_text("Working…");
+            row_box->append(*dot);
+        }
         auto* role = Gtk::make_managed<Gtk::Label>(a.value("role", ""));
         role->set_halign(Gtk::Align::START);
         role->set_ellipsize(Pango::EllipsizeMode::END);
@@ -840,6 +855,48 @@ void HiveWindow::rebuild_roster() {
     }
 }
 
+// Desktop notification via the app ID (com.hivemind.client). Best-effort:
+// if the portal/notification daemon is absent this is a silent no-op.
+void HiveWindow::notify(const Glib::ustring& title, const Glib::ustring& body) {
+    auto app = get_application();
+    if (!app) return;
+    auto n = Gio::Notification::create(title);
+    n->set_body(body);
+    n->set_icon(themed_icon_pixbuf("hive", 48, dark_mode_));
+    app->send_notification("hivemind-activity", n);
+}
+
+// After each threads refresh: badge rows with unseen activity, and pop a
+// desktop notification for threads we're not looking at while the window
+// is unfocused. First call only seeds the baseline (no storm at startup).
+void HiveWindow::process_thread_activity() {
+    for (auto& t : threads_) {
+        const std::string id = t.value("id", "");
+        const std::string act = t.value("last_activity", "");
+        if (id.empty()) continue;
+        // First pass ever: record the baseline, notify/badge nothing.
+        if (!activity_seeded_) { last_seen_activity_[id] = act; continue; }
+        // The thread on screen is always considered seen.
+        if (id == current_thread_) { last_seen_activity_[id] = act; continue; }
+        // Other threads: notify on new activity while unfocused. The badge
+        // itself is computed in rebuild_thread_list() from this same map —
+        // last_seen stays untouched here so the badge persists.
+        auto it = last_seen_activity_.find(id);
+        const bool is_newer = !act.empty() &&
+                              (it == last_seen_activity_.end() || act > it->second);
+        if (is_newer && it != last_seen_activity_.end() && !is_active()) {
+            std::string title = t.value("title", "");
+            if (title.empty())
+                for (auto& aid : t.value("agent_ids", json::array())) {
+                    if (!title.empty()) title += ", ";
+                    title += agent_name_of(agents_, aid.get<std::string>());
+                }
+            notify(title, "New messages in this thread");
+        }
+    }
+    activity_seeded_ = true;
+}
+
 void HiveWindow::rebuild_thread_list() {
     while (auto* row = threads_list_.get_row_at_index(0))
         threads_list_.remove(*row);
@@ -855,9 +912,24 @@ void HiveWindow::rebuild_thread_list() {
         auto* label = Gtk::make_managed<Gtk::Label>(title);
         label->set_halign(Gtk::Align::START);
         label->set_ellipsize(Pango::EllipsizeMode::END);
-        label->set_margin(6);
+        label->set_hexpand(true);
+        auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+        row_box->set_margin(6);
+        row_box->append(*label);
+        // Unread dot: activity newer than last-seen and not on screen.
+        const std::string tid = t.value("id", "");
+        const std::string act = t.value("last_activity", "");
+        auto seen = last_seen_activity_.find(tid);
+        const bool unread = activity_seeded_ && !act.empty() && tid != current_thread_ &&
+            (seen == last_seen_activity_.end() || act > seen->second);
+        if (unread) {
+            auto* dot = Gtk::make_managed<Gtk::Label>("\u25CF");  // ●
+            dot->add_css_class("hv-unread-dot");
+            dot->set_valign(Gtk::Align::CENTER);
+            row_box->append(*dot);
+        }
         auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
-        row->set_child(*label);
+        row->set_child(*row_box);
         row->set_data("thread_id", new std::string(t.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
         threads_list_.append(*row);
@@ -1009,6 +1081,9 @@ void HiveWindow::on_thread_selected() {
     current_thread_ = *id;
     last_message_id_.clear();
     delete_thread_btn_.set_sensitive(true);
+    for (auto& t : threads_)
+        if (t.value("id", "") == *id)
+            last_seen_activity_[*id] = t.value("last_activity", "");
     update_thread_title();
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);

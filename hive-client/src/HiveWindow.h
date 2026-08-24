@@ -79,6 +79,9 @@ private:
     void on_new_task();
     void show_task_dialog(const std::string& preselect_agent_id = "");
     void update_thread_title();
+    void notify(const Glib::ustring& title, const Glib::ustring& body);
+    /// Badge/notify pass over threads_ after a refresh (Phase 14.1).
+    void process_thread_activity();
     void on_new_thread();
     void on_approvals();
     void on_stop();
@@ -101,8 +104,12 @@ private:
     nlohmann::json threads_ = nlohmann::json::array();
     std::string current_thread_;
     std::string last_message_id_;
-    int pending_approvals_ = 0;
+    int pending_approvals_ = -1;   // -1 = first poll (don't notify on load)
     bool thread_busy_ = false;
+    // Phase 14.1 — attention: per-thread last-seen activity (ISO strings
+    // compare lexicographically) driving unread badges + notifications.
+    std::unordered_map<std::string, std::string> last_seen_activity_;
+    bool activity_seeded_ = false;  // first refresh records without notifying
     bool alive_ = true;
     std::vector<nlohmann::json> rendered_;   // bubbles actually on screen
 

@@ -21,6 +21,7 @@ struct Thread {
     std::string title;
     std::string kind;        // "dm" | "group"
     std::string created_at;
+    std::string last_activity;         // MAX(messages.created_at); "" if no messages
     std::vector<std::string> agent_ids;  // participants (loaded separately)
 };
 

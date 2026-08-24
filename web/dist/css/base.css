@@ -321,3 +321,6 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .skill-chip:hover { opacity: 1; }
 .skill-chip-on { opacity: 1; background: var(--accent, #3584e4);
   border-color: var(--accent, #3584e4); color: #fff; }
+
+.busy-dot { color: var(--accent, #3584e4); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }

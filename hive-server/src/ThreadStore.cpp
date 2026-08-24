@@ -198,15 +198,22 @@ std::vector<Thread> ThreadStore::list_threads() {
     sqlite3* db = open_conn();
     std::vector<Thread> out;
     sqlite3_stmt* st = nullptr;
+    // last_activity lets clients show unread badges without polling every
+    // thread's messages (Phase 14.1).
     if (sqlite3_prepare_v2(db,
-            "SELECT id, title, kind, created_at FROM threads"
-            " ORDER BY created_at DESC", -1, &st, nullptr) == SQLITE_OK) {
+            "SELECT t.id, t.title, t.kind, t.created_at,"
+            "  (SELECT MAX(m.created_at) FROM messages m WHERE m.thread_id = t.id)"
+            " FROM threads t"
+            " ORDER BY COALESCE((SELECT MAX(m.created_at) FROM messages m"
+            "                   WHERE m.thread_id = t.id), t.created_at) DESC",
+            -1, &st, nullptr) == SQLITE_OK) {
         while (sqlite3_step(st) == SQLITE_ROW) {
             Thread t;
             t.id = col_text(st, 0);
             t.title = col_text(st, 1);
             t.kind = col_text(st, 2);
             t.created_at = col_text(st, 3);
+            t.last_activity = col_text(st, 4);
             out.push_back(std::move(t));
         }
         sqlite3_finalize(st);
