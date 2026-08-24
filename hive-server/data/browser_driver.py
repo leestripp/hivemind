@@ -2,10 +2,15 @@
 """browser_driver.py — HiveMind Phase 6 computer-use driver.
 
 Runs INSIDE the agent container. Connects to a persistent Chromium over CDP
-(launching it on the Xvfb display :99 when needed), so the same browser the
-agent drives is the one the user sees in the web UI's Computer view — that's
-the login-handoff channel: the user can watch, take over, log in, and the
-agent resumes on the same page. Profile persists at ~/.browser-profile.
+(launching it on the GNOME Wayland headless display when needed), so the same
+browser the agent drives is the one the user sees in the web UI's Computer
+view — that's the login-handoff channel: the user can watch, take over, log
+in, and the agent resumes on the same page. Profile persists at
+~/.browser-profile.
+
+Phase 24: the browser is playwright's bundled chromium (Ubuntu's
+chromium-browser deb is a snap stub — unusable in containers) running
+Wayland-native on gnome-shell's headless display.
 
 Usage: python3 browser_driver.py <action> [args...]
 Prints one JSON object to stdout: {"status": "ok", ...} or
@@ -28,6 +33,19 @@ def emit(obj):
     sys.exit(0 if obj.get("status") == "ok" else 1)
 
 
+def chromium_binary():
+    """Playwright's bundled chromium (the snap stub can't run here)."""
+    import glob
+    hits = sorted(glob.glob(os.path.expanduser(
+        "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")))
+    if not hits:  # system fallback for non-container runs
+        for c in ("chromium", "chromium-browser", "google-chrome"):
+            if subprocess.run(["which", c], capture_output=True).returncode == 0:
+                return c
+        raise RuntimeError("no chromium found (run: playwright install chromium)")
+    return hits[-1]  # newest
+
+
 def ensure_browser(pw):
     """Connect to the running Chromium; launch it if CDP is unreachable."""
     try:
@@ -35,11 +53,16 @@ def ensure_browser(pw):
     except Exception:
         pass
     os.makedirs(PROFILE, exist_ok=True)
+    env = {**os.environ,
+           # Wayland-native on the GNOME headless display; XWayland is the
+           # fallback when a display number is all that's around.
+           "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-0"),
+           "DISPLAY": os.environ.get("DISPLAY", ":0")}
     subprocess.Popen(
-        ["chromium-browser", "--remote-debugging-port=9222",
+        [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
          "--disable-session-crashed-bubble", "--start-maximized", "about:blank"],
-        env={**os.environ, "DISPLAY": ":99"},
+        env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     last = None
     for _ in range(30):  # up to ~15s for first launch

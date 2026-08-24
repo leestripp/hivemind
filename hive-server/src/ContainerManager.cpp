@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -281,12 +282,17 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
     const std::string cname = container_name(agent_id);
     auto st = status(agent_id);
 
-    // Containers created before Phase 6 have no published 6080 — recreate
-    // (home dir is a bind mount, so browser profile/state survives).
-    if (st.exists && screen_port(agent_id) == 0) {
-        stop(agent_id);
-        remove(agent_id);
-        st = status(agent_id);
+    // Recreate when the container predates the screen stack (no published
+    // 6080) or runs a stale image (e.g. the X11-era browser image). The
+    // home dir is a bind mount — browser profile/session survive.
+    if (st.exists) {
+        auto img = run("podman inspect -f '{{.ImageName}}' " + shell_quote(cname));
+        if (screen_port(agent_id) == 0 ||
+            img.output.find(kBrowserImage) == std::string::npos) {
+            stop(agent_id);
+            remove(agent_id);
+            st = status(agent_id);
+        }
     }
 
     if (!st.exists) {
@@ -298,8 +304,12 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
             " --memory 4g --cpus 2"
             " -p 127.0.0.1::6080"
             " -v " + shell_quote(ws) + ":/workspace"
-            " -v " + shell_quote(home.string()) + ":/home/hive:U"
-            " -w /workspace " + kBrowserImage;
+            " -v " + shell_quote(home.string()) + ":/home/hive:U";
+        // Phase 24: GPU passthrough when the host has one — mutter gets
+        // hardware GL (llvmpipe software rendering is the fallback).
+        if (fs::exists("/dev/dri/renderD128"))
+            cmd += " --device /dev/dri";
+        cmd += std::string(" -w /workspace ") + kBrowserImage;
         auto r = run(cmd);
         if (r.exit_code != 0)
             throw std::runtime_error("podman create (browser) failed: " + r.output);
@@ -316,31 +326,20 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
     if (port == 0)
         throw std::runtime_error("container has no published 6080 port");
 
-    // Start the display stack idempotently (detached, logs to /tmp).
-    // Chromium last: the SAME instance browser_driver.py connects to via
-    // CDP :9222 (connect_over_cdp attaches to it; profile persists in the
-    // home mount) — so the screen shows the agent's actual browser instead
-    // of a black display until its first browser_* call.
-    auto r = exec(agent_id,
-        "pgrep -x Xvfb >/dev/null || nohup Xvfb :99 -screen 0 1280x800x24 "
-            ">/tmp/xvfb.log 2>&1 & "
-        "sleep 1; "
-        "pgrep -x x11vnc >/dev/null || nohup x11vnc -display :99 -forever "
-            "-shared -nopw -localhost >/tmp/x11vnc.log 2>&1 & "
-        "pgrep  websockify >/dev/null || nohup websockify --web "
-            "/usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 & "
-        "sleep 2; "
-        "curl -sf --max-time 2 http://127.0.0.1:9222/json/version "
-            ">/dev/null 2>&1 || "
-        "DISPLAY=:99 nohup chromium-browser --remote-debugging-port=9222 "
-            "--user-data-dir=/home/hive/.browser-profile --no-first-run "
-            "--no-default-browser-check --disable-session-crashed-bubble "
-            "--start-maximized about:blank >/tmp/chromium.log 2>&1 & "
-        "pgrep  websockify >/dev/null",
-        /*timeout_s=*/30);
+    // Phase 24: GNOME Wayland headless desktop (gnome-shell --headless +
+    // gnome-remote-desktop VNC + websockify), idempotent bring-up script.
+    auto r = exec(agent_id, "hive-screen.sh", /*timeout_s=*/45);
     if (r.exit_code != 0)
         throw std::runtime_error("display stack failed to start: " + r.output);
     return port;
+}
+
+std::string ContainerManager::screen_password(const std::string& agent_id) {
+    // Written by hive-screen.sh into the agent's home mount on first run.
+    std::ifstream f(agent_home_dir(agent_id) / ".vnc-password");
+    std::string pw;
+    std::getline(f, pw);
+    return pw;
 }
 
 bool ContainerManager::stop_screen(const std::string& agent_id) {

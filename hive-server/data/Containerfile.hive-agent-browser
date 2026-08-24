@@ -1,36 +1,51 @@
-# Containerfile.hive-agent-browser — computer-use variant (Phase 6).
-# Builds on the base agent image with a headless browser stack so agents
-# can operate websites that have no API/MCP. UNTESTED in the dev sandbox
-# (no working podman there) — build/verify on a real Ubuntu 26.04 box:
-#   podman build -t localhost/hive-agent:browser \
-#       -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
+# Containerfile.hive-agent-browser — computer-use variant (Phase 24 rework).
+# GNOME 50 on Wayland, headless: gnome-shell --headless (mutter's headless
+# backend) + gnome-remote-desktop serving VNC + noVNC/websockify for the
+# browser client. NO X11 server anywhere — X11 apps run via XWayland.
 #
-# Login handoff flow (designed, implementation follows with Phase 6 UI):
-#   1. Agent hits a login wall and reports it in the thread.
-#   2. User opens the session via noVNC (container exposes :6080) or the
-#      client's embedded view, authenticates, hands control back.
-#   3. Browser profile persists in the agent's /home/hive mount, so the
-#      session survives container restarts.
+# Why not Xvfb/x11vnc: GNOME 50 dropped X11 sessions entirely (Ubuntu 26.04
+# is Wayland-only), and GRD's headless VNC backend (libvncserver) is the
+# maintained path. GPU optional: --device /dev/dri gives mutter hardware GL
+# (llvmpipe software rendering works without it).
+#
+# Build:  podman build -t localhost/hive-agent:browser \
+#             -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
+#
+# Login handoff: the browser profile persists in the agent's /home/hive
+# mount; the user takes over via noVNC, authenticates, hands back.
 
 FROM localhost/hive-agent:latest
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        chromium-browser \
-        xvfb \
-        x11vnc \
+        gnome-shell \
+        mutter \
+        gnome-remote-desktop \
+        pipewire \
+        pipewire-bin \
+        wireplumber \
+        dbus \
+        dbus-x11 \
+        xwayland \
+        xdg-desktop-portal-gnome \
+        fonts-dejavu-core \
         novnc \
         websockify \
         python3-playwright \
     && rm -rf /var/lib/apt/lists/* \
-    && python3 -m playwright install-deps chromium || true
+    && python3 -m playwright install chromium --with-deps || true
+
+# Ubuntu's chromium-browser deb is a snap stub (snaps can't run in
+# containers) — playwright's bundled chromium is the real browser. It is
+# ALSO the desktop browser: launched on the Wayland display with CDP :9222,
+# browser_driver.py attaches over CDP.
+
+COPY hive-screen.sh /usr/local/bin/hive-screen.sh
+RUN chmod +x /usr/local/bin/hive-screen.sh
 
 USER hive
 WORKDIR /workspace
 
-# Xvfb on :99, x11vnc on :5900, noVNC/websockify on :6080.
-# The CMD keeps the sandbox idle; the display stack starts on demand via
-# container_exec (Phase 6 tooling will wrap this).
-ENV DISPLAY=:99
+ENV XDG_RUNTIME_DIR=/run/user/1000
 EXPOSE 6080
 CMD ["sleep", "infinity"]
