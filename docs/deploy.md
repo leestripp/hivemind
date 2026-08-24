@@ -28,6 +28,16 @@ State lives in `~/.local/share/hivemind/` — `auth.db` (API keys),
 homes), `workspace/` (company share). Back up this whole directory;
 `secrets.key` is required to decrypt `secrets.db`.
 
+**Relocating the workspace**: the company share can live on bulk storage —
+`PUT /api/config {"workspace_root": "/path"}` (Settings page works too).
+Containers mount it at `/workspace` (plain bind, no `:U`); the dir needs to
+be writable by BOTH the service user and subuid-mapped container users —
+mode `1777` (sticky) works: service writes its files, containers write
+theirs, nobody deletes each other's (the files API is read-only anyway).
+Rig layout (dev-rig): the 2×4TB btrfs RAID1 is mounted at `/workspace`
+(fstype btrfs, fstab by UUID, `nosuid,nodev,nofail`), and hivemind's
+`workspace_root` points there.
+
 ## 3. systemd unit
 
 `/etc/systemd/system/hivemind.service`:
