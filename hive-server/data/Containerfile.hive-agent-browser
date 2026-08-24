@@ -46,6 +46,8 @@ RUN chmod +x /usr/local/bin/hive-screen.sh
 USER hive
 WORKDIR /workspace
 
-ENV XDG_RUNTIME_DIR=/run/user/1000
+# /run is root-owned in the container and the agent runs as hive — the
+# runtime dir lives in the per-agent home mount instead (0700, writable).
+ENV XDG_RUNTIME_DIR=/home/hive/.run
 EXPOSE 6080
 CMD ["sleep", "infinity"]
