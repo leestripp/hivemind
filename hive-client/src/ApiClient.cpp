@@ -152,6 +152,10 @@ nlohmann::json ApiClient::container_stop(const std::string& agent_id) {
     return request("POST", "/api/agents/" + agent_id + "/container/stop");
 }
 
+nlohmann::json ApiClient::screen_start(const std::string& agent_id) {
+    return request("POST", "/api/agents/" + agent_id + "/screen/start");
+}
+
 // ── threads / chat ──────────────────────────────────────────────────────────
 
 nlohmann::json ApiClient::templates() {

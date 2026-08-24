@@ -1,4 +1,10 @@
 #include "HiveWindow.h"
+
+#include <thread>
+
+#ifdef HIVEMIND_WITH_WEBKIT
+#include <webkit/webkit.h>
+#endif
 #include <giomm/memoryinputstream.h>
 #include <giomm/resource.h>
 #include <gdkmm/pixbuf.h>
@@ -1246,6 +1252,7 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
         });
         box->append(*b);
     };
+    mk("\U0001F5A5 Computer", nullptr, [this, agent] { show_agent_screen(agent); });
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
@@ -1258,6 +1265,51 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     pop->set_pointing_to(rect);
     pop->signal_closed().connect([pop] { pop->unparent(); });
     pop->popup();
+}
+
+// ── Agent Computer screen (embedded noVNC via WebKitGTK) ───────────────────
+// Right-click an agent → Computer. Loads the server's screen URL, which
+// redirects to noVNC with autoconnect + the per-agent VNC password filled.
+// The ?key= sets the HttpOnly screen cookie on first load, so the WS
+// handshake inside WebKit authenticates too. Without WebKitGTK the menu
+// item falls back to the system browser.
+void HiveWindow::show_agent_screen(const nlohmann::json& agent) {
+    const std::string id = agent.value("id", "");
+    if (id.empty()) return;
+    const std::string url = api_.base_url() + "/screen/" + id +
+                            "/?key=" + api_.api_key();
+
+    // The screen stack may not be running — POST screen/start first or
+    // the page 503s. ApiClient is synchronous, so start in a worker
+    // thread; the UI thread opens the window immediately.
+    std::thread([this, id] {
+        try { api_.screen_start(id); } catch (...) {}
+    }).detach();
+
+#ifdef HIVEMIND_WITH_WEBKIT
+    auto* win = Gtk::make_managed<Gtk::Window>();
+    win->set_title("Computer — " + agent.value("name", id));
+    win->set_default_size(1320, 860);
+    win->set_transient_for(*this);
+
+    // WebKitWebView is plain GTK4 C API — embeds fine in a gtkmm window.
+    auto* wv = webkit_web_view_new();
+    gtk_widget_set_vexpand(wv, TRUE);
+    gtk_widget_set_hexpand(wv, TRUE);
+    win->set_child(*Glib::wrap(GTK_WIDGET(wv)));
+    win->present();
+
+    // Give the bring-up a moment, then load. If the screen still isn't
+    // up, noVNC shows the server's error page and the user can retry.
+    Glib::signal_timeout().connect_once([wv, url] {
+        webkit_web_view_load_uri(WEBKIT_WEB_VIEW(wv), url.c_str());
+    }, 3000);
+#else
+    // System-browser fallback: same delay logic via a timeout, then open.
+    Glib::signal_timeout().connect_once([url] {
+        Gio::AppInfo::launch_default_for_uri(url);
+    }, 3000);
+#endif
 }
 
 void HiveWindow::on_edit_agent(const nlohmann::json& agent) {

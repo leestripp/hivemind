@@ -22,6 +22,7 @@ public:
     void set_api_key(std::string key) { api_key_ = std::move(key); }
     void set_base_url(std::string url) { base_ = std::move(url); }
     const std::string& api_key() const { return api_key_; }
+    const std::string& base_url() const { return base_; }
 
     // ── roster ────────────────────────────────────────────────────────────
     nlohmann::json list_agents();                                    // GET /api/agents
@@ -47,6 +48,7 @@ public:
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
     nlohmann::json container_start(const std::string& agent_id);     // POST …/container/start
     nlohmann::json container_stop(const std::string& agent_id);      // POST …/container/stop
+    nlohmann::json screen_start(const std::string& agent_id);        // POST …/screen/start
 
     // ── skills (Phase 14.2) ───────────────────────────────────────────────
     nlohmann::json list_global_skills();                              // GET /api/skills

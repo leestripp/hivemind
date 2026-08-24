@@ -6,6 +6,14 @@
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
+
+# Optional: WebKitGTK 6.0 — embeds the noVNC screen view (agent context
+# menu → Computer). Without it the menu item falls back to the system
+# browser.
+pkg_check_modules(WEBKIT IMPORTED_TARGET webkitgtk-6.0)
+if(WEBKIT_FOUND)
+    message(STATUS "WebKitGTK ${WEBKIT_VERSION} found — embedded Computer view enabled")
+endif()
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
@@ -42,6 +50,11 @@ target_link_libraries(hive-client PRIVATE
     nlohmann_json::nlohmann_json
     OmniNet
 )
+
+if(WEBKIT_FOUND)
+    target_compile_definitions(hive-client PRIVATE HIVEMIND_WITH_WEBKIT=1)
+    target_link_libraries(hive-client PRIVATE PkgConfig::WEBKIT)
+endif()
 
 install(TARGETS hive-client DESTINATION "bin")
 install(FILES data/hivemind.desktop DESTINATION "share/applications")
