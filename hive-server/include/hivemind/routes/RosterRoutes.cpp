@@ -8,6 +8,8 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/AgentHost.h"
+#include "hivemind/RoutineStore.h"
+#include "hivemind/ThreadStore.h"
 
 #include <nlohmann/json.hpp>
 
@@ -59,7 +61,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
                             AgentRegistry& registry,
-                            ChatService& chat) {
+                            ChatService& chat,
+                            RoutineStore& routines) {
 
     // ── POST /api/agents ──────────────────────────────────────────────────
     server.post("/api/agents",
@@ -157,16 +160,67 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
         });
 
+    // Cascade delete: threads the agent was in are cleaned up (solo threads
+    // deleted, group threads keep going without the agent), and its routines
+    // are either deleted or moved to another agent via ?reassign_to=<id>.
     server.delete_("/api/agents/:id",
-        [&agents, &registry](const OmniNet::HTTP::Request& req,
+        [&agents, &threads, &registry, &routines](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
-            if (!agents.delete_agent(seg[2])) {
-                send_error(resp, 404, "agent not found"); return;
+            const std::string id = seg[2];
+            auto existing = agents.get_agent(id);
+            if (!existing) { send_error(resp, 404, "agent not found"); return; }
+
+            const std::string reassign_to = req.queryParameter("reassign_to", "");
+            if (!reassign_to.empty() && reassign_to != id
+                && !agents.get_agent(reassign_to)) {
+                send_error(resp, 400, "reassign target agent not found"); return;
             }
-            registry.evict(seg[2]);
-            send_json(resp, json{{"deleted", true}});
+
+            // 1. Routines: reassign (moving routine-thread participation to
+            //    the new owner) or delete.
+            int routines_reassigned = 0;
+            if (!reassign_to.empty() && reassign_to != id) {
+                std::vector<std::string> routine_threads;
+                for (auto& r : routines.list())
+                    if (r.agent_id == id) routine_threads.push_back(r.thread_id);
+                routines_reassigned = routines.reassign_agent(id, reassign_to);
+                for (auto& tid : routine_threads) {
+                    threads.remove_participant(tid, id);
+                    threads.add_participant(tid, reassign_to);
+                }
+            }
+            const int routines_deleted = routines.remove_for_agent(id);
+
+            // 2. Threads: solo threads die with the agent; group threads lose
+            //    the participant (with a system note for the humans reading).
+            int threads_deleted = 0, threads_left = 0;
+            for (auto& t : threads.list_threads()) {
+                auto& parts = t.agent_ids;
+                if (std::find(parts.begin(), parts.end(), id) == parts.end())
+                    continue;
+                if (parts.size() <= 1) {
+                    threads.delete_thread(t.id);
+                    ++threads_deleted;
+                } else {
+                    threads.remove_participant(t.id, id);
+                    threads.add_message(t.id, "system", "",
+                        existing->name + " was removed from the hive.");
+                    ++threads_left;
+                }
+            }
+
+            // 3. The roster row itself + any live host process.
+            agents.delete_agent(id);
+            registry.evict(id);
+            send_json(resp, json{
+                {"deleted", true},
+                {"threads_deleted", threads_deleted},
+                {"threads_left", threads_left},
+                {"routines_deleted", routines_deleted},
+                {"routines_reassigned", routines_reassigned},
+            });
         });
 
     // ── POST /api/threads ─────────────────────────────────────────────────

@@ -36,7 +36,9 @@ public:
                                 const std::string& workspace_mode,
                                 bool require_approval,
                                 const std::string& avatar);            // PATCH /api/agents/:id
-    nlohmann::json delete_agent(const std::string& id);                // DELETE /api/agents/:id
+    nlohmann::json delete_agent(const std::string& id,
+                                const std::string& reassign_to = "");  // DELETE /api/agents/:id[?reassign_to=]
+    nlohmann::json list_routines();                                    // GET /api/routines
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
 
     // ── threads / chat ────────────────────────────────────────────────────

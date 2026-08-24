@@ -135,12 +135,18 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
         });
 
     // ── DELETE /api/routines/:id ──────────────────────────────────────────
+    // A routine owns its thread (created alongside it) — deleting the
+    // routine deletes the thread too, no orphans.
     server.delete_("/api/routines/:id",
-        [&routines](const OmniNet::HTTP::Request& req,
+        [&routines, &threads](const OmniNet::HTTP::Request& req,
                     OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
-            if (!routines.remove(seg[2])) { send_error(resp, 404, "routine not found"); return; }
+            auto r = routines.get(seg[2]);
+            if (!r) { send_error(resp, 404, "routine not found"); return; }
+            const std::string tid = r->thread_id;
+            routines.remove(seg[2]);
+            threads.delete_thread(tid);
             send_json(resp, json{{"deleted", true}});
         });
 

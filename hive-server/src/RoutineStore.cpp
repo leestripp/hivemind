@@ -217,6 +217,37 @@ bool RoutineStore::set_enabled(const std::string& id, bool enabled) {
     return ok;
 }
 
+int RoutineStore::reassign_agent(const std::string& old_agent_id,
+                                 const std::string& new_agent_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    int n = 0;
+    if (sqlite3_prepare_v2(db,
+            "UPDATE routines SET agent_id = ? WHERE agent_id = ?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, new_agent_id);
+        bind_text(st, 2, old_agent_id);
+        if (sqlite3_step(st) == SQLITE_DONE) n = sqlite3_changes(db);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return n;
+}
+
+int RoutineStore::remove_for_agent(const std::string& agent_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    int n = 0;
+    if (sqlite3_prepare_v2(db, "DELETE FROM routines WHERE agent_id = ?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, agent_id);
+        if (sqlite3_step(st) == SQLITE_DONE) n = sqlite3_changes(db);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return n;
+}
+
 bool RoutineStore::remove(const std::string& id) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;

@@ -23,8 +23,10 @@
  *   POST   /api/threads/:id/messages      {body} → user message + agent turns
  *   GET    /api/threads/:id/activity      in-progress agent turns (streaming)
  */
+class RoutineStore;
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
                             AgentRegistry& registry,
-                            ChatService& chat);
+                            ChatService& chat,
+                            RoutineStore& routines);

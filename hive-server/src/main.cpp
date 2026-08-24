@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
     // Phase 12: graph/workflow/trigger/run routes REMOVED — workflow engine
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,
-                           agent_registry, chat_service);
+                           agent_registry, chat_service, routine_store);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store);
     register_key_routes(server, auth_store);

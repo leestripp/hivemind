@@ -216,6 +216,43 @@ std::vector<Thread> ThreadStore::list_threads() {
     return out;
 }
 
+bool ThreadStore::add_participant(const std::string& thread_id,
+                                  const std::string& agent_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "INSERT OR IGNORE INTO thread_participants (thread_id, agent_id)"
+        " VALUES (?, ?)";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return false;
+    }
+    bind_text(st, 1, thread_id);
+    bind_text(st, 2, agent_id);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return ok;
+}
+
+bool ThreadStore::remove_participant(const std::string& thread_id,
+                                     const std::string& agent_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "DELETE FROM thread_participants WHERE thread_id = ? AND agent_id = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return false;
+    }
+    bind_text(st, 1, thread_id);
+    bind_text(st, 2, agent_id);
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db) > 0;
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return ok;
+}
+
 bool ThreadStore::delete_thread(const std::string& id) {
     sqlite3* db = open_conn();
     exec_sql(db, "BEGIN");

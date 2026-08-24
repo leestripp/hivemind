@@ -1025,26 +1025,108 @@ void HiveWindow::on_edit_agent(const nlohmann::json& agent) {
 void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
     const std::string id   = agent.value("id", "");
     const std::string name = agent.value("name", "?");
-    auto dlg = Gtk::AlertDialog::create(
-        "Delete agent \u201C" + name + "\u201D?");
-    dlg->set_detail("This removes the agent from the roster. Its workspace and "
-                    "conversation history are kept on disk.");
-    dlg->set_buttons({"Cancel", "Delete"});
-    dlg->set_cancel_button(0);
-    dlg->set_default_button(0);
-    dlg->choose(*this, [this, id, dlg](Glib::RefPtr<Gio::AsyncResult>& res) {
-        int btn = -1;
-        try { btn = dlg->choose_finish(res); } catch (...) { return; }
-        if (btn != 1 || !alive_) return;
-        run_async([this, id] {
-            api_.delete_agent(id);
-            {
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this] { if (alive_) refresh_all(); });
+
+    // What does this agent own? Threads come from the cached roster state;
+    // routines are fetched fresh (blocking call, same pattern as the
+    // provider/model dropdowns in the agent dialog).
+    int n_threads_solo = 0, n_threads_group = 0;
+    for (auto& t : threads_) {
+        auto ids = t.value("agent_ids", nlohmann::json::array());
+        bool has = false;
+        for (auto& a : ids) if (a.get<std::string>() == id) { has = true; break; }
+        if (!has) continue;
+        if (ids.size() <= 1) ++n_threads_solo; else ++n_threads_group;
+    }
+    nlohmann::json owned_routines = nlohmann::json::array();
+    try {
+        for (auto& r : api_.list_routines().value("routines", nlohmann::json::array()))
+            if (r.value("agent_id", "") == id) owned_routines.push_back(r);
+    } catch (...) { /* server unreachable — treat as none */ }
+    const int n_routines = (int)owned_routines.size();
+
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    const std::string title = "Delete agent";
+    dialog->set_title(title);
+    install_dialog_titlebar(*dialog, title);
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Delete", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::CANCEL);  // safe default
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 10);
+    box->set_margin(16);
+
+    auto* head = Gtk::make_managed<Gtk::Label>("Delete \u201C" + name + "\u201D?");
+    head->add_css_class("heading");
+    head->set_halign(Gtk::Align::START);
+    box->append(*head);
+
+    std::string detail = "The roster entry is removed. Conversation history and the workspace stay on disk.";
+    if (n_threads_solo > 0 || n_threads_group > 0) {
+        detail += "\n\nThreads: ";
+        std::vector<std::string> parts;
+        if (n_threads_solo)
+            parts.push_back(std::to_string(n_threads_solo) + " private thread(s) will be deleted");
+        if (n_threads_group)
+            parts.push_back(std::to_string(n_threads_group) + " group thread(s) continue without " + name);
+        for (size_t i = 0; i < parts.size(); ++i) { if (i) detail += "; "; detail += parts[i]; }
+        detail += ".";
+    }
+    auto* info = Gtk::make_managed<Gtk::Label>(detail);
+    info->set_wrap(true);
+    info->set_max_width_chars(52);
+    info->set_halign(Gtk::Align::START);
+    info->add_css_class("dim-label");
+    box->append(*info);
+
+    // Reassignment choice — only when the agent actually owns tasks and
+    // there is someone else to take them.
+    std::vector<Glib::ustring> choices;
+    auto* reassign_ids = new std::vector<std::string>();   // freed on response
+    if (n_routines > 0) {
+        auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+        auto* lbl = Gtk::make_managed<Gtk::Label>(
+            std::to_string(n_routines) + " scheduled task(s):");
+        lbl->set_halign(Gtk::Align::START);
+        choices.push_back("Delete them");
+        reassign_ids->push_back("");
+        for (auto& a : agents_) {
+            if (a.value("id", "") == id) continue;
+            choices.push_back("Reassign to " + a.value("name", "?"));
+            reassign_ids->push_back(a.value("id", ""));
+        }
+        auto* dd = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(choices));
+        dd->set_selected(0);
+        row->append(*lbl);
+        row->append(*dd);
+        box->append(*row);
+        box->set_data("reassign_dd", dd);   // no ownership transfer — dialog-owned
+    }
+
+    dialog->get_content_area()->append(*box);
+    dialog->signal_response().connect(
+        [this, dialog, box, id, reassign_ids](int r) {
+            std::string reassign;
+            if (r == (int)Gtk::ResponseType::OK) {
+                if (auto* dd = static_cast<Gtk::DropDown*>(box->get_data("reassign_dd"))) {
+                    const auto sel = dd->get_selected();
+                    if (sel > 0 && sel < reassign_ids->size())
+                        reassign = (*reassign_ids)[sel];
+                }
+                run_async([this, id, reassign] {
+                    api_.delete_agent(id, reassign);
+                    {
+                        std::lock_guard<std::mutex> lk(queue_m_);
+                        done_queue_.push_back([this] { if (alive_) refresh_all(); });
+                    }
+                    dispatcher_.emit();
+                });
             }
-            dispatcher_.emit();
+            delete reassign_ids;
+            dialog->destroy();
         });
-    });
+    dialog->present();
 }
 
 void HiveWindow::on_new_agent() {

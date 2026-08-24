@@ -52,6 +52,10 @@ public:
     std::optional<Thread> get_thread(const std::string& id);
     std::vector<Thread> list_threads();
     bool delete_thread(const std::string& id);  // cascades messages + participants
+    bool remove_participant(const std::string& thread_id,
+                            const std::string& agent_id);
+    bool add_participant(const std::string& thread_id,
+                         const std::string& agent_id);
 
     /// Append a message; returns its id.
     std::string add_message(const std::string& thread_id,

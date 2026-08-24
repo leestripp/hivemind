@@ -99,8 +99,15 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
     return request("PATCH", "/api/agents/" + id, &body);
 }
 
-nlohmann::json ApiClient::delete_agent(const std::string& id) {
-    return request("DELETE", "/api/agents/" + id);
+nlohmann::json ApiClient::delete_agent(const std::string& id,
+                                       const std::string& reassign_to) {
+    std::string path = "/api/agents/" + id;
+    if (!reassign_to.empty()) path += "?reassign_to=" + reassign_to;
+    return request("DELETE", path);
+}
+
+nlohmann::json ApiClient::list_routines() {
+    return request("GET", "/api/routines");
 }
 
 nlohmann::json ApiClient::container_status(const std::string& agent_id) {

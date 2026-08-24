@@ -55,6 +55,11 @@ public:
 
     bool set_enabled(const std::string& id, bool enabled);
     bool remove(const std::string& id);
+    /// Move every routine owned by old_agent to new_agent. Returns count.
+    int reassign_agent(const std::string& old_agent_id,
+                       const std::string& new_agent_id);
+    /// Delete every routine owned by the agent. Returns count.
+    int remove_for_agent(const std::string& agent_id);
 
 private:
     std::filesystem::path db_path_;
