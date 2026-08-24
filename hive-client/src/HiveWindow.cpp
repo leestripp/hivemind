@@ -19,6 +19,12 @@ namespace {
 
 const char* kCss = R"(
 .hv-sidebar { background: @shade; }
+.hv-sidebar list { background: transparent; }
+.hv-sidebar row { border-radius: 8px; }
+.hv-sidebar row:selected {
+  background: alpha(@accent_color, 0.28);
+  box-shadow: inset 3px 0 0 @accent_color;
+}
 .hv-msg-user   { background: alpha(@accent_color, 0.15); border-radius: 10px;
                  padding: 8px; margin: 4px 48px 4px 12px; }
 .hv-msg-agent  { background: alpha(@window_fg_color, 0.07); border-radius: 10px;
@@ -62,6 +68,10 @@ const char* kCss = R"(
 /* Context menus (right-click roster/threads) */
 .hv-menu-item { padding: 6px 12px; min-width: 140px; }
 .hv-menu-item label { margin: 0; }
+.hv-prompt-frame { border: 1px solid alpha(@window_fg_color, 0.2);
+                   border-radius: 8px; }
+.hv-prompt-frame textview { padding: 6px; }
+.error { color: @error_color; }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -309,6 +319,7 @@ void HiveWindow::setup_icons() {
     };
     slot(new_agent_btn_,     "agent-add",  "Create a new agent");
     slot(new_thread_btn_,    "thread-add", "Start a new thread");
+    slot(tasks_btn_,         "task-add",   "Schedule a task (routine)");
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
     slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
     slot(delete_thread_btn_, "trash",      "Delete the selected thread");
@@ -386,6 +397,8 @@ HiveWindow::HiveWindow() {
         sigc::mem_fun(*this, &HiveWindow::on_new_agent));
     new_thread_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_new_thread));
+    tasks_btn_.signal_clicked().connect(
+        sigc::mem_fun(*this, &HiveWindow::on_new_task));
     approvals_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_approvals));
     connect_btn_.signal_clicked().connect(
@@ -399,6 +412,7 @@ HiveWindow::HiveWindow() {
     delete_thread_btn_.set_sensitive(false);  // enabled with a selection
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
+    header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);
@@ -429,6 +443,7 @@ HiveWindow::HiveWindow() {
     threads_list_.signal_row_selected().connect(
         [this](Gtk::ListBoxRow*) { on_thread_selected(); });
 
+    sidebar_.add_css_class("hv-sidebar");
     sidebar_.append(roster_label_);
     sidebar_.append(roster_scroll_);
     sidebar_.append(*Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::HORIZONTAL));
@@ -450,6 +465,11 @@ HiveWindow::HiveWindow() {
     composer_.append(entry_);
     composer_.append(send_btn_);
 
+    thread_title_.add_css_class("heading");
+    thread_title_.set_halign(Gtk::Align::START);
+    thread_title_.set_margin_start(6);
+    thread_title_.set_ellipsize(Pango::EllipsizeMode::END);
+    chat_box_.append(thread_title_);
     chat_box_.append(status_label_);
     chat_box_.append(chat_scroll_);
     chat_box_.append(composer_);
@@ -841,7 +861,28 @@ void HiveWindow::rebuild_thread_list() {
         row->set_data("thread_id", new std::string(t.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
         threads_list_.append(*row);
+        // Keep the visible selection on the thread the chat is showing —
+        // rebuilding the list drops it otherwise (refresh clears highlight).
+        if (!current_thread_.empty() && t.value("id", "") == current_thread_)
+            threads_list_.select_row(*row);
     }
+    update_thread_title();
+}
+
+void HiveWindow::update_thread_title() {
+    if (current_thread_.empty()) { thread_title_.set_text(""); return; }
+    for (auto& t : threads_) {
+        if (t.value("id", "") != current_thread_) continue;
+        std::string title = t.value("title", "");
+        if (title.empty())
+            for (auto& id : t.value("agent_ids", json::array())) {
+                if (!title.empty()) title += ", ";
+                title += agent_name_of(agents_, id.get<std::string>());
+            }
+        thread_title_.set_text("\U0001F4AC " + title);
+        return;
+    }
+    thread_title_.set_text("");
 }
 
 void HiveWindow::append_message_bubble(const std::string& sender_kind,
@@ -968,6 +1009,7 @@ void HiveWindow::on_thread_selected() {
     current_thread_ = *id;
     last_message_id_.clear();
     delete_thread_btn_.set_sensitive(true);
+    update_thread_title();
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);
     rendered_.clear();
@@ -1008,6 +1050,8 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
         });
         box->append(*b);
     };
+    mk("Add Task\u2026", nullptr,
+       [this, agent] { show_task_dialog(agent.value("id", "")); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
     mk("Delete Agent", "destructive-action", [this, agent] { on_delete_agent(agent); });
     pop->set_child(*box);
@@ -1125,6 +1169,172 @@ void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
             }
             delete reassign_ids;
             dialog->destroy();
+        });
+    dialog->present();
+}
+
+void HiveWindow::on_new_task() {
+    show_task_dialog("");
+}
+
+// Schedule-a-task dialog (routines). Blocking create call on OK — same
+// pattern as the provider/model fetch in the agent dialog — so server
+// validation errors can be shown in-dialog without closing it.
+void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title("Add scheduled task");
+    install_dialog_titlebar(*dialog, "Add scheduled task");
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::OK);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_margin(12);
+    grid->set_row_spacing(8);
+    grid->set_column_spacing(8);
+
+    auto* name = Gtk::make_managed<Gtk::Entry>();
+    name->set_placeholder_text("Name (e.g. daily-brief)");
+
+    // Agent dropdown (preselected when opened from an agent's menu)
+    std::vector<Glib::ustring> agent_names;
+    auto* agent_ids = new std::vector<std::string>();  // freed on response
+    guint preselect = 0;
+    for (auto& a : agents_) {
+        agent_names.push_back(a.value("name", "?"));
+        agent_ids->push_back(a.value("id", ""));
+        if (a.value("id", "") == preselect_agent_id)
+            preselect = agent_ids->size() - 1;
+    }
+    auto* agent_dd = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(agent_names));
+    if (!agent_ids->empty()) agent_dd->set_selected(preselect);
+
+    auto* prompt = Gtk::make_managed<Gtk::TextView>();
+    prompt->set_wrap_mode(Gtk::WrapMode::WORD_CHAR);
+    prompt->set_size_request(-1, 72);
+    auto* prompt_scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+    prompt_scroll->set_child(*prompt);
+    prompt_scroll->add_css_class("hv-prompt-frame");
+
+    // Schedule: type dropdown + a stack of per-type field sets
+    auto* type_dd = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create({"Once (one-shot)", "Interval (every N minutes)",
+                                 "Daily", "Weekly"}));
+    auto* stack = Gtk::make_managed<Gtk::Stack>();
+
+    // once: date + time entries
+    auto* once_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+    auto* once_date = Gtk::make_managed<Gtk::Entry>();
+    once_date->set_placeholder_text("YYYY-MM-DD");
+    once_date->set_max_width_chars(12);
+    auto* once_time = Gtk::make_managed<Gtk::Entry>();
+    once_time->set_placeholder_text("HH:MM");
+    once_time->set_max_width_chars(6);
+    once_box->append(*once_date);
+    once_box->append(*once_time);
+    stack->add(*once_box, "once", "Once");
+
+    // interval: minutes spinner
+    auto* every = Gtk::make_managed<Gtk::SpinButton>(
+        Gtk::Adjustment::create(60, 1, 10080, 5, 30, 0));
+    stack->add(*every, "interval", "Interval");
+
+    // daily: time entry
+    auto* daily_time = Gtk::make_managed<Gtk::Entry>();
+    daily_time->set_placeholder_text("HH:MM (e.g. 09:00)");
+    daily_time->set_max_width_chars(10);
+    stack->add(*daily_time, "daily", "Daily");
+
+    // weekly: time entry + weekday checkboxes
+    auto* weekly_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
+    auto* weekly_time = Gtk::make_managed<Gtk::Entry>();
+    weekly_time->set_placeholder_text("HH:MM (e.g. 09:00)");
+    weekly_time->set_max_width_chars(10);
+    weekly_box->append(*weekly_time);
+    auto* days_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+    const char* day_names[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
+    Gtk::CheckButton* day_checks[7];
+    for (int i = 0; i < 7; ++i) {
+        day_checks[i] = Gtk::make_managed<Gtk::CheckButton>(day_names[i]);
+        if (i >= 1 && i <= 5) day_checks[i]->set_active(true);  // weekdays default
+        days_box->append(*day_checks[i]);
+    }
+    weekly_box->append(*days_box);
+    stack->add(*weekly_box, "weekly", "Weekly");
+
+    stack->set_visible_child("once");
+    type_dd->property_selected().signal_changed().connect([type_dd, stack] {
+        const char* names[4] = {"once", "interval", "daily", "weekly"};
+        const auto sel = type_dd->get_selected();
+        if (sel < 4) stack->set_visible_child(names[sel]);
+    });
+
+    auto* err = Gtk::make_managed<Gtk::Label>("");
+    err->add_css_class("error");
+    err->set_halign(Gtk::Align::START);
+    err->set_wrap(true);
+
+    auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(label);
+        l->set_halign(Gtk::Align::END);
+        grid->attach(*l, 0, row);
+        w->set_hexpand(true);
+        grid->attach(*w, 1, row);
+    };
+    add_row("Name", name, 0);
+    add_row("Agent", agent_dd, 1);
+    add_row("Prompt", prompt_scroll, 2);
+    add_row("Schedule", type_dd, 3);
+    grid->attach(*stack, 1, 4);
+    grid->attach(*err, 1, 5);
+    dialog->get_content_area()->append(*grid);
+
+    dialog->signal_response().connect(
+        [this, dialog, name, agent_dd, agent_ids, prompt, type_dd,
+         once_date, once_time, every, daily_time, weekly_time, day_checks, err](int r) {
+            if (r != (int)Gtk::ResponseType::OK) {
+                delete agent_ids;
+                dialog->destroy();
+                return;
+            }
+            const std::string n = name->get_text();
+            const auto asel = agent_dd->get_selected();
+            const std::string aid = asel < agent_ids->size() ? (*agent_ids)[asel] : "";
+            const std::string p = prompt->get_buffer()->get_text();
+            // Build the schedule spec from the visible stack page
+            nlohmann::json sched;
+            const auto tsel = type_dd->get_selected();
+            if (tsel == 0) {
+                sched = {{"type", "once"},
+                         {"at", once_date->get_text().raw() + "T" + once_time->get_text().raw()}};
+            } else if (tsel == 1) {
+                sched = {{"type", "interval"},
+                         {"every_minutes", every->get_value_as_int()}};
+            } else if (tsel == 2) {
+                sched = {{"type", "daily"}, {"time", daily_time->get_text().raw()}};
+            } else {
+                nlohmann::json days = nlohmann::json::array();
+                for (int i = 0; i < 7; ++i)
+                    if (day_checks[i]->get_active()) days.push_back(i);
+                sched = {{"type", "weekly"}, {"time", weekly_time->get_text().raw()},
+                         {"days", days}};
+            }
+            try {
+                if (n.empty() || p.empty() || aid.empty())
+                    throw std::runtime_error("name, agent and prompt are required");
+                api_.create_routine(aid, n, p, sched);   // blocking — shows errors inline
+                delete agent_ids;
+                dialog->destroy();
+                run_async([this] {   // nothing visual to refresh; keep queue pattern
+                    std::lock_guard<std::mutex> lk(queue_m_);
+                    done_queue_.push_back([this] { if (alive_) refresh_all(); });
+                    dispatcher_.emit();
+                });
+            } catch (const std::exception& e) {
+                err->set_text(e.what());   // keep the dialog open
+            }
         });
     dialog->present();
 }

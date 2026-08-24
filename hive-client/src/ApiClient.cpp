@@ -110,6 +110,15 @@ nlohmann::json ApiClient::list_routines() {
     return request("GET", "/api/routines");
 }
 
+nlohmann::json ApiClient::create_routine(const std::string& agent_id,
+                                         const std::string& name,
+                                         const std::string& prompt,
+                                         const nlohmann::json& schedule) {
+    nlohmann::json body{{"agent_id", agent_id}, {"name", name},
+                        {"prompt", prompt}, {"schedule", schedule}};
+    return request("POST", "/api/routines", &body);
+}
+
 nlohmann::json ApiClient::container_status(const std::string& agent_id) {
     return request("GET", "/api/agents/" + agent_id + "/container/status");
 }

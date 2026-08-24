@@ -76,6 +76,9 @@ private:
     void on_delete_agent(const nlohmann::json& agent);
     void show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
                          double x, double y);
+    void on_new_task();
+    void show_task_dialog(const std::string& preselect_agent_id = "");
+    void update_thread_title();
     void on_new_thread();
     void on_approvals();
     void on_stop();
@@ -114,6 +117,7 @@ private:
     // Icon-only buttons (icons are GResource SVGs, re-tinted per theme).
     Gtk::Button new_agent_btn_;
     Gtk::Button new_thread_btn_;
+    Gtk::Button tasks_btn_;              // schedule a routine ("Add Task")
     Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
     Gtk::Label approvals_label_;         // child of approvals_btn_
     Gtk::Image approvals_icon_;          // child of approvals_btn_
@@ -134,6 +138,7 @@ private:
 
     Gtk::Box chat_box_{Gtk::Orientation::VERTICAL};
     Gtk::Label status_label_{""};
+    Gtk::Label thread_title_;            // active thread name above the chat
     Gtk::ScrolledWindow chat_scroll_;
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
