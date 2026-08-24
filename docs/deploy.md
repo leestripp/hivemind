@@ -32,11 +32,13 @@ homes), `workspace/` (company share). Back up this whole directory;
 `PUT /api/config {"workspace_root": "/path"}` (Settings page works too).
 Containers mount it at `/workspace` (plain bind, no `:U`); the dir needs to
 be writable by BOTH the service user and subuid-mapped container users —
-mode `1777` (sticky) works: service writes its files, containers write
-theirs, nobody deletes each other's (the files API is read-only anyway).
-Rig layout (dev-rig): the 2×4TB btrfs RAID1 is mounted at `/workspace`
-(fstype btrfs, fstab by UUID, `nosuid,nodev,nofail`), and hivemind's
-`workspace_root` points there.
+use mode `0777` (NO sticky bit: sticky EPERMs cross-deletes) and the server
+creates its `attachments/<thread>/` dirs as 0777 too (FileRoutes).
+**Do NOT use default POSIX ACLs on btrfs** — its default-ACL inheritance
+bakes setuid+setgid+sticky (mode 7777) into every new subdirectory, which
+then blocks cross-unlinks with "Operation not permitted". Rig layout
+(dev-rig): the 2×4TB btrfs RAID1 is mounted at `/workspace` (fstab by UUID,
+`nosuid,nodev,nofail`), and hivemind's `workspace_root` points there.
 
 ## 3. systemd unit
 
