@@ -6,6 +6,7 @@
 #include "hivemind/AgentSerialization.h"
 #include "hivemind/ContainerManager.h"
 #include "hivemind/ContainerTools.h"
+#include "hivemind/BrowserTools.h"
 #include "hivemind/AgentTools.h"
 
 #include "hivemind/LLMStore.h"
@@ -346,6 +347,23 @@ void AgentHost::ensure_agent() {
             });
         }
         agent_->register_tool(std::move(tool));
+
+        // Phase 6 computer use: browser_* tools (persistent Chromium over
+        // CDP on the container's Xvfb display — the same browser the user
+        // watches/takes over in the Computer view). Same approval gate.
+        auto approval = [this](std::string_view what) -> bool {
+            std::string id = approvals_.create(info_.id, info_.name,
+                                               "browser", std::string{what});
+            return approvals_.wait(id, /*timeout_s=*/600);
+        };
+        for (auto& spec : BrowserTool::specs()) {
+            auto bt = std::make_unique<BrowserTool>(info_.id, std::move(spec));
+            if (info_.require_approval) bt->set_approval_fn(approval);
+            agent_->register_tool(std::move(bt));
+        }
+        auto fs = std::make_unique<BrowserFillSecretTool>(info_.id);
+        if (info_.require_approval) fs->set_approval_fn(approval);
+        agent_->register_tool(std::move(fs));
     }
 
     // Phase 3 collaboration tools — every roster agent gets these.

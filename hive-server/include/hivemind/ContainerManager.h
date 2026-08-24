@@ -86,6 +86,11 @@ private:
     /// `podman exec --env-file` (0600 tmp file, deleted after) — values
     /// never appear in podman's argv, bash history, or the LLM context.
     static hivemind::SecretStore* secrets();   // function-local static (impl)
+public:
+    /// Process-wide SecretStore (same instance exec() injects from).
+    /// Public for tools that gate on grants (BrowserFillSecretTool).
+    static hivemind::SecretStore& secret_store() { return *secrets(); }
+private:
     /// Run a podman command line (already quoted), capture output + rc.
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);
 

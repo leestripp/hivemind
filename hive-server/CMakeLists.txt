@@ -12,6 +12,7 @@ set(CORE_SOURCES
     src/AgentHost.cpp
     src/ContainerManager.cpp
     src/ContainerTools.cpp
+    src/BrowserTools.cpp
     src/ApprovalStore.cpp
     src/AgentTools.cpp
     src/RoutineStore.cpp

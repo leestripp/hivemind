@@ -86,3 +86,35 @@ build command and flow.
 | `newuidmap: write to uid_map failed` | running inside a nested/restricted container — run hive-server on a normal host/VM |
 | first turn takes minutes | base image is building (once per machine) |
 | agent can't see a teammate's file | it's in their private home; use `/workspace` for shared artifacts |
+
+
+## Browser tools (Phase 6)
+
+Containerized agents get `browser_*` tools alongside `container_exec`:
+
+| Tool | Action |
+|---|---|
+| `browser_navigate` | open URL (returns final URL + title) |
+| `browser_click` / `browser_type` / `browser_press` | interact by CSS selector / key |
+| `browser_read` | page visible text (~6000 chars cap) |
+| `browser_screenshot` | viewport PNG into the workspace |
+| `browser_eval` | run JavaScript, JSON result |
+| `browser_tabs` / `browser_back` / `browser_reload` | session navigation |
+| `browser_fill_secret` | type a granted secret by NAME into a field |
+
+Implementation: `hive-server/data/browser_driver.py` is copied into the
+agent's home mount on each call and runs via `container_exec`. It connects
+to a persistent Chromium over CDP (auto-launched on the Xvfb display :99),
+so the browser the agent drives is the same one the user sees in the web
+UI's Computer view — login handoff = user takes over, authenticates,
+agent resumes on the same page. Profile persists at `~/.browser-profile`
+in the agent's home mount.
+
+`browser_fill_secret` checks the SecretStore grant on the host BEFORE any
+container call; the value rides in via exec's `HIVE_SECRET_<NAME>` env
+injection and the driver never echoes it — the secret never enters the
+LLM context, tool args, or tool output.
+
+Tools honor `require_approval` with the same approval queue as
+`container_exec` (approval summaries contain the action + target, never
+secret values).
