@@ -53,7 +53,7 @@ alive websockify || \
 # The shared browser: maximized on :99, CDP :9222 for browser_driver.py.
 # Skip if already up (CDP answers).
 if ! curl -sf --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
-    CHROME="$(ls /opt/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | tail -1)"
+    CHROME="$(ls /opt/ms-playwright/chromium-*/chrome-linux64/chrome /opt/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | tail -1)"
     [ -n "$CHROME" ] && nohup "$CHROME" --remote-debugging-port=9222 \
         --user-data-dir=/home/hive/.browser-profile --no-first-run \
         --no-default-browser-check --disable-session-crashed-bubble \

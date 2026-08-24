@@ -37,7 +37,10 @@ def chromium_binary():
     """Playwright's bundled chromium (the snap stub can't run here)."""
     import glob
     hits = sorted(glob.glob(
-        "/opt/ms-playwright/chromium-*/chrome-linux/chrome") +
+        "/opt/ms-playwright/chromium-*/chrome-linux64/chrome") +
+        glob.glob("/opt/ms-playwright/chromium-*/chrome-linux/chrome") +
+        glob.glob(os.path.expanduser(
+            "~/.cache/ms-playwright/chromium-*/chrome-linux*64/chrome")) +
         glob.glob(os.path.expanduser(
             "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")))
     if not hits:  # system fallback for non-container runs
