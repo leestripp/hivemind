@@ -299,7 +299,7 @@ non-read-only key (POST).
 | Method | Path | Description |
 |---|---|---|
 | GET | /api/agents/:id/screen | Screen status: `{podman, browser_image, running, port, url}` |
-| POST | /api/agents/:id/screen/start | Ensure browser container + display stack (Xvfb/x11vnc/websockify). 502 with the podman error on failure. Returns `{running, port, url}`. |
+| POST | /api/agents/:id/screen/start | Ensure browser container (`--shm-size 1g`, recreated on image-digest change) + display stack (Xvfb/openbox/x11vnc/websockify + Chrome). 502 with the podman error on failure. Returns `{running, port, url}`. |
 | POST | /api/agents/:id/screen/stop | Stop the display stack (container keeps running) |
 
 **Browser-facing proxy** (noVNC can't send Bearer headers — these live
@@ -307,7 +307,10 @@ outside `/api/` and authenticate via `?key=` query, which sets an HttpOnly
 `hive_screen` cookie (Path=/screen, SameSite=Strict) for subsequent asset
 and WebSocket requests; admin or agent scope required):
 
-- `GET /screen/:id/` → 302 → `vnc.html?autoconnect=true&resize=scale&path=screen/ws%3Fagent%3D:id`
+- `GET /screen/:id/` → 302 → `vnc.html?autoconnect=true&resize=scale&path=%2Fscreen%2Fws%3Fagent%3D<id>&password=<vnc-pw>`
+  (path is percent-encoded ABSOLUTE — relative doubles against the page
+  URL; password is the per-agent 8-char VNC password, so noVNC
+  autoconnects with no prompt)
 - `GET /screen/:id/<asset>` → HTTP proxy to the container's `127.0.0.1:6080`
 - `WS  /screen/ws?agent=<id>` → WebSocket splice: hive-server completes the
   client handshake itself, then opens a fresh upgrade to the container's
