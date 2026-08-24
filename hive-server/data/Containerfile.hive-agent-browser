@@ -4,8 +4,11 @@
 # browser client. NO X11 server anywhere — X11 apps run via XWayland.
 #
 # Why not Xvfb/x11vnc: GNOME 50 dropped X11 sessions entirely (Ubuntu 26.04
-# is Wayland-only), and GRD's headless VNC backend (libvncserver) is the
-# maintained path. GPU optional: --device /dev/dri gives mutter hardware GL
+# is Wayland-only), and GRD's headless VNC backend (libvncserver, rebuilt
+# from source — Ubuntu compiles it out) is the maintained path. Note:
+# gnome-shell itself is NOT in the image — it hard-requires logind, which
+# cannot exist in a container; mutter --headless is GNOME's compositor and
+# provides everything the Agent Computer needs. GPU optional: --device /dev/dri gives mutter hardware GL
 # (llvmpipe software rendering works without it).
 #
 # Build:  podman build -t localhost/hive-agent:browser \
@@ -18,7 +21,6 @@ FROM localhost/hive-agent:latest
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gnome-shell \
         mutter \
         gnome-remote-desktop \
         pipewire \
@@ -27,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         dbus \
         dbus-x11 \
         xwayland \
-        xdg-desktop-portal-gnome \
+        xdg-desktop-portal-gtk \
         fonts-dejavu-core \
         novnc \
         websockify \
