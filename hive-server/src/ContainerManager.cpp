@@ -317,6 +317,10 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
         throw std::runtime_error("container has no published 6080 port");
 
     // Start the display stack idempotently (detached, logs to /tmp).
+    // Chromium last: the SAME instance browser_driver.py connects to via
+    // CDP :9222 (connect_over_cdp attaches to it; profile persists in the
+    // home mount) — so the screen shows the agent's actual browser instead
+    // of a black display until its first browser_* call.
     auto r = exec(agent_id,
         "pgrep -x Xvfb >/dev/null || nohup Xvfb :99 -screen 0 1280x800x24 "
             ">/tmp/xvfb.log 2>&1 & "
@@ -325,7 +329,14 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
             "-shared -nopw -localhost >/tmp/x11vnc.log 2>&1 & "
         "pgrep  websockify >/dev/null || nohup websockify --web "
             "/usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 & "
-        "sleep 2; pgrep  websockify >/dev/null",
+        "sleep 2; "
+        "curl -sf --max-time 2 http://127.0.0.1:9222/json/version "
+            ">/dev/null 2>&1 || "
+        "DISPLAY=:99 nohup chromium-browser --remote-debugging-port=9222 "
+            "--user-data-dir=/home/hive/.browser-profile --no-first-run "
+            "--no-default-browser-check --disable-session-crashed-bubble "
+            "--start-maximized about:blank >/tmp/chromium.log 2>&1 & "
+        "pgrep  websockify >/dev/null",
         /*timeout_s=*/30);
     if (r.exit_code != 0)
         throw std::runtime_error("display stack failed to start: " + r.output);
