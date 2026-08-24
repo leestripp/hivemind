@@ -56,6 +56,27 @@ function closeModal(id) { $(id).classList.add('hidden'); }
 
 // ── events ────────────────────────────────────────────────────────────
 export function initSkills() {
+  $('skills-install').addEventListener('click', () => {
+    $('skill-install-form').reset();
+    openModal('skill-install-modal');
+  });
+
+  $('skill-install-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const body = { git_url: f.git_url.value.trim() };
+    if (f.path.value.trim()) body.path = f.path.value.trim();
+    try {
+      const r = await API.post('/api/skills/install', body);
+      closeModal('skill-install-modal');
+      await loadAll();
+      alert(`Installed "${r.installed}"${r.version ? ' v' + r.version : ''}`);
+    } catch (err) { alert(err.message); }
+  });
+
+  document.querySelectorAll('#skill-install-modal [data-close]').forEach(b =>
+    b.addEventListener('click', () => closeModal('skill-install-modal')));
+
   $('skills-add').addEventListener('click', () => {
     $('skill-form').reset();
     openModal('skill-modal');

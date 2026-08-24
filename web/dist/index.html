@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind</title>
-<link rel="stylesheet" href="css/base.css?v=20260824c">
-  <link rel="stylesheet" href="css/settings.css?v=20260824c">
+<link rel="stylesheet" href="css/base.css?v=20260824d">
+  <link rel="stylesheet" href="css/settings.css?v=20260824d">
 </head>
 <body>
 <div class="app">
@@ -177,6 +177,7 @@
       <div class="section-head">
         <h3>Global Library</h3>
         <div>
+          <button id="skills-install" class="btn" title="Clone a repo containing a SKILL.md into the library">Install from Git</button>
           <button id="skills-add" class="btn">+ Add Skill</button>
         </div>
       </div>
@@ -199,6 +200,18 @@
           <button type="button" class="btn" data-close>Cancel</button>
           <button type="submit" class="btn btn-primary">Add</button>
         </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="skill-install-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head"><h3>Install Skill from Git</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <form id="skill-install-form">
+        <label>Git URL <input name="git_url" required placeholder="https://github.com/you/your-skill.git"></label>
+        <label>Subdirectory (optional) <input name="path" placeholder="skills/my-skill — if SKILL.md isn't at repo root"></label>
+        <p class="muted">Shallow-clones the repo, validates SKILL.md frontmatter, and copies the skill into the global library.</p>
+        <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="submit">Install</button></div>
       </form>
     </div>
   </div>
@@ -322,7 +335,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260824c"></script>
+<script type="module" src="js/main.js?v=20260824d"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>

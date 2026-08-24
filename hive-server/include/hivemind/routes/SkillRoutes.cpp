@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -165,6 +167,77 @@ void register_skill_routes(OmniNet::HTTP::Server& server,
             }
             fs::remove_all(dir, ec);
             send_json(resp, json{{"deleted", seg[2]}});
+        });
+
+    // ── POST /api/skills/install ─────────────────────────────────────────
+    // {git_url, path?} — Phase 14.3 skill registry: shallow-clone a repo,
+    // locate the skill dir (repo root or `path` subdir), validate SKILL.md,
+    // copy into the global library. 409 if the name is taken.
+    // The URL/path go through a strict charset allowlist AND single-quoting
+    // before hitting the shell — injection-safe.
+    server.post("/api/skills/install",
+        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json body;
+            try { body = json::parse(req.bodyAsString()); }
+            catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+            const std::string url = body.value("git_url", "");
+            const std::string sub = body.value("path", "");
+            auto safe = [](const std::string& v, size_t max) {
+                if (v.empty() || v.size() > max) return false;
+                for (unsigned char c : v) {
+                    if (std::isalnum(c)) continue;
+                    if (std::string(":/.-_@~%+").find((char)c) != std::string::npos) continue;
+                    return false;
+                }
+                return true;
+            };
+            if (!safe(url, 300)) { send_error(resp, 400, "bad git_url"); return; }
+            if (!sub.empty() && (!safe(sub, 120) || sub.find("..") != std::string::npos)) {
+                send_error(resp, 400, "bad path"); return;
+            }
+
+            char tmpl[] = "/tmp/hive-skill-XXXXXX";
+            if (!mkdtemp(tmpl)) { send_error(resp, 500, "tmp dir failed"); return; }
+            const fs::path tmp = tmpl;
+            struct Cleanup { fs::path p; ~Cleanup() {
+                std::error_code ec; fs::remove_all(p, ec); fs::remove(p.string() + ".log", ec);
+            } } cleanup{tmp};
+
+            const std::string cmd = "timeout 90 git clone --depth 1 '" + url +
+                                    "' '" + tmp.string() + "' >'" + tmp.string() + ".log' 2>&1";
+            if (std::system(cmd.c_str()) != 0) {
+                std::ifstream lf(tmp.string() + ".log");
+                std::string tail, line;
+                while (std::getline(lf, line)) { tail = line; }  // last line
+                send_error(resp, 502, "git clone failed: " + tail);
+                return;
+            }
+
+            const fs::path src = sub.empty() ? tmp : tmp / sub;
+            std::error_code ec;
+            if (!fs::exists(src / "SKILL.md", ec)) {
+                send_error(resp, 400, "no SKILL.md at repo " +
+                           (sub.empty() ? "root" : "path '" + sub + "'"));
+                return;
+            }
+            json fm = frontmatter_of(src / "SKILL.md");
+            std::string name = fm.value("name", "");
+            if (name.empty()) name = src.filename().string();
+            if (!valid_skill_name(name)) {
+                send_error(resp, 400, "invalid skill name '" + name + "'");
+                return;
+            }
+            fs::create_directories(global_skills_root(), ec);
+            const fs::path dest = global_skills_root() / name;
+            if (fs::exists(dest, ec)) {
+                send_error(resp, 409, "skill '" + name + "' already installed");
+                return;
+            }
+            fs::copy(src, dest, fs::copy_options::recursive, ec);
+            if (ec) { send_error(resp, 500, "copy failed: " + ec.message()); return; }
+            send_json(resp, json{{"installed", name},
+                                 {"description", fm.value("description", "")},
+                                 {"version", fm.value("version", "")}}, 201);
         });
 
     // ── GET /api/agents/:id/global-skills ─────────────────────────────────
