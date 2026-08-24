@@ -201,6 +201,23 @@ void RoutineStore::mark_fired(const std::string& id, const std::string& fired_at
     sqlite3_close(db);
 }
 
+void RoutineStore::reschedule(const std::string& id,
+                              const std::string& next_fire_at, bool disable) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "UPDATE routines SET next_fire_at = ?,"
+        " enabled = CASE WHEN ? THEN 0 ELSE enabled END WHERE id = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, next_fire_at);
+        sqlite3_bind_int(st, 2, disable ? 1 : 0);
+        bind_text(st, 3, id);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+}
+
 bool RoutineStore::set_enabled(const std::string& id, bool enabled) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;

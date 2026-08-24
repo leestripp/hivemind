@@ -53,6 +53,12 @@ public:
     void mark_fired(const std::string& id, const std::string& fired_at,
                     const std::string& next_fire_at, bool disable);
 
+    /// Advance next_fire_at WITHOUT touching last_fired_at (Phase 17
+    /// skip-if-running: the routine did not actually run). Optionally
+    /// disable when the schedule is exhausted.
+    void reschedule(const std::string& id, const std::string& next_fire_at,
+                    bool disable);
+
     bool set_enabled(const std::string& id, bool enabled);
     bool remove(const std::string& id);
     /// Move every routine owned by old_agent to new_agent. Returns count.

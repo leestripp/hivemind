@@ -1,5 +1,6 @@
 // tests/test_routine_store.cpp — RoutineStore CRUD + due-scan, no LLM.
 #include "hivemind/RoutineStore.h"
+#include "hivemind/Schedule.h"
 
 #include <cassert>
 #include <filesystem>
@@ -64,6 +65,38 @@ int main() {
     assert(store.remove(once.id));
     assert(!store.remove(once.id));
     assert(store.list().size() == 1);
+
+    // ── Phase 17: skip-if-running ────────────────────────────────────
+    // Policy decisions (pure function):
+    const json once_sch = json::parse(R"({"type":"once","at":"2026-08-24T10:00"})");
+    const json daily_sch = json::parse(R"({"type":"daily","time":"09:00"})");
+    using A = hm::RoutineFireAction;
+    assert(hm::routine_fire_action(once_sch,  false) == A::Fire);
+    assert(hm::routine_fire_action(daily_sch, false) == A::Fire);
+    assert(hm::routine_fire_action(once_sch,  true)  == A::RetryLater);
+    assert(hm::routine_fire_action(daily_sch, true)  == A::SkipReschedule);
+    // invalid/absent type counts as recurring (never silently drop one-shot
+    // semantics, but a busy invalid routine must not spin either)
+    assert(hm::routine_fire_action(json::object(), true) == A::SkipReschedule);
+
+    // reschedule advances next_fire_at WITHOUT touching last_fired_at
+    auto busy = store.create("agent-1", "thread-busy", "busy-daily",
+                             "tick", R"({"type":"daily","time":"09:00"})",
+                             "2026-08-24T09:00:00");
+    store.mark_fired(busy.id, "2026-08-24T09:00:01", "2026-08-25T09:00:00", false);
+    store.reschedule(busy.id, "2026-08-26T09:00:00", false);
+    auto b = store.get(busy.id);
+    assert(b->last_fired_at == "2026-08-24T09:00:01");   // unchanged
+    assert(b->next_fire_at == "2026-08-26T09:00:00");    // advanced
+    assert(b->enabled);
+    // skipped fire is no longer due at the old slot
+    for (auto& d : store.list_due("2026-08-25T10:00:00"))
+        assert(d.id != busy.id);
+    // reschedule with disable (schedule exhausted while busy)
+    store.reschedule(busy.id, "", true);
+    b = store.get(busy.id);
+    assert(!b->enabled && b->next_fire_at.empty());
+    assert(b->last_fired_at == "2026-08-24T09:00:01");   // still unchanged
 
     fs::remove_all(tmp);
     std::cout << "test_routine_store: OK\n";

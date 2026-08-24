@@ -140,6 +140,13 @@ std::optional<std::string> compute_next_fire(const json& sch,
     return time_t_to_iso(next);
 }
 
+RoutineFireAction routine_fire_action(const json& sch, bool thread_busy) {
+    if (!thread_busy) return RoutineFireAction::Fire;
+    const bool once = sch.is_object() && sch.value("type", "") == "once";
+    return once ? RoutineFireAction::RetryLater
+                : RoutineFireAction::SkipReschedule;
+}
+
 std::string describe_schedule(const json& sch) {
     if (!sch.is_object() || !sch.contains("type")) return "invalid schedule";
     const std::string type = sch.value("type", "");

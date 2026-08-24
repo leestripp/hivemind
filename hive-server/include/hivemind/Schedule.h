@@ -38,4 +38,16 @@ std::string describe_schedule(const json& schedule);
 /// Validate a schedule spec. Returns "" if valid, else an error message.
 std::string validate_schedule(const json& schedule);
 
+/// Skip-if-running policy (Phase 17): what the scheduler should do with a
+/// due routine whose thread already has a turn in flight.
+///   Fire            — thread free: post the prompt as usual.
+///   SkipReschedule  — busy recurring routine: drop THIS fire and advance
+///                     next_fire_at (cron-style overlap skip; piling prompts
+///                     into a busy thread would machine-gun the agent the
+///                     moment its turn ends).
+///   RetryLater      — busy once-routine: leave next_fire_at untouched so
+///                     the next tick retries (a one-shot must not be lost).
+enum class RoutineFireAction { Fire, SkipReschedule, RetryLater };
+RoutineFireAction routine_fire_action(const json& schedule, bool thread_busy);
+
 } // namespace hm

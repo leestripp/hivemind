@@ -229,10 +229,28 @@ int main(int argc, char* argv[]) {
                 const std::string now = hm::now_iso_local();
                 for (auto& r : routine_store.list_due(now)) {
                     try {
-                        chat_service.post_user_message(r.thread_id, r.prompt);
                         json sched = json::parse(r.schedule_json, nullptr, false);
                         const bool once = sched.is_object()
                             && sched.value("type", "") == "once";
+                        // Phase 17 skip-if-running: never pile a routine
+                        // prompt into a thread with a turn in flight.
+                        switch (hm::routine_fire_action(
+                                sched, chat_service.busy(r.thread_id))) {
+                        case hm::RoutineFireAction::RetryLater:
+                            std::cout << "[scheduler] routine " << r.id
+                                      << " (" << r.name << ") busy, retry next tick\n";
+                            continue;
+                        case hm::RoutineFireAction::SkipReschedule: {
+                            auto next = hm::compute_next_fire(sched, now, r.created_at);
+                            routine_store.reschedule(r.id, next.value_or(""), !next);
+                            std::cout << "[scheduler] routine " << r.id
+                                      << " (" << r.name << ") busy, skipped fire\n";
+                            continue;
+                        }
+                        case hm::RoutineFireAction::Fire:
+                            break;
+                        }
+                        chat_service.post_user_message(r.thread_id, r.prompt);
                         auto next = once ? std::nullopt
                             : hm::compute_next_fire(sched, now, r.created_at);
                         routine_store.mark_fired(r.id, now,
