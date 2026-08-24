@@ -77,10 +77,10 @@ API — including the **login handoff** flow (agent pauses at a login wall,
 you authenticate via the live session view, control returns; the profile
 persists in `/home/hive`).
 
-> ⚠ The display stack was reworked 2026-08-24 (X11 → Wayland: mutter
-> --headless + gnome-remote-desktop VNC). **Currently blocked** — GRD
-> drops VNC clients before the RFB greeting. See docs/computer-use.md for
-> the full status, findings, and next steps.
+> The display stack: Xvfb + openbox + x11vnc + noVNC/websockify +
+> playwright chromium (Phase 25, working — verified with a real noVNC
+> client). See docs/computer-use.md for the architecture, the wire path,
+> operating instructions, and the failed Wayland detour (Phase 24).
 
 ## Troubleshooting
 

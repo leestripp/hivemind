@@ -1,136 +1,136 @@
-# Agent Computer (live screen) — status, findings, and what failed
+# Agent Computer — live screen (Phase 25, X11 stack)
 
-> State as of 2026-08-24 (evening): **WORKING — Phase 25 X11 stack.**
-> The GNOME/Wayland path (Phase 24) was abandoned after GRD dropped VNC
-> clients pre-greeting (cause not isolated); the X11 stack (Xvfb + openbox
-> + x11vnc + noVNC) was rebuilt properly and verified end-to-end with a
-> real noVNC client. Phase 24's trail stays below as reference.
+> **Status: WORKING** (verified 2026-08-24 with a real noVNC client on the
+> dev-rig rig: connected, 1280x800, desktop rendering, chromium on CDP).
+> This document is the definitive reference for how it works and how it was
+> made to work — including the failed GNOME/Wayland detour (Phase 24) so
+> nobody repeats it.
 
-## What the feature is
+## What it is
 
-The "🖥 Computer" button (web agents page / client inspector) opens a live
-view of the agent's container desktop via noVNC, proxied through hive-server:
+Every containerized agent can expose a live desktop you can watch and
+drive from the browser ("🖥 Computer" on the web agents page / client
+inspector). The primary use is **login handoff**: the agent browses with
+its own chromium, hits a login wall, you take over the same screen, log in,
+and hand control back — the profile persists, so the session survives.
+
+## Architecture (the working stack)
 
 ```
-browser noVNC ──WS──▶ hive-server /screen/ws (auth, splice)
-                          │ raw TCP
-                    container :6080 websockify ──▶ :5900 VNC server ──▶ desktop
+┌─ your browser ─────────────────────────────────────────────┐
+│  noVNC (vnc.html?autoconnect&path=/screen/ws?agent=<id>    │
+│                          &password=<pw>)                   │
+└──────────┬──────────────── WebSocket ──────────────────────┘
+           ▼
+┌─ hive-server :8421 ────────────────────────────────────────┐
+│  GET /screen/<id>/    → 302 → vnc.html (proxied assets)    │
+│  GET /screen/ws?agent=<id> → WS upgrade → raw-TCP splice   │
+│  Auth: Bearer / ?key= / HttpOnly cookie (hive_screen)      │
+└──────────┬──────────────── 127.0.0.1:<published> ──────────┘
+           ▼
+┌─ podman container (hive-<agent-id>, user hive) ────────────┐
+│  websockify :6080 ──▶ x11vnc :5900 ──▶ Xvfb :99 (1280x800) │
+│                          ▲                    ▲            │
+│                    watchdog loop          openbox (WM)     │
+│                                           chromium (max)   │
+│                                           └─ CDP :9222 ◀── browser_* tools
+└────────────────────────────────────────────────────────────┘
 ```
 
-Auth: bearer key / `?key=` / HttpOnly cookie. Container's :6080 is published
-on 127.0.0.1 only; hive-server is the single entry point.
+The same chromium the user sees is the one the agent's `browser_*` tools
+drive — they attach over CDP :9222 (`browser_driver.py` launches it with
+`--remote-debugging-port=9222` if it isn't running). One browser, two
+drivers (human and agent).
 
-## What WORKS (verified on the rig)
+## The components, and why these exact ones
 
-- **Deployment rig "dev-rig"** (AerynOS 26.03, RX 9070): hive-server as
-  systemd service (`hive-server.service`, user `hivemind`), rootless podman
-  fully working (the dev sandbox's limitation is gone). Deploy loop:
-  `git push rig main && ssh root@dev-rig /usr/local/bin/hive-deploy`.
-- **WS splice + page proxy**: noVNC page loads, websocket upgrades, binary
-  subprotocol negotiated. (Fixed `fdb7fa5`: vnc.html `path=` param must be
-  ABSOLUTE — `/screen/ws` — or noVNC resolves it against `/screen/<id>/`
-  and the WS 404s. Symptom was "opens but can't connect".)
-- **mutter --headless**: runs clean in the container, `--virtual-monitor
-  1280x800`, hardware GL via `--device /dev/dri` passthrough (GBM renderer
-  on the RX 9070, "high priority EGL context").
-- **gnome-remote-desktop 50.2 headless VNC daemon**: registers on the
-  session bus, "VNC server started", listens on :5900 (v4+v6).
-- **VNC password plumbing**: per-agent 8-char password generated into the
-  home mount, handed to noVNC via `?password=` (a supported noVNC query
-  param per its EMBEDDING.md), read server-side via `podman exec` (the
-  direct host-file read fails: the `:U` bind mount chowns the home dir to
-  the container uid — permission denied, not missing).
+| Component | Choice | Why |
+|---|---|---|
+| Display | **Xvfb** `:99 -screen 0 1280x800x24` | virtual framebuffer; no GPU/session needed |
+| Window manager | **openbox** | the Phase 6.1 black screen was an EMPTY DISPLAY — no WM, nothing drawn. openbox is tiny and bulletproof in containers. (Anthropic's computer-use demo uses mutter as its WM; mutter's standalone X11 mode is gone in GNOME 50.) |
+| VNC server | **x11vnc** `-forever -shared -passwd <pw> -localhost -wait 50` | scrapes the Xvfb display; `-forever -shared` keeps it up across client drops; plus a 5s watchdog loop restarts it if it dies on odd X events (Anthropic recipe) |
+| WS bridge + web | **websockify** `--web /usr/share/novnc 6080 localhost:5900` | serves the noVNC assets AND bridges WS→TCP |
+| Browser | **playwright's chromium** | Ubuntu's `chromium-browser` deb is a **snap stub** — snaps cannot run in containers. PyPI playwright (NOT the Ubuntu deb — it strips the node driver) + `playwright install chromium`, browsers in `/opt/ms-playwright` (world-readable; build is root, runtime is hive) |
+| noVNC client | Ubuntu `novnc` package assets | vnc.html takes `?autoconnect&path=&password=` query params |
 
-## What FAILED / current blocker
+## The three bugs that made it look broken
 
-**GRD accepts the TCP connection then closes it before the RFB greeting.**
-Raw in-container probe: connect to 127.0.0.1:5900 succeeds, read returns
-EOF instantly. Through websockify this surfaces as a WS close frame with
-reason "Target closed" (code 1000); noVNC shows a black frame then drops
-back to the Connect screen.
+1. **Path doubling** (fixed `fdb7fa5`): vnc.html's `path=` param was passed
+   *relative* (`screen/ws?agent=…`); noVNC resolves it against the page URL
+   (`/screen/<id>/vnc.html`) → WS to `/screen/<id>/screen/ws` → 404.
+   Symptom: "opens but can't connect". Fix: percent-encoded ABSOLUTE path
+   (`%2Fscreen%2Fws%3Fagent%3D<id>`).
+2. **Black screen**: display :99 had nothing on it — no WM, and chromium
+   never launched (snap stub). Symptom: connected, black, user bails.
+   Fix: openbox + playwright chromium `--start-maximized` at bring-up.
+3. **Empty `password=` in the redirect**: `screen_password()` read the
+   password file host-side, but the `:U` bind mount chowns the agent home
+   to the container uid — permission denied silently read as "". Then a
+   repair introduced an inverted trim (`!isspace` popped the whole
+   password). Fix: read via `podman exec`, trim `isspace` correctly.
 
-Ruled out:
-- *Throttler lockout* — GRD rate-limits (10 attempts/s/peer, 5 pending),
-  and my dozens of raw probes did trip it, but a fresh container +
-  single clean client connection fails identically.
-- *Password/auth* — server closes before any greeting; RFB auth happens
-  after. Not auth.
-- *v4-vs-v6* — 5900 answers on both.
+## Passwords
 
-Suspected (unverified): GRD's VNC session creates a PipeWire stream from
-mutter's RemoteDesktop API per client; if stream/session creation fails the
-client is dropped silently (grd-session-vnc.c:913 "PipeWire stream closed,
-closing client"). PipeWire + wireplumber RUN in the container but with
-degraded warnings (no system bus for rtkit, no systemd, no snapd). The
-daemon logs nothing at default verbosity on the failure — next debug step
-is `G_MESSAGES_DEBUG=all` on the daemon via a script copied in with
-`podman cp` (ssh+podman-exec quoting kept eating the inline attempts).
+Per-agent, generated once by `hive-screen.sh` into the home mount
+(`/home/hive/.vnc-password`, 0600), **exactly 8 chars — RFB truncates at
+8**. `ContainerManager::screen_password()` returns it via `podman exec
+cat`; `ScreenRoutes` appends it to the noVNC URL as `?password=`. The
+screen page is already API-key gated; the VNC password is defense in depth
+(localhost-only ports regardless).
 
-## Things discovered the hard way (don't re-learn)
+## Operating it
 
-1. **Ubuntu 26.04 GNOME 50 is Wayland-only** — the X11 session was removed
-   upstream. Xvfb+x11vnc was a dead end for a GNOME desktop anyway.
-2. **gnome-shell CANNOT run in a container**: its init hard-requires
-   logind (`LoginManagerSystemd` — fatal Gio error without
-   org.freedesktop.login1). mutter --headless is GNOME's compositor and
-   needs nothing of the sort. No Shell chrome (top bar/Activities) — the
-   desktop surface is the app (chromium maximized), which is all the
-   Agent Computer needs.
-3. **Ubuntu ships gnome-remote-desktop built with meson `-Dvnc=false`**
-   (the upstream default) — grdctl has NO vnc subcommand. The image
-   rebuilds GRD 50.2 from the upstream tarball with `-Dvnc=true
-   -Drdp=false -Dsystemd=false`, installed `--prefix=/usr` over the deb.
-   Build deps that bit us: `libei-dev`, `libdbus-1-dev` (plus the usual
-   glib/pipewire/secret/xkbcommon/epoxy/drm/fuse3/tss2/notify/cairo/
-   girepository).
-4. **GRD headless VNC enable lives in a different gsettings schema**:
-   `org.gnome.desktop.remote-desktop.vnc.headless` — writing the
-   non-headless schema does nothing (grdctl status stays "disabled").
-   And `grdctl ... enable` needs systemd — set gsettings directly.
-5. **RFB truncates VNC passwords at 8 chars.** Longer fails GRD's
-   set-password ("Password is too long").
-6. **Ubuntu's `chromium-browser` deb is a snap stub** — snaps can't run in
-   containers. The image uses playwright's bundled chromium (PyPI wheel —
-   Ubuntu's python3-playwright deb strips the node driver, cli.js, so
-   `playwright install` fails there; pip `--break-system-packages` works,
-   browsers in `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`, world-
-   readable — build runs as root, agents run as hive).
-7. **Container PID 1 is `sleep`** — it never reaps, so dead processes
-   linger as zombies and `pgrep` matches them. hive-screen.sh uses
-   zombie-aware liveness checks (`/proc/<pid>/stat` state != Z).
-8. **dbus-run-session tears the bus down when its main child exits** —
-   keep the session script alive with `sleep infinity`; background the
-   GRD daemon.
-9. **pgrep  self-match**: a probe shell whose own cmdline contains the
-   pattern kills itself (`pkill  gnome-remote-desktop-daemon`). Also:
-   pkill without  can't match names >15 chars. Use `[n]`-style regex
-   tricks or PID lists.
-10. **Backgrounded builds over ssh die with the channel** — use
-    `systemd-run --uid=… --unit=… --collect` on the rig for image builds.
+```bash
+# Rebuild the image (rig):
+cd ~/hivemind && podman build -t localhost/hive-agent:browser \
+    -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
 
-## Files in the current (partially working) implementation
+# Screen lifecycle:
+POST /api/agents/:id/screen/start   # ensure_screen: recreate-if-stale → start → hive-screen.sh
+POST /api/agents/:id/screen/stop
+GET  /screen/<id>/?key=<api-key>    # → noVNC, autoconnects
 
-- `hive-server/data/Containerfile.hive-agent-browser` — mutter, GRD source
-  build, pipewire/wireplumber, xwayland, novnc/websockify, pip playwright
-- `hive-server/data/hive-screen.sh` — idempotent bring-up (all the lessons
-  above are in its header comments)
-- `hive-server/src/ContainerManager.cpp` — ensure_screen (digest-based
-  recreate, /dev/dri passthrough, runs hive-screen.sh), screen_password
-- `hive-server/include/hivemind/routes/ScreenRoutes.cpp` — page proxy +
-  WS splice + absolute-path/password redirect params
-- `hive-server/data/browser_driver.py` — CDP attach/launch of the shared
-  chromium (Wayland env), ~/.browser-profile persists logins
+# Logs INSIDE the container when something's off:
+podman exec hive-<id> sh -c 'tail /tmp/{xvfb,openbox,x11vnc,websockify,chromium}.log'
+```
 
-## Next steps (when we pick this back up)
+`ensure_screen` recreates the container when the **image digest** changed
+(names/tags lie — rebuilds keep the same tag). Bring-up is idempotent and
+zombie-safe (PID 1 is `sleep`, never reaps; liveness checks read
+`/proc/<pid>/stat` state).
 
-1. **Test with a REAL client first** — the stack has only ever been probed
-   with raw TCP/curl, which are pathological RFB clients. Open the screen
-   URL in a browser (noVNC, real client, password flows via ?password=):
-   `http://dev-rig:8421/screen/<agent-id>/?key=<api-key>`.
-2. If it still drops: run the GRD daemon with `G_MESSAGES_DEBUG=all`
-   (copy a runner script in via `podman cp`, don't fight ssh quoting) and
-   watch session/stream creation on connect.
-3. If PipeWire-in-container is the wall: consider cutting GRD out of the
-   loop — mutter alone + `wayvnc` won't work (mutter isn't wlroots), so
-   the fallback is back to Xvfb+x11vnc (works, it's what shipped in Phase
-   6.1, just not GNOME) OR RDP + a web RDP client (Guacamole — heavy).
+## Test with a REAL client, always
+
+Raw TCP/curl probes are pathological RFB clients and misled us for hours
+(GRD's throttler, connect-and-close poisoning session state, false
+"server broken" readings). The browser IS the test: open the screen URL,
+check `document.getElementById('noVNC_status').textContent`, sample the
+canvas pixels. One real client connection answers more than fifty probes.
+
+---
+
+## Appendix: Phase 24 — the GNOME/Wayland detour (failed, kept for reference)
+
+Tried to give agents a real GNOME desktop on Wayland. All of this was
+TRUE and none of it was fixable in a day:
+
+- **Ubuntu 26.04 GNOME 50 is Wayland-only** — the X11 session was removed
+  upstream. (User instinct was right; the container is the constraint.)
+- **gnome-shell cannot run in a container** — init hard-requires logind
+  (`LoginManagerSystemd`, fatal without `org.freedesktop.login1`).
+- **mutter --headless WORKS** — GNOME's compositor ran fine, GPU-accelerated
+  via `--device /dev/dri` (RX 9070, GBM renderer). Kept in git history.
+- **Ubuntu builds gnome-remote-desktop with meson `-Dvnc=false`** — rebuilt
+  GRD 50.2 from source with VNC on (needed `libei-dev`, `libdbus-1-dev`);
+  headless enable lives in `org.gnome.desktop.remote-desktop.vnc.headless`
+  (NOT the regular schema); `grdctl ... enable` needs systemd — set
+  gsettings directly. Daemon ran, "VNC server started", listened on :5900…
+- **…then closed every client before the RFB greeting.** Cause never
+  isolated (suspect: per-client PipeWire stream creation from mutter's
+  RemoteDesktop API — `grd-session-vnc.c:913`). Abandoned, not mourned:
+  the X11 stack does the job with 10% of the moving parts.
+
+If Wayland is ever revisited: start from the daemon with
+`G_MESSAGES_DEBUG=all` (copy a runner in via `podman cp` — ssh quoting ate
+repeated inline attempts), with a real noVNC client, and read the session
+setup logs.
