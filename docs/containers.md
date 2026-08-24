@@ -71,12 +71,16 @@ are a planned extension of the shared mode.
 
 ## Browser/computer-use variant (Phase 6)
 
-`hive-server/data/Containerfile.hive-agent-browser` layers chromium,
-playwright, Xvfb and noVNC onto the base image for agents that operate
-websites with no API — including the **login handoff** flow (agent pauses
-at a login wall, you authenticate via the live session view, control
-returns; the profile persists in `/home/hive`). See the file header for the
-build command and flow.
+`hive-server/data/Containerfile.hive-agent-browser` layers the browser +
+desktop stack onto the base image for agents that operate websites with no
+API — including the **login handoff** flow (agent pauses at a login wall,
+you authenticate via the live session view, control returns; the profile
+persists in `/home/hive`).
+
+> ⚠ The display stack was reworked 2026-08-24 (X11 → Wayland: mutter
+> --headless + gnome-remote-desktop VNC). **Currently blocked** — GRD
+> drops VNC clients before the RFB greeting. See docs/computer-use.md for
+> the full status, findings, and next steps.
 
 ## Troubleshooting
 
