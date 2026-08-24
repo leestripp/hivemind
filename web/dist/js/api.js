@@ -1,4 +1,6 @@
 // js/api.js — thin fetch wrappers for the HiveMind REST API.
+import { notifyError } from './util.js';
+
 export const API = {
   // Phase 9: every /api/* call needs a bearer key. Stored in localStorage
   // after a one-time prompt (web UI is the localhost fallback client).
@@ -22,7 +24,16 @@ export const API = {
     const text = await r.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-    if (!r.ok) throw new Error(`${method} ${path} → ${r.status} ${text}`);
+    if (!r.ok) {
+      // Phase 19: prefer the server's structured error + request id.
+      const msg = (data && data.error) ? data.error : text;
+      const rid = (data && data.request_id) || r.headers.get('X-Request-Id') || '';
+      notifyError(`${msg}`, rid);
+      const err = new Error(`${method} ${path} → ${r.status} ${msg}`);
+      err.requestId = rid;
+      err.status = r.status;
+      throw err;
+    }
     return data;
   },
   get: (p) => API.req('GET', p),

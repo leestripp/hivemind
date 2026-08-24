@@ -1,7 +1,7 @@
 // js/pages/files.js — Phase 18 artifacts browser: browse the shared
 // company workspace (agent outputs, chat attachments) over /api/files.
 import { API } from '../api.js';
-import { $, esc } from '../util.js';
+import { $, esc, getTimezone } from '../util.js';
 
 let cwd = '';            // workspace-relative path, '' = root
 let entries = [];
@@ -14,7 +14,9 @@ function fmtSize(n) {
 }
 function fmtTime(epoch) {
   if (!epoch) return '';
-  return new Date(epoch * 1000).toLocaleString();
+  const tz = getTimezone();   // Phase 19
+  return new Date(epoch * 1000).toLocaleString(undefined,
+    tz ? { timeZone: tz } : undefined);
 }
 
 async function load() {

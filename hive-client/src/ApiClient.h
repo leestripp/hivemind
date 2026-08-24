@@ -25,6 +25,7 @@ public:
 
     // ── roster ────────────────────────────────────────────────────────────
     nlohmann::json list_agents();                                    // GET /api/agents
+    nlohmann::json templates();                                      // GET /api/templates (Phase 19)
     nlohmann::json create_agent(const std::string& name, const std::string& role,
                                 const std::string& model,
                                 const std::string& workspace_mode,

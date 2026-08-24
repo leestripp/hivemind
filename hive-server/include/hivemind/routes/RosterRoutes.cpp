@@ -69,6 +69,45 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                             ChatService& chat,
                             RoutineStore& routines) {
 
+    // ── GET /api/templates — teammate templates (Phase 19) ─────────────
+    // Static catalog: pre-filled personas for the first-run / new-agent
+    // flow. Clients fetch + pre-fill the create form (or one-click add);
+    // creation still goes through POST /api/agents unchanged.
+    server.get("/api/templates",
+        [](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            static const json templates = json::array({
+                {{"id", "chief"}, {"name", "Chief"}, {"avatar", "avatar-0"},
+                 {"require_approval", false},
+                 {"role", "Chief of staff — coordinates the team. Uses "
+                         "list_agents and message_agent to delegate work to "
+                         "specialists, tracks open threads, and reports "
+                         "progress back to the user concisely."}},
+                {{"id", "eng"}, {"name", "Eng"}, {"avatar", "avatar-2"},
+                 {"require_approval", false},
+                 {"role", "Software engineer — reads and writes code in the "
+                         "shared workspace, runs builds and tests, reviews "
+                         "diffs carefully, and explains tradeoffs briefly. "
+                         "Verifies claims by running things, not guessing."}},
+                {{"id", "ops"}, {"name", "Ops"}, {"avatar", "avatar-1"},
+                 {"require_approval", true},
+                 {"role", "Operations teammate — monitors systems, triages "
+                         "alerts, and runs routine checks. Prefers "
+                         "checklists, gathers evidence before reporting, "
+                         "and escalates with exact error output."}},
+                {{"id", "sales"}, {"name", "Sales"}, {"avatar", "avatar-3"},
+                 {"require_approval", false},
+                 {"role", "Sales assistant — researches leads, drafts "
+                         "outreach, and keeps CRM notes in the workspace. "
+                         "Friendly, concise tone; always cites sources."}},
+                {{"id", "scout"}, {"name", "Scout"}, {"avatar", "avatar-4"},
+                 {"require_approval", false},
+                 {"role", "Research analyst — digs into topics, compares "
+                         "options, and produces cited summaries and "
+                         "decision memos in the workspace."}},
+            });
+            send_json(resp, json{{"templates", templates}});
+        });
+
     // ── POST /api/agents ──────────────────────────────────────────────────
     server.post("/api/agents",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {

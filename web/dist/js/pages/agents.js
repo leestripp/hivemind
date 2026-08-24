@@ -60,7 +60,40 @@ async function refresh() {
     const agents = roster.agents || [];
     const live = act.agents || {};
     if (!agents.length) {
-      grid.innerHTML = '<p class="muted">No agents yet — create one from the hive-client (+ Agent).</p>';
+      // Phase 19 first-run: one-click teammate templates.
+      const tpl = await API.get('/api/templates');
+      const templates = tpl.templates || [];
+      grid.innerHTML = '<p class="muted" style="grid-column:1/-1">No agents yet — start your team with a template (or use + Agent in the client for a blank one):</p>';
+      for (const t of templates) {
+        const card = document.createElement('div');
+        card.className = 'agent-card';
+        card.innerHTML = `
+          <div class="agent-top">
+            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || 'avatar-0')}.svg" width="44" height="44" alt=""></div>
+            <div class="agent-id-block">
+              <div class="agent-name">${esc(t.name)}</div>
+              <div class="agent-role">${esc(t.role)}</div>
+            </div>
+          </div>
+          <div class="agent-actions">
+            <button class="btn btn-sm suggested-action" data-tpl="${esc(t.id)}">+ Add ${esc(t.name)}</button>
+          </div>`;
+        grid.appendChild(card);
+      }
+      grid.onclick = async (e) => {
+        const b = e.target.closest('[data-tpl]');
+        if (!b) return;
+        const t = templates.find(x => x.id === b.dataset.tpl);
+        if (!t) return;
+        b.disabled = true;
+        try {
+          await API.post('/api/agents', {
+            name: t.name, role: t.role, avatar: t.avatar,
+            require_approval: !!t.require_approval,
+          });
+          refresh();
+        } catch (err) { alert(err.message); b.disabled = false; }
+      };
       return;
     }
     grid.innerHTML = '';

@@ -110,6 +110,10 @@ Response reports what happened:
  "routines_deleted": 0, "routines_reassigned": 1}
 ```
 
+> **Errors (Phase 19):** every error body is `{"error": msg, "request_id": "req-N-…"}`
+> and every response carries `X-Request-Id`. The server logs `[req-…] error <status>: …`
+> on stderr — quote the id when reporting issues.
+
 ## 3. Threads & chat
 
 | Method | Path | Description |
@@ -118,6 +122,7 @@ Response reports what happened:
 | GET | `/api/threads` | List threads by latest activity, incl. participants + `last_activity` (latest message ts — drives unread badges) |
 | GET | `/api/threads/:id` | Thread + `agent_ids` |
 | DELETE | `/api/threads/:id` | Delete thread, messages and participants |
+| GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create |
 | GET | `/api/threads/:id/messages` | Messages, chronological; each has an `attachments` array (`[]` default, Phase 18) |
 | GET | `/api/threads/:id/messages?after=<msg_id>` | Incremental fetch (polling) |
 | POST | `/api/threads/:id/messages` | Post user message → **202** `{message_id, status:"processing"}`. Optional `attachments` array (Phase 18) — metadata from prior attachment uploads |

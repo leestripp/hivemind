@@ -37,8 +37,8 @@ html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
-  background: #0e1116;
-  color: #d8dee9;
+  background: var(--bg);
+  color: var(--fg);
   overflow: hidden;
 }
 .app {
@@ -395,3 +395,36 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   .rule-row { flex-wrap: wrap; }
   .rule-row .rule-cmd { flex-basis: 100%; order: 2; }
 }
+
+/* Phase 19: structured error toasts */
+#error-toasts {
+  position: fixed; right: 16px; bottom: 16px; z-index: 999;
+  display: flex; flex-direction: column; gap: 8px; max-width: min(480px, 92vw);
+}
+.error-toast {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card, #22252b); border: 1px solid #e01b24; border-radius: 8px;
+  padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  transition: opacity .4s;
+}
+.error-toast.fade { opacity: 0; }
+.error-toast-msg { flex: 1; font-size: 13px; word-break: break-word; }
+.error-toast-id { font-size: 11px; opacity: .75; user-select: all; }
+
+/* Phase 19: light theme (Settings → Appearance; persisted client-side) */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg:     #f2f4f8;
+  --panel:  #ffffff;
+  --bg1:    #e8ebf0;
+  --card:   #ffffff;
+  --border: #cdd3dc;
+  --accent: #1c71d8;
+  --fg:     #1d2330;
+  --muted:  #667085;
+}
+[data-theme="light"] option { background: #ffffff; color: #1d2330; }
+[data-theme="light"] * { scrollbar-color: #b8c0cc transparent; }
+[data-theme="light"] *::-webkit-scrollbar-thumb { background: #b8c0cc; }
+[data-theme="light"] .error-toast { border-color: #d92d20; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+[data-theme="light"] .icon-btn:hover { background: #e2e6ec; }

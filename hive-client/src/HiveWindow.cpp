@@ -454,6 +454,7 @@ HiveWindow::HiveWindow() {
     // ── chat area ─────────────────────────────────────────────────────────
     status_label_.set_halign(Gtk::Align::START);
     status_label_.set_margin(6);
+    status_label_.set_selectable(true);   // Phase 19: error ids are copyable
     chat_scroll_.set_child(messages_box_);
     chat_scroll_.set_vexpand(true);
     entry_.set_hexpand(true);
@@ -1893,11 +1894,14 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     avatar_grid->set_row_spacing(6);
     auto* chosen_avatar = new std::string(
         existing ? existing->value("avatar", "") : "");   // freed in response lambda
+    auto* avatar_tiles = new std::vector<
+        std::pair<std::string, Gtk::ToggleButton*>>();    // freed likewise
     Gtk::ToggleButton* group_leader = nullptr;
     auto add_tile = [&](const std::string& val, Gtk::Widget* content, int pos) {
         auto* b = Gtk::make_managed<Gtk::ToggleButton>();
         b->set_child(*content);
         b->add_css_class("avatar-pick");
+        avatar_tiles->push_back({val, b});
         if (!group_leader) { group_leader = b; if (chosen_avatar->empty()) b->set_active(true); }
         else { b->set_group(*group_leader); if (val == *chosen_avatar) b->set_active(true); }
         b->signal_toggled().connect([b, chosen_avatar, val] {
@@ -1917,6 +1921,32 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         add_tile("avatar-" + std::to_string(i), img, i + 1);
     }
 
+    // Phase 19: teammate templates — pick one to pre-fill the form.
+    auto* templates_json = new nlohmann::json(nlohmann::json::array());
+    if (!editing) {
+        try { *templates_json =
+                  api_.templates().value("templates", nlohmann::json::array()); }
+        catch (...) { /* offline — dropdown stays "(blank)" */ }
+    }
+    std::vector<Glib::ustring> tpl_items{"(blank)"};
+    for (auto& t : *templates_json)
+        tpl_items.push_back(t.value("name", "") + "  —  template");
+    auto* tpl = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create(tpl_items));
+    tpl->property_selected().signal_changed().connect(
+        [tpl, templates_json, name, role, appr, chosen_avatar, avatar_tiles] {
+            const auto sel = tpl->get_selected();
+            if (sel == 0 || sel > templates_json->size()) return;
+            const auto& t = (*templates_json)[sel - 1];
+            name->set_text(t.value("name", ""));
+            role->set_text(t.value("role", ""));
+            appr->set_active(t.value("require_approval", false));
+            const std::string av = t.value("avatar", "");
+            *chosen_avatar = av;
+            for (auto& pr : *avatar_tiles)
+                if (pr.first == av) { pr.second->set_active(true); break; }
+        });
+
     auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(label);
         l->set_halign(Gtk::Align::END);
@@ -1924,17 +1954,19 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         w->set_hexpand(true);
         grid->attach(*w, 1, row);
     };
-    add_row("Name", name, 0);
-    add_row("Role", role, 1);
-    add_row("Provider", provider, 2);
-    add_row("Model", model, 3);
-    add_row("Workspace", mode, 4);
-    add_row("Avatar", avatar_grid, 5);
-    grid->attach(*appr, 1, 6);
+    int row_i = 0;
+    if (!editing) add_row("Template", tpl, row_i++);
+    add_row("Name", name, row_i++);
+    add_row("Role", role, row_i++);
+    add_row("Provider", provider, row_i++);
+    add_row("Model", model, row_i++);
+    add_row("Workspace", mode, row_i++);
+    add_row("Avatar", avatar_grid, row_i++);
+    grid->attach(*appr, 1, row_i);
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar, edit_id](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -1944,6 +1976,8 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 const std::string av = *chosen_avatar;
                 delete chosen_avatar;
                 delete model_names;
+                delete templates_json;
+                delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, edit_id,
                            ap = appr->get_active()] {
@@ -1959,7 +1993,11 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 });
             }
         }
-        if (r != (int)Gtk::ResponseType::OK) delete chosen_avatar;
+        if (r != (int)Gtk::ResponseType::OK) {
+            delete chosen_avatar;
+            delete templates_json;
+            delete avatar_tiles;
+        }
         dialog->destroy();
     });
     dialog->present();

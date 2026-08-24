@@ -91,6 +91,33 @@
         </div>
         <div class="insp-help" id="set-workspace-msg"></div>
       </section>
+      <section class="settings-section">
+        <h3>Appearance</h3>
+        <div class="trig-form-row">
+          <label>Theme</label>
+          <select id="set-theme" class="btn">
+            <option value="dark">Dark (default)</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+        <div class="trig-form-row">
+          <label>Times shown in</label>
+          <select id="set-tz" class="btn">
+            <option value="">Server-local (as scheduled)</option>
+            <option value="browser">This browser's zone</option>
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">US Eastern</option>
+            <option value="America/Chicago">US Central</option>
+            <option value="America/Denver">US Mountain</option>
+            <option value="America/Los_Angeles">US Pacific</option>
+            <option value="Europe/London">London</option>
+            <option value="Europe/Berlin">Berlin</option>
+            <option value="Australia/Sydney">Sydney</option>
+          </select>
+        </div>
+        <p class="muted">Display-only prefs — stored in this browser. Schedules still
+        fire in server-local time; this only changes how times render.</p>
+      </section>
       <section class="settings-section"><h3>Models (daedalus SettingsStore)</h3><div id="set-models" class="kv"></div></section>
       <section class="settings-section"><h3>Agent engine</h3><div id="set-agent" class="kv"></div></section>
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>

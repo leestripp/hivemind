@@ -63,6 +63,9 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
     }
     if (http_code >= 400) {
         std::string msg = j.value("error", "HTTP " + std::to_string(http_code));
+        // Phase 19: carry the server's request id so users can quote it.
+        const std::string rid = j.value("request_id", "");
+        if (!rid.empty()) msg += "  [" + rid + "]";
         throw std::runtime_error(msg);
     }
     return j;
@@ -150,6 +153,10 @@ nlohmann::json ApiClient::container_stop(const std::string& agent_id) {
 }
 
 // ── threads / chat ──────────────────────────────────────────────────────────
+
+nlohmann::json ApiClient::templates() {
+    return request("GET", "/api/templates");
+}
 
 nlohmann::json ApiClient::list_threads() { return request("GET", "/api/threads"); }
 

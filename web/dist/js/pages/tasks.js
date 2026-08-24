@@ -2,7 +2,7 @@
 // Server engine: RoutineStore + 30s scheduler tick (Phase 5). This page is
 // the dashboard on top: list, enable/disable, run-now, delete, cleanup.
 import { API } from '../api.js';
-import { $, esc } from '../util.js';
+import { $, esc, fmtTimeTZ } from '../util.js';
 
 let tasks = [];
 let agents = [];
@@ -27,10 +27,7 @@ function isCompleted(t) {
   return t.schedule && t.schedule.type === 'once' && !!t.last_fired_at;
 }
 
-function fmtTime(iso) {
-  if (!iso) return '—';
-  return iso.replace('T', ' ').slice(0, 16);
-}
+function fmtTime(iso) { return fmtTimeTZ(iso); }   // Phase 19: tz pref
 
 // ── table ─────────────────────────────────────────────────────────────
 function renderTasks() {

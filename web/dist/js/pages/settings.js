@@ -1,5 +1,5 @@
 import { API } from '../api.js';
-import { $, esc, log } from '../util.js';
+import { $, esc, log, getTheme, setTheme, getTimezone, setTimezone } from '../util.js';
 import { S } from '../state.js';
 
 
@@ -14,6 +14,22 @@ async function loadWorkspace() {
 }
 
 export function initSettings() {
+  // Phase 19: appearance + timezone (client-side, instant).
+  const themeSel = $('set-theme');
+  themeSel.value = getTheme();
+  themeSel.addEventListener('change', () => setTheme(themeSel.value));
+  const tzSel = $('set-tz');
+  const cur = getTimezone();
+  tzSel.value = (cur === 'browser')
+    ? 'browser'
+    : (cur === '' ? '' : cur);
+  if (tzSel.value !== cur && cur && cur !== 'browser') tzSel.value = cur;
+  tzSel.addEventListener('change', () => {
+    setTimezone(tzSel.value === 'browser'
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+      : tzSel.value);
+  });
+
   $('set-workspace-save').addEventListener('click', async () => {
     const msg = $('set-workspace-msg');
     msg.textContent = '';

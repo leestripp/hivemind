@@ -8,6 +8,9 @@ import { enterTasks, initTasks } from './pages/tasks.js';
 import { enterSkills, initSkills } from './pages/skills.js';
 import { enterSecrets, initSecrets } from './pages/secrets.js';
 import { enterFiles, initFiles } from './pages/files.js';
+import { getTheme } from './util.js';
+
+document.documentElement.dataset.theme = getTheme();   // Phase 19
 
 const PAGES = ['agents', 'tasks', 'files', 'skills', 'secrets', 'models', 'keys', 'settings'];   // sidebar order
 

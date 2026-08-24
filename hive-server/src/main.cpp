@@ -51,6 +51,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <ctime>
 #include <chrono>
 #include <csignal>
 #include <iostream>
@@ -109,6 +110,11 @@ int main(int argc, char* argv[]) {
     // their ACAO header from RouteUtil::send_json via the thread-local.
     server.use([](const OmniNet::HTTP::Request& req,
                   OmniNet::HTTP::Response& resp) -> bool {
+        // Phase 19: per-request id for structured error notices.
+        static std::atomic<unsigned long> seq{0};
+        hivemind::routes::request_id =
+            "req-" + std::to_string(++seq) + "-" +
+            std::to_string(std::time(nullptr) & 0xffffff);
         auto origin = req.header("Origin");
         hivemind::routes::request_origin = origin ? std::string{*origin} : "";
         if (req.method() != OmniNet::HTTP::Method::OPTIONS ||
