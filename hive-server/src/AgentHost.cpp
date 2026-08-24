@@ -12,6 +12,7 @@
 #include "daedalus/default_paths.h"
 
 #include <algorithm>
+#include <iostream>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -365,6 +366,7 @@ void AgentHost::enqueue(PendingTurn turn) {
         if (stopping_)
             throw std::runtime_error("agent '" + info_.name +
                                      "' is shutting down");
+        touch();
         queue_.push_back(std::move(turn));
         if (!driver_running_) {
             driver_running_ = true;
@@ -400,6 +402,16 @@ void AgentHost::run_one(PendingTurn& turn) {
     // turn_mtx_ serializes against shutdown()/evict(); the driver thread
     // already serializes turns against each other.
     std::lock_guard<std::mutex> turn_lk{turn_mtx_};
+
+    // Phase 8: in-flight for the whole turn; eviction skips busy hosts.
+    in_flight_.fetch_add(1, std::memory_order_relaxed);
+    struct FlightGuard {
+        AgentHost* h;
+        ~FlightGuard() {
+            h->in_flight_.fetch_sub(1, std::memory_order_relaxed);
+            h->touch();
+        }
+    } flight_guard{this};
 
     // Whole turn under the global agent mutex — daedalus 0.9.6 global state
     // is not multi-agent safe. Held only for the LLM round, never while
@@ -551,6 +563,23 @@ void AgentRegistry::evict(const std::string& agent_id) {
     try { host->shutdown(); } catch (...) {}
     std::lock_guard<std::mutex> lk(m_);
     graveyard_.push_back(std::move(host));   // dead + saved, not freed
+}
+
+/// Phase 8: evict hosts idle longer than `timeout` (and not busy).
+/// Eviction persists history via shutdown() — the host lazily re-creates
+/// on next use, so idle eviction is pure memory relief.
+void AgentRegistry::evict_idle(std::chrono::steady_clock::duration timeout) {
+    std::vector<std::string> victims;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        for (auto& [id, host] : hosts_)
+            if (!host->busy() && host->idle_for() > timeout)
+                victims.push_back(id);
+    }
+    for (auto& id : victims) {
+        std::cout << "[registry] evicting idle agent host " << id << "\n";
+        evict(id);
+    }
 }
 
 void AgentRegistry::shutdown_all() {

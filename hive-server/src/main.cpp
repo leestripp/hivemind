@@ -210,12 +210,16 @@ int main(int argc, char* argv[]) {
     // (server-local time), then recompute their next fire. Once-triggers
     // disable themselves after firing. The actual run goes through the
     // same start_graph_run() path as the REST Run button and webhooks.
-    std::jthread scheduler{[&routine_store,
-                            &chat_service](std::stop_token st) {
+    std::jthread scheduler{[&routine_store, &chat_service,
+                            &agent_registry](std::stop_token st) {
         while (!st.stop_requested()) {
             for (int i = 0; i < 30 && !st.stop_requested(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             if (st.stop_requested()) break;
+            // ── Phase 8: evict agent hosts idle > 30 min (history is
+            // persisted on evict; the host lazily re-creates on next use).
+            try { agent_registry.evict_idle(std::chrono::minutes(30)); }
+            catch (...) {}
             // ── Agent routines (Phase 5): fire due routine prompts into
             // their threads. Per-routine guard mirrors the trigger policy.
             try {

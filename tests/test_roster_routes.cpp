@@ -143,6 +143,25 @@ int main() {
 
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
+
+    // ── Phase 8: idle eviction — fresh agent (never messaged = never busy) ─
+    {
+        auto r3 = request("POST", port, "/api/agents",
+                          {{"name", "Evictable"}, {"role", "test"}});
+        assert(r3.statusCode() == 201);
+        const std::string a3 = json::parse(r3.bodyAsString())["id"];
+        auto agent = agents.get_agent(a3);
+        assert(agent);
+        auto& host = registry.get_or_create(*agent);
+        assert(!host.busy());
+        registry.evict_idle(std::chrono::seconds(0));   // everything idle
+        auto& host2 = registry.get_or_create(*agent);   // fresh host
+        assert(&host2 != &host);
+        host2.touch();
+        registry.evict_idle(std::chrono::hours(24));    // nothing idle that long
+        assert(&registry.get_or_create(*agent) == &host2);
+    }
+
     registry.shutdown_all();
 
     fs::remove_all(tmp);

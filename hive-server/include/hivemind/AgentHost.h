@@ -75,6 +75,23 @@ public:
     /// Safe to call when idle.
     void cancel() noexcept;
 
+    /// Phase 8 idle eviction: activity tracking. touch() on enqueue and at
+    /// every turn completion; busy() while a turn is queued or in flight —
+    /// the registry never evicts a busy host.
+    void touch() noexcept {
+        last_active_.store(std::chrono::steady_clock::now(),
+                           std::memory_order_relaxed);
+    }
+    std::chrono::steady_clock::duration idle_for() const noexcept {
+        return std::chrono::steady_clock::now() -
+               last_active_.load(std::memory_order_relaxed);
+    }
+    bool busy() const noexcept {
+        if (in_flight_.load(std::memory_order_relaxed) > 0) return true;
+        std::lock_guard<std::mutex> lk(queue_m_);
+        return !queue_.empty();
+    }
+
     /// Run one full turn synchronously (compat wrapper over enqueue()).
     std::string run_turn(const std::string& prompt,
                          std::function<void(std::string_view)> on_delta);
@@ -104,8 +121,13 @@ private:
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
     std::unique_ptr<daedalus::Agent> agent_;
 
+    // Phase 8 idle eviction state
+    std::atomic<std::chrono::steady_clock::time_point> last_active_{
+        std::chrono::steady_clock::now()};
+    std::atomic<int> in_flight_{0};
+
     // Phase 11.1 queue state
-    std::mutex queue_m_;
+    mutable std::mutex queue_m_;
     std::condition_variable queue_cv_;
     std::deque<PendingTurn> queue_;
     bool driver_running_ = false;           // guarded by queue_m_
@@ -137,6 +159,9 @@ public:
     /// until shutdown_all). In-flight turns finish safely; new turns on the
     /// dead host are rejected.
     void evict(const std::string& agent_id);
+
+    /// Phase 8: evict hosts idle longer than timeout (skips busy hosts).
+    void evict_idle(std::chrono::steady_clock::duration timeout);
 
     /// Shut down (persist history) and destroy every host, live and
     /// graveyard. Call after ChatService::quiesce(), from the server's
