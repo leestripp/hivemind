@@ -210,7 +210,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                     std::string{req.header("Host").value_or("localhost")} +
                     "/screen/" + seg[1] +
                     "/vnc.html?autoconnect=true&resize=scale"
-                    "&path=screen/ws%3Fagent%3D" + seg[1];
+                    "&path=%2Fscreen%2Fws%3Fagent%3D" + seg[1];   // ABSOLUTE — relative paths resolve against /screen/<id>/vnc.html and double up
                 if (!req.queryParameter("key", "").empty())
                     loc += "&key=" + req.queryParameter("key", "");
                 resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(302));
