@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind</title>
-<link rel="stylesheet" href="css/base.css?v=20260824d">
-  <link rel="stylesheet" href="css/settings.css?v=20260824d">
+<link rel="stylesheet" href="css/base.css?v=20260824e">
+  <link rel="stylesheet" href="css/settings.css?v=20260824e">
 </head>
 <body>
 <div class="app">
@@ -34,6 +34,12 @@
     <button class="ab-item" data-page="skills" title="Skills">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
         <path d="M14 3h4a1 1 0 0 1 1 1v4h-2.5a2 2 0 1 0 0 4H19v4a1 1 0 0 1-1 1h-4v-2.5a2 2 0 1 0-4 0V17H6a1 1 0 0 1-1-1v-4h2.5a2 2 0 1 1 0-4H5V4a1 1 0 0 1 1-1h4v2.5a2 2 0 1 0 4 0Z"/>
+      </svg>
+    </button>
+    <button class="ab-item" data-page="secrets" title="Secrets">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <rect x="4.5" y="10.5" width="15" height="10" rx="2"/>
+        <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5M12 14.5v2.5"/>
       </svg>
     </button>
     <button class="ab-item" data-page="models" title="Models">
@@ -99,6 +105,31 @@
       <div id="agents-grid" class="agents-grid">
         <p class="muted">loading…</p>
       </div>
+    </div>
+  </div>
+
+  <div id="page-secrets" class="page hidden">
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>🔒 Secrets</h2>
+          <p class="muted">
+            The secret broker — credentials agents need at runtime, delivered
+            <em>without</em> entering the LLM context. Values are write-only
+            (AES-256-GCM at rest); toggle a chip to grant a secret to an agent —
+            it appears as <code>HIVE_SECRET_&lt;NAME&gt;</code> in its container
+            exec environment. Rotation = delete + re-add.
+          </p>
+        </div>
+      </div>
+      <div class="section-head">
+        <h3>Broker</h3>
+        <button id="secrets-add" class="btn">+ Add Secret</button>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th>Name</th><th>Created</th><th>Granted to</th><th></th></tr></thead>
+        <tbody id="secrets-tbody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -212,6 +243,25 @@
         <label>Subdirectory (optional) <input name="path" placeholder="skills/my-skill — if SKILL.md isn't at repo root"></label>
         <p class="muted">Shallow-clones the repo, validates SKILL.md frontmatter, and copies the skill into the global library.</p>
         <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="submit">Install</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="secret-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Add Secret</h3>
+      <form id="secret-form">
+        <label>Name
+          <input name="name" required placeholder="OPENAI_KEY" pattern="[A-Za-z_][A-Za-z0-9_]*"
+                 title="Letters, digits, underscore — used as HIVE_SECRET_&lt;NAME&gt;">
+        </label>
+        <label>Value (write-only — never shown again)
+          <input name="value" type="password" required autocomplete="off">
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Add</button>
+        </div>
       </form>
     </div>
   </div>
@@ -335,7 +385,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260824d"></script>
+<script type="module" src="js/main.js?v=20260824e"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>

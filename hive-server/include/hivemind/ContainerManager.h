@@ -16,6 +16,8 @@
  * The manager never falls back to host execution — if podman or the
  * container is unavailable, calls fail with a clear error.
  */
+namespace hivemind { class SecretStore; }
+
 class ContainerManager {
 public:
     struct ExecResult {
@@ -63,6 +65,10 @@ public:
     static std::filesystem::path agent_home_dir(const std::string& agent_id);
 
 private:
+    /// Phase 15 secret broker: granted secrets ride into the container via
+    /// `podman exec --env-file` (0600 tmp file, deleted after) — values
+    /// never appear in podman's argv, bash history, or the LLM context.
+    static hivemind::SecretStore* secrets();   // function-local static (impl)
     /// Run a podman command line (already quoted), capture output + rc.
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);
 

@@ -30,9 +30,11 @@
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/routes/SkillRoutes.h"
+#include "hivemind/routes/SecretRoutes.h"
 #include "hivemind/routes/KeyRoutes.h"
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
+#include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/LLMStore.h"
 #include "hivemind/AgentStore.h"
@@ -86,6 +88,7 @@ int main(int argc, char* argv[]) {
     RoutineStore routine_store;
     LLMStore llm_store;
     AuthStore auth_store;
+    hivemind::SecretStore secret_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
 
@@ -118,6 +121,7 @@ int main(int argc, char* argv[]) {
         // Scope policy: admin-only routes, then read-only keys.
         const bool admin = AuthStore::has_scope(*scopes, "admin");
         if (path.rfind("/api/keys", 0) == 0 ||
+            path.rfind("/api/secrets", 0) == 0 ||
             path.find("/container/exec") != std::string::npos ||
             (path == "/api/config" &&
              req.method() != OmniNet::HTTP::Method::GET)) {
@@ -156,6 +160,7 @@ int main(int argc, char* argv[]) {
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
     register_skill_routes(server, agent_store);
+    register_secret_routes(server, agent_store, secret_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);

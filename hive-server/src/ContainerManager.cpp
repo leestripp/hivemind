@@ -2,13 +2,16 @@
 // src/ContainerManager.cpp — podman sandbox lifecycle (HiveMind 2.0, Phase 2)
 // =============================================================================
 #include "hivemind/ContainerManager.h"
+#include "hivemind/SecretStore.h"
 #include "hivemind/ServerConfig.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -170,15 +173,46 @@ bool ContainerManager::remove(const std::string& agent_id) {
     return r.exit_code == 0;
 }
 
+hivemind::SecretStore* ContainerManager::secrets() {
+    static hivemind::SecretStore store;   // XDG path; key loads on first use
+    return &store;
+}
+
 ContainerManager::ExecResult ContainerManager::exec(const std::string& agent_id,
                                                     const std::string& command,
                                                     int timeout_s) {
     if (!podman_available())
         return {-1, "podman is not installed on this machine", false};
 
+    // Phase 15: inject granted secrets via --env-file so values never show
+    // up in podman's argv (visible in ps) or the shell history.
+    std::string env_arg;
+    int env_fd = -1;
+    std::string env_path;
+    auto env = secrets()->env_for_agent(agent_id);
+    if (!env.empty()) {
+        char tmpl[] = "/tmp/hive-env-XXXXXX";
+        env_fd = mkstemp(tmpl);
+        if (env_fd >= 0) {
+            env_path = tmpl;
+            ::chmod(env_path.c_str(), 0600);
+            for (auto& [k, v] : env) {
+                std::string line = k + "=" + v + "\n";
+                (void)!write(env_fd, line.data(), line.size());
+            }
+            ::close(env_fd);
+            env_fd = -1;
+            env_arg = " --env-file " + shell_quote(env_path);
+        }
+    }
     std::string cmd =
-        "podman exec -u hive -w /workspace " +
+        "podman exec -u hive -w /workspace" + env_arg + " " +
         shell_quote(container_name(agent_id)) +
         " bash -lc " + shell_quote(command);
-    return run(cmd, timeout_s);
+    auto res = run(cmd, timeout_s);
+    if (!env_path.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(env_path, ec);   // gone the moment exec returns
+    }
+    return res;
 }

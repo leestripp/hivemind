@@ -17,6 +17,7 @@ set(CORE_SOURCES
     src/RoutineStore.cpp
     src/LLMStore.cpp
     src/AuthStore.cpp
+    src/SecretStore.cpp
     src/ServerConfig.cpp
 )
 
@@ -30,6 +31,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/AgentRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
     include/hivemind/routes/SkillRoutes.cpp
+    include/hivemind/routes/SecretRoutes.cpp
     include/hivemind/routes/ContainerRoutes.cpp
     include/hivemind/routes/ApprovalRoutes.cpp
     include/hivemind/routes/RoutineRoutes.cpp
