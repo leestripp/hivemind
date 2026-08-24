@@ -1,0 +1,218 @@
+// include/hivemind/routes/SkillRoutes.cpp
+// -----------------------------------------------------------------------------
+// Global skills library + per-agent enable symlinks (see header).
+// -----------------------------------------------------------------------------
+#include "hivemind/routes/SkillRoutes.h"
+#include "hivemind/routes/RouteUtil.h"
+#include "hivemind/AgentStore.h"
+
+#include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <system_error>
+#include <vector>
+
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+
+namespace {
+using hivemind::routes::path_segments;
+using hivemind::routes::send_json;
+using hivemind::routes::send_error;
+
+// ~/.local/share/hivemind/skills/ — the managed global library.
+fs::path global_skills_root() {
+    return AgentStore::agents_base_dir().parent_path() / "skills";
+}
+
+fs::path agent_skills_root(const std::string& agent_id) {
+    return AgentStore::agents_base_dir() / agent_id / ".agents" / "skills";
+}
+
+bool valid_skill_name(const std::string& n) {
+    if (n.empty() || n.size() > 64) return false;
+    for (char c : n) {
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// Pull name/description/version out of SKILL.md YAML frontmatter (flat keys).
+json frontmatter_of(const fs::path& skill_md) {
+    json fm = json::object();
+    std::ifstream f(skill_md);
+    if (!f) return fm;
+    std::string line;
+    bool in_fm = false;
+    while (std::getline(f, line)) {
+        if (line == "---") { if (in_fm) break; in_fm = true; continue; }
+        if (!in_fm) continue;
+        auto pos = line.find(':');
+        if (pos == std::string::npos) continue;
+        std::string key = line.substr(0, pos);
+        std::string val = line.substr(pos + 1);
+        while (!val.empty() && val.front() == ' ') val.erase(val.begin());
+        while (!val.empty() && (val.back() == ' ' || val.back() == '\r')) val.pop_back();
+        if (key == "name" || key == "description" || key == "version")
+            fm[key] = val;
+    }
+    return fm;
+}
+
+// A symlink whose target (relative or absolute) lands inside the global
+// library. Agent-local skills are real directories; globals are links.
+bool is_global_link(const fs::path& link) {
+    std::error_code ec;
+    if (!fs::is_symlink(link, ec)) return false;
+    fs::path target = fs::read_symlink(link, ec);
+    if (ec) return false;
+    if (target.is_relative()) target = link.parent_path() / target;
+    target = fs::weakly_canonical(target, ec);
+    if (ec) return false;
+    const auto root = fs::weakly_canonical(global_skills_root(), ec);
+    if (ec) return false;
+    auto rt = root.string();
+    return target.string().starts_with(rt + "/");
+}
+
+std::vector<std::string> enabled_global_skills(const std::string& agent_id) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    fs::path root = agent_skills_root(agent_id);
+    if (!fs::exists(root, ec)) return out;
+    for (auto& e : fs::directory_iterator(root, ec))
+        if (is_global_link(e.path()) && fs::exists(e.path() / "SKILL.md", ec))
+            out.push_back(e.path().filename().string());
+    return out;
+}
+
+} // namespace
+
+void register_skill_routes(OmniNet::HTTP::Server& server,
+                                             AgentStore& agents) {
+
+    // ── GET /api/skills ───────────────────────────────────────────────────
+    server.get("/api/skills",
+        [&agents](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            std::error_code ec;
+            fs::create_directories(global_skills_root(), ec);
+            json list = json::array();
+            auto all = agents.list_agents();
+            for (auto& e : fs::directory_iterator(global_skills_root(), ec)) {
+                if (!e.is_directory() || fs::is_symlink(e.path())) continue;
+                if (!fs::exists(e.path() / "SKILL.md", ec)) continue;
+                const std::string sname = e.path().filename().string();
+                json fm = frontmatter_of(e.path() / "SKILL.md");
+                json enabled = json::array();
+                for (auto& a : all) {
+                    auto eg = enabled_global_skills(a.id);
+                    if (std::find(eg.begin(), eg.end(), sname) != eg.end())
+                        enabled.push_back({{"id", a.id}, {"name", a.name}});
+                }
+                list.push_back({
+                    {"name", sname},
+                    {"description", fm.value("description", "")},
+                    {"version", fm.value("version", "")},
+                    {"enabled_agents", enabled},
+                });
+            }
+            send_json(resp, json{{"skills", list}});
+        });
+
+    // ── POST /api/skills ──────────────────────────────────────────────────
+    server.post("/api/skills",
+        [](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json body;
+            try { body = json::parse(req.bodyAsString()); }
+            catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+            std::string name = body.value("name", "");
+            std::string desc = body.value("description", "");
+            std::string content = body.value("content", "");
+            if (!valid_skill_name(name)) {
+                send_error(resp, 400, "skill name must be kebab-case (a-z 0-9 -)"); return;
+            }
+            if (content.empty()) { send_error(resp, 400, "content required"); return; }
+            fs::path dir = global_skills_root() / name;
+            std::error_code ec;
+            if (fs::exists(dir, ec)) { send_error(resp, 409, "skill already exists"); return; }
+            fs::create_directories(dir, ec);
+            std::ofstream f(dir / "SKILL.md", std::ios::trunc);
+            if (!f) { send_error(resp, 500, "cannot write skill file"); return; }
+            f << "---\nname: " << name << "\n"
+              << "description: " << (desc.empty() ? name : desc) << "\n"
+              << "version: 1.0.0\n---\n\n"
+              << content << "\n";
+            f.close();
+            send_json(resp, json{{"created", name}}, 201);
+        });
+
+    // ── DELETE /api/skills/:name ──────────────────────────────────────────
+    server.delete_("/api/skills/:name",
+        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api skills :name
+            if (seg.size() < 3) { send_error(resp, 400, "missing name"); return; }
+            if (!valid_skill_name(seg[2])) { send_error(resp, 400, "bad skill name"); return; }
+            fs::path dir = global_skills_root() / seg[2];
+            std::error_code ec;
+            if (!fs::exists(dir, ec)) { send_error(resp, 404, "skill not found"); return; }
+            // Remove every agent's symlink first so none dangle.
+            for (auto& a : agents.list_agents()) {
+                fs::path link = agent_skills_root(a.id) / seg[2];
+                if (fs::is_symlink(link, ec)) fs::remove(link, ec);
+            }
+            fs::remove_all(dir, ec);
+            send_json(resp, json{{"deleted", seg[2]}});
+        });
+
+    // ── GET /api/agents/:id/global-skills ─────────────────────────────────
+    server.get("/api/agents/:id/global-skills",
+        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api agents :id global-skills
+            if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
+            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
+            send_json(resp, json{{"skills", enabled_global_skills(seg[2])}});
+        });
+
+    // ── POST /api/agents/:id/global-skills ────────────────────────────────
+    // {name, enabled} — create/remove the symlink. The link is RELATIVE
+    // (../../../../skills/<name>) so it keeps resolving when the hivemind data
+    // root is bind-mounted into an agent container at the same depth.
+    server.post("/api/agents/:id/global-skills",
+        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
+            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
+            json body;
+            try { body = json::parse(req.bodyAsString()); }
+            catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+            std::string name = body.value("name", "");
+            if (!valid_skill_name(name)) { send_error(resp, 400, "bad skill name"); return; }
+            const bool enable = body.value("enabled", true);
+
+            fs::path target = global_skills_root() / name;
+            std::error_code ec;
+            if (enable && !fs::exists(target / "SKILL.md", ec)) {
+                send_error(resp, 404, "global skill not found"); return;
+            }
+            fs::path link = agent_skills_root(seg[2]) / name;
+            if (enable) {
+                // Don't clobber an agent-local skill with the same name.
+                if (fs::exists(link, ec) && !is_global_link(link)) {
+                    send_error(resp, 409,
+                        "agent has a local skill named '" + name + "'"); return;
+                }
+                fs::create_directories(link.parent_path(), ec);
+                fs::remove(link, ec);   // refresh existing link
+                // ../../../.. from <base>/agents/<id>/.agents/skills/ (the dir
+                // CONTAINING the link) → <base>
+                fs::create_symlink(fs::path("../../../../skills") / name, link, ec);
+                if (ec) { send_error(resp, 500, "symlink failed: " + ec.message()); return; }
+            } else {
+                if (fs::is_symlink(link, ec)) fs::remove(link, ec);
+            }
+            send_json(resp, json{{"name", name}, {"enabled", enable}});
+        });
+}

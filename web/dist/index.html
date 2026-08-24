@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind</title>
-<link rel="stylesheet" href="css/base.css?v=20260824a">
-  <link rel="stylesheet" href="css/settings.css?v=20260824a">
+<link rel="stylesheet" href="css/base.css?v=20260824b">
+  <link rel="stylesheet" href="css/settings.css?v=20260824b">
 </head>
 <body>
 <div class="app">
@@ -29,6 +29,11 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
         <circle cx="12" cy="13" r="8"/>
         <path d="M12 9.5v3.5l2.5 2.5M9 2.5h6"/>
+      </svg>
+    </button>
+    <button class="ab-item" data-page="skills" title="Skills">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+        <path d="M14 3h4a1 1 0 0 1 1 1v4h-2.5a2 2 0 1 0 0 4H19v4a1 1 0 0 1-1 1h-4v-2.5a2 2 0 1 0-4 0V17H6a1 1 0 0 1-1-1v-4h2.5a2 2 0 1 1 0-4H5V4a1 1 0 0 1 1-1h4v2.5a2 2 0 1 0 4 0Z"/>
       </svg>
     </button>
     <button class="ab-item" data-page="models" title="Models">
@@ -155,6 +160,33 @@
     </div>
   </div>
 
+  <div id="page-skills" class="page hidden">
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>🧩 Skills</h2>
+          <p class="muted">
+            The global skill library — reusable capability packs (SKILL.md) shared
+            across agents. Toggle a chip to enable a skill for that agent; the
+            server symlinks it into the agent's skills dir and daedalus discovers
+            it on its next turn. Agent-learned local skills stay between you and
+            the agent — they are not managed here.
+          </p>
+        </div>
+      </div>
+      <div class="section-head">
+        <h3>Global Library</h3>
+        <div>
+          <button id="skills-add" class="btn">+ Add Skill</button>
+        </div>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th>Name</th><th>Trigger / Description</th><th>Version</th><th>Enabled for</th><th></th></tr></thead>
+        <tbody id="skills-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <div id="provider-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Provider</h3><button class="icon-btn" data-close title="Close">✕</button></div>
@@ -166,6 +198,23 @@
         <div class="modal-actions">
           <button type="button" class="btn" data-close>Cancel</button>
           <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="skill-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-head"><h3>Add Global Skill</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <form id="skill-form">
+        <label>Name <input name="name" required pattern="[a-z0-9-]+" placeholder="kebab-case, e.g. code-review"></label>
+        <label>Trigger description <input name="description" placeholder="When should agents activate this? e.g. Reviews code diffs for bugs"></label>
+        <label>Instructions (markdown body of SKILL.md)
+          <textarea name="content" rows="8" required placeholder="# Skill Title&#10;&#10;## Step 1: …"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
         </div>
       </form>
     </div>
@@ -273,7 +322,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260824a"></script>
+<script type="module" src="js/main.js?v=20260824b"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>

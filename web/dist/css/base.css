@@ -313,3 +313,11 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .modal-panel textarea { width: 100%; box-sizing: border-box; background: #2e3440;
   border: 1px solid #4c566a; border-radius: 6px; color: inherit; padding: 6px 8px;
   font: inherit; resize: vertical; }
+
+/* ── skills page chips ── */
+.skill-chip { border: 1px solid var(--border, #444); background: transparent;
+  color: inherit; border-radius: 999px; padding: 2px 10px; font-size: 12px;
+  cursor: pointer; opacity: 0.65; }
+.skill-chip:hover { opacity: 1; }
+.skill-chip-on { opacity: 1; background: var(--accent, #3584e4);
+  border-color: var(--accent, #3584e4); color: #fff; }

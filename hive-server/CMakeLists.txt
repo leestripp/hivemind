@@ -29,6 +29,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/AgentRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
+    include/hivemind/routes/SkillRoutes.cpp
     include/hivemind/routes/ContainerRoutes.cpp
     include/hivemind/routes/ApprovalRoutes.cpp
     include/hivemind/routes/RoutineRoutes.cpp

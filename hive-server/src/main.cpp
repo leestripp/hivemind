@@ -29,6 +29,7 @@
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
+#include "hivemind/routes/SkillRoutes.h"
 #include "hivemind/routes/KeyRoutes.h"
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
@@ -154,6 +155,7 @@ int main(int argc, char* argv[]) {
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
+    register_skill_routes(server, agent_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);
