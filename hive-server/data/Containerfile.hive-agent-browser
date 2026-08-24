@@ -17,10 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb \
         x11vnc \
         openbox \
-        libgl1 \
-        libgl1-mesa-dri \
-        mesa-vulkan-drivers \
-        libvulkan1 \
         novnc \
         websockify \
         fonts-dejavu-core \

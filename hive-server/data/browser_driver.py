@@ -67,12 +67,7 @@ def ensure_browser(pw):
         [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
          "--disable-session-crashed-bubble", "--disable-dev-shm-usage",
-         "--noerrdialogs",
-         # Hardware WebGL/Vulkan when the host passed a GPU through
-         # (/dev/dri) — SwiftShader otherwise. Matches hive-screen.sh.
-         *(["--use-angle=vulkan", "--enable-features=Vulkan",
-            "--enable-unsafe-webgpu", "--ignore-gpu-blocklist"]
-           if os.path.exists("/dev/dri/renderD128") else ["--disable-gpu"]),
+         "--disable-gpu", "--noerrdialogs",
          "--disable-features=TranslateUI", "--start-maximized", "about:blank"],
         env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

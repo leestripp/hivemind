@@ -52,16 +52,6 @@ alive websockify || \
 
 # The shared browser: maximized on :99, CDP :9222 for browser_driver.py.
 # Skip if already up (CDP answers).
-# GPU: when the host passed /dev/dri through, Chrome renders WebGL/3D on
-# real hardware (Vulkan/ANGLE on the RX 9070) even though the display is
-# Xvfb — Three.js/game-dev work gets honest GPU behavior. Without a GPU,
-# SwiftShader (slow but correct).
-GPU_FLAGS="--disable-gpu"
-if [ -e /dev/dri/renderD128 ]; then
-    GPU_FLAGS="--use-angle=vulkan --enable-features=Vulkan \
-        --enable-unsafe-webgpu --ignore-gpu-blocklist"
-fi
-
 if ! curl -sf --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
     # Real Chrome first (no testing/automation branding — sites that
     # reject test builds must accept it); playwright chromium as fallback.
