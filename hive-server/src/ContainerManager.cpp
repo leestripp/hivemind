@@ -286,9 +286,12 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
     // 6080) or runs a stale image (e.g. the X11-era browser image). The
     // home dir is a bind mount — browser profile/session survive.
     if (st.exists) {
-        auto img = run("podman inspect -f '{{.ImageName}}' " + shell_quote(cname));
+        // Digest, not name: the tag is constant across rebuilds.
+        auto img = run("podman inspect -f '{{.Image}}' " + shell_quote(cname));
+        auto cur = run(std::string{"podman image inspect -f '{{.Id}}' "} +
+                       kBrowserImage);
         if (screen_port(agent_id) == 0 ||
-            img.output.find(kBrowserImage) == std::string::npos) {
+            img.output != cur.output) {
             stop(agent_id);
             remove(agent_id);
             st = status(agent_id);
