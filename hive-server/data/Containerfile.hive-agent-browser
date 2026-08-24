@@ -22,11 +22,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Chromium: Ubuntu's chromium-browser deb is a snap stub (snaps can't run
-# in containers). Playwright's bundled chromium is the real browser — PyPI
-# wheel (the Ubuntu python3-playwright deb strips the node driver).
-# Browsers in a shared world-readable path: build runs as root, agents run
-# as hive. ENV must precede the RUN or chromium lands in /root/.cache.
+# Browser: Google Chrome STABLE (official .deb — real production browser).
+# Two other options both fail in containers: Ubuntu's chromium-browser deb
+# is a snap stub (snaps can't run), and playwright's bundled build is
+# "Chromium for Testing" — branded as such, and some sites (Google) refuse
+# sign-in on automation/testing builds, which breaks the login-handoff
+# flow that is the entire point of the live screen.
+RUN curl -sSL -o /tmp/chrome.deb \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update && apt-get install -y /tmp/chrome.deb \
+    && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
+
+# Playwright stays as the DRIVER (and its chromium as last-resort
+# fallback): PyPI wheel — the Ubuntu python3-playwright deb strips the
+# node driver. ENV must precede the RUN or browsers land in /root/.cache.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN pip install --no-cache-dir --break-system-packages playwright \
     && playwright install chromium --with-deps \

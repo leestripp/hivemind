@@ -43,8 +43,10 @@ def chromium_binary():
             "~/.cache/ms-playwright/chromium-*/chrome-linux*64/chrome")) +
         glob.glob(os.path.expanduser(
             "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")))
-    if not hits:  # system fallback for non-container runs
-        for c in ("chromium", "chromium-browser", "google-chrome"):
+    if not hits:
+        # Real Chrome first (login handoff: sites reject testing builds),
+        # then whatever chromium is around.
+        for c in ("google-chrome", "chromium", "chromium-browser"):
             if subprocess.run(["which", c], capture_output=True).returncode == 0:
                 return c
         raise RuntimeError("no chromium found (run: playwright install chromium)")
