@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 /**
  * ServerConfig — server-level settings (HiveMind 2.0, workspace config).
@@ -28,6 +29,13 @@ public:
     /// path is not absolute (after ~ expansion) or cannot be created.
     void set_workspace_root(const std::string& path);
 
+    /// Phase 9: CORS allowlist. Empty (default) = no CORS headers — the
+    /// same-origin web UI keeps working; browsers block cross-origin fetches.
+    /// Entries are exact origins ("https://hive.example.com") or "*".
+    std::vector<std::string> cors_origins() const { return cors_origins_; }
+    void set_cors_origins(std::vector<std::string> origins);
+    bool cors_allowed(const std::string& origin) const;
+
     /// Expand a leading "~/" to $HOME. Static + pure for tests.
     static std::string expand_home(const std::string& path);
 
@@ -39,5 +47,6 @@ private:
     void save() const;
 
     std::filesystem::path file_;
-    std::string workspace_root_;   // "" = use default
+    std::string workspace_root_;
+    std::vector<std::string> cors_origins_;   // "" = use default
 };

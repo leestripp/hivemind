@@ -19,6 +19,12 @@ The **master key** is printed once at first server start (also in
 Scopes: `admin` (everything), `agent` (default), `read` (GET only).
 Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 
+**CORS** (Phase 9): default is no CORS headers — the web UI is same-origin.
+For cross-origin browser clients, add exact origins (or `"*"`) to
+`~/.local/share/hivemind/server.json` `"cors_origins"` and restart;
+preflight `OPTIONS` is answered without auth. TLS terminates at Caddy —
+see `docs/deploy.md`.
+
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/keys` | List keys (public ids only) — admin |

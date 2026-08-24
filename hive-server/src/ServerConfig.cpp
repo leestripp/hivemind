@@ -42,6 +42,10 @@ void ServerConfig::load() {
     try {
         auto j = nlohmann::json::parse(f);
         workspace_root_ = j.value("workspace_root", "");
+        cors_origins_.clear();
+        if (j.contains("cors_origins") && j["cors_origins"].is_array())
+            for (auto& o : j["cors_origins"])
+                if (o.is_string()) cors_origins_.push_back(o.get<std::string>());
     } catch (...) { /* corrupt file → defaults */ }
 }
 
@@ -50,7 +54,8 @@ void ServerConfig::save() const {
     fs::create_directories(file_.parent_path(), ec);
     std::ofstream f{file_, std::ios::trunc};
     if (!f) throw std::runtime_error("cannot write " + file_.string());
-    f << nlohmann::json{{"workspace_root", workspace_root_}}.dump(2) << "\n";
+    f << nlohmann::json{{"workspace_root", workspace_root_},
+                        {"cors_origins", cors_origins_}}.dump(2) << "\n";
 }
 
 std::string ServerConfig::workspace_root() {
@@ -76,4 +81,15 @@ void ServerConfig::set_workspace_root(const std::string& path) {
         throw std::invalid_argument("'" + expanded + "' is not a directory");
     workspace_root_ = expanded;
     save();
+}
+
+void ServerConfig::set_cors_origins(std::vector<std::string> origins) {
+    cors_origins_ = std::move(origins);
+    save();
+}
+
+bool ServerConfig::cors_allowed(const std::string& origin) const {
+    for (auto& o : cors_origins_)
+        if (o == "*" || o == origin) return true;
+    return false;
 }

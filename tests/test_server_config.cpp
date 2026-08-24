@@ -47,6 +47,21 @@ int main() {
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 
+    // ── Phase 9: cors_origins allowlist ───────────────────────────────────
+    ServerConfig cors_cfg{tmp / "cors.json"};
+    assert(cors_cfg.cors_origins().empty());                 // default: none
+    assert(!cors_cfg.cors_allowed("https://anything.io"));   // no headers
+    cors_cfg.set_cors_origins({"https://hive.example.com"});
+    assert(cors_cfg.cors_allowed("https://hive.example.com"));
+    assert(!cors_cfg.cors_allowed("https://evil.example.com"));
+    {
+        ServerConfig cors_cfg2{tmp / "cors.json"};           // persists
+        assert(cors_cfg2.cors_origins().size() == 1);
+        assert(cors_cfg2.cors_allowed("https://hive.example.com"));
+    }
+    cors_cfg.set_cors_origins({"*"});
+    assert(cors_cfg.cors_allowed("https://whatever.io"));    // wildcard
+
     fs::remove_all(tmp);
     std::cout << "test_server_config: OK\n";
     return 0;

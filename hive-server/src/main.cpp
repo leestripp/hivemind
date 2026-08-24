@@ -31,6 +31,8 @@
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/routes/SkillRoutes.h"
 #include "hivemind/routes/SecretRoutes.h"
+#include "hivemind/routes/RouteUtil.h"
+#include "hivemind/ServerConfig.h"
 #include "hivemind/routes/KeyRoutes.h"
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
@@ -97,6 +99,32 @@ int main(int argc, char* argv[]) {
     // /api/health then requires `Authorization: Bearer <key>`.
     auth_store.ensure_master_key(/*print=*/true);
 
+    // ─── CORS (Phase 9) ─────────────────────────────────────────────
+    // Same-origin web UI needs nothing. For cross-origin API clients the
+    // admin adds exact origins to server.json "cors_origins" (or "*").
+    // Preflight is answered here (no auth required); actual responses get
+    // their ACAO header from RouteUtil::send_json via the thread-local.
+    server.use([](const OmniNet::HTTP::Request& req,
+                  OmniNet::HTTP::Response& resp) -> bool {
+        auto origin = req.header("Origin");
+        hivemind::routes::request_origin = origin ? std::string{*origin} : "";
+        if (req.method() != OmniNet::HTTP::Method::OPTIONS ||
+            !origin || !req.header("Access-Control-Request-Method"))
+            return true;   // not a preflight
+        resp = OmniNet::HTTP::Response::ok();
+        resp.setStatus(OmniNet::HTTP::StatusCode::NO_CONTENT);
+        if (ServerConfig::instance().cors_allowed(std::string{*origin})) {
+            resp.setHeader("Access-Control-Allow-Origin", *origin);
+            resp.setHeader("Access-Control-Allow-Methods",
+                           "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+            resp.setHeader("Access-Control-Allow-Headers",
+                           "Authorization, Content-Type");
+            resp.setHeader("Access-Control-Max-Age", "86400");
+            resp.setHeader("Vary", "Origin");
+        }
+        return false;      // preflight answered — no handler runs
+    });
+
     // Global auth middleware — runs before every handler; guards /api/*.
     server.use([&auth_store](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) -> bool {
@@ -105,10 +133,7 @@ int main(int argc, char* argv[]) {
         if (path == "/api/health") return true;       // probe stays open
 
         auto deny = [&](int code, const std::string& msg) {
-            resp = OmniNet::HTTP::Response::ok();
-            resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(code));
-            resp.setContentType("application/json");
-            resp.setBody("{\"error\":\"" + msg + "\"}");
+            hivemind::routes::send_error(resp, code, msg);
             return false;
         };
 
