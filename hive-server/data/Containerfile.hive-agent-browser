@@ -32,8 +32,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         novnc \
         websockify \
         python3-playwright \
+        meson ninja-build build-essential pkg-config xz-utils \
+        libglib2.0-dev libvncserver-dev libpipewire-0.3-dev libsecret-1-dev \
+        libxkbcommon-dev libepoxy-dev libdrm-dev libfuse3-dev libtss2-dev \
+        libnotify-dev libcairo2-dev libgirepository1.0-dev libei-dev \
+        libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m playwright install chromium --with-deps || true
+
+# Ubuntu builds gnome-remote-desktop with -Dvnc=false (meson default) —
+# no VNC in grdctl at all. Rebuild GRD 50.2 from upstream with the VNC
+# backend on (RDP off, systemd off — this is a container), installed over
+# the deb at /usr so the daemon path stays /usr/libexec/…-daemon.
+RUN curl -sSL -o /tmp/grd.tar.xz \
+        https://download.gnome.org/sources/gnome-remote-desktop/50/gnome-remote-desktop-50.2.tar.xz \
+    && cd /tmp && tar xf grd.tar.xz && cd gnome-remote-desktop-50.2 \
+    && meson setup build --prefix=/usr -Dvnc=true -Drdp=false \
+           -Dsystemd=false -Dtests=false -Dman=false \
+    && ninja -C build && ninja -C build install \
+    && cd / && rm -rf /tmp/gnome-remote-desktop-50.2 /tmp/grd.tar.xz
 
 # Ubuntu's chromium-browser deb is a snap stub (snaps can't run in
 # containers) — playwright's bundled chromium is the real browser. It is
