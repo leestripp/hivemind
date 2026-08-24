@@ -1,10 +1,9 @@
 # Agent Computer — live screen (Phase 25, X11 stack)
 
-> **Status: WORKING** (verified 2026-08-24 with a real noVNC client on the
-> dev-rig rig: connected, 1280x800, desktop rendering, chromium on CDP).
-> This document is the definitive reference for how it works and how it was
-> made to work — including the failed GNOME/Wayland detour (Phase 24) so
-> nobody repeats it.
+> **Status: WORKING — user-verified 2026-08-24** in both the web UI and the
+> GTK client (Phase 26 WebKitGTK embed). This document is the definitive
+> reference for how it works and how it was made to work — including the
+> failed GNOME/Wayland detour (Phase 24) so nobody repeats it.
 
 ## What it is
 
@@ -108,6 +107,7 @@ zombie-safe (PID 1 is `sleep`, never reaps; liveness checks read
 | **Chrome "Page Unresponsive" dialogs** | podman's default 64MB /dev/shm starves the renderer — `--shm-size 1g` at container create + `--disable-dev-shm-usage --disable-gpu` launch flags (719b9a9). Note: existing containers keep old flags until recreated — `ensure_screen` only recreates on image-digest change, so `podman rm -f hive-<id>` by hand after a flags-only change |
 | Chrome won't start: "profile in use on another computer" | stale `SingletonLock` from a dead container in the persistent profile — cleared automatically before launch (7236649) |
 | "Chromium for Testing" branding / site sign-in refused | playwright's build is a test build — the image ships real Google Chrome stable (8d51320) |
+| no sound (YouTube etc.) | by design — RFB/VNC carries framebuffer + input only, no audio channel. Not a bug; container audio streaming (PulseAudio-over-TCP) is possible but deliberately not wired |
 
 ## Test with a REAL client, always
 
