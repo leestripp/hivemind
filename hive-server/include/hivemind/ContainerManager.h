@@ -64,6 +64,23 @@ public:
     /// Per-agent home directory on the host (bind-mounted to /home/hive).
     static std::filesystem::path agent_home_dir(const std::string& agent_id);
 
+    // ── Phase 6: computer use (screen pipeline) ──────────────────────
+    /// Build localhost/hive-agent:browser from Containerfile.hive-agent-browser
+    /// if missing. Throws std::runtime_error on build failure.
+    void ensure_browser_image();
+    /// True when the browser image exists (cheap `podman image exists`).
+    bool browser_image_present();
+    /// Host-loopback port the agent's container publishes 6080 on
+    /// (`podman port <name> 6080`); 0 when not published/not running.
+    uint16_t screen_port(const std::string& agent_id);
+    /// Ensure the agent's container runs the browser image with 6080
+    /// published on 127.0.0.1 and the display stack (Xvfb/x11vnc/
+    /// websockify --web /usr/share/novnc) up. Recreates the container when
+    /// it predates port publishing. Returns the host port. Throws on failure.
+    uint16_t ensure_screen(const std::string& agent_id);
+    /// Stop the display stack (container keeps running). False if not found.
+    bool stop_screen(const std::string& agent_id);
+
 private:
     /// Phase 15 secret broker: granted secrets ride into the container via
     /// `podman exec --env-file` (0600 tmp file, deleted after) — values
@@ -73,6 +90,7 @@ private:
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);
 
     static constexpr const char* kImage = "localhost/hive-agent:latest";
+    static constexpr const char* kBrowserImage = "localhost/hive-agent:browser";
 };
 
 /// Process-wide shared instance.

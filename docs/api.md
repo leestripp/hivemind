@@ -262,6 +262,34 @@ file, deleted when exec returns) — values never appear in podman's argv,
 shell history, or tool output. The Phase 6 browser `fill_secret` tool will
 type values via playwright for web logins.
 
+## 6.6 Screen (Phase 6 — computer use)
+
+All under the standard `/api/` Bearer auth; screen control requires a
+non-read-only key (POST).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/agents/:id/screen | Screen status: `{podman, browser_image, running, port, url}` |
+| POST | /api/agents/:id/screen/start | Ensure browser container + display stack (Xvfb/x11vnc/websockify). 502 with the podman error on failure. Returns `{running, port, url}`. |
+| POST | /api/agents/:id/screen/stop | Stop the display stack (container keeps running) |
+
+**Browser-facing proxy** (noVNC can't send Bearer headers — these live
+outside `/api/` and authenticate via `?key=` query, which sets an HttpOnly
+`hive_screen` cookie (Path=/screen, SameSite=Strict) for subsequent asset
+and WebSocket requests; admin or agent scope required):
+
+- `GET /screen/:id/` → 302 → `vnc.html?autoconnect=true&resize=scale&path=screen/ws%3Fagent%3D:id`
+- `GET /screen/:id/<asset>` → HTTP proxy to the container's `127.0.0.1:6080`
+- `WS  /screen/ws?agent=<id>` → WebSocket splice: hive-server completes the
+  client handshake itself, then opens a fresh upgrade to the container's
+  websockify and relays raw bytes both ways.
+
+The container publishes 6080 on **127.0.0.1 only** — hive-server is the
+single auth-guarded entry point, safe behind Caddy/TLS. Browser profile
+persists in the agent's `/home/hive` bind mount, so login sessions survive
+container restarts (login handoff: agent reports the wall in-thread, user
+opens the Computer view, authenticates, hands back).
+
 ## 7. Containers
 
 | Method | Path | Description |

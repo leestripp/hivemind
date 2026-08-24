@@ -85,12 +85,82 @@ async function refresh() {
           <div><span>Workspace</span>${esc(a.workspace_mode || 'shared')}</div>
           <div><span>Approvals</span>${a.require_approval ? 'required' : 'auto'}</div>
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
+        </div>
+        <div class="agent-actions">
+          <button class="btn btn-sm" data-screen="${esc(a.id)}" title="Live container desktop (Phase 6)">🖥 Computer</button>
         </div>`;
+      card.querySelector('[data-screen]').addEventListener('click',
+        () => openScreen(a.id, a.name));
       grid.appendChild(card);
     }
   } catch (e) {
     grid.innerHTML = `<p class="muted">unavailable — ${esc(e.message)}</p>`;
   }
+}
+
+// ── Phase 6: Agent Computer (noVNC through hive-server) ─────────────────
+let screenModal = null;
+
+function ensureScreenModal() {
+  if (screenModal) return screenModal;
+  screenModal = document.createElement('div');
+  screenModal.className = 'modal-overlay hidden';
+  screenModal.id = 'screen-modal';
+  screenModal.innerHTML = `
+    <div class="modal-panel screen-panel">
+      <div class="modal-head">
+        <strong id="screen-title">Agent Computer</strong>
+        <span class="muted" id="screen-state"></span>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" id="screen-stop">Stop screen</button>
+        <button class="btn btn-sm" id="screen-close">Close</button>
+      </div>
+      <div id="screen-body" class="screen-body">
+        <p class="muted" id="screen-msg">Starting the display stack…</p>
+      </div>
+    </div>`;
+  document.body.appendChild(screenModal);
+  screenModal.querySelector('#screen-close').addEventListener('click', hideScreen);
+  return screenModal;
+}
+
+let screenAgent = null;
+
+async function openScreen(id, name) {
+  ensureScreenModal();
+  screenAgent = id;
+  screenModal.classList.remove('hidden');
+  document.getElementById('screen-title').textContent = `🖥 ${name} — Computer`;
+  const msg = document.getElementById('screen-msg');
+  const body = document.getElementById('screen-body');
+  msg.textContent = 'Starting the display stack…';
+  body.querySelector('iframe')?.remove();
+  msg.style.display = '';
+  try {
+    const r = await API.post(`/api/agents/${id}/screen/start`, {});
+    // Cookie-based auth: first hit carries ?key=, server sets an HttpOnly
+    // cookie for all subsequent asset + WS requests, then redirects into
+    // noVNC with autoconnect.
+    const ifr = document.createElement('iframe');
+    ifr.className = 'screen-frame';
+    ifr.src = `${r.url}?key=${encodeURIComponent(API.getKey())}`;
+    body.appendChild(ifr);
+    msg.style.display = 'none';
+  } catch (e) {
+    msg.textContent = 'Screen unavailable — ' + e.message;
+  }
+  document.getElementById('screen-stop').onclick = async () => {
+    try { await API.post(`/api/agents/${screenAgent}/screen/stop`, {}); }
+    catch (_) {}
+    hideScreen();
+  };
+}
+
+function hideScreen() {
+  if (!screenModal) return;
+  screenModal.classList.add('hidden');
+  screenModal.querySelector('iframe')?.remove();   // drops the VNC session
+  screenAgent = null;
 }
 
 export function enterAgents() {

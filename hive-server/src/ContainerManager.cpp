@@ -216,3 +216,109 @@ ContainerManager::ExecResult ContainerManager::exec(const std::string& agent_id,
     }
     return res;
 }
+
+// ── Phase 6: computer use (screen pipeline) ─────────────────────────────
+// UNTESTED in the dev sandbox (no working podman) — verify on a real
+// Ubuntu 26.04 box like the rest of the container layer.
+
+void ContainerManager::ensure_browser_image() {
+    if (!podman_available())
+        throw std::runtime_error("podman is not installed on this machine");
+    if (browser_image_present()) return;
+
+    const char* containerfile = "hive-server/data/Containerfile.hive-agent-browser";
+    if (!fs::exists(containerfile))
+        throw std::runtime_error(
+            std::string{"Containerfile not found at "} + containerfile +
+            " (run hive-server from the repository root)");
+
+    auto build = run(std::string{"podman build -t "} + kBrowserImage +
+                         "  hive-server/data/Containerfile.hive-agent-browser"
+                         " hive-server/data",
+                     /*timeout_s=*/1800);
+    if (build.exit_code != 0)
+        throw std::runtime_error("browser image build failed: " + build.output);
+}
+
+bool ContainerManager::browser_image_present() {
+    auto r = run(std::string{"podman image exists "} + kBrowserImage);
+    return r.exit_code == 0;
+}
+
+uint16_t ContainerManager::screen_port(const std::string& agent_id) {
+    const std::string cname = container_name(agent_id);
+    auto r = run("podman port " + shell_quote(cname) + " 6080");
+    if (r.exit_code != 0) return 0;
+    // output looks like "127.0.0.1:32771" (possibly multiple lines)
+    auto pos = r.output.rfind(':');
+    if (pos == std::string::npos) return 0;
+    try {
+        return static_cast<uint16_t>(std::stoi(r.output.substr(pos + 1)));
+    } catch (...) { return 0; }
+}
+
+uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
+    ensure_browser_image();
+
+    const std::string cname = container_name(agent_id);
+    auto st = status(agent_id);
+
+    // Containers created before Phase 6 have no published 6080 — recreate
+    // (home dir is a bind mount, so browser profile/state survives).
+    if (st.exists && screen_port(agent_id) == 0) {
+        stop(agent_id);
+        remove(agent_id);
+        st = status(agent_id);
+    }
+
+    if (!st.exists) {
+        fs::path home = agent_home_dir(agent_id);
+        fs::create_directories(home);
+        const std::string ws = ServerConfig::instance().workspace_root();
+        std::string cmd =
+            std::string{"podman create --name "} + shell_quote(cname) +
+            " --memory 4g --cpus 2"
+            " -p 127.0.0.1::6080"
+            " -v " + shell_quote(ws) + ":/workspace"
+            " -v " + shell_quote(home.string()) + ":/home/hive:U"
+            " -w /workspace " + kBrowserImage;
+        auto r = run(cmd);
+        if (r.exit_code != 0)
+            throw std::runtime_error("podman create (browser) failed: " + r.output);
+    }
+
+    st = status(agent_id);
+    if (!st.running) {
+        auto r = run("podman start " + shell_quote(cname));
+        if (r.exit_code != 0)
+            throw std::runtime_error("podman start failed: " + r.output);
+    }
+
+    const uint16_t port = screen_port(agent_id);
+    if (port == 0)
+        throw std::runtime_error("container has no published 6080 port");
+
+    // Start the display stack idempotently (detached, logs to /tmp).
+    auto r = exec(agent_id,
+        "pgrep -x Xvfb >/dev/null || nohup Xvfb :99 -screen 0 1280x800x24 "
+            ">/tmp/xvfb.log 2>&1 & "
+        "sleep 1; "
+        "pgrep -x x11vnc >/dev/null || nohup x11vnc -display :99 -forever "
+            "-shared -nopw -localhost >/tmp/x11vnc.log 2>&1 & "
+        "pgrep  websockify >/dev/null || nohup websockify --web "
+            "/usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 & "
+        "sleep 2; pgrep  websockify >/dev/null",
+        /*timeout_s=*/30);
+    if (r.exit_code != 0)
+        throw std::runtime_error("display stack failed to start: " + r.output);
+    return port;
+}
+
+bool ContainerManager::stop_screen(const std::string& agent_id) {
+    auto st = status(agent_id);
+    if (!st.exists || !st.running) return false;
+    exec(agent_id,
+         "pkill  websockify; pkill -x x11vnc; pkill -x Xvfb; true",
+         /*timeout_s=*/15);
+    return true;
+}

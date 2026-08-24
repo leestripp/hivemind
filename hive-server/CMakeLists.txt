@@ -37,6 +37,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/RoutineRoutes.cpp
     include/hivemind/routes/KeyRoutes.cpp
     include/hivemind/routes/ConfigRoutes.cpp
+    include/hivemind/routes/ScreenRoutes.cpp
 )
 
 # Everything except main.cpp — shared by the server binary and the test suite.

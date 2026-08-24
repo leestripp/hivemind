@@ -378,3 +378,10 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   .kv { grid-template-columns: 1fr; gap: 2px 0; }
   .kv .k { margin-top: 6px; }
 }
+
+/* Phase 6: Agent Computer modal (noVNC iframe) */
+.screen-panel { width: min(1320px, 96vw); max-width: 96vw; }
+.screen-body  { min-height: 300px; }
+.screen-frame { width: 100%; height: min(82dvh, 800px); border: 0;
+                border-radius: 6px; background: #111; }
+.agent-actions { margin-top: 10px; display: flex; gap: 8px; }

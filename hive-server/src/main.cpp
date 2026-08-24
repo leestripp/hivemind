@@ -31,6 +31,7 @@
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/routes/SkillRoutes.h"
 #include "hivemind/routes/SecretRoutes.h"
+#include "hivemind/routes/ScreenRoutes.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/ServerConfig.h"
 #include "hivemind/routes/KeyRoutes.h"
@@ -186,6 +187,7 @@ int main(int argc, char* argv[]) {
                             thread_store, chat_service);
     register_skill_routes(server, agent_store);
     register_secret_routes(server, agent_store, secret_store);
+    register_screen_routes(server, agent_store, auth_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     register_static_routes(server);
