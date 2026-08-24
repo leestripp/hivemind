@@ -536,6 +536,7 @@ HiveWindow::HiveWindow() {
         if (connect_dialog_ || api_.api_key().empty()) return alive_;
         poll_chat();
         poll_approvals();
+        poll_roster();
         return alive_;
     }, 1500);
 
@@ -812,6 +813,34 @@ void HiveWindow::poll_chat() {
                         }
                     set_status(who + " is working…");
                 }
+            });
+        }
+        dispatcher_.emit();
+    });
+}
+
+// Roster activity poll (Phase 27): the spinner/state tag must track live
+// turns even when the user isn't in that agent's chat. Rebuild ONLY when
+// the busy/state signature changes — rebuilding rows every tick would
+// fight the user's selection/scroll.
+void HiveWindow::poll_roster() {
+    run_async([this] {
+        json agents = api_.list_agents();
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, agents] {
+                if (!alive_) return;
+                auto arr = agents.value("agents", json::array());
+                std::string sig;
+                for (auto& a : arr) {
+                    sig += a.value("id", "") + ":" +
+                           (a.value("busy", false) ? "1" : "0") + ":" +
+                           a.value("state", "") + ";";
+                }
+                if (sig == roster_sig_) return;
+                roster_sig_ = sig;
+                agents_ = arr;
+                rebuild_roster();
             });
         }
         dispatcher_.emit();

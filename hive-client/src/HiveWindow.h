@@ -65,6 +65,8 @@ private:
     void refresh_threads();
     void poll_chat();           // messages + activity for current thread
     void poll_approvals();
+    void poll_roster();          // agents busy/state (Phase 27)
+    std::string roster_sig_;   // last busy/state signature
 
     // ── UI callbacks ──────────────────────────────────────────────────────
     void on_agent_selected();
