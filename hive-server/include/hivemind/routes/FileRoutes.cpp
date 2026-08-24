@@ -74,6 +74,13 @@ void register_file_routes(OmniNet::HTTP::Server& server,
                 const fs::path root = ServerConfig::instance().workspace_root();
                 const fs::path dir  = root / "attachments" / seg[2];
                 fs::create_directories(dir);
+                // World-writable: agents (containers run as a different
+                // uid via rootless subuid mapping) must write alongside
+                // the uploaded files. The workspace share is 0777 for the
+                // same reason — see docs/deploy.md "Relocating the
+                // workspace".
+                fs::permissions(dir, fs::perms::all,
+                                fs::perm_options::replace);
                 const fs::path dest = hm::files::unique_path(dir, name);
                 std::ofstream out(dest, std::ios::binary | std::ios::trunc);
                 out.write(reinterpret_cast<const char*>(body.data()),
