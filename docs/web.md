@@ -2,7 +2,9 @@
 
 > hive-server serves a zero-build static web UI from `web/dist/` at
 > `http://127.0.0.1:8421/`. It is the management console: roster, tasks,
-> skills, models, keys. Chat-first daily driving is the GTK client's job
+> skills, models, keys. Chat-first daily driving is the GTK client's job The layout is responsive —
+> usable on phone-width screens (tables scroll horizontally, cards stack,
+> modals go near-full-width), so approvals work from a mobile browser.
 > (`docs/client.md`); the web UI covers configuration and oversight.
 
 ---
