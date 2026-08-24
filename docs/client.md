@@ -61,6 +61,19 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
   matching web SVG (`web/dist/avatars/`) is used instead of the auto
   palette — same id space across client and web.
 
+## Right-click agent menu
+
+Add Task… · **Skills…** (Phase 14.2: shared-library switches + read-only
+learned-skills list) · **Inspector…** (Phase 14.4: agent details + container
+status with Start/Stop) · Edit Agent · Delete Agent.
+
+## Attention indicators (Phase 14.1)
+
+Unread ● on thread rows with activity newer than last-seen (clears on
+select); ● on roster rows while the agent works (`busy` flag); desktop
+notifications for new messages in unfocused threads and new parked
+approvals (seeded on first refresh — no startup storm).
+
 ## Notes for contributors
 
 - `ApiClient` calls are blocking by design — always invoked on detached
