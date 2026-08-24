@@ -37,3 +37,20 @@ initSkills();
 initSecrets();
 initSettings();
 showPage((location.hash || '').replace('#/', '') || 'agents');
+
+// ── Responsive tables: copy each column's <th> text onto its <td> as
+// data-label, so the ≤760px card layout can show "Label: value" rows.
+// A MutationObserver covers every table forever — no per-renderer edits.
+function labelTable(t) {
+  const heads = [...t.querySelectorAll('thead th')].map(th => th.textContent.trim());
+  if (!heads.length) return;
+  t.querySelectorAll('tbody tr').forEach(tr =>
+    [...tr.children].forEach((td, i) => {
+      if (heads[i]) td.setAttribute('data-label', heads[i]);
+    }));
+}
+const labelAll = () =>
+  document.querySelectorAll('table.kv-table').forEach(labelTable);
+new MutationObserver(labelAll)
+  .observe(document.body, { childList: true, subtree: true });
+labelAll();

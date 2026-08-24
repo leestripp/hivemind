@@ -120,7 +120,7 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .ab-item:hover { color:var(--fg); }
 .ab-item.active { color:var(--accent); border-left-color:var(--accent); }
 /* ─── Triggers + Settings pages ───────────────────────────────────────── */
-.page-body { padding:20px 24px; overflow:auto; max-width:760px; }
+.page-body { padding:20px 24px; overflow:auto; max-width:920px; width:100%; margin:0 auto; }
 .page-body h2 { margin:0 0 8px; font-size:18px; }
 .trig-rows { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
 .settings-section { margin:14px 0; }
@@ -162,7 +162,7 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .browse-card .insp-help { color: #f38ba8; font-size: 0.82rem; margin: 6px 0 0; }
 
 /* ── Phase 12: keys page (table + modal) ─────────────────────────── */
-.page-wide { max-width: 900px; }
+.page-wide { max-width: 1240px; }
 
 .page-head {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -338,11 +338,30 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   /* Titles + action buttons wrap instead of squeezing */
   .page-head, .section-head { flex-wrap: wrap; gap: 8px; }
 
-  /* Wide tables scroll horizontally inside their own box, not the page */
-  .kv-table { display: block; overflow-x: auto; }
-  .kv-table thead, .kv-table tbody { display: table; min-width: 480px; width: 100%; }
-  .kv-table td, .kv-table th { padding: 8px 10px; }
-  .cell-id { max-width: 120px; }
+  /* Tables collapse into labeled cards — no sideways scrolling at all.
+     data-label attributes are auto-filled by main.js from the thead. */
+  .kv-table { display: block; background: none; border: none; }
+  .kv-table thead { display: none; }
+  .kv-table tbody { display: block; }
+  .kv-table tbody tr {
+    display: block; margin-bottom: 10px; padding: 4px 12px;
+    background: var(--bg1, #151923);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .kv-table td {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+    white-space: normal; word-break: break-word;
+  }
+  .kv-table td:last-child { border-bottom: none; }
+  .kv-table td::before {
+    content: attr(data-label); flex: 0 0 auto;
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: #6c7280;
+  }
+  .kv-table td[rowspan], .kv-table td[colspan] { display: block; text-align: center; }
+  .kv-table td[colspan]::before { content: none; }
+  .cell-id { max-width: 60%; }
 
   /* Cards: single column, no min track width */
   .agents-grid { grid-template-columns: 1fr; }
