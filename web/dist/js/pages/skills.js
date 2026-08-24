@@ -116,4 +116,61 @@ export function initSkills() {
     b.addEventListener('click', () => closeModal('skill-modal')));
 }
 
-export function enterSkills() { loadAll().catch(e => log?.(e.message)); }
+// ── Phase 21: curated registry (marketplace) ─────────────────────────
+async function loadRegistry() {
+  const host = $('skills-registry');
+  try {
+    const reg = await API.get('/api/skills/registry');
+    const entries = reg.entries || [];
+    if (!entries.length) {
+      host.innerHTML = '<p class="muted">registry unavailable</p>';
+      return;
+    }
+    host.innerHTML = '';
+    for (const e of entries) {
+      const card = document.createElement('div');
+      card.className = 'agent-card';
+      const tags = (e.tags || []).map(t => `<span class="badge">${esc(t)}</span>`).join(' ');
+      card.innerHTML = `
+        <div class="agent-top">
+          <div class="agent-id-block">
+            <div class="agent-name">${esc(e.name)}</div>
+            <div class="agent-role">${esc(e.description || '')}</div>
+          </div>
+        </div>
+        <div class="agent-meta"><div><span>Source</span>${esc(e.source || e.git_url)}</div>
+        <div><span>Tags</span>${tags || '—'}</div></div>
+        <div class="agent-actions">
+          <button class="btn btn-sm ${e.installed ? '' : 'suggested-action'}"
+                  data-reg="${esc(e.name)}" ${e.installed ? 'disabled' : ''}>
+            ${e.installed ? '✓ Installed' : '⬇ Install'}</button>
+        </div>`;
+      host.appendChild(card);
+    }
+    host.onclick = async (ev) => {
+      const b = ev.target.closest('[data-reg]');
+      if (!b || b.disabled) return;
+      const entry = entries.find(x => x.name === b.dataset.reg);
+      if (!entry) return;
+      b.disabled = true; b.textContent = '…';
+      try {
+        const body = { git_url: entry.git_url };
+        if (entry.path) body.path = entry.path;
+        const r = await API.post('/api/skills/install', body);
+        b.textContent = '✓ Installed';
+        await loadAll();   // refresh library table + enabled chips
+        alert(`Installed "${r.installed}"${r.version ? ' v' + r.version : ''} — toggle it on per agent above.`);
+      } catch (err) {
+        b.disabled = false; b.textContent = '⬇ Install';
+        alert(err.message);
+      }
+    };
+  } catch (e2) {
+    host.innerHTML = `<p class="muted">registry failed: ${esc(e2.message)}</p>`;
+  }
+}
+
+export function enterSkills() {
+  loadAll().catch(e => log?.(e.message));
+  loadRegistry();
+}

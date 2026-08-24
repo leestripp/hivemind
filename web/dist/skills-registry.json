@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "name": "pdf",
+      "description": "Read, extract, fill, and create PDF documents.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/pdf",
+      "tags": ["documents"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "docx",
+      "description": "Create and edit Word documents with tracked structure.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/docx",
+      "tags": ["documents"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "xlsx",
+      "description": "Spreadsheet analysis and Excel file generation.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/xlsx",
+      "tags": ["documents", "data"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "pptx",
+      "description": "Build and edit PowerPoint decks programmatically.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/pptx",
+      "tags": ["documents", "presentations"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "brand-guidelines",
+      "description": "Apply consistent brand styling to docs and artifacts.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/brand-guidelines",
+      "tags": ["design"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "canvas-design",
+      "description": "Design posters and visual art as PNG/PDF canvases.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/canvas-design",
+      "tags": ["design"],
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "algorithmic-art",
+      "description": "Generative art via p5.js with seeded randomness.",
+      "git_url": "https://github.com/anthropics/skills.git",
+      "path": "skills/algorithmic-art",
+      "tags": ["design", "code"],
+      "source": "anthropics/skills"
+    }
+  ]
+}

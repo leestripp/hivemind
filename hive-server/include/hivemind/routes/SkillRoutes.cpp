@@ -42,6 +42,17 @@ bool valid_skill_name(const std::string& n) {
     return true;
 }
 
+// web/dist/skills-registry.json — same discovery as StaticRoutes.
+fs::path find_registry_file() {
+    if (const char* pwd = std::getenv("PWD")) {
+        fs::path p = fs::path(pwd) / "web" / "dist" / "skills-registry.json";
+        if (fs::exists(p)) return p;
+    }
+    fs::path p = fs::current_path() / "web" / "dist" / "skills-registry.json";
+    if (fs::exists(p)) return p;
+    return fs::path("web/dist/skills-registry.json");
+}
+
 // Pull name/description/version out of SKILL.md YAML frontmatter (flat keys).
 json frontmatter_of(const fs::path& skill_md) {
     json fm = json::object();
@@ -122,6 +133,30 @@ void register_skill_routes(OmniNet::HTTP::Server& server,
                 });
             }
             send_json(resp, json{{"skills", list}});
+        });
+
+    // ── GET /api/skills/registry — curated marketplace catalog (Phase 21) ──
+    // Bundled JSON index of known-good skill repos; entries are annotated
+    // with installed=true when the name is already in the global library.
+    server.get("/api/skills/registry",
+        [](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            std::ifstream f(find_registry_file());
+            if (!f) { send_json(resp, json{{"entries", json::array()}}); return; }
+            json reg = json::parse(f, nullptr, false);
+            if (!reg.is_object()) {
+                send_error(resp, 500, "registry file is not valid JSON"); return;
+            }
+            std::error_code ec;
+            if (!reg.contains("entries") || !reg["entries"].is_array())
+                reg["entries"] = json::array();
+            for (auto& e : reg["entries"]) {   // by reference — value() copies!
+                const std::string n = e.value("name", "");
+                const bool inst = !n.empty()
+                    && fs::exists(global_skills_root() / n / "SKILL.md", ec)
+                    && !fs::is_symlink(global_skills_root() / n, ec);
+                e["installed"] = inst;
+            }
+            send_json(resp, reg);
         });
 
     // ── POST /api/skills ──────────────────────────────────────────────────

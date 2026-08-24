@@ -122,6 +122,7 @@ Response reports what happened:
 | GET | `/api/threads` | List threads by latest activity, incl. participants + `last_activity` (latest message ts — drives unread badges) |
 | GET | `/api/threads/:id` | Thread + `agent_ids` |
 | DELETE | `/api/threads/:id` | Delete thread, messages and participants |
+| GET | `/api/skills/registry` | Curated marketplace catalog (Phase 21) — bundled `skills-registry.json` entries annotated with `installed` flags; install via existing `POST /api/skills/install` |
 | GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create |
 | GET | `/api/threads/:id/messages` | Messages, chronological; each has an `attachments` array (`[]` default, Phase 18) |
 | GET | `/api/threads/:id/messages?after=<msg_id>` | Incremental fetch (polling) |
