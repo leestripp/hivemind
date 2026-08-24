@@ -50,7 +50,7 @@ drivers (human and agent).
 | Window manager | **openbox** | the Phase 6.1 black screen was an EMPTY DISPLAY — no WM, nothing drawn. openbox is tiny and bulletproof in containers. (Anthropic's computer-use demo uses mutter as its WM; mutter's standalone X11 mode is gone in GNOME 50.) |
 | VNC server | **x11vnc** `-forever -shared -passwd <pw> -localhost -wait 50` | scrapes the Xvfb display; `-forever -shared` keeps it up across client drops; plus a 5s watchdog loop restarts it if it dies on odd X events (Anthropic recipe) |
 | WS bridge + web | **websockify** `--web /usr/share/novnc 6080 localhost:5900` | serves the noVNC assets AND bridges WS→TCP |
-| Browser | **playwright's chromium** | Ubuntu's `chromium-browser` deb is a **snap stub** — snaps cannot run in containers. PyPI playwright (NOT the Ubuntu deb — it strips the node driver) + `playwright install chromium`, browsers in `/opt/ms-playwright` (world-readable; build is root, runtime is hive) |
+| Browser | **Google Chrome stable** (official .deb) | the real production browser — no testing branding, and sites that reject automation/test builds at sign-in (Google) accept it, which the login-handoff flow needs. Ubuntu's `chromium-browser` deb is a **snap stub** (snaps can't run in containers); playwright's bundled build is *Chromium for Testing* (branded, and gets flagged). Playwright (PyPI wheel — the Ubuntu deb strips the node driver) remains the DRIVER, its chromium the last-resort fallback. Stale `Singleton{Lock,Socket,Cookie}` files are cleared before launch — the profile persists in the home mount across container recreates |
 | noVNC client | Ubuntu `novnc` package assets | vnc.html takes `?autoconnect&path=&password=` query params |
 
 ## The three bugs that made it look broken
