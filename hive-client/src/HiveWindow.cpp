@@ -893,7 +893,13 @@ void HiveWindow::rebuild_roster() {
         // The roster is visible even when the agent's chat isn't — the
         // spinner catches the eye; the tag says what it's doing
         // ("acting", "planning", "verifying", …).
-        if (a.value("busy", false)) {
+        // The daedalus state is authoritative (straight from the Agent);
+        // the LiveTurn 'busy' flag misses some turn paths — OR them.
+        const std::string st_ = a.value("state", "");
+        const bool working = a.value("busy", false) ||
+            (!st_.empty() && st_ != "idle" && st_ != "done" &&
+             st_ != "cancelled" && st_ != "error");
+        if (working) {
             auto* spin = Gtk::make_managed<Gtk::Spinner>();
             spin->start();
             spin->set_valign(Gtk::Align::CENTER);
