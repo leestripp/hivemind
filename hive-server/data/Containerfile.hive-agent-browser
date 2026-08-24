@@ -43,6 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Playwright: the Ubuntu deb strips the node driver (unusable); the PyPI
 # wheel bundles it. Browsers go to a shared, world-readable path — the
 # container runs as hive at runtime, but the build install runs as root.
+# (ENV must precede the RUN or chromium lands in /root/.cache.)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN pip install --no-cache-dir --break-system-packages playwright \
     && playwright install chromium --with-deps \
     && chmod -R a+rX /opt/ms-playwright
@@ -73,6 +75,5 @@ WORKDIR /workspace
 # /run is root-owned in the container and the agent runs as hive — the
 # runtime dir lives in the per-agent home mount instead (0700, writable).
 ENV XDG_RUNTIME_DIR=/home/hive/.run
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 EXPOSE 6080
 CMD ["sleep", "infinity"]
