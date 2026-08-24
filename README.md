@@ -80,8 +80,23 @@ POST/GET/DELETE       /api/threads[/:id]      GET/POST …/messages
 GET  /api/threads/:id/activity                live turn state
 GET  /api/approvals?status=pending            POST …/:id/approve|deny
 POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
-GET/POST/DELETE       /api/agents/:id/skills[/name]
+GET/POST/DELETE       /api/agents/:id/skills[/name]          local (agent-owned) skills
+GET/POST/DELETE       /api/skills[/name]                     global skill library
+GET/POST              /api/agents/:id/global-skills          per-agent global-skill toggle
 GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 ```
+
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| `docs/api.md` | REST API reference (auth, roster, threads, routines, skills, containers, models) |
+| `docs/agents.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
+| `docs/skills.md` | Global skill library design — symlinks, local/global split |
+| `docs/client.md` | GTK4 native client — dialogs, menus, theming |
+| `docs/web.md` | Web dashboard — pages, stack, adding a page |
+| `docs/containers.md` | Podman sandboxing |
+| `docs/design.md` | Architecture deep-dive |
+| `Plan.md` | Roadmap & phase status |
 
 See `docs/api.md` and `Plan.md` (roadmap, phases 0–8) for details.

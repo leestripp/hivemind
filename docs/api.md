@@ -61,7 +61,7 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
 | GET | `/api/agents` | List roster |
 | GET | `/api/agents/:id` | Get one agent |
 | PATCH | `/api/agents/:id` | Update fields (partial) |
-| DELETE | `/api/agents/:id` | Remove from roster (on-disk agent dir kept) |
+| DELETE | `/api/agents/:id` | Remove from roster + **cascade** (see below). `?reassign_to=<id>` hands routines to another agent |
 
 **Create body**
 
@@ -71,7 +71,8 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
   "role": "research assistant",       // persona injected into the system prompt
   "model": "kimi-for-coding",         // daedalus SettingsStore model; "" = store default
   "workspace_mode": "shared",         // "shared" = podman container (default), "host" = no container
-  "require_approval": false           // true → commands park in the approval queue
+  "require_approval": false,          // true → commands park in the approval queue
+  "avatar": "avatar-3"                // "avatar-0".."avatar-5" (SVG in web/dist/avatars/); "" = auto palette hash
 }
 ```
 
@@ -81,9 +82,26 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
 {
   "id": "uuid", "name": "Nova", "role": "...", "model": "...",
   "workspace_mode": "shared", "container_id": "",
-  "require_approval": false,
+  "require_approval": false, "avatar": "avatar-3",
   "created_at": "ISO-UTC", "updated_at": "ISO-UTC"
 }
+```
+
+**DELETE cascade** — removing an agent cleans up what it owns:
+
+- **Solo threads** (the agent is the only participant — its DM, routine
+  threads) are deleted with their messages
+- **Group threads** keep going without it: the agent is removed as a
+  participant and a system note (`<name> was removed from the hive.`) posts
+- **Routines** are deleted — or reassigned with `?reassign_to=<agent_id>`;
+  reassigned routines swap their routine-thread participation to the new
+  owner so they keep firing
+
+Response reports what happened:
+
+```json
+{"deleted": true, "threads_deleted": 2, "threads_left": 1,
+ "routines_deleted": 0, "routines_reassigned": 1}
 ```
 
 ## 3. Threads & chat
@@ -158,7 +176,7 @@ in-thread.
 | GET | `/api/routines` | List (incl. human `schedule_text`) |
 | POST | `/api/routines/:id/run` | Fire immediately (off-schedule) → 202 |
 | POST | `/api/routines/:id/enabled` | `{"enabled": true|false}` |
-| DELETE | `/api/routines/:id` | Remove |
+| DELETE | `/api/routines/:id` | Remove (also deletes the routine's own thread — routines own their threads) |
 
 **Create body**
 
@@ -182,9 +200,26 @@ Schedule specs (server-local time):
 
 ## 6. Skills
 
-Anthropic-format skills per agent, stored at
+Two layers (see `docs/skills.md` for the design): a **global library**
+managed by the server, and **local skills** owned by each agent.
+
+### Global library — `~/.local/share/hivemind/skills/`
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/skills` | Library list: `{name, description, version, enabled_agents[]}` |
+| POST | `/api/skills` | Create `{name, description, content}` → 201 (409 if exists) |
+| DELETE | `/api/skills/:name` | Remove from library **and unlink every agent** |
+| GET | `/api/agents/:id/global-skills` | Enabled global skill names for the agent |
+| POST | `/api/agents/:id/global-skills` | Toggle: `{name, enabled}` — creates/removes a relative symlink in the agent's `.agents/skills/` (409 if a local skill owns the name) |
+
+### Local (per-agent) skills
+
+Anthropic-format skills in
 `~/.local/share/hivemind/agents/<id>/.agents/skills/<name>/SKILL.md`
-(daedalus auto-discovers the project-relative `.agents/skills/` dir).
+(daedalus auto-discovers the project-relative `.agents/skills/` dir). These
+belong to the agent — the teach-by-demonstration flow writes here; there is
+no central management UI for them.
 
 | Method | Path | Description |
 |---|---|---|

@@ -26,7 +26,8 @@ Create one via the GTK client (**+ Agent**) or the API:
 curl -X POST localhost:8421/api/agents -H 'Content-Type: application/json' -d '{
   "name": "Nova",
   "role": "research assistant — concise answers",
-  "model": "kimi-for-coding"
+  "model": "kimi-for-coding",
+  "avatar": "avatar-3"
 }'
 ```
 
@@ -48,6 +49,27 @@ and reloads prior history — it picks up where you left off.
 > **Graceful stops matter.** History is written on `Agent::shutdown()`, which
 > the server calls on SIGTERM (`hivemindctl stop`, systemd, Ctrl-C).
 > `kill -9` can lose the in-flight turn.
+
+## Avatars
+
+Each agent has a chat/roster avatar. Pick one of six built-in SVGs
+(`avatar-0`..`avatar-5`, served from `web/dist/avatars/`) in the client's
+New Agent dialog, or leave it blank — an **auto** palette hash of the
+agent's name is used instead. PATCHable later; the roster, chat bubbles and
+web cards all render it.
+
+## Deleting an agent (cascade)
+
+`DELETE /api/agents/:id` removes the roster entry and cleans up what the
+agent owns, reporting counts:
+
+- **Solo threads** (DMs, routine threads) are deleted with their messages
+- **Group threads** continue; the agent is removed and a system note posts
+- **Routines** are deleted — or handed to a teammate with
+  `?reassign_to=<agent_id>` (their routine threads follow to the new owner)
+
+The on-disk agent dir (history, memory, container home) is kept — delete it
+manually if you want it gone.
 
 ## Models
 
@@ -113,3 +135,13 @@ curl -X POST localhost:8421/api/agents/<id>/skills \
 
 "Teach" v1: narrate the steps once, save them as a skill, and the agent
 reuses them — no re-explaining.
+
+Two layers exist:
+
+- **Global skills** — the server's shared library
+  (`~/.local/share/hivemind/skills/`), managed on the web Skills page.
+  Enabling one for an agent symlinks it into the agent's `.agents/skills/`.
+- **Local skills** — the agent's own (the curl above). Learned per-agent,
+  owned per-agent, deliberately *not* centrally managed.
+
+See `docs/skills.md`.

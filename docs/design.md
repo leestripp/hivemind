@@ -199,10 +199,15 @@ Statuses: `pending → approved | denied | expired`.
   scheduler tick posts due prompts into it via `ChatService`, so the agent's
   reply lands in a thread the user can read. A routine that throws is
   disabled rather than re-firing every tick.
-- **Skills:** `POST /api/agents/:id/skills` writes an Anthropic-format
-  `SKILL.md` into `<agent_dir>/.agents/skills/<name>/` — daedalus discovers
-  it automatically. Teach-by-demonstration v1 = narrated steps saved as a
-  skill.
+- **Skills:** two layers (see `docs/skills.md`).
+  *Global:* the server manages a shared library at
+  `~/.local/share/hivemind/skills/`; enabling a skill for an agent creates a
+  **relative symlink** in `<agent_dir>/.agents/skills/` (resolves through
+  daedalus' existing project-local discovery; container phase must bind-mount
+  the library at matching depth). *Local:* `POST /api/agents/:id/skills`
+  writes an Anthropic-format `SKILL.md` into the agent's own
+  `.agents/skills/<name>/` — teach-by-demonstration v1 = narrated steps saved
+  as a skill. Locals are agent-owned and deliberately not centrally managed.
 
 ## 10. GTK client
 
@@ -218,24 +223,31 @@ Statuses: `pending → approved | denied | expired`.
 
 ## 11. Web UI
 
-Static SPA served from `web/dist` by the catch-all route. Phase 12 removed
-the 1.x node-graph workflow engine (GraphStore/GraphRunner/executors,
-triggers/webhooks, canvas pages); the web UI currently serves API-key and
-server-settings pages. Phase 13 rebuilds it as an agent ops dashboard
-(fleet status, threads, approvals, routines).
+Zero-build static SPA (plain ES modules, hash router) served from
+`web/dist` by the catch-all route — the management console; chat stays in
+the GTK client. Pages: **Agents** (roster cards, containers, delete with
+cascade summary), **Tasks** (routine dashboard: toggles, run-now, add-task
+modal with dynamic schedule fields, one-shot cleanup), **Skills** (global
+library + per-agent enable chips), **Models** (providers/models over
+LLMStore), **Keys**, **Settings**. See `docs/web.md`. (Phase 12 removed the
+1.x node-graph workflow engine; the canvas port is a later phase.)
 
 ## 12. Persistence map
 
 | What | Where |
 |---|---|
-| Roster | `~/.local/share/hivemind/agents.db` |
+| Roster (incl. `avatar` column) | `~/.local/share/hivemind/agents.db` |
 | Threads/messages | `~/.local/share/hivemind/threads.db` |
 | Approvals | `~/.local/share/hivemind/approvals.db` |
 | Routines | `~/.local/share/hivemind/routines.db` |
+| Global skill library | `~/.local/share/hivemind/skills/<name>/SKILL.md` |
+| Skill enable state | symlinks in `agents/<id>/.agents/skills/` (no DB) |
+| Web avatar SVGs | `web/dist/avatars/avatar-0..5.svg` |
 | Agent runtime state (history, memory, skills) | `~/.local/share/hivemind/agents/<id>/` |
 | API keys | `~/.local/share/hivemind/auth.db` (hashes only) |
 | Server config (workspace_root) | `~/.local/share/hivemind/server.json` |
-| Models/providers/credentials | daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`) |
+| LLM providers/models (server) | `~/.local/share/hivemind/llm.db` (LLMStore) |
+| daedalus agent credentials/models | daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`) |
 | Containers/images/volumes | podman (rootless, per-user) |
 
 ## 13. Concurrency rules

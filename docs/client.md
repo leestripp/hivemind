@@ -22,9 +22,24 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
   "X is working…" indicator while a turn streams. Completed replies append
   automatically (1.5 s poll).
 - **Composer:** type, Enter to send. Every agent in the thread replies.
-- **+ Agent:** name, role, model (blank = store default), workspace mode
-  (`shared` = container, `host` = none), and the require-approval switch.
+- **+ Agent:** name, role, **Provider/Model dropdowns** (live from the
+  server's model store; model list filters by provider), workspace mode
+  (`shared` = container, `host` = none), the require-approval switch, and an
+  **avatar picker** — Auto (palette hash) or one of six hive-bot tiles.
 - **+ Thread:** pick one or more participants (multi-select = group thread).
+- **⏰ Add Task (header):** schedule a routine — name, agent, prompt, and a
+  schedule type dropdown that swaps the fields below it (once: date+time /
+  interval: minutes / daily: time / weekly: time + Su–Sa checks). Server
+  validation errors show inline without closing the dialog. Also available
+  per-agent via right-click → **Add Task…** (preselects the agent).
+- **Right-click an agent** in the roster: Add Task… / Edit Agent (same
+  dialog, prefilled) / Delete Agent. Delete shows a cascade summary — how
+  many private threads will be deleted vs group threads that continue — and,
+  when the agent owns routines, a "Delete them / Reassign to X" dropdown.
+  Cancel is the default response.
+- **Active thread:** the selected sidebar row is highlighted with an accent
+  bar (re-applied after every refresh rebuild) and the chat header shows
+  the thread's title — you can always tell which conversation you're in.
 - **Approvals:** header button shows a live pending count; open it to
   approve/deny parked commands inline.
 
@@ -42,6 +57,9 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 - **Avatars** (`data/avatars/*.svg`) are hexagonal hive-bots, one per
   `palette_index(name)` color plus `user.svg`. They are self-contained
   (identity colors, dark visor + white eyes) so they read on both themes.
+  When the roster row sets an `avatar` field (`avatar-0`..`avatar-5`), the
+  matching web SVG (`web/dist/avatars/`) is used instead of the auto
+  palette — same id space across client and web.
 
 ## Notes for contributors
 
