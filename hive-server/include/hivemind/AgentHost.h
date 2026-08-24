@@ -54,6 +54,12 @@ public:
 
     const RosterAgent& info() const { return info_; }
 
+    /// Current daedalus agent state as a lowercase string ("acting",
+    /// "planning", …; "idle" when no agent is constructed). Thread-safe:
+    /// Agent::state() is const/noexcept and daedalus hosts are expected to
+    /// render it from UI threads.
+    std::string state_name() const noexcept;
+
     /// Evicted hosts are marked dead (new turns rejected) but never
     /// destroyed mid-process — see AgentRegistry's graveyard rule.
     void mark_dead() noexcept { dead_ = true; }
@@ -164,6 +170,9 @@ public:
 
     /// Live host for id, or nullptr (never constructs). For cancel paths.
     AgentHost* find(const std::string& agent_id);
+
+    /// Live agent's state name, or "idle" when no host is live.
+    std::string agent_state(const std::string& agent_id);
 
     /// Mark the host dead and retire it to the graveyard (stays allocated
     /// until shutdown_all). In-flight turns finish safely; new turns on the

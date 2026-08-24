@@ -79,6 +79,8 @@ const char* kCss = R"(
 .hv-prompt-frame textview { padding: 6px; }
 .error { color: @error_color; }
 .hv-unread-dot { color: @accent_color; font-weight: bold; }
+.hv-state-tag { font-size: 10px; padding: 1px 8px; border-radius: 8px;
+                background: alpha(@accent_color, 0.15); color: @accent_color; }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -858,13 +860,23 @@ void HiveWindow::rebuild_roster() {
         auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
         name->set_halign(Gtk::Align::START);
         name->add_css_class("heading");
-        // Phase 14.1: busy dot while the agent has a live turn anywhere.
+        // Busy indicators: spinner + daedalus state tag (Phase 27).
+        // The roster is visible even when the agent's chat isn't — the
+        // spinner catches the eye; the tag says what it's doing
+        // ("acting", "planning", "verifying", …).
         if (a.value("busy", false)) {
-            auto* dot = Gtk::make_managed<Gtk::Label>("\u25CF");
-            dot->add_css_class("hv-unread-dot");
-            dot->set_valign(Gtk::Align::CENTER);
-            dot->set_tooltip_text("Working…");
-            row_box->append(*dot);
+            auto* spin = Gtk::make_managed<Gtk::Spinner>();
+            spin->start();
+            spin->set_valign(Gtk::Align::CENTER);
+            spin->set_tooltip_text("Working…");
+            row_box->append(*spin);
+            const std::string state = a.value("state", "");
+            if (!state.empty() && state != "idle") {
+                auto* tag = Gtk::make_managed<Gtk::Label>(state);
+                tag->add_css_class("hv-state-tag");
+                tag->set_valign(Gtk::Align::CENTER);
+                row_box->append(*tag);
+            }
         }
         auto* role = Gtk::make_managed<Gtk::Label>(a.value("role", ""));
         role->set_halign(Gtk::Align::START);

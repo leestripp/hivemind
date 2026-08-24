@@ -827,6 +827,18 @@ std::vector<ChatService::LiveTurn> ChatService::activity(const std::string& thre
     return out;
 }
 
+std::string AgentHost::state_name() const noexcept {
+    if (!agent_) return "idle";
+    return daedalus::to_string(agent_->state());
+}
+
+std::string AgentRegistry::agent_state(const std::string& agent_id) {
+    std::lock_guard<std::mutex> lk(m_);
+    auto it = hosts_.find(agent_id);
+    if (it == hosts_.end() || it->second->dead()) return "idle";
+    return it->second->state_name();
+}
+
 bool ChatService::busy(const std::string& thread_id) {
     std::lock_guard<std::mutex> lk(m_);
     auto it = live_.find(thread_id);

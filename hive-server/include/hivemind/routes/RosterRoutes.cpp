@@ -132,12 +132,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     // ── GET /api/agents ───────────────────────────────────────────────────
     // busy: agent has a live turn in any thread (Phase 14.1 roster dots).
     server.get("/api/agents",
-        [&agents, &chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+        [&agents, &chat, &registry](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             auto live = chat.agent_activity();
             json list = json::array();
             for (auto& a : agents.list_agents()) {
                 auto j = agent_json(a);
                 j["busy"] = live.count(a.id) > 0;
+                j["state"] = registry.agent_state(a.id);
                 list.push_back(std::move(j));
             }
             send_json(resp, json{{"agents", list}});
