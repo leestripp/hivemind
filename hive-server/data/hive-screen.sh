@@ -1,75 +1,70 @@
 #!/bin/bash
-# hive-screen.sh — bring up the headless GNOME (mutter) Wayland desktop +
-# GRD VNC + noVNC/websockify inside a hive-agent:browser container (Phase 24).
-# Idempotent. Session state under the agent's home mount (persists restarts).
+# hive-screen.sh — bring up the X11 screen stack inside a
+# hive-agent:browser container (Phase 25). Idempotent: safe on every
+# screen open. Layout: Xvfb :99 → openbox (WM) → x11vnc :5900 (password)
+# → websockify/noVNC :6080 → chromium maximized (shared CDP browser).
 #
-# Notes from the bring-up research:
-#  - gnome-shell CANNOT run here (hard logind dependency, fatal in GNOME 50);
-#    mutter --headless is GNOME's compositor and provides the RemoteDesktop
-#    D-Bus API GRD needs. The desktop surface is the app (chromium maximized).
-#  - GRD headless VNC enable lives in the HEADLESS gsettings schema
-#    (org.gnome.desktop.remote-desktop.vnc.headless), not the regular one.
-#  - grdctl ... enable needs systemd (absent) — set gsettings directly.
-#  - VNC passwords: RFB truncates at 8 chars.
-#  - dbus-run-session's bus dies when its main child exits — keep it alive
-#    with sleep infinity, background the daemon.
+# Lessons baked in (docs/computer-use.md):
+#  - PID 1 (sleep) never reaps → zombie-aware liveness checks.
+#  - RFB truncates VNC passwords at 8 chars.
+#  - chromium is playwright's bundled build (the deb is a snap stub).
+#  - x11vnc gets a watchdog loop (Anthropic's demo recipe): it can die on
+#    odd X events; restart it so the screen never goes dark mid-session.
 set -u
 
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/home/hive/.run}"
-mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+export DISPLAY=:99
 
-# Per-agent VNC password (8 chars — RFB limit), home mount. Regenerate if
-# the file exists but has the wrong length (stale from older scripts).
+# Per-agent VNC password (8 chars — RFB limit), in the home mount.
 PW_FILE="/home/hive/.vnc-password"
 _pw="$(cat "$PW_FILE" 2>/dev/null || true)"
 if [ "${#_pw}" -ne 8 ]; then
-    head -c 4 /dev/urandom | od -An -tx1 | tr -d " 
-" > "$PW_FILE"
+    head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$PW_FILE"
 fi
 chmod 600 "$PW_FILE"
-export HIVE_VNC_PW="$(cat "$PW_FILE")"
+PW="$(cat "$PW_FILE")"
 
-GRD_DAEMON=""
-for p in /usr/libexec/gnome-remote-desktop-daemon /usr/lib/gnome-remote-desktop-daemon; do
-    [ -x "$p" ] && GRD_DAEMON="$p" && break
-done
-
-# Zombie-safe liveness: PID 1 (sleep) never reaps, so dead mutter/daemon
-# linger as zombies and plain pgrep would match them.
-alive() {  # alive <exact-name>
+alive() {  # alive <exact-process-name> — zombies don't count
     for p in $(pgrep -x "$1" 2>/dev/null); do
         [ "$(cut -d' ' -f3 /proc/$p/stat 2>/dev/null)" != "Z" ] && return 0
     done
     return 1
 }
 
-if ! alive mutter; then
-    nohup dbus-run-session -- bash -c '
-        pipewire >/tmp/pipewire.log 2>&1 &
-        wireplumber >/tmp/wireplumber.log 2>&1 &
-        mutter --headless --virtual-monitor 1280x800 >/tmp/mutter.log 2>&1 &
-        # wait for mutter to own the RemoteDesktop API on the session bus
-        for _ in $(seq 1 24); do
-            busctl --user list 2>/dev/null | grep -q org.gnome.Mutter.RemoteDesktop && break
-            sleep 0.5
-        done
-        printf "%s" "$HIVE_VNC_PW" | grdctl --headless vnc set-password
-        gsettings set org.gnome.desktop.remote-desktop.vnc.headless enable true
-        "$0" >/tmp/grd.log 2>&1 &
-        sleep infinity
-    ' "$GRD_DAEMON" >/tmp/session.log 2>&1 &
+alive Xvfb || nohup Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
+sleep 1
+alive openbox || nohup openbox >/tmp/openbox.log 2>&1 &
+
+# x11vnc + watchdog (restarts it if it dies)
+if ! alive x11vnc; then
+    nohup x11vnc -display :99 -forever -shared -passwd "$PW" \
+        -localhost -wait 50 >/tmp/x11vnc.log 2>&1 &
+    nohup bash -c 'while true; do
+        pgrep -x x11vnc >/dev/null || exec x11vnc -display :99 -forever \
+            -shared -passwd "'"$PW"'" -localhost -wait 50 \
+            >>/tmp/x11vnc.log 2>&1
+        sleep 5
+    done' >/dev/null 2>&1 &
 fi
 
-# websockify: noVNC web assets + WS→VNC bridge on :6080 (GRD VNC :5900).
 alive websockify || \
     nohup websockify --web /usr/share/novnc 6080 localhost:5900 \
         >/tmp/websockify.log 2>&1 &
 
-# Readiness: mutter + VNC listening + websockify.
-for _ in $(seq 1 48); do
-    alive mutter && alive websockify && \
+# The shared browser: maximized on :99, CDP :9222 for browser_driver.py.
+# Skip if already up (CDP answers).
+if ! curl -sf --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+    CHROME="$(ls /opt/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | tail -1)"
+    [ -n "$CHROME" ] && nohup "$CHROME" --remote-debugging-port=9222 \
+        --user-data-dir=/home/hive/.browser-profile --no-first-run \
+        --no-default-browser-check --disable-session-crashed-bubble \
+        --start-maximized about:blank >/tmp/chromium.log 2>&1 &
+fi
+
+# Readiness: x11vnc + websockify alive and :5900 answering.
+for _ in $(seq 1 30); do
+    alive x11vnc && alive websockify && \
     (exec 3<>/dev/tcp/127.0.0.1/5900) 2>/dev/null && exit 0
     sleep 0.5
 done
-echo "hive-screen: stack did not come up — see /tmp/session.log /tmp/grd.log" >&2
+echo "hive-screen: stack did not come up — see /tmp/*.log" >&2
 exit 1

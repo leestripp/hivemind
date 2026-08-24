@@ -1,70 +1,36 @@
-# Containerfile.hive-agent-browser — computer-use variant (Phase 24 rework).
-# GNOME 50 on Wayland, headless: gnome-shell --headless (mutter's headless
-# backend) + gnome-remote-desktop serving VNC + noVNC/websockify for the
-# browser client. NO X11 server anywhere — X11 apps run via XWayland.
+# Containerfile.hive-agent-browser — computer-use variant (Phase 25: X11).
+# Xvfb + x11vnc + noVNC/websockify + openbox (window manager) + playwright's
+# chromium. Proven recipe — same stack as Anthropic's computer-use demo
+# (they use mutter as the WM; openbox chosen here as the bulletproof
+# container option — mutter's standalone X11 mode is gone in GNOME 50).
 #
-# Why not Xvfb/x11vnc: GNOME 50 dropped X11 sessions entirely (Ubuntu 26.04
-# is Wayland-only), and GRD's headless VNC backend (libvncserver, rebuilt
-# from source — Ubuntu compiles it out) is the maintained path. Note:
-# gnome-shell itself is NOT in the image — it hard-requires logind, which
-# cannot exist in a container; mutter --headless is GNOME's compositor and
-# provides everything the Agent Computer needs. GPU optional: --device /dev/dri gives mutter hardware GL
-# (llvmpipe software rendering works without it).
+# Phase 24 tried GNOME-on-Wayland (mutter --headless + gnome-remote-desktop
+# VNC) — blocked: GRD dropped clients pre-greeting. Trail: docs/computer-use.md.
 #
 # Build:  podman build -t localhost/hive-agent:browser \
 #             -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
-#
-# Login handoff: the browser profile persists in the agent's /home/hive
-# mount; the user takes over via noVNC, authenticates, hands back.
 
 FROM localhost/hive-agent:latest
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        mutter \
-        gnome-remote-desktop \
-        pipewire \
-        pipewire-bin \
-        wireplumber \
-        dbus \
-        dbus-x11 \
-        xwayland \
-        xdg-desktop-portal-gtk \
-        fonts-dejavu-core \
+        xvfb \
+        x11vnc \
+        openbox \
         novnc \
         websockify \
-        meson ninja-build build-essential pkg-config xz-utils \
-        libglib2.0-dev libvncserver-dev libpipewire-0.3-dev libsecret-1-dev \
-        libxkbcommon-dev libepoxy-dev libdrm-dev libfuse3-dev libtss2-dev \
-        libnotify-dev libcairo2-dev libgirepository1.0-dev libei-dev \
-        libdbus-1-dev \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Playwright: the Ubuntu deb strips the node driver (unusable); the PyPI
-# wheel bundles it. Browsers go to a shared, world-readable path — the
-# container runs as hive at runtime, but the build install runs as root.
-# (ENV must precede the RUN or chromium lands in /root/.cache.)
+# Chromium: Ubuntu's chromium-browser deb is a snap stub (snaps can't run
+# in containers). Playwright's bundled chromium is the real browser — PyPI
+# wheel (the Ubuntu python3-playwright deb strips the node driver).
+# Browsers in a shared world-readable path: build runs as root, agents run
+# as hive. ENV must precede the RUN or chromium lands in /root/.cache.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN pip install --no-cache-dir --break-system-packages playwright \
     && playwright install chromium --with-deps \
     && chmod -R a+rX /opt/ms-playwright
-
-# Ubuntu builds gnome-remote-desktop with -Dvnc=false (meson default) —
-# no VNC in grdctl at all. Rebuild GRD 50.2 from upstream with the VNC
-# backend on (RDP off, systemd off — this is a container), installed over
-# the deb at /usr so the daemon path stays /usr/libexec/…-daemon.
-RUN curl -sSL -o /tmp/grd.tar.xz \
-        https://download.gnome.org/sources/gnome-remote-desktop/50/gnome-remote-desktop-50.2.tar.xz \
-    && cd /tmp && tar xf grd.tar.xz && cd gnome-remote-desktop-50.2 \
-    && meson setup build --prefix=/usr -Dvnc=true -Drdp=false \
-           -Dsystemd=false -Dtests=false -Dman=false \
-    && ninja -C build && ninja -C build install \
-    && cd / && rm -rf /tmp/gnome-remote-desktop-50.2 /tmp/grd.tar.xz
-
-# Ubuntu's chromium-browser deb is a snap stub (snaps can't run in
-# containers) — playwright's bundled chromium is the real browser. It is
-# ALSO the desktop browser: launched on the Wayland display with CDP :9222,
-# browser_driver.py attaches over CDP.
 
 COPY hive-screen.sh /usr/local/bin/hive-screen.sh
 RUN chmod +x /usr/local/bin/hive-screen.sh
@@ -72,8 +38,8 @@ RUN chmod +x /usr/local/bin/hive-screen.sh
 USER hive
 WORKDIR /workspace
 
-# /run is root-owned in the container and the agent runs as hive — the
-# runtime dir lives in the per-agent home mount instead (0700, writable).
-ENV XDG_RUNTIME_DIR=/home/hive/.run
+# Xvfb :99, x11vnc :5900 (password-protected), noVNC/websockify :6080.
+# Stack starts on demand via hive-screen.sh (container_exec).
+ENV DISPLAY=:99
 EXPOSE 6080
 CMD ["sleep", "infinity"]

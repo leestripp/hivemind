@@ -56,10 +56,8 @@ def ensure_browser(pw):
         pass
     os.makedirs(PROFILE, exist_ok=True)
     env = {**os.environ,
-           # Wayland-native on the GNOME headless display; XWayland is the
-           # fallback when a display number is all that's around.
-           "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-0"),
-           "DISPLAY": os.environ.get("DISPLAY", ":0")}
+           # X11 stack (Phase 25): the Xvfb display the user sees via noVNC.
+           "DISPLAY": os.environ.get("DISPLAY", ":99")}
     subprocess.Popen(
         [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
