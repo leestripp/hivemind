@@ -29,12 +29,16 @@ with each other, and only come back when they need your approval.
 - **Approvals** — flip `require_approval` on an agent and its commands park
   in an approval queue until you approve/deny them.
 - **Routines & skills** — scheduled prompts ("watch this, ping me daily")
-  and Anthropic-format agent skills per teammate.
-- **Native GTK4 client** (`hive-client`) — roster, threads, live chat,
-  approvals inbox. Plus the web UI for keys/settings (ops dashboard in
-  Phase 13).
-- **Any model** — daedalus' SettingsStore owns providers/credentials; pick
-  per agent. No vendor lock-in.
+  fired by a 30 s scheduler tick, and a **global skill library**
+  (Anthropic SKILL.md format) shared across agents via per-agent enable
+  toggles — plus per-agent learned skills that stay agent-owned.
+- **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
+  live chat, approvals inbox, scheduled-task dialog, right-click agent
+  management. Plus the **web dashboard**: Agents, Tasks, Skills, Models,
+  API keys, settings.
+- **Any model** — providers/models live in HiveMind's own store
+  (`llm.db`, managed on the web Models page) and are injected into agents
+  at spawn; pick per agent. No vendor lock-in.
 
 ## Quick start (Ubuntu 26.04)
 
@@ -57,10 +61,13 @@ automatically.
 
 ### Models
 
-Agents need a model in the daedalus **SettingsStore**
-(`~/.local/share/daedalus/daedalus.db`) — manage it with
-[icarus](https://gitlab.com/leestripp/icarus). Pass the model name when
-creating an agent (blank = store default).
+Providers and models live in HiveMind's own store
+(`~/.local/share/hivemind/llm.db`) — manage them on the web **Models** page
+(`http://localhost:8421/#/models`) or via `/api/providers` + `/api/models`.
+On first run with an empty store, existing entries are imported one-way
+from the daedalus SettingsStore. Pass the model name when creating an agent
+(blank = store default); credentials resolve at spawn time — daedalus never
+reads the DB and is never patched.
 
 ## Layout
 
@@ -84,6 +91,8 @@ GET/POST/DELETE       /api/agents/:id/skills[/name]          local (agent-owned)
 GET/POST/DELETE       /api/skills[/name]                     global skill library
 GET/POST              /api/agents/:id/global-skills          per-agent global-skill toggle
 GET/POST              /api/agents/:id/container/{status,start,stop,exec}
+GET/POST/DELETE       /api/providers[/:name]  GET …/:name/discover
+GET/POST/DELETE       /api/models[/:name]     POST …/:name/default
 ```
 
 ## Documentation
