@@ -63,6 +63,9 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 
 ## Right-click agent menu
 
+**🖥 Computer** (Phase 26: the agent's live screen — POSTs screen/start,
+then opens the noVNC view embedded in a WebKitGTK window; falls back to
+the system browser when the client was built without WebKitGTK 6.0) ·
 Add Task… · **Skills…** (Phase 14.2: shared-library switches + read-only
 learned-skills list) · **Inspector…** (Phase 14.4: agent details + container
 status with Start/Stop) · Edit Agent · Delete Agent.
