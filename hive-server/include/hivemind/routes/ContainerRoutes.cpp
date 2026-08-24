@@ -7,6 +7,7 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/ContainerManager.h"
+#include "hivemind/ExecAuditStore.h"
 
 #include <nlohmann/json.hpp>
 
@@ -86,5 +87,26 @@ void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents
                 {"exit_code", res.exit_code}, {"output", res.output},
                 {"timed_out", res.timed_out},
             });
+        });
+
+    // Phase 8: exec audit trail — every container_exec/browser_* command
+    // an agent ran, with exit code + duration (newest first).
+    server.get("/api/agents/:id/exec-log",
+        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
+            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
+            int limit = 100;
+            try { limit = std::min(500, std::max(1,
+                std::stoi(req.queryParameter("limit", "100")))); }
+            catch (...) {}
+            json entries = json::array();
+            for (const auto& e : ContainerManager::exec_audit().list(seg[2], limit))
+                entries.push_back({
+                    {"id", e.id}, {"ts", e.ts}, {"command", e.command},
+                    {"exit_code", e.exit_code}, {"timed_out", e.timed_out},
+                    {"duration_ms", e.duration_ms},
+                });
+            send_json(resp, json{{"entries", entries}});
         });
 }

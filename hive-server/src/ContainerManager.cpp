@@ -2,6 +2,7 @@
 // src/ContainerManager.cpp — podman sandbox lifecycle (HiveMind 2.0, Phase 2)
 // =============================================================================
 #include "hivemind/ContainerManager.h"
+#include "hivemind/ExecAuditStore.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/ServerConfig.h"
 
@@ -178,6 +179,13 @@ hivemind::SecretStore* ContainerManager::secrets() {
     return &store;
 }
 
+static ExecAuditStore& audit_store() {
+    static ExecAuditStore store{
+        fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."} /
+        ".local" / "share" / "hivemind" / "exec_audit.db"};
+    return store;
+}
+
 ContainerManager::ExecResult ContainerManager::exec(const std::string& agent_id,
                                                     const std::string& command,
                                                     int timeout_s) {
@@ -209,13 +217,23 @@ ContainerManager::ExecResult ContainerManager::exec(const std::string& agent_id,
         "podman exec -u hive -w /workspace" + env_arg + " " +
         shell_quote(container_name(agent_id)) +
         " bash -lc " + shell_quote(command);
+    const auto t0 = std::chrono::steady_clock::now();
     auto res = run(cmd, timeout_s);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
     if (!env_path.empty()) {
         std::error_code ec;
         std::filesystem::remove(env_path, ec);   // gone the moment exec returns
     }
+    // Phase 8 audit trail: log the ORIGINAL command (never the env-file
+    // argv) — secret values are in the file, not the command string.
+    try { audit_store().log(agent_id, command, res.exit_code,
+                            res.timed_out, ms); }
+    catch (...) {}
     return res;
 }
+
+ExecAuditStore& ContainerManager::exec_audit() { return audit_store(); }
 
 // ── Phase 6: computer use (screen pipeline) ─────────────────────────────
 // UNTESTED in the dev sandbox (no working podman) — verify on a real

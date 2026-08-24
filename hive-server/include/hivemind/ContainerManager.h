@@ -1,5 +1,7 @@
 #pragma once
 
+class ExecAuditStore;
+
 #include <optional>
 #include <string>
 #include <filesystem>
@@ -90,6 +92,9 @@ public:
     /// Process-wide SecretStore (same instance exec() injects from).
     /// Public for tools that gate on grants (BrowserFillSecretTool).
     static hivemind::SecretStore& secret_store() { return *secrets(); }
+
+    /// Container exec audit trail (Phase 8). Logged from exec().
+    static ExecAuditStore& exec_audit();
 private:
     /// Run a podman command line (already quoted), capture output + rc.
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);

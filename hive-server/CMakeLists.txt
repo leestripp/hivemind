@@ -11,6 +11,7 @@ set(CORE_SOURCES
     src/ThreadStore.cpp
     src/AgentHost.cpp
     src/ContainerManager.cpp
+    src/ExecAuditStore.cpp
     src/ContainerTools.cpp
     src/BrowserTools.cpp
     src/ApprovalStore.cpp

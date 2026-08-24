@@ -302,6 +302,12 @@ opens the Computer view, authenticates, hands back).
 Containers are named `hive-<agent_id>`; image `localhost/hive-agent:latest`.
 See `docs/containers.md`.
 
+### Exec audit log (Phase 8)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/agents/:id/exec-log?limit=100 | Every command the agent ran in its container (container_exec, browser_*, screen stack), newest first: `{entries: [{id, ts, command, exit_code, timed_out, duration_ms}]}`. Commands are verbatim (≤500 chars) — secret values never appear in argv (env-file injection), so the log doubles as broker accountability. |
+
 ## 8. Models
 
 | Method | Path | Description |
