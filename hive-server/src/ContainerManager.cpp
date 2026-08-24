@@ -309,10 +309,10 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
             " -p 127.0.0.1::6080"
             " -v " + shell_quote(ws) + ":/workspace"
             " -v " + shell_quote(home.string()) + ":/home/hive:U";
-        // Phase 24: GPU passthrough when the host has one — mutter gets
-        // hardware GL (llvmpipe software rendering is the fallback).
-        if (fs::exists("/dev/dri/renderD128"))
-            cmd += " --device /dev/dri";
+        // Deliberately NO GPU passthrough (decision 2026-08-25): one GPU
+        // shared by N agents' Chrome instances is a contention/instability
+        // source; the X11 screen stack renders fine in software. WebGL/3D
+        // dev still works via SwiftShader (slow but correct).
         cmd += std::string(" -w /workspace ") + kBrowserImage;
         auto r = run(cmd);
         if (r.exit_code != 0)
