@@ -18,9 +18,14 @@ set -u
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/home/hive/.run}"
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 
-# Per-agent VNC password, generated once (8 chars — RFB limit), home mount.
+# Per-agent VNC password (8 chars — RFB limit), home mount. Regenerate if
+# the file exists but has the wrong length (stale from older scripts).
 PW_FILE="/home/hive/.vnc-password"
-[ -f "$PW_FILE" ] || head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$PW_FILE"
+_pw="$(cat "$PW_FILE" 2>/dev/null || true)"
+if [ "${#_pw}" -ne 8 ]; then
+    head -c 4 /dev/urandom | od -An -tx1 | tr -d " 
+" > "$PW_FILE"
+fi
 chmod 600 "$PW_FILE"
 export HIVE_VNC_PW="$(cat "$PW_FILE")"
 

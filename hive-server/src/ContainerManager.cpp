@@ -339,9 +339,15 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
 
 std::string ContainerManager::screen_password(const std::string& agent_id) {
     // Written by hive-screen.sh into the agent's home mount on first run.
-    std::ifstream f(agent_home_dir(agent_id) / ".vnc-password");
-    std::string pw;
-    std::getline(f, pw);
+    // Read via podman exec, NOT the host path: the :U mount chowns the home
+    // dir to the container uid, so the hive-server process user can't enter
+    // it (permission denied != missing — the direct read silently failed).
+    auto r = run("podman exec " + shell_quote(container_name(agent_id)) +
+                 " cat /home/hive/.vnc-password");
+    if (r.exit_code != 0) return "";
+    std::string pw = r.output;
+    while (!pw.empty() && !isspace((unsigned char)pw.back()))
+        pw.pop_back();
     return pw;
 }
 
