@@ -66,7 +66,9 @@ def ensure_browser(pw):
     subprocess.Popen(
         [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
-         "--disable-session-crashed-bubble", "--start-maximized", "about:blank"],
+         "--disable-session-crashed-bubble", "--disable-dev-shm-usage",
+         "--disable-gpu", "--noerrdialogs",
+         "--disable-features=TranslateUI", "--start-maximized", "about:blank"],
         env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     last = None

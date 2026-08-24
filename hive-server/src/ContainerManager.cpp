@@ -305,6 +305,7 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
         std::string cmd =
             std::string{"podman create --name "} + shell_quote(cname) +
             " --memory 4g --cpus 2"
+            " --shm-size 1g"   // Chrome hangs ("Page Unresponsive") on the 64MB default
             " -p 127.0.0.1::6080"
             " -v " + shell_quote(ws) + ":/workspace"
             " -v " + shell_quote(home.string()) + ":/home/hive:U";
