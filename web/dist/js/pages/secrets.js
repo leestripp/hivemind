@@ -37,7 +37,7 @@ function renderSecrets() {
                 title="${on ? 'Revoke from' : 'Grant to'} ${esc(a.name)}">${esc(a.name)}</button>`;
     }).join(' ');
     tr.innerHTML = `
-      <td><strong>${esc(s.name)}</strong><br><span class="muted" style="font-size:11px">HIVE_SECRET_${esc(s.name.toUpperCase())}</span></td>
+      <td><strong>${esc(s.name)}</strong>${s.source ? ' <span class="badge" title="External vault reference — value fetched at use, never stored">↗ vault</span>' : ''}<br><span class="muted" style="font-size:11px">${s.source ? esc(s.source) : 'HIVE_SECRET_' + esc(s.name.toUpperCase())}</span></td>
       <td class="muted">${esc(s.created_at || '—')}</td>
       <td>${chips || '<span class="muted">no agents</span>'}</td>
       <td class="row-actions">
@@ -56,17 +56,27 @@ function closeModal(id) { $(id).classList.add('hidden'); }
 export function initSecrets() {
   $('secrets-add').addEventListener('click', () => {
     $('secret-form').reset();
+    $('secret-kind').dispatchEvent(new Event('change'));
     openModal('secret-modal');
+  });
+
+  // Phase 22: stored value XOR external vault reference.
+  $('secret-kind').addEventListener('change', () => {
+    const ext = $('secret-kind').value === 'external';
+    $('secret-value-row').classList.toggle('hidden', ext);
+    $('secret-source-row').classList.toggle('hidden', !ext);
+    $('secret-form').value.required = !ext;
+    $('secret-form').source.required = ext;
   });
 
   $('secret-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
-      await API.post('/api/secrets', {
-        name: f.name.value.trim(),
-        value: f.value.value,
-      });
+      const body = { name: f.name.value.trim() };
+      if ($('secret-kind').value === 'external') body.source = f.source.value.trim();
+      else body.value = f.value.value;
+      await API.post('/api/secrets', body);
       closeModal('secret-modal');
       await loadAll();
     } catch (err) { alert(err.message); }

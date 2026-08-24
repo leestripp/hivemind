@@ -7,6 +7,7 @@
 set(CORE_SOURCES
     src/Schedule.cpp
     src/Files.cpp
+    src/Vault.cpp
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp

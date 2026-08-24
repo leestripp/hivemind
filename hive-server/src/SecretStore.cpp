@@ -1,5 +1,7 @@
 #include "hivemind/SecretStore.h"
 
+#include "hivemind/Vault.h"
+
 #include "hivemind/DbUtil.h"
 
 #include <openssl/evp.h>
@@ -9,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <string_view>
 #include <sys/stat.h>
 
 using namespace hivemind::db;
@@ -164,6 +167,21 @@ void SecretStore::ensure_schema(sqlite3* db) {
         "  agent_id TEXT NOT NULL,"
         "  PRIMARY KEY (secret_name, agent_id));",
         "SecretStore schema");
+    // Phase 22 migration: external vault source on pre-existing DBs.
+    bool has_src = false;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(secrets)",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* n = col_text(st, 1);
+            if (n && std::string_view{n} == "source") { has_src = true; break; }
+        }
+        sqlite3_finalize(st);
+    }
+    if (!has_src)
+        exec_sql(db,
+            "ALTER TABLE secrets ADD COLUMN source TEXT NOT NULL DEFAULT ''",
+            "SecretStore source migration");
 }
 
 bool SecretStore::put(const std::string& name, const std::string& value) {
@@ -199,21 +217,57 @@ bool SecretStore::put(const std::string& name, const std::string& value) {
     return false;
 }
 
+bool SecretStore::put_external(const std::string& name,
+                               const std::string& source) {
+    if (!valid_name(name)) return false;
+    if (hm::vault::validate_source(source) != "") return false;
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM secrets WHERE name=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, name);
+        const bool dup = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+        if (dup) { sqlite3_close(db); return false; }
+    }
+    // blob column is NOT NULL — external rows store an empty blob.
+    if (sqlite3_prepare_v2(db,
+            "INSERT INTO secrets (name, blob, created_at, source)"
+            " VALUES (?,?,?,?)", -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, name);
+        sqlite3_bind_blob(st, 2, "", 0, SQLITE_STATIC);
+        bind_text(st, 3, iso_now());
+        bind_text(st, 4, source);
+        const bool ok = sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+        sqlite3_close(db);
+        return ok;
+    }
+    sqlite3_close(db);
+    return false;
+}
+
 std::optional<std::string> SecretStore::get(const std::string& name) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;
     std::optional<std::string> blob;
-    if (sqlite3_prepare_v2(db, "SELECT blob FROM secrets WHERE name=?",
+    std::string source;
+    if (sqlite3_prepare_v2(db, "SELECT blob, source FROM secrets WHERE name=?",
                            -1, &st, nullptr) == SQLITE_OK) {
         bind_text(st, 1, name);
         if (sqlite3_step(st) == SQLITE_ROW) {
             const void* p = sqlite3_column_blob(st, 0);
             blob = std::string(static_cast<const char*>(p),
                                (size_t)sqlite3_column_bytes(st, 0));
+            source = col_text(st, 1);
         }
         sqlite3_finalize(st);
     }
     sqlite3_close(db);
+    // Phase 22: externally-sourced secrets fetch at delivery time — the
+    // value never touches the DB. Vault fetch happens AFTER close for the
+    // same lock-hygiene reason as decrypt below.
+    if (!source.empty()) return hm::vault::fetch(source);
     // Decrypt AFTER the connection is closed: a crypto throw (wrong key,
     // tampered blob) must not leak a connection holding a shared lock —
     // that silently SQLITE_BUSY-blocks later writes from other connections.
@@ -226,12 +280,13 @@ std::vector<SecretEntry> SecretStore::list() {
     std::vector<SecretEntry> out;
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db,
-            "SELECT name, created_at FROM secrets ORDER BY name",
+            "SELECT name, created_at, source FROM secrets ORDER BY name",
             -1, &st, nullptr) == SQLITE_OK) {
         while (sqlite3_step(st) == SQLITE_ROW) {
             SecretEntry e;
             e.name = col_text(st, 0);
             e.created_at = col_text(st, 1);
+            e.source = col_text(st, 2);
             out.push_back(std::move(e));
         }
         sqlite3_finalize(st);

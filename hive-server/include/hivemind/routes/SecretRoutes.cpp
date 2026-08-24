@@ -1,5 +1,6 @@
 // include/hivemind/routes/SecretRoutes.cpp
 #include "hivemind/routes/SecretRoutes.h"
+#include "hivemind/Vault.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/SecretStore.h"
@@ -26,6 +27,7 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
                         granted.push_back({{"id", a->id}, {"name", a->name}});
                 list.push_back({{"name", s.name},
                                 {"created_at", s.created_at},
+                                {"source", s.source},   // Phase 22: vault ref
                                 {"agents", granted}});
             }
             send_json(resp, json{{"secrets", list}});
@@ -39,9 +41,26 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
             const std::string name = body.value("name", "");
             const std::string value = body.value("value", "");
+            const std::string source = body.value("source", "");
             if (!hivemind::SecretStore::valid_name(name)) {
                 send_error(resp, 400,
                     "name must be [A-Za-z0-9_], start with a letter/underscore, ≤64 chars");
+                return;
+            }
+            if (!value.empty() && !source.empty()) {
+                send_error(resp, 400, "give 'value' OR 'source', not both");
+                return;
+            }
+            if (!source.empty()) {
+                // Phase 22: external vault reference — value fetched at
+                // delivery time, never stored here.
+                const std::string bad = hm::vault::validate_source(source);
+                if (!bad.empty()) { send_error(resp, 400, bad); return; }
+                if (!secrets.put_external(name, source)) {
+                    send_error(resp, 409, "secret exists (delete first to rotate)");
+                    return;
+                }
+                send_json(resp, json{{"created", name}, {"source", source}}, 201);
                 return;
             }
             if (value.find('\n') != std::string::npos ||

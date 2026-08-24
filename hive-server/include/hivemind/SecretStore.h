@@ -30,6 +30,8 @@ namespace hivemind {
 struct SecretEntry {
     std::string name;        // [A-Za-z0-9_], 1-64 chars
     std::string created_at;
+    std::string source;      // "" = local value; "pass:…"/"op://…" = Phase 22
+                             // external vault reference (fetched at delivery)
     std::vector<std::string> agent_ids;  // granted agents (joined)
 };
 
@@ -42,6 +44,11 @@ public:
 
     /// Create a secret. Returns false if the name exists or is invalid.
     bool put(const std::string& name, const std::string& value);
+    /// Create an EXTERNALLY-SOURCED secret (Phase 22): no local value —
+    /// get() fetches from the vault CLI at delivery time. The reference
+    /// must pass hm::vault::validate_source. Returns false on bad
+    /// name/source or duplicate.
+    bool put_external(const std::string& name, const std::string& source);
     /// Decrypt a secret (broker delivery paths only — never expose via API).
     std::optional<std::string> get(const std::string& name);
     /// List names/metadata ONLY — values never leave this class through it.

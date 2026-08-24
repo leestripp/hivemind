@@ -315,8 +315,18 @@
           <input name="name" required placeholder="OPENAI_KEY" pattern="[A-Za-z_][A-Za-z0-9_]*"
                  title="Letters, digits, underscore — used as HIVE_SECRET_&lt;NAME&gt;">
         </label>
-        <label>Value (write-only — never shown again)
-          <input name="value" type="password" required autocomplete="off">
+        <label>Storage
+          <select name="kind" id="secret-kind">
+            <option value="local">Stored here (encrypted)</option>
+            <option value="external">External vault (fetched at use)</option>
+          </select>
+        </label>
+        <label id="secret-value-row">Value (write-only — never shown again)
+          <input name="value" type="password" autocomplete="off">
+        </label>
+        <label id="secret-source-row" class="hidden">Vault reference
+          <input name="source" placeholder="pass:work/token  or  op://Vault/Item/field"
+                 autocomplete="off" spellcheck="false">
         </label>
         <div class="modal-actions">
           <button type="button" class="btn" data-close>Cancel</button>
