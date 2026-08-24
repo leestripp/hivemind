@@ -1,11 +1,10 @@
 # Agent Computer (live screen) — status, findings, and what failed
 
-> State as of 2026-08-24: **partially working, not user-ready.** The screen
-> page connects and authenticates, the GNOME (mutter, Wayland) headless
-> desktop runs GPU-accelerated in the agent container, but the VNC server
-> (gnome-remote-desktop) closes every client connection before the RFB
-> greeting. Root cause not yet found. This doc is the full trail so the
-> next session doesn't repeat it.
+> State as of 2026-08-24 (evening): **WORKING — Phase 25 X11 stack.**
+> The GNOME/Wayland path (Phase 24) was abandoned after GRD dropped VNC
+> clients pre-greeting (cause not isolated); the X11 stack (Xvfb + openbox
+> + x11vnc + noVNC) was rebuilt properly and verified end-to-end with a
+> real noVNC client. Phase 24's trail stays below as reference.
 
 ## What the feature is
 
