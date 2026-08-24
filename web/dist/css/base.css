@@ -385,3 +385,13 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .screen-frame { width: 100%; height: min(82dvh, 800px); border: 0;
                 border-radius: 6px; background: #111; }
 .agent-actions { margin-top: 10px; display: flex; gap: 8px; }
+
+/* Phase 16: auto-review rules editor */
+.rule-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.rule-row .rule-cmd { flex: 1; }
+.rule-row select, .rule-row input { background: #1a1d23; color: #d8dee9;
+  border: 1px solid #3b4252; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+@media (max-width: 760px) {
+  .rule-row { flex-wrap: wrap; }
+  .rule-row .rule-cmd { flex-basis: 100%; order: 2; }
+}

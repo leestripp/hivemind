@@ -105,6 +105,11 @@ public:
     void shutdown();
 
 private:
+    /// Phase 16: rule-based auto-review ahead of the human queue.
+    /// A matching approval_rules row short-circuits (recorded as
+    /// auto_allowed/auto_denied); no match → create + wait as before.
+    bool request_approval(const std::string& kind, const std::string& payload);
+
     void ensure_agent();  // lazy construction (caller holds turn_mtx_)
     void driver_loop();   // drains queue_ (one thread per host, on demand)
     void run_one(PendingTurn& turn);   // one submit + run_one_turn cycle

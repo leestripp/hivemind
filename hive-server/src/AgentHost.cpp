@@ -341,9 +341,7 @@ void AgentHost::ensure_agent() {
         auto tool = std::make_unique<ContainerBashTool>(info_.id);
         if (info_.require_approval) {
             tool->set_approval_fn([this](std::string_view cmd) -> bool {
-                std::string id = approvals_.create(info_.id, info_.name,
-                                                   "command", std::string{cmd});
-                return approvals_.wait(id, /*timeout_s=*/600);
+                return request_approval("command", std::string{cmd});
             });
         }
         agent_->register_tool(std::move(tool));
@@ -352,9 +350,7 @@ void AgentHost::ensure_agent() {
         // CDP on the container's Xvfb display — the same browser the user
         // watches/takes over in the Computer view). Same approval gate.
         auto approval = [this](std::string_view what) -> bool {
-            std::string id = approvals_.create(info_.id, info_.name,
-                                               "browser", std::string{what});
-            return approvals_.wait(id, /*timeout_s=*/600);
+            return request_approval("browser", std::string{what});
         };
         for (auto& spec : BrowserTool::specs()) {
             auto bt = std::make_unique<BrowserTool>(info_.id, std::move(spec));
@@ -440,9 +436,7 @@ void AgentHost::run_one(PendingTurn& turn) {
 
     auto sink = std::make_shared<StreamingSink>(std::move(turn.on_delta));
     sink->set_approval_fn([this](std::string_view cmd) -> bool {
-        std::string id = approvals_.create(info_.id, info_.name,
-                                           "command", std::string{cmd});
-        return approvals_.wait(id, /*timeout_s=*/600);
+        return request_approval("command", std::string{cmd});
     });
     proxy_sink_->set_target(sink);
 
@@ -530,6 +524,18 @@ std::string AgentHost::run_turn(const std::string& prompt,
     };
     enqueue(std::move(t));
     return fut.get();
+}
+
+bool AgentHost::request_approval(const std::string& kind,
+                                 const std::string& payload) {
+    // Phase 16: rule-based auto-review — a matching rule short-circuits
+    // the human queue; the decision is still recorded for the inbox.
+    if (auto m = approvals_.match_rule(info_.id, kind, payload)) {
+        approvals_.record_auto(info_.id, info_.name, kind, payload, *m);
+        return *m;
+    }
+    std::string id = approvals_.create(info_.id, info_.name, kind, payload);
+    return approvals_.wait(id, /*timeout_s=*/600);
 }
 
 void AgentHost::shutdown() {

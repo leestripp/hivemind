@@ -262,6 +262,22 @@ file, deleted when exec returns) — values never appear in podman's argv,
 shell history, or tool output. The Phase 6 browser `fill_secret` tool will
 type values via playwright for web logins.
 
+## 6.4b Approval rules (Phase 16 — rule-based auto-review)
+
+Per-agent ordered rules that short-circuit the human approval queue.
+First match wins; no match falls through to the normal flow (queue when
+`require_approval` is on). Patterns are shell-style globs (`*` = any run,
+`?` = one char) on the tool kind (`command`, `browser`) and the payload.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/agents/:id/approval-rules | `{rules: [{tool, command, action}]}` in evaluation order |
+| PUT | /api/agents/:id/approval-rules | Replace the list atomically (≤100; action `allow`\|`deny`) |
+
+Auto decisions are recorded as approvals rows with status
+`auto_allowed`/`auto_denied` (resolved immediately — they never appear as
+pending) so the inbox shows what the rules did.
+
 ## 6.6 Screen (Phase 6 — computer use)
 
 All under the standard `/api/` Bearer auth; screen control requires a

@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service, routine_store);
     register_container_routes(server, agent_store);
-    register_approval_routes(server, approval_store);
+    register_approval_routes(server, approval_store, agent_store);
     register_key_routes(server, auth_store);
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,

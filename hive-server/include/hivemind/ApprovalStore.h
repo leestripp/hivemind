@@ -16,6 +16,16 @@
  *
  * DB file: ~/.local/share/hivemind/approvals.db (fresh connection per op).
  */
+/// Phase 16: one ordered auto-review rule. First match wins; no match
+/// falls through to the human queue (require_approval path).
+struct ApprovalRule {
+    std::string agent_id;
+    int position = 0;
+    std::string tool_pattern;      // glob on kind ("command", "browser", …)
+    std::string command_pattern;   // glob on payload (the command/action)
+    std::string action;            // "allow" | "deny"
+};
+
 struct Approval {
     std::string id;
     std::string agent_id;
@@ -46,6 +56,24 @@ public:
     /// Block until the approval is resolved. Polls the DB every 250 ms.
     /// Returns true=approved, false=denied/expired/timeout (timeout_s max wait).
     bool wait(const std::string& id, int timeout_s = 600);
+
+    // ── Phase 16: rule-based auto-review ─────────────────────────────
+    std::vector<ApprovalRule> list_rules(const std::string& agent_id);
+    /// Atomically replace an agent's ordered rule list (≤100 rules).
+    void replace_rules(const std::string& agent_id,
+                       const std::vector<ApprovalRule>& rules);
+    /// First matching rule → allow(true)/deny(false); nullopt = no match.
+    std::optional<bool> match_rule(const std::string& agent_id,
+                                   const std::string& kind,
+                                   const std::string& payload);
+    /// Record an auto decision as a resolved row (status auto_allowed /
+    /// auto_denied) so the inbox shows what the rules did.
+    void record_auto(const std::string& agent_id,
+                     const std::string& agent_name,
+                     const std::string& kind, const std::string& payload,
+                     bool allowed);
+    /// Shell-style glob: `*` = any run, `?` = one char. Pure; for tests.
+    static bool glob_match(std::string_view pattern, std::string_view text);
 
 private:
     std::filesystem::path db_path_;
