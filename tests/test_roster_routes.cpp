@@ -51,7 +51,7 @@ int main() {
     ApprovalStore approvals{tmp / "approvals.db"};
     LLMStore llm{tmp / "llm.db"};
     RoutineStore routines{tmp / "routines.db"};
-    AgentRegistry registry{agents, approvals, llm};
+    AgentRegistry registry{agents, approvals, llm, routines, threads};
     ChatService chat{agents, threads, registry};
 
     OmniNet::HTTP::Server::Config cfg;

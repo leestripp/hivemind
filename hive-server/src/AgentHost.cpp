@@ -217,10 +217,11 @@ private:
 
 AgentHost::AgentHost(RosterAgent info, fs::path dir,
                      AgentStore& agents, ApprovalStore& approvals,
-                     AgentRegistry& registry, LLMStore& llm)
+                     AgentRegistry& registry, LLMStore& llm,
+                     RoutineStore& routines, ThreadStore& threads)
     : info_(std::move(info)), dir_(std::move(dir)),
       agents_(agents), approvals_(approvals), registry_(registry),
-      llm_(llm),
+      llm_(llm), routines_(routines), threads_(threads),
       proxy_sink_(std::make_shared<ProxySink>()) {
     fs::create_directories(dir_);
 }
@@ -367,6 +368,8 @@ void AgentHost::ensure_agent() {
     agent_->register_tool(
         std::make_unique<MessageAgentTool>(info_.id, agents_, registry_));
     agent_->register_tool(std::make_unique<CreateAgentTool>(agents_));
+    agent_->register_tool(
+        std::make_unique<SaveRoutineTool>(info_.id, routines_, threads_));
     agent_->register_tool(
         std::make_unique<RunIcarusTool>(info_.id, dir_.string()));
 }
@@ -558,7 +561,8 @@ AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
     if (it == hosts_.end()) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
         auto host = std::make_unique<AgentHost>(agent, dir, agents_,
-                                                approvals_, *this, llm_);
+                                                approvals_, *this, llm_,
+                                                routines_, threads_);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
     return *it->second;

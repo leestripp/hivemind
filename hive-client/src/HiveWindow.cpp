@@ -409,6 +409,12 @@ HiveWindow::HiveWindow() {
     stop_btn_.signal_clicked().connect([this] { on_stop(); });
     stop_btn_.set_sensitive(false);   // enabled while a turn is running
     stop_btn_.add_css_class("destructive-action");
+    learn_btn_.set_label("🎓 Learn");
+    learn_btn_.set_tooltip_text(
+        "Learn-by-demonstration: the agent distills this thread's workflow "
+        "into a scheduled routine (save_routine)");
+    learn_btn_.signal_clicked().connect([this] { on_learn_routine(); });
+    learn_btn_.set_sensitive(false);   // enabled with a thread selection
     delete_thread_btn_.signal_clicked().connect([this] { on_delete_thread(); });
     delete_thread_btn_.set_sensitive(false);  // enabled with a selection
     header_.pack_start(new_agent_btn_);
@@ -418,6 +424,7 @@ HiveWindow::HiveWindow() {
     header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
+    header_.pack_end(learn_btn_);
     header_.pack_end(approvals_btn_);
     // CSD: install our HeaderBar AS the window titlebar so the compositor
     // doesn't draw a second (server-side) title bar above it.
@@ -1125,6 +1132,7 @@ void HiveWindow::on_thread_selected() {
     current_thread_ = *id;
     last_message_id_.clear();
     delete_thread_btn_.set_sensitive(true);
+    learn_btn_.set_sensitive(true);
     for (auto& t : threads_)
         if (t.value("id", "") == *id)
             last_seen_activity_[*id] = t.value("last_activity", "");
@@ -1146,6 +1154,26 @@ void HiveWindow::on_send() {
     std::string tid = current_thread_;
     run_async([this, tid, text, atts] {
         api_.post_message(tid, text, atts);
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this] { if (alive_) poll_chat(); });
+        }
+        dispatcher_.emit();
+    });
+}
+
+void HiveWindow::on_learn_routine() {
+    if (current_thread_.empty()) return;
+    const std::string tid = current_thread_;
+    const std::string text =
+        "[learn] Please save the workflow demonstrated in this thread as a "
+        "routine using the save_routine tool. Distill the steps into a "
+        "self-contained prompt (include every URL, file path, and value "
+        "used — future runs have no access to this conversation). Pick a "
+        "clear kebab-case name. If I haven't specified a schedule, ask me "
+        "for one before saving.";
+    run_async([this, tid, text] {
+        api_.post_message(tid, text);
         {
             std::lock_guard<std::mutex> lk(queue_m_);
             done_queue_.push_back([this] { if (alive_) poll_chat(); });
@@ -2119,6 +2147,7 @@ void HiveWindow::on_delete_thread() {
                     current_thread_.clear();
                     last_message_id_.clear();
                     delete_thread_btn_.set_sensitive(false);
+                    learn_btn_.set_sensitive(false);
                     while (auto* ch = messages_box_.get_first_child())
                         messages_box_.remove(*ch);
                     rendered_.clear();

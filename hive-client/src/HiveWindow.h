@@ -91,6 +91,7 @@ private:
     void on_new_thread();
     void on_approvals();
     void on_stop();
+    void on_learn_routine();   // Phase 20: distill thread into a routine
     void on_delete_thread();
 
     // ── rendering helpers ─────────────────────────────────────────────────
@@ -139,6 +140,7 @@ private:
     Gtk::Button theme_btn_;              // dark/light toggle
     Gtk::Button connect_btn_;
     Gtk::Button stop_btn_;
+    Gtk::Button learn_btn_;              // Phase 20: learn-by-demonstration
     Gtk::Button delete_thread_btn_;
     bool dark_mode_ = false;             // persisted in config.json
 

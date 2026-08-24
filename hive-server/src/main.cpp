@@ -95,7 +95,8 @@ int main(int argc, char* argv[]) {
     LLMStore llm_store;
     AuthStore auth_store;
     hivemind::SecretStore secret_store;
-    AgentRegistry agent_registry{agent_store, approval_store, llm_store};
+    AgentRegistry agent_registry{agent_store, approval_store, llm_store,
+                                 routine_store, thread_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
 
     // ─── Auth (Phase 9) ─────────────────────────────────────────────

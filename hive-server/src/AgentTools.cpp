@@ -5,6 +5,9 @@
 #include "hivemind/AgentStore.h"
 #include "hivemind/AgentHost.h"     // AgentRegistry
 #include "hivemind/ContainerManager.h"
+#include "hivemind/RoutineStore.h"
+#include "hivemind/Schedule.h"
+#include "hivemind/ThreadStore.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -128,6 +131,46 @@ json CreateAgentTool::execute(const json& args, daedalus::HostToolContext&) {
     try {
         auto a = agents_.create_agent(name, role, model);
         return ok({{"id", a.id}, {"name", a.name}, {"role", a.role}});
+    } catch (const std::exception& e) {
+        return error(e.what());
+    }
+}
+
+// ─── SaveRoutineTool (Phase 20: learn-by-demonstration) ─────────────────────
+
+json SaveRoutineTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"name", {{"type", "string"},
+                            {"description", "Short routine name, e.g. 'morning-standup-digest'."}}}},
+             json{{"prompt", {{"type", "string"},
+                              {"description", "Self-contained instruction for future runs: the distilled steps, URLs, paths, values. No references to 'the chat above'."}}}},
+             json{{"schedule", {{"type", "object"},
+                                {"description", "Schedule spec: {type:'once',at:'YYYY-MM-DDTHH:MM'} | {type:'interval',every_minutes:N} | {type:'daily',time:'HH:MM'} | {type:'weekly',days:[0-6],time:'HH:MM'} (server-local time)."}}}}},
+            {"name", "prompt", "schedule"}));
+}
+
+json SaveRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
+    const std::string name = args.value("name", "");
+    const std::string prompt = args.value("prompt", "");
+    if (name.empty()) return error("need 'name'");
+    if (prompt.empty()) return error("need 'prompt'");
+    if (!args.contains("schedule") || !args["schedule"].is_object())
+        return error("need 'schedule' object");
+    const json schedule = args["schedule"];
+    const std::string bad = hm::validate_schedule(schedule);
+    if (!bad.empty()) return error("invalid schedule: " + bad);
+    try {
+        // Same shape as RoutineRoutes: one dedicated thread per routine.
+        auto t = threads_.create_thread("routine: " + name, "dm", {agent_id_});
+        auto next = hm::compute_next_fire(schedule, hm::now_iso_local(), "");
+        auto r = routines_.create(agent_id_, t.id, name, prompt,
+                                  schedule.dump(), next.value_or(""));
+        return ok({{"routine_id", r.id}, {"thread_id", t.id},
+                   {"name", r.name},
+                   {"next_fire_at", r.next_fire_at},
+                   {"note", "Routine saved and scheduled. Tell the user its "
+                            "name and next fire time."}});
     } catch (const std::exception& e) {
         return error(e.what());
     }

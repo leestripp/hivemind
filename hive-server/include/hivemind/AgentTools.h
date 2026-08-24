@@ -6,6 +6,7 @@
 
 class AgentStore;
 class ThreadStore;
+class RoutineStore;
 class AgentRegistry;
 
 /**
@@ -72,6 +73,34 @@ public:
                            daedalus::HostToolContext& ctx) override;
 private:
     AgentStore& agents_;
+};
+
+/// save_routine — Phase 20 learn-by-demonstration: after the user
+/// demonstrates a workflow in a thread ("watch me do this once"), the
+/// agent distills it into a named, scheduled routine that then fires
+/// on its own. Mirrors RoutineRoutes' create path (own thread per
+/// routine, schedule validated, next_fire computed).
+class SaveRoutineTool final : public daedalus::BaseTool {
+public:
+    SaveRoutineTool(std::string agent_id, RoutineStore& routines,
+                    ThreadStore& threads)
+        : agent_id_(std::move(agent_id)), routines_(routines),
+          threads_(threads) {}
+    [[nodiscard]] std::string get_name() const override { return "save_routine"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Save a demonstrated workflow as a recurring or one-shot "
+               "routine that runs on a schedule. Use after the user shows "
+               "you a task and asks you to learn/remember it. The prompt "
+               "must be self-contained (steps, URLs, file paths, values) — "
+               "future fires get no thread history.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+private:
+    std::string agent_id_;
+    RoutineStore& routines_;
+    ThreadStore& threads_;
 };
 
 /// run_icarus — delegate a heavy duty task to an icarus subprocess
