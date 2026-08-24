@@ -89,6 +89,7 @@ GET  /api/approvals?status=pending            POST …/:id/approve|deny
 POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
 GET/POST/DELETE       /api/agents/:id/skills[/name]          local (agent-owned) skills
 GET/POST/DELETE       /api/skills[/name]                     global skill library
+GET/POST/DELETE       /api/secrets[/name]                    secret broker (write-only values)
 GET/POST              /api/agents/:id/global-skills          per-agent global-skill toggle
 GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 GET/POST/DELETE       /api/providers[/:name]  GET …/:name/discover

@@ -231,6 +231,31 @@ no central management UI for them.
 `name` must be kebab-case (`a-z 0-9 -`, ≤64 chars). `content` is the
 markdown body; frontmatter is generated.
 
+## 6.5 Secrets (Phase 15)
+
+The secret broker delivers credentials to agents **without** the values
+entering the LLM context (context = history = logs = leak). Values are
+AES-256-GCM-encrypted at rest (`~/.local/share/hivemind/secrets.db`,
+master key `secrets.key` 0600, created on first use) and are
+**write-only** over the API — no endpoint ever returns a value.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/secrets` | List `{name, created_at, agents[]}` (grants resolved) — **values never included** |
+| POST | `/api/secrets` | `{name, value}` → 201 (409 if exists — rotation = delete + re-add) — admin |
+| DELETE | `/api/secrets/:name` | Delete + cascade grants — admin |
+| GET | `/api/agents/:id/secrets` | Granted secret names |
+| POST | `/api/agents/:id/secrets` | Toggle grant: `{name, granted}` — admin |
+
+`name` is `[A-Za-z0-9_]`, starts with a letter/underscore, ≤64 chars.
+Multiline values are rejected (the delivery channel is line-based).
+
+**Delivery:** `POST /api/agents/:id/container/exec` injects granted secrets
+as `HIVE_SECRET_<NAME>` env vars via `podman exec --env-file` (0600 tmp
+file, deleted when exec returns) — values never appear in podman's argv,
+shell history, or tool output. The Phase 6 browser `fill_secret` tool will
+type values via playwright for web logins.
+
 ## 7. Containers
 
 | Method | Path | Description |

@@ -18,7 +18,7 @@ web/dist/
 ├── js/main.js            # boot + hash router (#/agents, #/tasks, …)
 ├── js/api.js             # fetch wrapper (API key auth header)
 ├── js/util.js            # $, esc, log helpers
-└── js/pages/             # one module per page: agents, tasks, skills,
+└── js/pages/             # one module per page: agents, tasks, skills, secrets,
                           # models, keys, settings
 ```
 
@@ -58,6 +58,15 @@ Dashboard for routines (the server's 30 s scheduler tick):
 Global skill library manager — see `docs/skills.md` for the design.
 Table with per-agent toggle chips, + Add Skill modal, delete (unlinks from
 all agents first).
+
+### Secrets (`#/secrets`)
+
+Secret broker manager (Phase 15) — see `docs/api.md` §6.5. Table with
+name, created date, per-agent grant chips, delete (cascades grants).
+**+ Add Secret** modal: name (`[A-Za-z0-9_]`) + write-only password value
+field — values are AES-256-GCM-encrypted at rest and never readable back.
+Granted secrets reach agents as `HIVE_SECRET_<NAME>` env vars at
+container-exec time.
 
 ### Models (`#/models`)
 
