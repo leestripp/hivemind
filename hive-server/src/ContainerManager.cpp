@@ -332,7 +332,9 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
 
     // Phase 24: GNOME Wayland headless desktop (gnome-shell --headless +
     // gnome-remote-desktop VNC + websockify), idempotent bring-up script.
-    auto r = exec(agent_id, "hive-screen.sh", /*timeout_s=*/45);
+    auto r = exec(agent_id,
+        "hive-screen.sh " + ServerConfig::instance().screen_resolution(),
+        /*timeout_s=*/45);
     if (r.exit_code != 0)
         throw std::runtime_error("display stack failed to start: " + r.output);
     return port;

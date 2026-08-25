@@ -30,7 +30,8 @@ alive() {  # alive <exact-process-name> — zombies don't count
     return 1
 }
 
-alive Xvfb || nohup Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
+RES="${1:-1280x800}"   # Phase 28: server passes ServerConfig screen_resolution
+alive Xvfb || nohup Xvfb :99 -screen 0 ${RES}x24 >/tmp/xvfb.log 2>&1 &
 sleep 1
 alive openbox || nohup openbox >/tmp/openbox.log 2>&1 &
 

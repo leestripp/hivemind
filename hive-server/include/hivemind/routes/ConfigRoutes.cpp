@@ -28,6 +28,7 @@ void register_config_routes(OmniNet::HTTP::Server& server) {
             auto& cfg = ServerConfig::instance();
             send_json(resp, json{
                 {"workspace_root", cfg.workspace_root()},
+                {"screen_resolution", cfg.screen_resolution()},
                 {"note", "workspace_root is bind-mounted at /workspace in "
                          "every agent container; changes apply to containers "
                          "created after the change"},
@@ -42,6 +43,14 @@ void register_config_routes(OmniNet::HTTP::Server& server) {
 
             auto& cfg = ServerConfig::instance();
             try {
+                if (body.contains("screen_resolution")) {
+                    if (!body["screen_resolution"].is_string()) {
+                        send_error(resp, 400, "screen_resolution must be a string");
+                        return;
+                    }
+                    cfg.set_screen_resolution(
+                        body["screen_resolution"].get<std::string>());
+                }
                 if (body.contains("workspace_root")) {
                     if (!body["workspace_root"].is_string()) {
                         send_error(resp, 400, "workspace_root must be a string");
@@ -52,6 +61,7 @@ void register_config_routes(OmniNet::HTTP::Server& server) {
                 }
                 send_json(resp, json{
                     {"workspace_root", cfg.workspace_root()},
+                {"screen_resolution", cfg.screen_resolution()},
                     {"applied", true},
                 });
             } catch (const std::invalid_argument& e) {

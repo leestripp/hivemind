@@ -36,6 +36,11 @@ public:
     void set_cors_origins(std::vector<std::string> origins);
     bool cors_allowed(const std::string& origin) const;
 
+    /// Phase 28: Xvfb geometry for agent screens ("1280x800" default).
+    /// Applies to screen stacks STARTED after the change.
+    std::string screen_resolution() const { return screen_resolution_; }
+    void set_screen_resolution(const std::string& res);   // validates WxH
+
     /// Phase 28: pre-start every agent's container at boot so the first
     /// turn isn't a cold start. Default true.
     bool warm_containers() const { return warm_containers_; }
@@ -55,4 +60,5 @@ private:
     std::string workspace_root_;
     std::vector<std::string> cors_origins_;   // "" = use default
     bool warm_containers_ = true;
+    std::string screen_resolution_ = "1280x800";
 };

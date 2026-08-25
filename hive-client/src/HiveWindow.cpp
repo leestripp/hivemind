@@ -1312,6 +1312,8 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
         box->append(*b);
     };
     mk("\U0001F5A5 Computer", nullptr, [this, agent] { show_agent_screen(agent); });
+    mk("\U0001F441 Computer (view-only)", nullptr,
+       [this, agent] { show_agent_screen(agent, true); });
     mk("\U0001F4CB Exec log", nullptr, [this, agent] { show_exec_log(agent); });
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
@@ -1334,11 +1336,12 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
 // The ?key= sets the HttpOnly screen cookie on first load, so the WS
 // handshake inside WebKit authenticates too. Without WebKitGTK the menu
 // item falls back to the system browser.
-void HiveWindow::show_agent_screen(const nlohmann::json& agent) {
+void HiveWindow::show_agent_screen(const nlohmann::json& agent, bool view_only) {
     const std::string id = agent.value("id", "");
     if (id.empty()) return;
-    const std::string url = api_.base_url() + "/screen/" + id +
-                            "/?key=" + api_.api_key();
+    std::string url = api_.base_url() + "/screen/" + id +
+                      "/?key=" + api_.api_key();
+    if (view_only) url += "&view_only=1";
 
     // The screen stack may not be running — POST screen/start first or
     // the page 503s. ApiClient is synchronous, so start in a worker

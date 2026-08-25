@@ -81,7 +81,7 @@ private:
     void show_agent_dialog(const nlohmann::json* existing);  // nullptr = create
     void on_edit_agent(const nlohmann::json& agent);
     void on_delete_agent(const nlohmann::json& agent);
-    void show_agent_screen(const nlohmann::json& agent);
+    void show_agent_screen(const nlohmann::json& agent, bool view_only = false);
     void show_exec_log(const nlohmann::json& agent);   // Phase 29
     void show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
                          double x, double y);

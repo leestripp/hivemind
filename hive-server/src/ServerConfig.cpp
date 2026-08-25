@@ -3,6 +3,7 @@
 // =============================================================================
 #include "hivemind/ServerConfig.h"
 
+#include <regex>
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
@@ -42,6 +43,8 @@ void ServerConfig::load() {
     try {
         auto j = nlohmann::json::parse(f);
         workspace_root_ = j.value("workspace_root", "");
+        warm_containers_ = j.value("warm_containers", true);
+        screen_resolution_ = j.value("screen_resolution", "1280x800");
         cors_origins_.clear();
         if (j.contains("cors_origins") && j["cors_origins"].is_array())
             for (auto& o : j["cors_origins"])
@@ -56,7 +59,8 @@ void ServerConfig::save() const {
     if (!f) throw std::runtime_error("cannot write " + file_.string());
     f << nlohmann::json{{"workspace_root", workspace_root_},
                         {"cors_origins", cors_origins_},
-                        {"warm_containers", warm_containers_}}.dump(2) << "\n";
+                        {"warm_containers", warm_containers_},
+                        {"screen_resolution", screen_resolution_}}.dump(2) << "\n";
 }
 
 std::string ServerConfig::workspace_root() {
@@ -81,6 +85,19 @@ void ServerConfig::set_workspace_root(const std::string& path) {
     if (!fs::is_directory(expanded))
         throw std::invalid_argument("'" + expanded + "' is not a directory");
     workspace_root_ = expanded;
+    save();
+}
+
+void ServerConfig::set_screen_resolution(const std::string& res) {
+    // WxH, 800x600 .. 7680x4320 — Xvfb rejects nonsense; fail early here.
+    static const std::regex re("^([0-9]{3,4})x([0-9]{3,4})$");
+    std::smatch m;
+    if (!std::regex_match(res, m, re) ||
+        std::stoi(m[1]) < 800 || std::stoi(m[1]) > 7680 ||
+        std::stoi(m[2]) < 600 || std::stoi(m[2]) > 4320)
+        throw std::invalid_argument(
+            "screen_resolution must be WxH between 800x600 and 7680x4320");
+    screen_resolution_ = res;
     save();
 }
 

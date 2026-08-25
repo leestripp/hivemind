@@ -214,6 +214,8 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                     "&password=" + container_manager().screen_password(seg[1]);
                 if (!req.queryParameter("key", "").empty())
                     loc += "&key=" + req.queryParameter("key", "");
+                if (req.queryParameter("view_only", "") == "1")
+                    loc += "&view_only=true";   // Phase 28: watch, don't touch
                 resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(302));
                 resp.setHeader("Location", loc);
                 if (!set_cookie.empty()) resp.setHeader("Set-Cookie", set_cookie);
