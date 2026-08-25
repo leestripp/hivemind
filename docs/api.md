@@ -127,7 +127,7 @@ Response reports what happened:
 | GET | `/api/connectors/:name/auth-url` | Mint one-shot state, return the provider authorize URL |
 | GET | `/api/oauth/callback?code&state` | PUBLIC provider redirect target — state is the credential; exchanges code → tokens stored in the broker as `<NAME>_ACCESS_TOKEN` / `_REFRESH_TOKEN` |
 | GET | `/api/skills/registry` | Curated marketplace catalog (Phase 21) — bundled `skills-registry.json` entries annotated with `installed` flags; install via existing `POST /api/skills/install` |
-| GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create |
+| GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create. Roles are generic: each tells the agent to read `/workspace/index.md` for its department folder (2026-08-25 — no per-department hardcoding; the index carries the mapping) |
 | GET | `/api/threads/:id/messages` | Messages, chronological; each has an `attachments` array (`[]` default, Phase 18) |
 | GET | `/api/threads/:id/messages?after=<msg_id>` | Incremental fetch (polling) |
 | POST | `/api/threads/:id/messages` | Post user message → **202** `{message_id, status:"processing"}`. Optional `attachments` array (Phase 18) — metadata from prior attachment uploads |

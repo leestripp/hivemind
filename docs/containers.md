@@ -29,6 +29,34 @@ podman build -t localhost/hive-agent:latest \
 | Inside the container | Host source |
 |---|---|
 | `/workspace` | **Shared company folder** — the `workspace_root` setting, bind-mounted into every agent container. Default `~/.local/share/hivemind/workspace`; set your own (e.g. `~/projects`) in the web UI **Settings → Company workspace** or `PUT /api/config` (admin key). Applies to containers created after the change. |
+
+### Workspace layout (2026-08-25)
+
+The company drive follows a fixed skeleton (seeded on install; canonical
+copy in `hive-server/data/workspace/`). `index.md` at the root is the map —
+the agent system prompt tells every containerized agent to read it before
+doing file work, so conventions live in ONE file instead of per-agent
+config:
+
+```
+index.md                  ← the map + house rules (kebab-case, ISO dates,
+                            README.md per project, archive don't delete…)
+departments/
+  engineering/            README.md per department (scope, agents,
+  marketing/              conventions)
+  executive/
+  chief-of-staff/
+projects/<name>/          cross-department initiatives (README.md each)
+inbox/                    user drops requests/files here for agents
+attachments/<thread-id>/  chat uploads (server-managed)
+scratch/                  volatile temp work
+archive/                  finished work — moved, never deleted
+```
+
+Agents work in their department folder (or a project folder for cross-dept
+work) and keep README.md files current so any agent or human can pick work
+up cold. Add a department by creating `departments/<name>/` + README.md and
+adding one line to `index.md` — no agent/template changes needed.
 | `/home/hive` | **Private** per-agent bind mount from `~/.local/share/hivemind/agents/<id>/home` |
 | user `hive` + `sudo` (no password) | base image |
 | git, curl, python3+pip, build-essential, jq, … | base image |
