@@ -1462,10 +1462,22 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
 
     auto* outer = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 10);
     outer->set_margin(14);
+    // Phase 29: create shared-library skills without leaving the client.
+    auto* hdr = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+    auto* spacer = Gtk::make_managed<Gtk::Label>("");
+    spacer->set_hexpand(true);
+    auto* newbtn = Gtk::make_managed<Gtk::Button>("+ New skill");
+    newbtn->add_css_class("suggested-action");
+    hdr->append(*spacer);
+    hdr->append(*newbtn);
+    outer->append(*hdr);
     auto* loading = Gtk::make_managed<Gtk::Label>("Loading…");
     loading->add_css_class("dim-label");
     outer->append(*loading);
     dialog->set_child(*outer);
+    newbtn->signal_clicked().connect([this, dialog] {
+        show_new_skill_dialog(dialog);
+    });
     dialog->present();
 
     run_async([this, dialog, outer, loading, agent_id, aname] {
@@ -1533,6 +1545,23 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                         text->append(*dl);
                     }
                     row->append(*text);
+                    // Phase 29: delete from the shared library (all agents).
+                    auto* del = Gtk::make_managed<Gtk::Button>("\u2715");
+                    del->add_css_class("destructive-action");
+                    del->set_valign(Gtk::Align::CENTER);
+                    del->set_tooltip_text("Delete from shared library");
+                    del->signal_clicked().connect([this, dialog, sname] {
+                        run_async([this, dialog, sname] {
+                            try { api_.delete_skill(sname); }
+                            catch (...) {}
+                            std::lock_guard<std::mutex> lk(queue_m_);
+                            done_queue_.push_back([this, dialog] {
+                                if (alive_ && dialog->get_root()) dialog->destroy();
+                            });
+                            dispatcher_.emit();
+                        });
+                    });
+                    row->append(*del);
                     auto* sw = Gtk::make_managed<Gtk::Switch>();
                     sw->set_valign(Gtk::Align::CENTER);
                     sw->set_active(enabled_set.count(sname) > 0);
@@ -1595,6 +1624,72 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
         }
         dispatcher_.emit();
     });
+}
+
+
+// ── New skill dialog (Phase 29) ─────────────────────────────────────────
+// Skills dialog → "+ New skill": create a shared-library skill (SKILL.md)
+// without leaving the client. POSTs /api/skills; on success the parent
+// skills dialog is closed (user reopens to see the new entry — the dialog
+// is modal and cheap).
+void HiveWindow::show_new_skill_dialog(Gtk::Window* parent) {
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title("New skill");
+    install_dialog_titlebar(*dialog, "New skill");
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::OK);
+    dialog->set_default_size(560, 420);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_margin(12);
+    grid->set_row_spacing(8);
+    grid->set_column_spacing(8);
+
+    auto* name = Gtk::make_managed<Gtk::Entry>();
+    name->set_placeholder_text("kebab-case-name");
+    auto* desc = Gtk::make_managed<Gtk::Entry>();
+    desc->set_placeholder_text("One-line description (when to use this skill)");
+    auto* content = Gtk::make_managed<Gtk::TextView>();
+    content->set_wrap_mode(Gtk::WrapMode::WORD_CHAR);
+    content->set_monospace(true);
+    auto* cscroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+    cscroll->set_child(*content);
+    cscroll->set_vexpand(true);
+    cscroll->add_css_class("hv-prompt-frame");
+    auto* err = Gtk::make_managed<Gtk::Label>("");
+    err->add_css_class("error");
+    err->set_halign(Gtk::Align::START);
+    err->set_wrap(true);
+
+    auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(label);
+        l->set_halign(Gtk::Align::END);
+        grid->attach(*l, 0, row);
+        w->set_hexpand(true);
+        grid->attach(*w, 1, row);
+    };
+    add_row("Name", name, 0);
+    add_row("Description", desc, 1);
+    add_row("Instructions", cscroll, 2);
+    grid->attach(*err, 1, 3);
+    dialog->get_content_area()->append(*grid);
+
+    dialog->signal_response().connect(
+        [this, dialog, parent, name, desc, content, err](int r) {
+            if (r != (int)Gtk::ResponseType::OK) { dialog->destroy(); return; }
+            try {
+                api_.create_skill(name->get_text(), desc->get_text(),
+                                  content->get_buffer()->get_text());
+                dialog->destroy();
+                if (parent && parent->get_root()) parent->destroy();
+            } catch (const std::exception& e) {
+                err->set_text(e.what());   // keep the dialog open
+            }
+        });
+    dialog->present();
 }
 
 // ── Phase 14.4: agent inspector ─────────────────────────────────────────────

@@ -90,6 +90,7 @@ private:
                           const nlohmann::json* existing = nullptr); // edit mode
     void show_routines_dialog();                     // Phase 29 manager
     void show_skills_dialog(const nlohmann::json& agent);   // Phase 14.2
+    void show_new_skill_dialog(Gtk::Window* parent);          // Phase 29
     void show_inspector(const nlohmann::json& agent);       // Phase 14.4
     void load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                                   const std::string& agent_id);

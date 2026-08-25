@@ -61,6 +61,9 @@ public:
 
     // ── skills (Phase 14.2) ───────────────────────────────────────────────
     nlohmann::json list_global_skills();                              // GET /api/skills
+    void create_skill(const std::string& name, const std::string& description,
+                      const std::string& content);                     // POST /api/skills
+    void delete_skill(const std::string& name);                        // DELETE /api/skills/:name
     nlohmann::json agent_global_skills(const std::string& agent_id);  // GET /api/agents/:id/global-skills
     nlohmann::json set_global_skill(const std::string& agent_id,      // POST /api/agents/:id/global-skills
                                     const std::string& name, bool enabled);

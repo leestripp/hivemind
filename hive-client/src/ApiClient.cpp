@@ -110,6 +110,18 @@ nlohmann::json ApiClient::list_global_skills() {
     return request("GET", "/api/skills");
 }
 
+void ApiClient::create_skill(const std::string& name,
+                             const std::string& description,
+                             const std::string& content) {
+    nlohmann::json body{{"name", name}, {"description", description},
+                        {"content", content}};
+    request("POST", "/api/skills", &body);
+}
+
+void ApiClient::delete_skill(const std::string& name) {
+    request("DELETE", "/api/skills/" + name);
+}
+
 nlohmann::json ApiClient::agent_global_skills(const std::string& agent_id) {
     return request("GET", "/api/agents/" + agent_id + "/global-skills");
 }
