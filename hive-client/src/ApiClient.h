@@ -49,6 +49,8 @@ public:
     nlohmann::json container_start(const std::string& agent_id);     // POST …/container/start
     nlohmann::json container_stop(const std::string& agent_id);      // POST …/container/stop
     nlohmann::json screen_start(const std::string& agent_id);        // POST …/screen/start
+    nlohmann::json exec_log(const std::string& agent_id,
+                            int limit = 200);                        // GET …/exec-log
 
     // ── skills (Phase 14.2) ───────────────────────────────────────────────
     nlohmann::json list_global_skills();                              // GET /api/skills

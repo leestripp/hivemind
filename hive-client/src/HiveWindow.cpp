@@ -1312,6 +1312,7 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
         box->append(*b);
     };
     mk("\U0001F5A5 Computer", nullptr, [this, agent] { show_agent_screen(agent); });
+    mk("\U0001F4CB Exec log", nullptr, [this, agent] { show_exec_log(agent); });
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
@@ -1369,6 +1370,71 @@ void HiveWindow::show_agent_screen(const nlohmann::json& agent) {
         Gio::AppInfo::launch_default_for_uri(url);
     }, 3000);
 #endif
+}
+
+// ── Exec log viewer (Phase 29) ──────────────────────────────────────────
+// Right-click an agent → Exec log. Every command the agent ran in its
+// container, newest first — "what did it do" without leaving the app.
+void HiveWindow::show_exec_log(const nlohmann::json& agent) {
+    const std::string id = agent.value("id", "");
+    const std::string name = agent.value("name", "?");
+    if (id.empty()) return;
+
+    auto* win = Gtk::make_managed<Gtk::Window>();
+    win->set_title("Exec log — " + name);
+    win->set_transient_for(*this);
+    win->set_default_size(760, 480);
+
+    auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
+    vbox->set_margin(10);
+    auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroll->set_vexpand(true);
+    auto* view = Gtk::make_managed<Gtk::TextView>();
+    view->set_editable(false);
+    view->set_monospace(true);
+    view->set_wrap_mode(Gtk::WrapMode::WORD_CHAR);
+    scroll->set_child(*view);
+    vbox->append(*scroll);
+    auto* status = Gtk::make_managed<Gtk::Label>("Loading…");
+    status->set_halign(Gtk::Align::START);
+    vbox->append(*status);
+    win->set_child(*vbox);
+    win->present();
+
+    auto buf = view->get_buffer();
+    auto tag_ok  = buf->create_tag("ok");   tag_ok->property_foreground() = "#8aadf4";
+    auto tag_bad = buf->create_tag("bad");  tag_bad->property_foreground() = "#ed8796";
+    auto tag_to  = buf->create_tag("to");   tag_to->property_foreground() = "#eed49f";
+    auto tag_dim = buf->create_tag("dim");  tag_dim->property_foreground() = "#6e738d";
+
+    run_async([this, id, name, buf, status, tag_ok, tag_bad, tag_to, tag_dim] {
+        std::string err;
+        json data;
+        try { data = api_.exec_log(id); }
+        catch (const std::exception& e) { err = e.what(); }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([=] {
+                if (!alive_) return;
+                if (!err.empty()) { status->set_text("Error: " + err); return; }
+                auto entries = data.value("entries", json::array());
+                for (auto& e : entries) {
+                    const int code = e.value("exit_code", -1);
+                    const bool to = e.value("timed_out", false);
+                    auto tag = to ? tag_to : (code == 0 ? tag_ok : tag_bad);
+                    std::string head = e.value("ts", "") + "  exit " +
+                        std::to_string(code) + (to ? " (timeout)" : "") +
+                        "  " + std::to_string(e.value("duration_ms", 0)) + "ms";
+                    buf->insert_with_tag(buf->end(), head + "\n", tag_dim);
+                    buf->insert_with_tag(buf->end(),
+                        "  $ " + e.value("command", "") + "\n", tag);
+                }
+                status->set_text(std::to_string(entries.size()) +
+                                 " entries — newest first");
+            });
+        }
+        dispatcher_.emit();
+    });
 }
 
 void HiveWindow::on_edit_agent(const nlohmann::json& agent) {
