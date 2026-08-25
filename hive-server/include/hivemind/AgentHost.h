@@ -35,6 +35,7 @@
  */
 class ProxySink;  // forwards AgentSink callbacks to a per-turn target
 class AgentRegistry;
+class ChatService;
 class LLMStore;
 
 /// Sanitize a roster display name into a valid daedalus agent_name
@@ -168,6 +169,12 @@ public:
     /// An evicted (dead) host is replaced with a fresh one.
     AgentHost& get_or_create(const RosterAgent& agent);
 
+    /// Set once from main() after ChatService is constructed (it depends on
+    /// the registry, so the registry can't take it in the constructor).
+    /// Read by MessageAgentTool at execute() time — always set by then.
+    void set_chat_service(ChatService* cs) { chat_service_ = cs; }
+    ChatService* chat_service() const { return chat_service_; }
+
     /// Live host for id, or nullptr (never constructs). For cancel paths.
     AgentHost* find(const std::string& agent_id);
 
@@ -188,6 +195,7 @@ public:
     void shutdown_all();
 
 private:
+    ChatService* chat_service_ = nullptr;
     AgentStore& agents_;
     ApprovalStore& approvals_;
     LLMStore& llm_;
@@ -224,6 +232,15 @@ public:
     std::string post_user_message(const std::string& thread_id,
                                   const std::string& body,
                                   const std::string& attachments_json = "[]");
+
+    /// Agent→agent async message (message_agent tool): find-or-create the
+    /// pair thread (kind "group", exactly these two agents), post the body
+    /// as sender_kind="agent", and fan it in to the target at generation 1
+    /// (replies fan back, capped by kMaxFanInGenerations). Returns the
+    /// thread id; throws std::invalid_argument on unknown agents.
+    std::string post_agent_message(const std::string& sender_id,
+                                   const std::string& target_id,
+                                   const std::string& body);
 
     /// Proactive nudge (gap analysis): post a sender_kind="system" message
     /// into a thread and fan it in to agent participants like a user

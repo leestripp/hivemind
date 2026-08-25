@@ -18,42 +18,42 @@ modules:
     sources:
       - type: archive
         url: https://download.gnome.org/sources/mm-common/1.0/mm-common-1.0.6.tar.xz
-        sha256: b55c46037dbcdabc5cee9b2b6e6b656fa3a22d895c83ba5e90e57b6b52ec1355
+        sha256: b55c46037dbcdabc5cee3b389ea11cc3910adb68ebe883e9477847aa660862e7
 
   - name: libsigcplusplus
     buildsystem: meson
     sources:
       - type: archive
         url: https://download.gnome.org/sources/libsigc++/3.0/libsigc++-3.0.7.tar.xz
-        sha256: bfbf91e872e5f4086d20a63a3cf69053d39f9e97b768d8db2255a9eb6599be6e
+        sha256: bfbe91c0d094ea6bbc6cbd3909b7d98c6561eea8b6d9c0c25add906a6e83d733
 
   - name: glibmm
     buildsystem: meson
     sources:
       - type: archive
         url: https://download.gnome.org/sources/glibmm/2.80/glibmm-2.80.1.tar.xz
-        sha256: f2b63df2abbafdaffee0ad0a2b721fdbb6c4bc0fbfbae15b7ad8805997ed505f
+        sha256: f1a0c0ec514e3774bf993396f17f72106b40912c7d7cc9d10da31ba15517e3f5
 
   - name: cairomm
     buildsystem: meson
     sources:
       - type: archive
-        url: https://download.gnome.org/sources/cairomm/1.18/cairomm-1.18.0.tar.xz
-        sha256: b81255394e3ea8e8aa887276d28ada2a3fd8feae3b10490f6c148feb2bdf0a6f
+        url: https://download.gnome.org/sources/cairomm/1.15/cairomm-1.15.4.tar.xz
+        sha256: 4cd9fd959538953dfa606aaa7a31381e3193eebf14d814d97ef928684ee9feb5
 
   - name: pangomm
     buildsystem: meson
     sources:
       - type: archive
         url: https://download.gnome.org/sources/pangomm/2.52/pangomm-2.52.0.tar.xz
-        sha256: 34a134126a6484ff12f77435840436b0fa589288b6b6df08c613454b1a85cce5
+        sha256: 34a134126a6484ff12f774358c36ecc44d0e9df094e1b83796d9774bb7d24947
 
   - name: gtkmm
     buildsystem: meson
     sources:
       - type: archive
         url: https://download.gnome.org/sources/gtkmm/4.16/gtkmm-4.16.0.tar.xz
-        sha256: 3b23fd3c8e120e7bdaea9cb020da0810e9b81343a1d1c722d4900d0500ee56ff
+        sha256: 3b23fd3abf8fb223b00e9983b6010af2db80e38c89ab6994b8b6230aa85d60f9
 
   - name: nlohmann-json
     buildsystem: cmake-ninja

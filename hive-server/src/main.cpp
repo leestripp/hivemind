@@ -102,6 +102,7 @@ int main(int argc, char* argv[]) {
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,
                                  routine_store, thread_store};
     ChatService chat_service{agent_store, thread_store, agent_registry};
+    agent_registry.set_chat_service(&chat_service);  // message_agent tool
 
     // ─── Auth (Phase 9) ─────────────────────────────────────────────
     // First run prints the master key once; every /api/* route except

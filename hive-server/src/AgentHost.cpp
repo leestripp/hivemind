@@ -447,14 +447,11 @@ void AgentHost::run_one(PendingTurn& turn) {
 
     // RAII guard: a throwing turn must still restore delegation depth and
     // detach the per-turn sink.
+    // RAII guard: detach the per-turn sink even if the turn throws.
     struct TurnGuard {
         ProxySink* proxy;
-        ~TurnGuard() {
-            --MessageAgentTool::depth_;
-            proxy->set_target(nullptr);
-        }
+        ~TurnGuard() { proxy->set_target(nullptr); }
     };
-    ++MessageAgentTool::depth_;
     TurnGuard guard{proxy_sink_.get()};
 
     // Watchdog: a hung LLM call blocks this agent's queue forever; cancel
@@ -649,6 +646,44 @@ void AgentRegistry::shutdown_all() {
 }
 
 // ─── ChatService ────────────────────────────────────────────────────────────
+
+std::string ChatService::post_agent_message(const std::string& sender_id,
+                                            const std::string& target_id,
+                                            const std::string& body) {
+    if (stopping_)
+        throw std::invalid_argument("server is shutting down");
+    auto sender = agents_.get_agent(sender_id);
+    auto target = agents_.get_agent(target_id);
+    if (!sender || !target)
+        throw std::invalid_argument("unknown sender or target agent");
+
+    // Find-or-create the pair thread: kind "group" with exactly these two
+    // participants. Reused across messages so the conversation accumulates
+    // and is visible in the client ("Scout \u2194 Scribe").
+    std::string tid;
+    for (const auto& t : threads_.list_threads()) {
+        if (t.kind == "group" && t.agent_ids.size() == 2 &&
+            std::find(t.agent_ids.begin(), t.agent_ids.end(), sender_id) !=
+                t.agent_ids.end() &&
+            std::find(t.agent_ids.begin(), t.agent_ids.end(), target_id) !=
+                t.agent_ids.end()) {
+            tid = t.id;
+            break;
+        }
+    }
+    if (tid.empty()) {
+        auto t = threads_.create_thread(
+            sender->name + " \u2194 " + target->name, "group",
+            {sender_id, target_id});
+        tid = t.id;
+    }
+
+    threads_.add_message(tid, "agent", sender_id, body);
+    // Generation 1: the target's reply fans back to the sender at gen 2,
+    // one more hop at gen 3, then kMaxFanInGenerations stops the ping-pong.
+    fan_in(tid, *target, sender->name, body, /*generation=*/1);
+    return tid;
+}
 
 void ChatService::fan_in(const std::string& thread_id,
                          const RosterAgent& agent,

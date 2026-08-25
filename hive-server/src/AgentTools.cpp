@@ -15,7 +15,6 @@
 
 using json = nlohmann::json;
 
-thread_local int MessageAgentTool::depth_ = 0;
 
 namespace {
 
@@ -86,27 +85,29 @@ json MessageAgentTool::execute(const json& args, daedalus::HostToolContext&) {
     if (target.empty() || message.empty())
         return error("need 'agent' and 'message'");
 
-    if (depth_ >= kMaxDepth)
-        return error("delegation depth limit reached — answer directly instead");
-
     auto agent = find_agent(agents_, target);
     if (!agent) return error("no agent named '" + target + "'");
     if (agent->id == sender_id_)
         return error("cannot message yourself");
 
-    // Run the teammate's turn inline. Nested turns are same-thread, so the
-    // recursive agent_exec_mutex admits them; cross-thread serialization is
-    // unchanged. Depth guard above prevents delegation loops.
-    auto& host = registry_.get_or_create(*agent);  // process-immortal (graveyard rule)
-    std::string prompt = "Message from your teammate " +
-        ([&]{ auto s = agents_.get_agent(sender_id_); return s ? s->name : sender_id_; }()) +
-        ": " + message;
+    // Async delivery (2026-08-25 rewrite): the OLD synchronous design ran
+    // the teammate's entire turn inline via run_turn() — nested agent
+    // loops, recursive mutexes, and a hang on its first live test. Now the
+    // message is POSTED to the pair thread (visible in the client) and the
+    // target is fanned in normally; its reply fans back, generation-capped.
+    auto* chat = registry_.chat_service();
+    if (!chat) return error("chat service unavailable");
     try {
-        std::string reply = host.run_turn(prompt, nullptr);
-        if (reply.size() > 4000) reply = reply.substr(0, 3997) + "...";
-        return ok({{"from", agent->name}, {"reply", reply}});
+        std::string tid =
+            chat->post_agent_message(sender_id_, agent->id, message);
+        return ok({{"delivered", true},
+                   {"to", agent->name},
+                   {"thread", tid},
+                   {"note", "Async: the reply arrives later as a new "
+                            "message from " + agent->name +
+                            ". Do not wait for it."}});
     } catch (const std::exception& e) {
-        return error(std::string{"teammate turn failed: "} + e.what());
+        return error(std::string{"delivery failed: "} + e.what());
     }
 }
 

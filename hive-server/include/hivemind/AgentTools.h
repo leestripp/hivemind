@@ -41,17 +41,15 @@ public:
         : sender_id_(std::move(sender_id)), agents_(agents), registry_(registry) {}
     [[nodiscard]] std::string get_name() const override { return "message_agent"; }
     [[nodiscard]] std::string get_description() const override {
-        return "Send a message to a teammate agent (by name or id) and wait "
-               "for their reply. Use for delegation and coordination.";
+        return "Send a message to a teammate agent (by name or id). The "
+               "message is posted to your shared thread and delivered "
+               "asynchronously: the reply arrives later as a new message "
+               "to you. Do NOT wait for an immediate answer; continue your "
+               "own work or report what you sent.";
     }
     [[nodiscard]] nlohmann::json get_definition() const override;
     nlohmann::json execute(const nlohmann::json& args,
                            daedalus::HostToolContext& ctx) override;
-
-    /// Max nesting depth for agent→agent turns (loop protection).
-    static constexpr int kMaxDepth = 4;
-    /// Current depth on this thread (run_turn increments it).
-    static thread_local int depth_;
 
 private:
     std::string sender_id_;

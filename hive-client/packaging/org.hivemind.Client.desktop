@@ -5,6 +5,6 @@ Comment=Chat with your AI agent hive — roster, threads, approvals, screens
 Exec=hive-client
 Icon=org.hivemind.Client
 Terminal=false
-Categories=Development;Network;
+Categories=Development;
 Keywords=ai;agents;chat;automation;
 StartupNotify=true
