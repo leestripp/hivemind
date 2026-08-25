@@ -91,8 +91,13 @@ Or directly: `podman ps --filter name=hive-`.
 
 | `workspace_mode` | Meaning |
 |---|---|
-| `shared` (default) | Containerized; shared `/workspace` + private home |
-| `host` | No container (escape hatch for dev machines without podman) |
+| `shared` | Containerized; shared `/workspace` + private home |
+
+**Containers are mandatory** (decision 2026-08-25). The former `host`
+escape hatch (no container, no sudo, no isolation) is REMOVED — legacy
+`host` rows in agents.db normalize to `shared` on load. The web API
+`workspace_mode` field remains for forward compatibility but only
+`shared` is accepted/used.
 
 Department volumes (named volumes mounted into a chosen subset of agents)
 are a planned extension of the shared mode.

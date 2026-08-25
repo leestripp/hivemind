@@ -119,6 +119,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string role = body.value("role", "");
             std::string model = body.value("model", "");
             std::string ws = body.value("workspace_mode", "shared");
+            if (ws == "host") ws = "shared";   // host mode removed (2026-08-25)
             bool req_appr = body.value("require_approval", false);
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,

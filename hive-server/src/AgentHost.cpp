@@ -244,11 +244,11 @@ void AgentHost::ensure_agent() {
     if (agent_) return;  // caller holds turn_mtx_
 
     // ── Container mode (Plan.md Phase 2) ─────────────────────────────
-    // workspace_mode "host" is the explicit escape hatch (dev boxes
-    // without podman); every other mode ("shared" today, dept volumes
-    // later) means the agent's command execution happens in its podman
-    // container as user `hive` with passwordless sudo.
-    containerized_ = info_.workspace_mode != "host";
+    // Containers are mandatory (user decision 2026-08-25 — the "host"
+    // workspace_mode escape hatch is REMOVED; host-side execution was an
+    // unprivileged dead end). AgentStore/RosterRoutes normalize any legacy
+    // "host" value to "shared" before this ever sees it.
+    containerized_ = true;
     std::string container_err;
     if (containerized_) {
         try {

@@ -41,6 +41,7 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.role           = col(2);
     a.model          = col(3);
     a.workspace_mode = col(4);
+    if (a.workspace_mode == "host") a.workspace_mode = "shared";  // legacy normalize
     a.container_id   = col(5);
     a.created_at     = col(6);
     a.updated_at     = col(7);
@@ -124,7 +125,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.name           = name;
     a.role           = role;
     a.model          = model;
-    a.workspace_mode = workspace_mode.empty() ? "shared" : workspace_mode;
+    a.workspace_mode = (workspace_mode.empty() || workspace_mode == "host")
+                           ? "shared" : workspace_mode;
     a.require_approval = require_approval;
     a.avatar         = avatar;
     a.created_at     = iso_now();
@@ -228,7 +230,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 1, name);
     bind_text(st, 2, role);
     bind_text(st, 3, model);
-    bind_text(st, 4, workspace_mode.empty() ? "shared" : workspace_mode);
+    bind_text(st, 4, (workspace_mode.empty() || workspace_mode == "host")
+                         ? "shared" : workspace_mode);
     bind_text(st, 5, now);
     sqlite3_bind_int(st, 6, require_approval ? 1 : 0);
     bind_text(st, 7, avatar);

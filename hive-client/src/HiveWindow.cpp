@@ -2007,11 +2007,9 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 break;
             }
     }
-    auto* mode = Gtk::make_managed<Gtk::DropDown>(
-        Gtk::StringList::create({"shared (container)", "host (no container)"}));
+    // Host mode removed (2026-08-25): agents always run containerized.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
     if (existing) {
-        mode->set_selected(existing->value("workspace_mode", "shared") == "host" ? 1 : 0);
         appr->set_active(existing->value("require_approval", false));
     }
 
@@ -2088,17 +2086,17 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
-    add_row("Workspace", mode, row_i++);
+    // (no Workspace row — always containerized)
     add_row("Avatar", avatar_grid, row_i++);
     grid->attach(*appr, 1, row_i);
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, mode, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
-                std::string ws = mode->get_selected() == 1 ? "host" : "shared";
+                std::string ws = "shared";
                 const auto msel = model->get_selected();
                 std::string m = msel < model_names->size() ? (*model_names)[msel] : "";
                 const std::string av = *chosen_avatar;
