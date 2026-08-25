@@ -137,6 +137,37 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
     // ── DELETE /api/routines/:id ──────────────────────────────────────────
     // A routine owns its thread (created alongside it) — deleting the
     // routine deletes the thread too, no orphans.
+    // ── PATCH /api/routines/:id — edit name/prompt/schedule (Phase 29) ───
+    server.patch("/api/routines/:id",
+        [&routines](const OmniNet::HTTP::Request& req,
+                    OmniNet::HTTP::Response& resp) {
+            const std::string id = path_segments(req.path())[2];
+            auto r = routines.get(id);
+            if (!r) { send_error(resp, 404, "unknown routine"); return; }
+            json body;
+            try { body = json::parse(req.bodyAsString()); }
+            catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+
+            const std::string name = body.value("name", r->name);
+            const std::string prompt = body.value("prompt", r->prompt);
+            json schedule = body.contains("schedule")
+                                ? body["schedule"]
+                                : json::parse(r->schedule_json);
+            if (name.empty() || prompt.empty()) {
+                send_error(resp, 400, "name and prompt required"); return;
+            }
+            if (auto err = hm::validate_schedule(schedule); !err.empty()) {
+                send_error(resp, 400, err); return;
+            }
+            const std::string next =
+                hm::compute_next_fire(schedule, hm::now_iso_local(),
+                                      hm::now_iso_local()).value_or("");
+            if (!routines.update(id, name, prompt, schedule.dump(), next)) {
+                send_error(resp, 500, "update failed"); return;
+            }
+            send_json(resp, routine_json(*routines.get(id)));
+        });
+
     server.delete_("/api/routines/:id",
         [&routines, &threads](const OmniNet::HTTP::Request& req,
                     OmniNet::HTTP::Response& resp) {

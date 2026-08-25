@@ -154,6 +154,28 @@ nlohmann::json ApiClient::exec_log(const std::string& agent_id, int limit) {
                           "/exec-log?limit=" + std::to_string(limit));
 }
 
+nlohmann::json ApiClient::update_routine(const std::string& id,
+                                         const std::string& name,
+                                         const std::string& prompt,
+                                         const nlohmann::json& schedule) {
+    nlohmann::json body{{"name", name}, {"prompt", prompt},
+                        {"schedule", schedule}};
+    return request("PATCH", "/api/routines/" + id, &body);
+}
+
+void ApiClient::delete_routine(const std::string& id) {
+    request("DELETE", "/api/routines/" + id);
+}
+
+void ApiClient::run_routine(const std::string& id) {
+    request("POST", "/api/routines/" + id + "/run");
+}
+
+void ApiClient::set_routine_enabled(const std::string& id, bool enabled) {
+    nlohmann::json body{{"enabled", enabled}};
+    request("POST", "/api/routines/" + id + "/enabled", &body);
+}
+
 // ── threads / chat ──────────────────────────────────────────────────────────
 
 nlohmann::json ApiClient::templates() {

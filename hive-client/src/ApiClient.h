@@ -45,6 +45,13 @@ public:
                                   const std::string& name,
                                   const std::string& prompt,
                                   const nlohmann::json& schedule);     // POST /api/routines
+    nlohmann::json update_routine(const std::string& id,
+                                  const std::string& name,
+                                  const std::string& prompt,
+                                  const nlohmann::json& schedule);     // PATCH /api/routines/:id
+    void delete_routine(const std::string& id);                        // DELETE /api/routines/:id
+    void run_routine(const std::string& id);                           // POST /api/routines/:id/run
+    void set_routine_enabled(const std::string& id, bool enabled);     // POST …/enabled
     nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
     nlohmann::json container_start(const std::string& agent_id);     // POST …/container/start
     nlohmann::json container_stop(const std::string& agent_id);      // POST …/container/stop

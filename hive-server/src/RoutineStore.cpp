@@ -218,6 +218,29 @@ void RoutineStore::reschedule(const std::string& id,
     sqlite3_close(db);
 }
 
+bool RoutineStore::update(const std::string& id, const std::string& name,
+                          const std::string& prompt,
+                          const std::string& schedule_json,
+                          const std::string& next_fire_at) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    bool ok = false;
+    if (sqlite3_prepare_v2(db,
+            "UPDATE routines SET name=?, prompt=?, schedule_json=?, next_fire_at=? "
+            "WHERE id = ?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, name);
+        bind_text(st, 2, prompt);
+        bind_text(st, 3, schedule_json);
+        bind_text(st, 4, next_fire_at);
+        bind_text(st, 5, id);
+        ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db) > 0;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
 bool RoutineStore::set_enabled(const std::string& id, bool enabled) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;

@@ -1315,6 +1315,7 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     mk("\U0001F4CB Exec log", nullptr, [this, agent] { show_exec_log(agent); });
     mk("Add Task\u2026", nullptr,
        [this, agent] { show_task_dialog(agent.value("id", "")); });
+    mk("Routines\u2026", nullptr, [this] { show_routines_dialog(); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
     mk("Inspector\u2026", nullptr, [this, agent] { show_inspector(agent); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
@@ -1837,14 +1838,18 @@ void HiveWindow::on_new_task() {
 // Schedule-a-task dialog (routines). Blocking create call on OK — same
 // pattern as the provider/model fetch in the agent dialog — so server
 // validation errors can be shown in-dialog without closing it.
-void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
+void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
+                                  const nlohmann::json* existing) {
+    const bool editing = existing != nullptr;
+    const json er = editing ? *existing : json::object();
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
-    dialog->set_title("Add scheduled task");
-    install_dialog_titlebar(*dialog, "Add scheduled task");
+    const char* title = editing ? "Edit scheduled task" : "Add scheduled task";
+    dialog->set_title(title);
+    install_dialog_titlebar(*dialog, title);
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Create", Gtk::ResponseType::OK);
+    dialog->add_button(editing ? "Save" : "Create", Gtk::ResponseType::OK);
     dialog->set_default_response(Gtk::ResponseType::OK);
 
     auto* grid = Gtk::make_managed<Gtk::Grid>();
@@ -1922,6 +1927,39 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
     stack->add(*weekly_box, "weekly", "Weekly");
 
     stack->set_visible_child("once");
+    // Edit mode (Phase 29): prefill from the existing routine.
+    if (editing) {
+        name->set_text(er.value("name", ""));
+        prompt->get_buffer()->set_text(er.value("prompt", ""));
+        const std::string raid = er.value("agent_id", "");
+        for (size_t i = 0; i < agent_ids->size(); ++i)
+            if ((*agent_ids)[i] == raid) { agent_dd->set_selected(i); break; }
+        agent_dd->set_sensitive(false);   // routine stays bound to its thread/agent
+        json sched = json::parse(er.value("schedule_json", "{}"), nullptr, false);
+        const std::string st = sched.value("type", "");
+        if (st == "interval") {
+            type_dd->set_selected(1); stack->set_visible_child("interval");
+            every->set_value(sched.value("every_minutes", 60));
+        } else if (st == "daily") {
+            type_dd->set_selected(2); stack->set_visible_child("daily");
+            daily_time->set_text(sched.value("time", ""));
+        } else if (st == "weekly") {
+            type_dd->set_selected(3); stack->set_visible_child("weekly");
+            weekly_time->set_text(sched.value("time", ""));
+            for (int i = 0; i < 7; ++i) day_checks[i]->set_active(false);
+            for (auto& d : sched.value("days", json::array())) {
+                int di = d.get<int>();
+                if (di >= 0 && di < 7) day_checks[di]->set_active(true);
+            }
+        } else {
+            const std::string at = sched.value("at", "");
+            const auto tpos = at.find('T');
+            if (tpos != std::string::npos) {
+                once_date->set_text(at.substr(0, tpos));
+                once_time->set_text(at.substr(tpos + 1));
+            }
+        }
+    }
     type_dd->property_selected().signal_changed().connect([type_dd, stack] {
         const char* names[4] = {"once", "interval", "daily", "weekly"};
         const auto sel = type_dd->get_selected();
@@ -1950,7 +1988,8 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
 
     dialog->signal_response().connect(
         [this, dialog, name, agent_dd, agent_ids, prompt, type_dd,
-         once_date, once_time, every, daily_time, weekly_time, day_checks, err](int r) {
+         once_date, once_time, every, daily_time, weekly_time, day_checks, err,
+         editing, er](int r) {
             if (r != (int)Gtk::ResponseType::OK) {
                 delete agent_ids;
                 dialog->destroy();
@@ -1981,7 +2020,10 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
             try {
                 if (n.empty() || p.empty() || aid.empty())
                     throw std::runtime_error("name, agent and prompt are required");
-                api_.create_routine(aid, n, p, sched);   // blocking — shows errors inline
+                if (editing)
+                    api_.update_routine(er.value("id", ""), n, p, sched);
+                else
+                    api_.create_routine(aid, n, p, sched);   // blocking — shows errors inline
                 delete agent_ids;
                 dialog->destroy();
                 run_async([this] {   // nothing visual to refresh; keep queue pattern
@@ -1994,6 +2036,114 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id) {
             }
         });
     dialog->present();
+}
+
+
+// ── Routines manager (Phase 29) ─────────────────────────────────────────
+// Roster right-click → Routines…: every scheduled task with Edit / Run now /
+// enable toggle / Delete. Edit reuses the task dialog in edit mode (PATCH).
+void HiveWindow::show_routines_dialog() {
+    auto* win = Gtk::make_managed<Gtk::Window>();
+    win->set_title("Routines");
+    win->set_transient_for(*this);
+    win->set_default_size(640, 420);
+
+    auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
+    vbox->set_margin(10);
+    auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroll->set_vexpand(true);
+    auto* list = Gtk::make_managed<Gtk::ListBox>();
+    list->add_css_class("boxed-list");
+    scroll->set_child(*list);
+    vbox->append(*scroll);
+    auto* status = Gtk::make_managed<Gtk::Label>("Loading…");
+    status->set_halign(Gtk::Align::START);
+    vbox->append(*status);
+    win->set_child(*vbox);
+
+    auto reload = std::make_shared<std::function<void()>>();
+    *reload = [this, list, status, reload] {
+        run_async([this, list, status, reload] {
+            std::string err; json data;
+            try { data = api_.list_routines(); }
+            catch (const std::exception& e) { err = e.what(); }
+            {
+                std::lock_guard<std::mutex> lk(queue_m_);
+                done_queue_.push_back([this, list, status, err, data, reload] {
+                    if (!alive_) return;
+                    if (!list->get_root()) return;   // window closed
+                    while (auto* row = list->get_row_at_index(0))
+                        list->remove(*row);
+                    if (!err.empty()) { status->set_text("Error: " + err); return; }
+                    auto rs = data.value("routines", json::array());
+                    for (auto& r : rs) {
+                        const std::string rid = r.value("id", "");
+                        auto* rowbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+                        rowbox->set_margin_top(6); rowbox->set_margin_bottom(6);
+                        auto* text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+                        text->set_hexpand(true);
+                        auto* nm = Gtk::make_managed<Gtk::Label>(r.value("name", "?"));
+                        nm->set_halign(Gtk::Align::START); nm->add_css_class("heading");
+                        json sched = json::parse(r.value("schedule_json", "{}"), nullptr, false);
+                        std::string sum = sched.value("type", "?");
+                        if (sched.value("type","") == "interval")
+                            sum = "every " + std::to_string(sched.value("every_minutes",0)) + "m";
+                        else if (!sched.value("time","").empty()) sum += " " + sched.value("time","");
+                        else if (!sched.value("at","").empty()) sum += " " + sched.value("at","");
+                        sum += "  ·  next: " + r.value("next_fire_at", std::string("—"));
+                        auto* sub = Gtk::make_managed<Gtk::Label>(sum);
+                        sub->set_halign(Gtk::Align::START); sub->add_css_class("dim-label");
+                        text->append(*nm); text->append(*sub);
+
+                        auto* sw = Gtk::make_managed<Gtk::Switch>();
+                        sw->set_active(r.value("enabled", true));
+                        sw->set_valign(Gtk::Align::CENTER);
+                        sw->property_active().signal_changed().connect(
+                            [this, rid, sw] {
+                                run_async([this, rid, on = sw->get_active()] {
+                                    try { api_.set_routine_enabled(rid, on); }
+                                    catch (...) {}
+                                });
+                            });
+                        auto* run = Gtk::make_managed<Gtk::Button>("\u25B6");
+                        run->set_tooltip_text("Run now");
+                        run->set_valign(Gtk::Align::CENTER);
+                        run->signal_clicked().connect([this, rid] {
+                            run_async([this, rid] {
+                                try { api_.run_routine(rid); } catch (...) {}
+                            });
+                        });
+                        auto* edit = Gtk::make_managed<Gtk::Button>("Edit");
+                        edit->set_valign(Gtk::Align::CENTER);
+                        json rcopy = r;
+                        edit->signal_clicked().connect([this, rcopy, reload] {
+                            auto* d = Gtk::make_managed<Gtk::Window>();  // dummy anchor ref
+                            (void)d;
+                            show_task_dialog("", &rcopy);
+                        });
+                        auto* del = Gtk::make_managed<Gtk::Button>("\u2715");
+                        del->add_css_class("destructive-action");
+                        del->set_valign(Gtk::Align::CENTER);
+                        del->signal_clicked().connect([this, rid, reload] {
+                            run_async([this, rid, reload] {
+                                try { api_.delete_routine(rid); } catch (...) {}
+                                std::lock_guard<std::mutex> lk(queue_m_);
+                                done_queue_.push_back([reload] { if (*reload) (*reload)(); });
+                                dispatcher_.emit();
+                            });
+                        });
+                        rowbox->append(*text); rowbox->append(*sw);
+                        rowbox->append(*run); rowbox->append(*edit); rowbox->append(*del);
+                        list->append(*rowbox);
+                    }
+                    status->set_text(std::to_string(rs.size()) + " routines");
+                });
+            }
+            dispatcher_.emit();
+        });
+    };
+    (*reload)();
+    win->present();
 }
 
 void HiveWindow::on_new_agent() {

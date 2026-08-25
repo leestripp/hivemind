@@ -59,6 +59,11 @@ public:
     void reschedule(const std::string& id, const std::string& next_fire_at,
                     bool disable);
 
+    /// Edit name/prompt/schedule (Phase 29 routine editing UI).
+    /// Caller recomputes next_fire_at from the new schedule.
+    bool update(const std::string& id, const std::string& name,
+                const std::string& prompt, const std::string& schedule_json,
+                const std::string& next_fire_at);
     bool set_enabled(const std::string& id, bool enabled);
     bool remove(const std::string& id);
     /// Move every routine owned by old_agent to new_agent. Returns count.
