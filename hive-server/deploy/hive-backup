@@ -1,0 +1,27 @@
+#!/bin/bash
+# hive-backup — online backup of the hivemind server state.
+# Destination: /workspace/backups/hivemind (btrfs RAID1), hardlink-incremental
+# daily trees (rsync --link-dest), 14-day retention.
+set -euo pipefail
+SRC=/home/hivemind/.local/share/hivemind
+BASE=/workspace/backups/hivemind
+TS=$(date +%Y%m%d-%H%M%S)
+DEST=$BASE/$TS
+mkdir -p "$DEST"
+
+# SQLite: online .backup per db (safe while the server is writing)
+mkdir -p "$DEST/db"
+for db in "$SRC"/*.db; do
+    [ -f "$db" ] || continue
+    sqlite3 "$db" ".backup '$DEST/db/$(basename "$db")'"
+done
+
+# Everything else (agent homes, skills, server.json, secrets key…):
+# hardlink-incremental — unchanged files cost nothing.
+LATEST=$(ls -1d "$BASE"/2* 2>/dev/null | sort | tail -1 || true)
+LINK=(); [ -n "$LATEST" ] && [ "$LATEST" != "$DEST" ] && LINK=(--link-dest="$LATEST")
+rsync -a --exclude='*.db' --exclude='workspace' "${LINK[@]}" "$SRC/" "$DEST/files/"
+
+# Retention: keep newest 14
+ls -1d "$BASE"/2* | sort | head -n -14 | xargs -r rm -rf
+echo "hive-backup: $DEST ($(du -sh "$DEST" | cut -f1))"

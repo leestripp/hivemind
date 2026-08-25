@@ -1,0 +1,5 @@
+[Unit]
+Description=HiveMind state backup (online sqlite + hardlink-incremental)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/hive-backup
