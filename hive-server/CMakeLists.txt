@@ -62,7 +62,6 @@ target_include_directories(hivemind_core PUBLIC
 
 target_link_libraries(hivemind_core PUBLIC
     OmniNet
-    CURL::libcurl
     nlohmann_json::nlohmann_json
     ${SQLite3_LIBRARIES}
     pthread

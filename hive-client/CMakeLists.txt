@@ -14,7 +14,6 @@ pkg_check_modules(WEBKIT IMPORTED_TARGET webkitgtk-6.0)
 if(WEBKIT_FOUND)
     message(STATUS "WebKitGTK ${WEBKIT_VERSION} found — embedded Computer view enabled")
 endif()
-find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # Bundle the SVG icon/avatar set into the binary so the client is
@@ -46,7 +45,6 @@ add_executable(hive-client
 target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
     PkgConfig::GTKMM
-    CURL::libcurl
     nlohmann_json::nlohmann_json
     OmniNet
 )

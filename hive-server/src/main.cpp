@@ -14,7 +14,7 @@
 //   - OmniNet (HTTP + WS) — gitlab.com/leestripp/omninet (CMake FetchContent)
 //   - daedalus  (AI agent)  — gitlab.com/leestripp/daedalus (CMake FetchContent)
 //   - SQLite   (persistence) — system package
-//   - libcurl  (LLM HTTP)   — system package
+//   (no libcurl — daedalus and hivemind both use OmniNet HTTP)
 //   - nlohmann/json         — system package
 // =============================================================================
 

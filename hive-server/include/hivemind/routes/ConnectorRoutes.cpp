@@ -179,35 +179,38 @@ void register_connector_routes(OmniNet::HTTP::Server& server,
                 "http://" + (host ? std::string{*host} : "127.0.0.1:8421") +
                 "/api/oauth/callback";
 
-            // Token exchange via curl (values single-quoted after the
-            // strict charset check above; endpoints validated at create).
-            std::string cmd =
-                "curl -sS --max-time 20 -X POST " +
-                ContainerManager::shell_quote(c->token_url) +
-                " -H 'Content-Type: application/x-www-form-urlencoded'"
-                " --data-urlencode 'grant_type=authorization_code'"
-                " --data-urlencode " + ContainerManager::shell_quote("code=" + code) +
-                " --data-urlencode " + ContainerManager::shell_quote("client_id=" + c->client_id) +
-                " --data-urlencode " + ContainerManager::shell_quote("redirect_uri=" + redirect);
+            // Token exchange via OmniNet HttpClient (no curl shell-out;
+            // values percent-encoded locally — no shell, no quoting risk).
+            auto enc = [](const std::string& s) {
+                static const char* hex = "0123456789ABCDEF";
+                std::string o;
+                for (unsigned char ch : s) {
+                    if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~')
+                        o += (char)ch;
+                    else { o += '%'; o += hex[ch >> 4]; o += hex[ch & 15]; }
+                }
+                return o;
+            };
+            std::string form = "grant_type=authorization_code&code=" + enc(code) +
+                               "&client_id=" + enc(c->client_id) +
+                               "&redirect_uri=" + enc(redirect);
             if (!c->client_secret.empty())
-                cmd += " --data-urlencode " +
-                       ContainerManager::shell_quote("client_secret=" + c->client_secret);
-            cmd += " 2>/dev/null";
+                form += "&client_secret=" + enc(c->client_secret);
 
-            FILE* pipe = popen(cmd.c_str(), "r");
-            if (!pipe) {
-                send_html(resp, "Exchange failed", "<h2>Token exchange failed</h2>", 502);
-                return;
-            }
-            std::string out;
-            char buf[2048];
-            while (fgets(buf, sizeof buf, pipe)) out += buf;
-            if (pclose(pipe) != 0 || out.empty()) {
+            OmniNet::HTTP::ClientConfig cfg;
+            cfg.request_timeout = std::chrono::seconds(20);
+            OmniNet::HTTP::ClientRequest tokreq;
+            tokreq.method("POST").url(c->token_url)
+                  .header("Content-Type", "application/x-www-form-urlencoded")
+                  .body(form);
+            auto tokres = OmniNet::HTTP::Client::get_instance().send_blocking(tokreq, cfg);
+            if (!tokres.has_value() || tokres->statusCode() != 200 ||
+                tokres->bodyAsString().empty()) {
                 send_html(resp, "Exchange failed",
                           "<h2>Token exchange failed</h2><p>Provider unreachable.</p>", 502);
                 return;
             }
-            json tok = json::parse(out, nullptr, false);
+            json tok = json::parse(tokres->bodyAsString(), nullptr, false);
             const std::string access  = tok.value("access_token", "");
             if (access.empty()) {
                 send_html(resp, "Exchange failed",
