@@ -74,7 +74,7 @@ async function refresh() {
         card.className = 'agent-card';
         card.innerHTML = `
           <div class="agent-top">
-            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || autoAvatar(t.name))}.svg" width="132" height="132" alt=""></div>
+            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || autoAvatar(t.name))}.svg" width="44" height="44" alt=""></div>
             <div class="agent-id-block">
               <div class="agent-name">${esc(t.name)}</div>
               <div class="agent-role">${esc(t.role)}</div>
@@ -109,7 +109,7 @@ async function refresh() {
       card.className = 'agent-card status-' + status;
       card.innerHTML = `
         <div class="agent-top">
-          <div class="agent-avatar"><img src="/avatars/${esc(a.avatar || autoAvatar(a.name))}.svg" width="132" height="132" alt=""></div>
+          <div class="agent-avatar"><img src="/avatars/${esc(a.avatar || autoAvatar(a.name))}.svg" width="44" height="44" alt=""></div>
           <div class="agent-id-block">
             <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>
