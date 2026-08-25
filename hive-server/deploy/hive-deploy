@@ -1,6 +1,10 @@
 #!/bin/sh
 # hive-deploy — pull latest main, rebuild, restart the service.
-# Run as root:  git push rig main  (from the dev box), then  ssh root@rig hive-deploy
+# Run as root ON the rig (dev-rig). From the dev box you can only do:
+#   git push rig main
+#   ssh hivemind@dev-rig 'cd ~/hivemind && git pull --ff-only && cmake --build build -j$(nproc)'
+# root SSH is key-denied and the hivemind user has no sudo, so the final
+# `systemctl restart hive-server` is done by the human on the rig.
 set -e
 runuser -u hivemind -- git -C /home/hivemind/hivemind pull --ff-only
 runuser -u hivemind -- sh -c "cd /home/hivemind/hivemind && cmake --build build -j$(nproc)"

@@ -112,6 +112,8 @@ sudo ufw allow 22,80,443/tcp && sudo ufw enable
 
 ## 7. Upgrades
 
+On the server itself:
+
 ```bash
 cd Hive-Mind && git pull && cmake --build build -j$(nproc)
 sudo systemctl restart hivemind
@@ -119,6 +121,32 @@ sudo systemctl restart hivemind
 
 Databases migrate in place; the master key is NOT reprinted (only on a
 fresh `auth.db`).
+
+### Day-to-day rig deploy (dev-rig) — from the dev box
+
+SSH access to dev-rig is **user `hivemind` only** — root SSH is
+key-denied, and the `hivemind` user has **no sudo**. So the restart step
+is always done by the human on the rig; everything else is scriptable
+from the dev box:
+
+```bash
+# 1. dev box: commit, then push to the rig's bare repo (remote `rig`
+#    = ssh://hivemind@dev-rig/srv/git/hivemind.git)
+git push rig main
+
+# 2. pull + rebuild on the rig (works as the hivemind user, no sudo)
+ssh hivemind@dev-rig 'cd ~/hivemind && git pull --ff-only \
+    && cmake --build build -j$(nproc)'
+
+# 3. restart — ROOT ONLY, run on the rig by the human:
+#    sudo systemctl restart hive-server
+```
+
+Web-UI-only changes (`web/dist/**`) take effect on the next page load
+without a restart — StaticRoutes serves them straight from the checkout
+(`~/hivemind/web/dist`). The restart is only needed for C++/API changes.
+`hive-deploy` (below) still does all three steps, but must be run as
+root ON the rig.
 
 ## 8. Backups (hive-backup)
 
@@ -145,7 +173,7 @@ creates the `hivemind` user (+ linger for rootless podman), copies the
 checkout to `~hivemind/hivemind`, installs the systemd units
 (hive-server.service, hive-backup.timer), installs hive-deploy +
 hive-backup to /usr/local/bin, builds, enables, health-checks.
-`hive-deploy` (also captured in deploy/) = pull → rebuild → restart.
+`hive-deploy` (also captured in deploy/) = pull → rebuild → restart — run as root ON the rig (see §7 for the dev-box flow and why root/hivemind SSH can't do the restart).
 
 ### Flatpak client
 `hive-client/packaging/org.hivemind.Client.yml` — GNOME 48 runtime,
