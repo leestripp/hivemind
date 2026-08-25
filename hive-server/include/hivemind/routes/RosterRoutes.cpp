@@ -8,6 +8,9 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/AgentHost.h"
+#include "hivemind/ContainerManager.h"
+
+#include <iostream>
 #include "hivemind/RoutineStore.h"
 #include "hivemind/ThreadStore.h"
 
@@ -263,9 +266,17 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 }
             }
 
-            // 3. The roster row itself + any live host process.
+            // 3. The roster row itself + any live host process + the
+            //    container (Phase 28: deleting an agent must not orphan
+            //    its podman container — best-effort, the row is gone
+            //    either way).
             agents.delete_agent(id);
             registry.evict(id);
+            try { container_manager().remove(id); }
+            catch (const std::exception& e) {
+                std::cerr << "[roster] container teardown for " << id
+                          << " failed: " << e.what() << "\n";
+            }
             send_json(resp, json{
                 {"deleted", true},
                 {"threads_deleted", threads_deleted},
