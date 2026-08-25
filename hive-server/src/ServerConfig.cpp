@@ -55,7 +55,8 @@ void ServerConfig::save() const {
     std::ofstream f{file_, std::ios::trunc};
     if (!f) throw std::runtime_error("cannot write " + file_.string());
     f << nlohmann::json{{"workspace_root", workspace_root_},
-                        {"cors_origins", cors_origins_}}.dump(2) << "\n";
+                        {"cors_origins", cors_origins_},
+                        {"warm_containers", warm_containers_}}.dump(2) << "\n";
 }
 
 std::string ServerConfig::workspace_root() {
@@ -80,6 +81,11 @@ void ServerConfig::set_workspace_root(const std::string& path) {
     if (!fs::is_directory(expanded))
         throw std::invalid_argument("'" + expanded + "' is not a directory");
     workspace_root_ = expanded;
+    save();
+}
+
+void ServerConfig::set_warm_containers(bool on) {
+    warm_containers_ = on;
     save();
 }
 

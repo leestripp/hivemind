@@ -37,6 +37,7 @@
 #include "hivemind/routes/SecretRoutes.h"
 #include "hivemind/routes/ScreenRoutes.h"
 #include "hivemind/routes/RouteUtil.h"
+#include "hivemind/ContainerManager.h"
 #include "hivemind/ServerConfig.h"
 #include "hivemind/routes/KeyRoutes.h"
 #include "hivemind/routes/ConfigRoutes.h"
@@ -226,6 +227,32 @@ int main(int argc, char* argv[]) {
               << settings.port << "/api/health\n";
     std::cout << "Web UI:     http://" << settings.address << ":"
               << settings.port << "/\n";
+    // ─── Phase 28: container warm-up ────────────────────────────────
+    // Pre-start every agent's container at boot so the first turn isn't
+    // a cold start (~seconds of podman create+start). One background
+    // thread, staggered, best-effort: failures are logged and the lazy
+    // path in ensure_agent() still covers them. Toggle: server.json
+    // "warm_containers": false.
+    std::jthread warmup{[&agent_store](std::stop_token st) {
+        if (!ServerConfig::instance().warm_containers()) return;
+        // Give the HTTP server a moment to bind before hammering podman.
+        for (int i = 0; i < 20 && !st.stop_requested(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        for (const auto& a : agent_store.list_agents()) {
+            if (st.stop_requested()) break;
+            try {
+                container_manager().ensure_running(a.id);
+                std::cout << "[warmup] container up: " << a.name << "\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[warmup] " << a.name << " failed: "
+                          << e.what() << "\n";
+            }
+            // Stagger so a big roster doesn't stampede podman.
+            for (int i = 0; i < 10 && !st.stop_requested(); ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }};
+
     // ─── Scheduled-trigger engine ─────────────────────────────────
     // Every 30s: fire enabled schedule triggers whose next_fire_at <= now
     // (server-local time), then recompute their next fire. Once-triggers

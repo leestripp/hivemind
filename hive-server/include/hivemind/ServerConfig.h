@@ -36,6 +36,11 @@ public:
     void set_cors_origins(std::vector<std::string> origins);
     bool cors_allowed(const std::string& origin) const;
 
+    /// Phase 28: pre-start every agent's container at boot so the first
+    /// turn isn't a cold start. Default true.
+    bool warm_containers() const { return warm_containers_; }
+    void set_warm_containers(bool on);
+
     /// Expand a leading "~/" to $HOME. Static + pure for tests.
     static std::string expand_home(const std::string& path);
 
@@ -49,4 +54,5 @@ private:
     std::filesystem::path file_;
     std::string workspace_root_;
     std::vector<std::string> cors_origins_;   // "" = use default
+    bool warm_containers_ = true;
 };
