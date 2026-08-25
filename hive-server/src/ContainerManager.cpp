@@ -252,7 +252,7 @@ void ContainerManager::ensure_browser_image() {
             " (run hive-server from the repository root)");
 
     auto build = run(std::string{"podman build -t "} + kBrowserImage +
-                         "  hive-server/data/Containerfile.hive-agent-browser"
+                         " -f hive-server/data/Containerfile.hive-agent-browser"
                          " hive-server/data",
                      /*timeout_s=*/1800);
     if (build.exit_code != 0)
