@@ -54,12 +54,15 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
   `themed_icon_pixbuf()` string-replaces it with the theme foreground
   (`#eeeeec` dark / `#241f31` light) before rendering — that is what
   makes icons follow the theme.
-- **Avatars** (`data/avatars/*.svg`) are hexagonal hive-bots, one per
-  `palette_index(name)` color plus `user.svg`. They are self-contained
-  (identity colors, dark visor + white eyes) so they read on both themes.
-  When the roster row sets an `avatar` field (`avatar-0`..`avatar-5`), the
-  matching web SVG (`web/dist/avatars/`) is used instead of the auto
-  palette — same id space across client and web.
+- **Avatars** (`data/avatars/*.svg`) are a set of 20 cartoon
+  department-head badges — 10 departments (executive, engineering,
+  marketing, sales, hr, finance, it-support, design, legal, operations),
+  each in male (`<dept>.svg`) and female (`<dept>-female.svg`) variants —
+  plus `user.svg` for the human. They carry their own pastel/badge colors
+  so they read on both themes. The New Agent dialog shows the full set as
+  a picker (department pairs side by side, tooltips name each head);
+  "Auto" (the default) stably hashes the agent's name into the set, and
+  the roster's `avatar` field stores the chosen name.
 
 ## Right-click agent menu
 

@@ -3,11 +3,24 @@
 import { API } from '../api.js';
 import { $, esc } from '../util.js';
 
-// ── palette — mirrors the GTK client exactly ──────────────────────────
-// Client: palette_index(name) = std::hash<string>(name) % 6, and libstdc++
-// std::hash<string> is MurmurHash64A(seed 0xc70f6907). Reimplemented here
-// (BigInt) so web avatar colors match the client's roster/bubbles.
-const PALETTE = ['#3584e4', '#33d17a', '#f6d32d', '#ff7800', '#9141ac', '#e01b24'];
+// ── auto avatar — mirrors the GTK client exactly ──────────────────────
+// Client: auto_avatar(name) = AVATARS[std::hash<string>(name) % 20], and
+// libstdc++ std::hash<string> is MurmurHash64A(seed 0xc70f6907).
+// Reimplemented here (BigInt) so the web picks the same department head
+// the client shows in the roster/bubbles. Order must match the client's
+// avatar_names() (department pairs: male, then female).
+const AVATARS = [
+  'executive', 'executive-female',
+  'engineering', 'engineering-female',
+  'marketing', 'marketing-female',
+  'sales', 'sales-female',
+  'hr', 'hr-female',
+  'finance', 'finance-female',
+  'it-support', 'it-support-female',
+  'design', 'design-female',
+  'legal', 'legal-female',
+  'operations', 'operations-female',
+];
 
 function murmur64a(str) {
   const m = 0xc6a4a7935bd1e995n, r = 47n, mask = 0xffffffffffffffffn;
@@ -30,17 +43,9 @@ function murmur64a(str) {
   return h;
 }
 
-const paletteIndex = (name) => Number(murmur64a(name) % 6n);
-
-// Hexagon hive-bot avatar, inlined so the color can follow the palette.
-function hexBot(color, size) {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none">
-    <path d="M32 4 56 18v28L32 60 8 46V18Z" fill="${color}"/>
-    <path d="M14 28h36v14a6 6 0 0 1-6 6H20a6 6 0 0 1-6-6Z" fill="#1a1d23"/>
-    <circle cx="24" cy="38" r="3.4" fill="#fff"/>
-    <circle cx="40" cy="38" r="3.4" fill="#fff"/>
-  </svg>`;
-}
+// "Auto" avatar for agents/templates without an explicit choice: stable
+// name hash into the dept-head set (same pick as the client).
+const autoAvatar = (name) => AVATARS[Number(murmur64a(name) % BigInt(AVATARS.length))];
 
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -69,7 +74,7 @@ async function refresh() {
         card.className = 'agent-card';
         card.innerHTML = `
           <div class="agent-top">
-            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || 'avatar-0')}.svg" width="44" height="44" alt=""></div>
+            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || autoAvatar(t.name))}.svg" width="44" height="44" alt=""></div>
             <div class="agent-id-block">
               <div class="agent-name">${esc(t.name)}</div>
               <div class="agent-role">${esc(t.role)}</div>
@@ -104,9 +109,7 @@ async function refresh() {
       card.className = 'agent-card status-' + status;
       card.innerHTML = `
         <div class="agent-top">
-          <div class="agent-avatar">${a.avatar
-            ? `<img src="/avatars/${esc(a.avatar)}.svg" width="44" height="44" alt="">`
-            : hexBot(PALETTE[paletteIndex(a.name)], 44)}</div>
+          <div class="agent-avatar"><img src="/avatars/${esc(a.avatar || autoAvatar(a.name))}.svg" width="44" height="44" alt=""></div>
           <div class="agent-id-block">
             <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>

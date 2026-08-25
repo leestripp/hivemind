@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Executive — cartoon department head (female)</title>
+  <desc>Exec with a silver top knot, gold hoops, a raised brow, pearl necklace and sparkles.</desc>
+  <circle cx="120" cy="120" r="116" fill="#FFF3D0"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#EAB308" stroke-width="6"/>
+  <!-- sparkles -->
+  <path d="M42 46 l3 9 9 3 -9 3 -3 9 -3 -9 -9 -3 9 -3 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <path d="M196 66 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <path d="M200 178 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <!-- ears -->
+  <ellipse cx="58" cy="140" rx="10" ry="14" fill="#EABF9B" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="182" cy="140" rx="10" ry="14" fill="#EABF9B" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- gold hoops -->
+  <circle cx="58" cy="162" r="6" fill="none" stroke="#D4A017" stroke-width="3.5"/>
+  <circle cx="182" cy="162" r="6" fill="none" stroke="#D4A017" stroke-width="3.5"/>
+  <!-- head -->
+  <path d="M60 132 C60 96 84 74 120 74 C156 74 180 96 180 132 C180 168 156 192 120 192 C84 192 60 168 60 132 Z" fill="#EABF9B" stroke="#2E2A38" stroke-width="5"/>
+  <!-- pulled-back silver hair with top knot -->
+  <path d="M62 118 C58 72 92 60 120 60 C148 60 182 74 178 120 L169 115 C171 90 144 76 120 78 C94 80 70 92 69 116 Z" fill="#B9C0CB" stroke="#2E2A38" stroke-width="5"/>
+  <circle cx="120" cy="50" r="14" fill="#B9C0CB" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M112 48 Q120 42 128 48" fill="none" stroke="#8B95A3" stroke-width="3"/>
+  <path d="M84 82 C104 70 140 68 158 82" fill="none" stroke="#E2E8F0" stroke-width="3.5"/>
+  <!-- blush -->
+  <ellipse cx="82" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.4"/>
+  <ellipse cx="158" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.4"/>
+  <!-- eyes with lashes -->
+  <ellipse cx="97" cy="128" rx="12.5" ry="13.5" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="143" cy="128" rx="12.5" ry="13.5" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="97" cy="130" r="5.5" fill="#2E2A38"/>
+  <circle cx="143" cy="130" r="5.5" fill="#2E2A38"/>
+  <circle cx="95" cy="127" r="2" fill="#FFFFFF"/>
+  <circle cx="141" cy="127" r="2" fill="#FFFFFF"/>
+  <path d="M85 120 l-5 -4 M90 116 l-3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <path d="M155 120 l5 -4 M150 116 l3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <!-- one brow raised -->
+  <path d="M84 105 Q97 99 110 104" fill="none" stroke="#6B7686" stroke-width="4.5"/>
+  <path d="M130 100 Q143 92 156 98" fill="none" stroke="#6B7686" stroke-width="4.5"/>
+  <!-- nose -->
+  <path d="M116 143 Q120 149 124 143" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- confident smile with lip tint -->
+  <path d="M100 160 Q126 172 144 156" fill="none" stroke="#B34A50" stroke-width="4.5"/>
+  <path d="M146 153 l4 -3" stroke="#B34A50" stroke-width="3"/>
+  <!-- collar + pearl necklace -->
+  <path d="M102 194 L120 207 L138 194" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <g fill="#FFFFFF" stroke="#2E2A38" stroke-width="2.5">
+    <circle cx="104" cy="207" r="3.2"/>
+    <circle cx="112" cy="211" r="3.2"/>
+    <circle cx="120" cy="213" r="3.2"/>
+    <circle cx="128" cy="211" r="3.2"/>
+    <circle cx="136" cy="207" r="3.2"/>
+  </g>
+  <circle cx="120" cy="220" r="4" fill="#EAB308" stroke="#2E2A38" stroke-width="3"/>
+</svg>

@@ -10,6 +10,7 @@
 #include <gdkmm/pixbuf.h>
 #include <future>
 
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -264,14 +265,37 @@ static Glib::RefPtr<Gdk::Pixbuf> avatar_pixbuf(const std::string& name, int size
                       size);
 }
 
-// Stable per-agent palette index — avatar and name label share it so an
-// agent is identifiable by color across a busy multi-agent thread.
+// Stable per-agent palette index — the name label color, so an agent is
+// identifiable by color across a busy multi-agent thread.
 int palette_index(const std::string& name) {
     return (int)(std::hash<std::string>{}(name) % 6);
 }
 
-// Hexagon hive-bot avatar from the bundled SVG set. palette_index keeps an
-// agent's bot consistent across the roster and every bubble; the user gets
+// Department-head avatar set (data/avatars): 10 departments, each with a
+// male (<dept>.svg) and female (<dept>-female.svg) variant. Ordered as
+// male/female pairs so picker grids keep teammates together.
+const std::vector<std::string>& avatar_names() {
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> v;
+        for (const char* d : {"executive", "engineering", "marketing", "sales",
+                              "hr", "finance", "it-support", "design", "legal",
+                              "operations"}) {
+            v.emplace_back(d);
+            v.push_back(std::string(d) + "-female");
+        }
+        return v;
+    }();
+    return names;
+}
+
+// "Auto" avatar choice: stable hash of the agent name into the dept set, so
+// an uncustomized agent keeps the same face across roster and bubbles.
+const std::string& auto_avatar(const std::string& name) {
+    return avatar_names()[std::hash<std::string>{}(name) % avatar_names().size()];
+}
+
+// Department-head avatar from the bundled SVG set. auto_avatar keeps an
+// agent's face consistent across the roster and every bubble; the user gets
 // the person-silhouette hex.
 //
 // HiDPI (Wayland/4K): GTK works in logical pixels and the compositor scales;
@@ -285,11 +309,10 @@ constexpr int AVATAR_SUPERSAMPLE = 2; // HiDPI oversampling factor
 Gtk::Widget* make_avatar(const std::string& name, bool is_user,
                          int logical = AVATAR_LOGICAL,
                          const std::string& avatar = "") {
-    // Chosen avatar wins; "" = auto palette hash of the agent's name.
+    // Chosen avatar wins; "" = stable name-hash into the dept-head set.
     const std::string res = is_user
         ? "user"
-        : (avatar.empty() ? "avatar-" + std::to_string(palette_index(name))
-                          : avatar);
+        : (avatar.empty() ? auto_avatar(name) : avatar);
     auto* img = Gtk::make_managed<Gtk::Image>();
     img->set(avatar_pixbuf(res, logical * AVATAR_SUPERSAMPLE));
     img->set_pixel_size(logical);
@@ -2333,8 +2356,10 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         appr->set_active(existing->value("require_approval", false));
     }
 
-    // Avatar picker: grid of the bundled hive-bot SVGs. "Auto" (default)
-    // keeps the name-hash palette color. ToggleButton group = radio behavior.
+    // Avatar picker: the 20 department-head SVGs (10 depts x male/female).
+    // "Auto" (default) hashes the agent name into the set. ToggleButton
+    // group = radio behavior. Layout: full-width Auto row, then dept pairs
+    // side by side, two departments per row.
     auto* avatar_grid = Gtk::make_managed<Gtk::Grid>();
     avatar_grid->set_column_spacing(6);
     avatar_grid->set_row_spacing(6);
@@ -2343,28 +2368,47 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     auto* avatar_tiles = new std::vector<
         std::pair<std::string, Gtk::ToggleButton*>>();    // freed likewise
     Gtk::ToggleButton* group_leader = nullptr;
-    auto add_tile = [&](const std::string& val, Gtk::Widget* content, int pos) {
+    auto add_tile = [&](const std::string& val, Gtk::Widget* content,
+                        const std::string& tip, int col, int row, int width = 1) {
         auto* b = Gtk::make_managed<Gtk::ToggleButton>();
         b->set_child(*content);
         b->add_css_class("avatar-pick");
+        b->set_tooltip_text(tip);
         avatar_tiles->push_back({val, b});
         if (!group_leader) { group_leader = b; if (chosen_avatar->empty()) b->set_active(true); }
         else { b->set_group(*group_leader); if (val == *chosen_avatar) b->set_active(true); }
         b->signal_toggled().connect([b, chosen_avatar, val] {
             if (b->get_active()) *chosen_avatar = val;
         });
-        avatar_grid->attach(*b, pos % 4, pos / 4);
+        avatar_grid->attach(*b, col, row, width);
     };
     {
-        auto* lbl = Gtk::make_managed<Gtk::Label>("Auto");
+        auto* lbl = Gtk::make_managed<Gtk::Label>("Auto  —  pick from the agent's name");
         lbl->add_css_class("avatar-pick-auto");
-        add_tile("", lbl, 0);
+        add_tile("", lbl, "Auto  —  pick an avatar based on the agent's name",
+                 0, 0, 4);
     }
-    for (int i = 0; i < 6; ++i) {
+    // "it-support-female" -> "IT Support (female)"
+    auto pretty = [](const std::string& v) {
+        std::string p = v;
+        bool female = false;
+        if (p.size() > 7 && p.compare(p.size() - 7, 7, "-female") == 0) {
+            female = true;
+            p.resize(p.size() - 7);
+        }
+        for (auto& c : p) if (c == '-') c = ' ';
+        if (p == "it support") p = "IT Support";
+        else if (!p.empty()) p[0] = (char)std::toupper((unsigned char)p[0]);
+        return female ? p + " (female)" : p + " (male)";
+    };
+    const auto& avatars = avatar_names();
+    for (size_t i = 0; i < avatars.size(); ++i) {
         auto* img = Gtk::make_managed<Gtk::Image>();
-        img->set(avatar_pixbuf("avatar-" + std::to_string(i), 64));
+        img->set(avatar_pixbuf(avatars[i], 64));
         img->set_pixel_size(32);
-        add_tile("avatar-" + std::to_string(i), img, i + 1);
+        // pairs stay together: cols 0-1 = dept A, cols 2-3 = dept B
+        add_tile(avatars[i], img, pretty(avatars[i]),
+                 (int)(i % 4), (int)(1 + i / 4));
     }
 
     // Phase 19: teammate templates — pick one to pre-fill the form.

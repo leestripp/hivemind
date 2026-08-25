@@ -27,7 +27,7 @@ curl -X POST localhost:8421/api/agents -H 'Content-Type: application/json' -d '{
   "name": "Nova",
   "role": "research assistant — concise answers",
   "model": "kimi-for-coding",
-  "avatar": "avatar-3"
+  "avatar": "engineering"
 }'
 ```
 
@@ -52,11 +52,12 @@ and reloads prior history — it picks up where you left off.
 
 ## Avatars
 
-Each agent has a chat/roster avatar. Pick one of six built-in SVGs
-(`avatar-0`..`avatar-5`, served from `web/dist/avatars/`) in the client's
-New Agent dialog, or leave it blank — an **auto** palette hash of the
-agent's name is used instead. PATCHable later; the roster, chat bubbles and
-web cards all render it.
+Each agent has a chat/roster avatar. Pick one of the 20 built-in
+department-head SVGs (10 departments × male/female, e.g. `engineering`,
+`sales-female`, bundled in `hive-client/data/avatars/`) in the client's
+New Agent dialog, or leave it blank — an **auto** hash of the agent's name
+into the set is used instead. PATCHable later; the roster and chat bubbles
+render it.
 
 ## Deleting an agent (cascade)
 

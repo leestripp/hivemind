@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Sales — cartoon department head (female)</title>
+  <desc>Confident sales lead with a sleek auburn bob, dollar-sign eyes, hoop earrings and a slim tie.</desc>
+  <circle cx="120" cy="120" r="116" fill="#E2F3FF"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#0EA5E9" stroke-width="6"/>
+  <!-- decor -->
+  <path d="M46 52 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3 Z" fill="#0EA5E9" opacity="0.65"/>
+  <circle cx="194" cy="60" r="4" fill="#0EA5E9" opacity="0.7"/>
+  <circle cx="46" cy="186" r="4" fill="#0EA5E9" opacity="0.7"/>
+  <!-- sleek bob behind head -->
+  <path d="M54 158 C50 88 82 58 120 58 C158 58 190 88 186 158 L174 170 C180 126 174 98 152 87 C130 76 96 78 80 95 C66 109 62 136 66 170 Z" fill="#8C4A2F" stroke="#2E2A38" stroke-width="5"/>
+  <!-- ears -->
+  <ellipse cx="60" cy="140" rx="10" ry="14" fill="#E9B98D" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="180" cy="140" rx="10" ry="14" fill="#E9B98D" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- hoop earrings -->
+  <circle cx="58" cy="162" r="6" fill="none" stroke="#D4A017" stroke-width="3.5"/>
+  <circle cx="182" cy="162" r="6" fill="none" stroke="#D4A017" stroke-width="3.5"/>
+  <!-- head -->
+  <path d="M62 132 C62 96 86 74 120 74 C154 74 178 96 178 132 C178 168 154 192 120 192 C86 192 62 168 62 132 Z" fill="#E9B98D" stroke="#2E2A38" stroke-width="5"/>
+  <!-- side-swept bangs -->
+  <path d="M70 112 C72 84 166 82 170 110 C158 96 140 92 122 96 C104 100 84 102 70 112 Z" fill="#8C4A2F" stroke="#2E2A38" stroke-width="4.5"/>
+  <path d="M86 92 C104 84 136 82 154 90" fill="none" stroke="#B26A45" stroke-width="3"/>
+  <!-- blush -->
+  <ellipse cx="82" cy="152" rx="8" ry="4.5" fill="#EE9F80" opacity="0.5"/>
+  <ellipse cx="158" cy="152" rx="8" ry="4.5" fill="#EE9F80" opacity="0.5"/>
+  <!-- eyes with dollar pupils and lashes -->
+  <ellipse cx="97" cy="128" rx="12.5" ry="14" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="143" cy="128" rx="12.5" ry="14" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <text x="97" y="135" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="bold" fill="#15803D" text-anchor="middle">$</text>
+  <text x="143" y="135" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="bold" fill="#15803D" text-anchor="middle">$</text>
+  <path d="M85 119 l-5 -4 M90 115 l-3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <path d="M155 119 l5 -4 M150 115 l3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <!-- raised brows -->
+  <path d="M84 104 Q97 96 110 102" fill="none" stroke="#5C2E1A" stroke-width="4.5"/>
+  <path d="M130 100 Q143 92 156 98" fill="none" stroke="#5C2E1A" stroke-width="4.5"/>
+  <!-- nose -->
+  <path d="M116 143 Q120 149 124 143" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- toothy grin -->
+  <clipPath id="salesf-mouth">
+    <path d="M92 156 C100 182 140 182 148 156 C140 164 100 164 92 156 Z"/>
+  </clipPath>
+  <path d="M92 156 C100 182 140 182 148 156 C140 164 100 164 92 156 Z" fill="#6E2F2F" stroke="#2E2A38" stroke-width="4"/>
+  <g clip-path="url(#salesf-mouth)">
+    <rect x="98" y="155" width="44" height="12" rx="5" fill="#FFFFFF"/>
+    <path d="M113 155 V168 M127 155 V168" stroke="#D8D3C8" stroke-width="2"/>
+    <ellipse cx="120" cy="176" rx="11" ry="6" fill="#F58AA6"/>
+  </g>
+  <!-- collar and slim tie -->
+  <path d="M104 194 L120 208 L136 194" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <rect x="115" y="204" width="10" height="11" rx="3.5" fill="#0284C7" stroke="#2E2A38" stroke-width="3.5"/>
+  <path d="M115 213 L120 232 L125 213 Z" fill="#0EA5E9" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

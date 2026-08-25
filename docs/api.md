@@ -78,7 +78,7 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
   "model": "kimi-for-coding",         // daedalus SettingsStore model; "" = store default
   "workspace_mode": "shared",         // "shared" = podman container (default), "host" = no container
   "require_approval": false,          // true → commands park in the approval queue
-  "avatar": "avatar-3"                // "avatar-0".."avatar-5" (SVG in web/dist/avatars/); "" = auto palette hash
+  "avatar": "engineering"             // dept avatar, e.g. "engineering", "sales-female"; "" = auto (name hash)
 }
 ```
 
@@ -88,7 +88,7 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
 {
   "id": "uuid", "name": "Nova", "role": "...", "model": "...",
   "workspace_mode": "shared", "container_id": "",
-  "require_approval": false, "avatar": "avatar-3",
+  "require_approval": false, "avatar": "engineering",
   "created_at": "ISO-UTC", "updated_at": "ISO-UTC"
 }
 ```
@@ -127,7 +127,7 @@ Response reports what happened:
 | GET | `/api/connectors/:name/auth-url` | Mint one-shot state, return the provider authorize URL |
 | GET | `/api/oauth/callback?code&state` | PUBLIC provider redirect target — state is the credential; exchanges code → tokens stored in the broker as `<NAME>_ACCESS_TOKEN` / `_REFRESH_TOKEN` |
 | GET | `/api/skills/registry` | Curated marketplace catalog (Phase 21) — bundled `skills-registry.json` entries annotated with `installed` flags; install via existing `POST /api/skills/install` |
-| GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create. Roles are generic: each tells the agent to read `/workspace/index.md` for its department folder (2026-08-25 — no per-department hardcoding; the index carries the mapping) |
+| GET | `/api/templates` | Teammate templates catalog (Phase 19) — `{templates:[{id, name, role, avatar, require_approval}]}`; pre-fill/one-click the normal agent create. 10 presets, one per department head (executive … operations), each with its dept avatar; every role tells the agent to read `/workspace/index.md` for its department folder (the index carries the mapping) |
 | GET | `/api/threads/:id/messages` | Messages, chronological; each has an `attachments` array (`[]` default, Phase 18) |
 | GET | `/api/threads/:id/messages?after=<msg_id>` | Incremental fetch (polling) |
 | POST | `/api/threads/:id/messages` | Post user message → **202** `{message_id, status:"processing"}`. Optional `attachments` array (Phase 18) — metadata from prior attachment uploads |

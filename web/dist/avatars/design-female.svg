@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Design — cartoon department head (female)</title>
+  <desc>Designer with ginger waves under a purple beret, winking, pencil behind the ear.</desc>
+  <circle cx="120" cy="120" r="116" fill="#F6ECFF"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#A855F7" stroke-width="6"/>
+  <!-- decor -->
+  <circle cx="196" cy="58" r="4" fill="#A855F7" opacity="0.7"/>
+  <circle cx="44" cy="60" r="5" fill="none" stroke="#A855F7" stroke-width="3" opacity="0.7"/>
+  <path d="M196 184 l4 8 4 -8 -4 -8 Z" fill="#A855F7" opacity="0.6"/>
+  <!-- ears -->
+  <ellipse cx="58" cy="140" rx="10" ry="14" fill="#F0BE9A" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="182" cy="140" rx="10" ry="14" fill="#F0BE9A" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- head -->
+  <path d="M60 132 C60 96 84 74 120 74 C156 74 180 96 180 132 C180 168 156 192 120 192 C84 192 60 168 60 132 Z" fill="#F0BE9A" stroke="#2E2A38" stroke-width="5"/>
+  <!-- wavy ginger locks -->
+  <path d="M156 98 C168 110 164 128 172 144 C178 156 172 168 164 172 C168 160 160 150 162 138 C164 126 156 112 150 106 Z" fill="#C65D21" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M84 100 C72 112 76 130 68 146 C62 158 68 170 76 174 C72 162 80 152 78 140 C76 128 84 112 90 106 Z" fill="#C65D21" stroke="#2E2A38" stroke-width="4"/>
+  <!-- blush -->
+  <ellipse cx="82" cy="152" rx="8" ry="4.5" fill="#EE9F80" opacity="0.5"/>
+  <ellipse cx="158" cy="152" rx="8" ry="4.5" fill="#EE9F80" opacity="0.5"/>
+  <!-- paint dot on cheek -->
+  <circle cx="78" cy="144" r="2.6" fill="#2DD4BF"/>
+  <!-- open left eye with lashes -->
+  <ellipse cx="97" cy="128" rx="13" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="97" cy="131" r="6.5" fill="#2E2A38"/>
+  <circle cx="94.5" cy="127.5" r="2.2" fill="#FFFFFF"/>
+  <path d="M87 113 l-5 -4 M83 120 l-6 -2 M91 109 l-3 -6" stroke="#2E2A38" stroke-width="3"/>
+  <!-- winking right eye -->
+  <path d="M131 130 Q143 121 155 130" fill="none" stroke="#2E2A38" stroke-width="5"/>
+  <!-- brows: left raised -->
+  <path d="M84 104 Q97 96 110 102" fill="none" stroke="#8A4517" stroke-width="4.5"/>
+  <path d="M132 108 Q143 104 154 108" fill="none" stroke="#8A4517" stroke-width="4.5"/>
+  <!-- nose -->
+  <path d="M116 143 Q120 149 124 143" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- playful smirk -->
+  <path d="M96 158 Q116 174 140 160" fill="none" stroke="#B34A50" stroke-width="4.5"/>
+  <path d="M94 155 l-4 -3" stroke="#B34A50" stroke-width="3"/>
+  <!-- beret (tilted the other way) -->
+  <g transform="rotate(6 120 88)">
+    <path d="M64 98 C68 62 172 56 184 88 C188 101 176 108 158 105 C118 114 72 113 64 98 Z" fill="#A855F7" stroke="#2E2A38" stroke-width="5"/>
+    <rect x="120" y="52" width="9" height="13" rx="4.5" fill="#7E22CE" stroke="#2E2A38" stroke-width="3.5"/>
+  </g>
+  <!-- pencil behind left ear -->
+  <g transform="translate(47,116) rotate(-28)">
+    <rect x="-4.5" y="-30" width="9" height="7" rx="3" fill="#F472B6" stroke="#2E2A38" stroke-width="3"/>
+    <rect x="-4.5" y="-24" width="9" height="4" fill="#94A3B8" stroke="#2E2A38" stroke-width="2.5"/>
+    <rect x="-4.5" y="-20" width="9" height="30" fill="#FBBF24" stroke="#2E2A38" stroke-width="3.5"/>
+    <path d="M-4.5 10 L0 22 L4.5 10 Z" fill="#F3D9B0" stroke="#2E2A38" stroke-width="3"/>
+    <path d="M-1.8 17 L0 22 L1.8 17 Z" fill="#2E2A38"/>
+  </g>
+</svg>

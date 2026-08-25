@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Marketing — cartoon department head</title>
+  <desc>Excited marketer in a backwards pink cap, starry eyes, freckles and a megaphone.</desc>
+  <circle cx="120" cy="120" r="116" fill="#FFE6F0"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#EC4899" stroke-width="6"/>
+  <!-- megaphone floating left -->
+  <g transform="translate(10,52) rotate(-14) scale(1.22)">
+    <path d="M6 4 L28 -8 L28 18 L6 10 Z" fill="#F472B6" stroke="#2E2A38" stroke-width="4"/>
+    <rect x="26" y="-11" width="7" height="32" rx="3.5" fill="#EC4899" stroke="#2E2A38" stroke-width="3.5"/>
+    <rect x="4" y="8" width="7" height="12" rx="3" fill="#EC4899" stroke="#2E2A38" stroke-width="3.5"/>
+    <path d="M42 -1 q7 6 0 13" fill="none" stroke="#EC4899" stroke-width="3.5"/>
+    <path d="M49 -6 q10 11 0 23" fill="none" stroke="#EC4899" stroke-width="3.5"/>
+  </g>
+  <!-- decor -->
+  <circle cx="196" cy="56" r="4" fill="#EC4899" opacity="0.7"/>
+  <circle cx="200" cy="186" r="4" fill="#EC4899" opacity="0.7"/>
+  <path d="M42 178 l4 8 4 -8 -4 -8 Z" fill="#EC4899" opacity="0.6"/>
+  <!-- ears -->
+  <ellipse cx="58" cy="140" rx="10" ry="14" fill="#FFDDBF" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="182" cy="140" rx="10" ry="14" fill="#FFDDBF" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- head -->
+  <path d="M60 132 C60 96 84 74 120 74 C156 74 180 96 180 132 C180 168 156 192 120 192 C84 192 60 168 60 132 Z" fill="#FFDDBF" stroke="#2E2A38" stroke-width="5"/>
+  <!-- blonde fringe peeking from cap -->
+  <path d="M84 106 Q92 96 100 105 Q108 95 116 104 Q124 95 132 104 Q140 95 148 105 Q156 97 160 108 L160 100 L84 100 Z" fill="#F6C453" stroke="#D9A62E" stroke-width="3"/>
+  <!-- freckles -->
+  <circle cx="82" cy="148" r="1.8" fill="#D98E5F"/>
+  <circle cx="90" cy="152" r="1.8" fill="#D98E5F"/>
+  <circle cx="86" cy="156" r="1.8" fill="#D98E5F"/>
+  <circle cx="158" cy="148" r="1.8" fill="#D98E5F"/>
+  <circle cx="150" cy="152" r="1.8" fill="#D98E5F"/>
+  <circle cx="154" cy="156" r="1.8" fill="#D98E5F"/>
+  <!-- starry eyes -->
+  <ellipse cx="97" cy="128" rx="12.5" ry="14" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="143" cy="128" rx="12.5" ry="14" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="97" cy="131" r="6.5" fill="#2E2A38"/>
+  <circle cx="143" cy="131" r="6.5" fill="#2E2A38"/>
+  <path d="M94 124 l1.2 2.8 2.8 1.2 -2.8 1.2 -1.2 2.8 -1.2 -2.8 -2.8 -1.2 2.8 -1.2 Z" fill="#FFFFFF"/>
+  <path d="M140 124 l1.2 2.8 2.8 1.2 -2.8 1.2 -1.2 2.8 -1.2 -2.8 -2.8 -1.2 2.8 -1.2 Z" fill="#FFFFFF"/>
+  <!-- raised brows -->
+  <path d="M83 104 Q97 94 111 102" fill="none" stroke="#B0763B" stroke-width="5"/>
+  <path d="M129 102 Q143 94 157 104" fill="none" stroke="#B0763B" stroke-width="5"/>
+  <!-- nose -->
+  <path d="M116 143 Q120 149 124 143" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- big open grin -->
+  <path d="M92 156 C98 186 142 186 148 156 C138 166 102 166 92 156 Z" fill="#8E3B46" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="120" cy="172" rx="12" ry="6.5" fill="#F58AA6"/>
+  <!-- blush -->
+  <ellipse cx="80" cy="150" rx="8" ry="4.5" fill="#F2A58C" opacity="0.45"/>
+  <ellipse cx="160" cy="150" rx="8" ry="4.5" fill="#F2A58C" opacity="0.45"/>
+  <!-- backwards cap -->
+  <path d="M66 102 C66 62 174 62 174 102 Z" fill="#F472B6" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M96 66 C98 78 98 90 97 101 M144 66 C142 78 142 90 143 101" fill="none" stroke="#DB2777" stroke-width="3"/>
+  <circle cx="120" cy="62" r="6" fill="#DB2777" stroke="#2E2A38" stroke-width="3.5"/>
+  <rect x="172" y="86" width="36" height="15" rx="7.5" fill="#EC4899" stroke="#2E2A38" stroke-width="4.5" transform="rotate(-9 172 93)"/>
+</svg>

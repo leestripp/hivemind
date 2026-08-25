@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Executive — cartoon department head</title>
+  <desc>Confident exec with slicked-back silver hair, a raised brow, gold tie and sparkles.</desc>
+  <circle cx="120" cy="120" r="116" fill="#FFF3D0"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#EAB308" stroke-width="6"/>
+  <!-- sparkles -->
+  <path d="M42 46 l3 9 9 3 -9 3 -3 9 -3 -9 -9 -3 9 -3 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <path d="M196 66 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <path d="M200 178 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2 Z" fill="#FDE047" stroke="#EAB308" stroke-width="2.5"/>
+  <!-- ears -->
+  <ellipse cx="58" cy="140" rx="10" ry="14" fill="#F5CFA8" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="182" cy="140" rx="10" ry="14" fill="#F5CFA8" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- head -->
+  <path d="M60 132 C60 96 84 74 120 74 C156 74 180 96 180 132 C180 168 156 192 120 192 C84 192 60 168 60 132 Z" fill="#F5CFA8" stroke="#2E2A38" stroke-width="5"/>
+  <!-- slicked-back silver hair -->
+  <path d="M62 118 C58 70 92 56 120 56 C150 56 184 72 178 120 L169 115 C171 88 144 74 120 76 C94 78 70 92 69 116 Z" fill="#9AA5B1" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M84 78 C104 66 140 64 158 78" fill="none" stroke="#CBD5E1" stroke-width="4"/>
+  <path d="M92 88 C110 78 134 76 150 86" fill="none" stroke="#CBD5E1" stroke-width="3"/>
+  <!-- blush -->
+  <ellipse cx="82" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.4"/>
+  <ellipse cx="158" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.4"/>
+  <!-- eyes -->
+  <ellipse cx="97" cy="128" rx="12.5" ry="13.5" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="143" cy="128" rx="12.5" ry="13.5" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="97" cy="130" r="5.5" fill="#2E2A38"/>
+  <circle cx="143" cy="130" r="5.5" fill="#2E2A38"/>
+  <circle cx="95" cy="127" r="2" fill="#FFFFFF"/>
+  <circle cx="141" cy="127" r="2" fill="#FFFFFF"/>
+  <!-- one brow raised -->
+  <path d="M84 105 Q97 99 110 104" fill="none" stroke="#6B7686" stroke-width="5"/>
+  <path d="M130 100 Q143 92 156 98" fill="none" stroke="#6B7686" stroke-width="5"/>
+  <!-- nose -->
+  <path d="M116 143 Q120 149 124 143" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- smug smirk -->
+  <path d="M100 160 Q126 172 144 156" fill="none" stroke="#2E2A38" stroke-width="4.5"/>
+  <path d="M146 153 l4 -3" stroke="#2E2A38" stroke-width="3"/>
+  <!-- strong chin -->
+  <path d="M112 188 Q120 192 128 188" fill="none" stroke="#2E2A38" stroke-width="3"/>
+  <!-- collar and gold tie -->
+  <path d="M102 194 L120 208 L138 194" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <rect x="113" y="204" width="14" height="12" rx="4" fill="#CA8A04" stroke="#2E2A38" stroke-width="3.5"/>
+  <path d="M113 214 L120 234 L127 214 Z" fill="#EAB308" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

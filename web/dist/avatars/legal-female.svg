@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Legal — cartoon department head (female)</title>
+  <desc>Counsel with a dark side-part and low bun, spectacles, pearl studs and the scales of justice.</desc>
+  <circle cx="120" cy="120" r="116" fill="#EDF0F4"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#64748B" stroke-width="6"/>
+  <!-- scales of justice -->
+  <g transform="translate(16,44)" stroke="#64748B" stroke-width="3.5">
+    <path d="M30 12 V44" fill="none"/>
+    <path d="M21 44 H39" fill="none"/>
+    <path d="M18 18 H42" fill="none"/>
+    <circle cx="30" cy="10" r="3" fill="#64748B"/>
+    <path d="M18 18 L12 32 M18 18 L24 32" fill="none" stroke-width="2.5"/>
+    <path d="M10 32 Q18 41 26 32 Z" fill="#CBD5E1"/>
+    <path d="M42 18 L36 32 M42 18 L48 32" fill="none" stroke-width="2.5"/>
+    <path d="M34 32 Q42 41 50 32 Z" fill="#CBD5E1"/>
+  </g>
+  <!-- decor -->
+  <circle cx="198" cy="60" r="4" fill="#64748B" opacity="0.7"/>
+  <circle cx="196" cy="188" r="4" fill="#64748B" opacity="0.7"/>
+  <!-- low bun behind head -->
+  <circle cx="188" cy="142" r="13" fill="#33261E" stroke="#2E2A38" stroke-width="4.5"/>
+  <path d="M181 138 Q188 133 195 138" fill="none" stroke="#241A12" stroke-width="3"/>
+  <!-- ears -->
+  <ellipse cx="58" cy="140" rx="10" ry="14" fill="#E8B48C" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="182" cy="140" rx="10" ry="14" fill="#E8B48C" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- pearl studs -->
+  <circle cx="57" cy="157" r="3.8" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3"/>
+  <circle cx="183" cy="157" r="3.8" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3"/>
+  <!-- head -->
+  <path d="M60 132 C60 96 84 74 120 74 C156 74 180 96 180 132 C180 168 156 192 120 192 C84 192 60 168 60 132 Z" fill="#E8B48C" stroke="#2E2A38" stroke-width="5"/>
+  <!-- dark side-part hair -->
+  <path d="M62 118 C58 72 92 58 120 58 C150 58 182 74 178 120 L169 115 C169 92 146 80 124 82 C102 84 76 92 71 117 Z" fill="#33261E" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M118 62 C110 70 103 78 99 88" fill="none" stroke="#5C4A3A" stroke-width="3"/>
+  <path d="M130 66 C142 69 153 77 159 87" fill="none" stroke="#5C4A3A" stroke-width="3"/>
+  <!-- eyes with lashes -->
+  <ellipse cx="97" cy="130" rx="11.5" ry="13" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="143" cy="130" rx="11.5" ry="13" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="97" cy="132" r="5.5" fill="#2E2A38"/>
+  <circle cx="143" cy="132" r="5.5" fill="#2E2A38"/>
+  <circle cx="95" cy="129" r="2" fill="#FFFFFF"/>
+  <circle cx="141" cy="129" r="2" fill="#FFFFFF"/>
+  <path d="M86 121 l-5 -4 M90 117 l-3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <path d="M154 121 l5 -4 M150 117 l3 -5" stroke="#2E2A38" stroke-width="3"/>
+  <!-- spectacles -->
+  <circle cx="97" cy="130" r="15" fill="none" stroke="#475569" stroke-width="3.5"/>
+  <circle cx="143" cy="130" r="15" fill="none" stroke="#475569" stroke-width="3.5"/>
+  <path d="M112 129 H128" stroke="#475569" stroke-width="3.5"/>
+  <path d="M82 127 L64 123 M158 127 L176 123" stroke="#475569" stroke-width="3.5"/>
+  <!-- brows -->
+  <path d="M86 110 Q97 106 108 110" fill="none" stroke="#33261E" stroke-width="4"/>
+  <path d="M132 110 Q143 106 154 110" fill="none" stroke="#33261E" stroke-width="4"/>
+  <!-- nose -->
+  <path d="M116 144 Q120 150 124 144" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- firm, kind smile with lip tint -->
+  <path d="M102 162 Q120 171 138 162" fill="none" stroke="#B34A50" stroke-width="4.5"/>
+  <!-- blush -->
+  <ellipse cx="82" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.45"/>
+  <ellipse cx="158" cy="152" rx="8" ry="4.5" fill="#F2A58C" opacity="0.45"/>
+  <!-- collar -->
+  <path d="M104 194 L120 207 L136 194" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+</svg>

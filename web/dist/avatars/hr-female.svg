@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>HR / People — cartoon department head (female)</title>
+  <desc>Warm HR partner with a joyful curly afro, heart clip and closed-eye smile.</desc>
+  <circle cx="120" cy="120" r="116" fill="#FFF0E2"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#F97316" stroke-width="6"/>
+  <!-- decor -->
+  <path d="M196 54 c-4 -5 -11 -1 -9 5 c1 3 5 6 9 9 c4 -3 8 -6 9 -9 c2 -6 -5 -10 -9 -5 Z" fill="#FB923C" opacity="0.8"/>
+  <circle cx="46" cy="64" r="4" fill="#F97316" opacity="0.7"/>
+  <circle cx="194" cy="188" r="4" fill="#F97316" opacity="0.7"/>
+  <!-- curly afro (overlapping circles = cartoon curls) -->
+  <g fill="#3D2B1F" stroke="#2E2A38" stroke-width="4.5">
+    <circle cx="64" cy="108" r="16"/>
+    <circle cx="82" cy="80" r="17"/>
+    <circle cx="108" cy="66" r="17"/>
+    <circle cx="134" cy="66" r="17"/>
+    <circle cx="160" cy="82" r="16"/>
+    <circle cx="176" cy="110" r="15"/>
+    <circle cx="58" cy="140" r="14"/>
+    <circle cx="182" cy="140" r="14"/>
+    <circle cx="64" cy="168" r="13"/>
+    <circle cx="176" cy="168" r="13"/>
+  </g>
+  <circle cx="120" cy="120" r="56" fill="#3D2B1F"/>
+  <!-- ears -->
+  <ellipse cx="62" cy="142" rx="9" ry="13" fill="#9C6644" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="178" cy="142" rx="9" ry="13" fill="#9C6644" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- head -->
+  <path d="M64 134 C64 98 88 78 120 78 C152 78 176 98 176 134 C176 168 152 192 120 192 C88 192 64 168 64 134 Z" fill="#9C6644" stroke="#2E2A38" stroke-width="5"/>
+  <!-- heart hair clip -->
+  <g transform="translate(166,108) rotate(14)">
+    <path d="M0 3 C-7 -5 -17 1 0 14 C17 1 7 -5 0 3 Z" fill="#F43F5E" stroke="#2E2A38" stroke-width="3.5"/>
+  </g>
+  <!-- blush -->
+  <ellipse cx="86" cy="154" rx="9" ry="5" fill="#C77B52" opacity="0.6"/>
+  <ellipse cx="154" cy="154" rx="9" ry="5" fill="#C77B52" opacity="0.6"/>
+  <!-- happy closed eyes with lash tips -->
+  <path d="M84 130 Q97 119 110 130" fill="none" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M130 130 Q143 119 156 130" fill="none" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M84 130 l-4 -3 M156 130 l4 -3" stroke="#2E2A38" stroke-width="3"/>
+  <!-- soft brows -->
+  <path d="M88 112 Q97 107 106 112" fill="none" stroke="#3D2B1F" stroke-width="4"/>
+  <path d="M134 112 Q143 107 152 112" fill="none" stroke="#3D2B1F" stroke-width="4"/>
+  <!-- nose -->
+  <path d="M116 145 Q120 151 124 145" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- open smile with tongue -->
+  <clipPath id="hrf-mouth">
+    <path d="M94 158 C102 182 138 182 146 158 C136 167 104 167 94 158 Z"/>
+  </clipPath>
+  <path d="M94 158 C102 182 138 182 146 158 C136 167 104 167 94 158 Z" fill="#6E2F2F" stroke="#2E2A38" stroke-width="4"/>
+  <g clip-path="url(#hrf-mouth)">
+    <ellipse cx="120" cy="174" rx="12" ry="7" fill="#F58AA6"/>
+  </g>
+</svg>

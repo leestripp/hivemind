@@ -23,7 +23,7 @@ struct RosterAgent {
     std::string model;          // daedalus SettingsStore model name ("" = store default)
     std::string workspace_mode; // "shared" (company /workspace) — containers land in Phase 2
     std::string container_id;   // "" until Phase 2
-    std::string avatar;         // "avatar-0".."avatar-5"; "" = auto (palette hash of name)
+    std::string avatar;         // dept avatar name e.g. "engineering-female"; "" = auto (name hash)
     bool require_approval = false; // Phase 3: gate shell commands for human review
     std::string created_at;
     std::string updated_at;

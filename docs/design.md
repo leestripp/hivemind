@@ -242,7 +242,7 @@ LLMStore), **Keys**, **Settings**. See `docs/web.md`. (Phase 12 removed the
 | Routines | `~/.local/share/hivemind/routines.db` |
 | Global skill library | `~/.local/share/hivemind/skills/<name>/SKILL.md` |
 | Skill enable state | symlinks in `agents/<id>/.agents/skills/` (no DB) |
-| Web avatar SVGs | `web/dist/avatars/avatar-0..5.svg` |
+| Client avatar SVGs | `hive-client/data/avatars/` (20 dept heads + `user.svg`, compiled into gresources) |
 | Agent runtime state (history, memory, skills) | `~/.local/share/hivemind/agents/<id>/` |
 | API keys | `~/.local/share/hivemind/auth.db` (hashes only) |
 | Server config (workspace_root) | `~/.local/share/hivemind/server.json` |

@@ -16,12 +16,26 @@
     <file>icons/task-add.svg</file>
     <file>icons/trash.svg</file>
     <file>icons/workflows.svg</file>
-    <file>avatars/avatar-0.svg</file>
-    <file>avatars/avatar-1.svg</file>
-    <file>avatars/avatar-2.svg</file>
-    <file>avatars/avatar-3.svg</file>
-    <file>avatars/avatar-4.svg</file>
-    <file>avatars/avatar-5.svg</file>
+    <file>avatars/design.svg</file>
+    <file>avatars/design-female.svg</file>
+    <file>avatars/engineering.svg</file>
+    <file>avatars/engineering-female.svg</file>
+    <file>avatars/executive.svg</file>
+    <file>avatars/executive-female.svg</file>
+    <file>avatars/finance.svg</file>
+    <file>avatars/finance-female.svg</file>
+    <file>avatars/hr.svg</file>
+    <file>avatars/hr-female.svg</file>
+    <file>avatars/it-support.svg</file>
+    <file>avatars/it-support-female.svg</file>
+    <file>avatars/legal.svg</file>
+    <file>avatars/legal-female.svg</file>
+    <file>avatars/marketing.svg</file>
+    <file>avatars/marketing-female.svg</file>
+    <file>avatars/operations.svg</file>
+    <file>avatars/operations-female.svg</file>
+    <file>avatars/sales.svg</file>
+    <file>avatars/sales-female.svg</file>
     <file>avatars/user.svg</file>
   </gresource>
 </gresources>
