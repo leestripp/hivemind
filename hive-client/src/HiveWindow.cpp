@@ -1935,7 +1935,7 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
         for (size_t i = 0; i < agent_ids->size(); ++i)
             if ((*agent_ids)[i] == raid) { agent_dd->set_selected(i); break; }
         agent_dd->set_sensitive(false);   // routine stays bound to its thread/agent
-        json sched = json::parse(er.value("schedule_json", "{}"), nullptr, false);
+        json sched = er.value("schedule", json::object());
         const std::string st = sched.value("type", "");
         if (st == "interval") {
             type_dd->set_selected(1); stack->set_visible_child("interval");
@@ -2084,12 +2084,7 @@ void HiveWindow::show_routines_dialog() {
                         text->set_hexpand(true);
                         auto* nm = Gtk::make_managed<Gtk::Label>(r.value("name", "?"));
                         nm->set_halign(Gtk::Align::START); nm->add_css_class("heading");
-                        json sched = json::parse(r.value("schedule_json", "{}"), nullptr, false);
-                        std::string sum = sched.value("type", "?");
-                        if (sched.value("type","") == "interval")
-                            sum = "every " + std::to_string(sched.value("every_minutes",0)) + "m";
-                        else if (!sched.value("time","").empty()) sum += " " + sched.value("time","");
-                        else if (!sched.value("at","").empty()) sum += " " + sched.value("at","");
+                        std::string sum = r.value("schedule_text", "");
                         sum += "  ·  next: " + r.value("next_fire_at", std::string("—"));
                         auto* sub = Gtk::make_managed<Gtk::Label>(sum);
                         sub->set_halign(Gtk::Align::START); sub->add_css_class("dim-label");
