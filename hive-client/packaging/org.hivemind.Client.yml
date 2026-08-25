@@ -1,0 +1,96 @@
+# Flatpak manifest for the HiveMind GTK4 client.
+# Build:  flatpak-builder --force-clean build-dir hive-client/packaging/org.hivemind.Client.yml
+# Run:    flatpak-builder --run build-dir hive-client/packaging/org.hivemind.Client.yml hive-client
+app-id: org.hivemind.Client
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+command: hive-client
+finish-args:
+  - --share=network              # talks to hive-server over HTTP(S)
+  - --socket=wayland
+  - --socket=fallback-x11
+
+modules:
+  # ── gtkmm-4.0 stack (not in the GNOME runtime) ──────────────────────
+  - name: mm-common
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/mm-common/1.0/mm-common-1.0.6.tar.xz
+        sha256: b55c46037dbcdabc5cee9b2b6e6b656fa3a22d895c83ba5e90e57b6b52ec1355
+
+  - name: libsigcplusplus
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/libsigc++/3.0/libsigc++-3.0.7.tar.xz
+        sha256: bfbf91e872e5f4086d20a63a3cf69053d39f9e97b768d8db2255a9eb6599be6e
+
+  - name: glibmm
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/glibmm/2.80/glibmm-2.80.1.tar.xz
+        sha256: f2b63df2abbafdaffee0ad0a2b721fdbb6c4bc0fbfbae15b7ad8805997ed505f
+
+  - name: cairomm
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/cairomm/1.18/cairomm-1.18.0.tar.xz
+        sha256: b81255394e3ea8e8aa887276d28ada2a3fd8feae3b10490f6c148feb2bdf0a6f
+
+  - name: pangomm
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/pangomm/2.52/pangomm-2.52.0.tar.xz
+        sha256: 34a134126a6484ff12f77435840436b0fa589288b6b6df08c613454b1a85cce5
+
+  - name: gtkmm
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/gtkmm/4.16/gtkmm-4.16.0.tar.xz
+        sha256: 3b23fd3c8e120e7bdaea9cb020da0810e9b81343a1d1c722d4900d0500ee56ff
+
+  - name: nlohmann-json
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DJSON_BuildTests=OFF
+    sources:
+      - type: git
+        url: https://github.com/nlohmann/json.git
+        tag: v3.11.3
+
+  # ── OmniNet (pre-fetched; the superbuild uses it via
+  #    FETCHCONTENT_SOURCE_DIR_OMNINET) ────────────────────────────────
+  - name: omninet-src
+    buildsystem: simple
+    build-commands: []
+    sources:
+      - type: git
+        url: https://gitlab.com/leestripp/omninet.git
+        branch: main
+        dest: omninet-src
+
+  # ── the client ──────────────────────────────────────────────────────
+  - name: hivemind
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DHIVEMIND_BUILD_SERVER=OFF
+      - -DHIVEMIND_USE_DAEDALUS=OFF
+      - -DBUILD_TESTING=OFF
+      - -DFETCHCONTENT_SOURCE_DIR_OMNINET=/run/build/omninet-src
+    build-commands: []
+    post-install:
+      - install -Dm755 build/hive-client/hive-client /app/bin/hive-client
+      - install -Dm644 hive-client/packaging/org.hivemind.Client.desktop /app/share/applications/org.hivemind.Client.desktop
+      - install -Dm644 hive-client/packaging/org.hivemind.Client.metainfo.xml /app/share/metainfo/org.hivemind.Client.metainfo.xml
+      - install -Dm644 hive-client/data/icons/hive.svg /app/share/icons/hicolor/scalable/apps/org.hivemind.Client.svg
+    sources:
+      - type: dir
+        path: ../..

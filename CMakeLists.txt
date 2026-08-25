@@ -122,7 +122,10 @@ enable_testing()
 # ============================================================================
 # Subprojects
 # ============================================================================
-add_subdirectory(hive-server)
+option(HIVEMIND_BUILD_SERVER "Build the hive-server daemon" ON)
+if(HIVEMIND_BUILD_SERVER)
+    add_subdirectory(hive-server)
+endif()
 
 option(HIVEMIND_BUILD_CLIENT "Build the GTK4/gtkmm4 native client" ON)
 if(HIVEMIND_BUILD_CLIENT)
@@ -137,7 +140,9 @@ if(HIVEMIND_BUILD_CLIENT)
     endif()
 endif()
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/tests")
+# Tests cover the server side only — skip in client-only builds
+# (e.g. the Flatpak manifest configures with HIVEMIND_BUILD_SERVER=OFF).
+if(HIVEMIND_BUILD_SERVER AND EXISTS "${CMAKE_SOURCE_DIR}/tests")
     add_subdirectory(tests)
 endif()
 

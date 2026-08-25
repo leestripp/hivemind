@@ -1,0 +1,9 @@
+#!/bin/sh
+# hive-deploy — pull latest main, rebuild, restart the service.
+# Run as root:  git push rig main  (from the dev box), then  ssh root@rig hive-deploy
+set -e
+runuser -u hivemind -- git -C /home/hivemind/hivemind pull --ff-only
+runuser -u hivemind -- sh -c "cd /home/hivemind/hivemind && cmake --build build -j$(nproc)"
+systemctl restart hive-server
+sleep 2
+systemctl is-active hive-server && curl -s http://127.0.0.1:8421/api/health

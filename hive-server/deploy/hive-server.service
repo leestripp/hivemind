@@ -1,0 +1,20 @@
+[Unit]
+Description=HiveMind server (agent roster, threads, scheduler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hivemind
+Group=hivemind
+WorkingDirectory=/home/hivemind/hivemind
+ExecStart=/home/hivemind/hivemind/build/hive-server/hive-server
+Restart=on-failure
+RestartSec=3
+# secrets.key / auth.db live in ~/.local/share/hivemind with 0600 perms
+UMask=0077
+NoNewPrivileges=false
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

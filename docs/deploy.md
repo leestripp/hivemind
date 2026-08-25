@@ -136,3 +136,26 @@ Manual run: `sudo hive-backup`. Restore: stop hivemind, copy a snapshot's
 `db/*.db` + `files/` back over `~/.local/share/hivemind/`, start hivemind.
 The agents' *containers* are not backed up — they're disposable; rebuild
 from the Containerfile.
+
+## 9. Packaging (Phase 31)
+
+### Fresh server install
+`hive-server/deploy/install.sh` (run as root, path to checkout):
+creates the `hivemind` user (+ linger for rootless podman), copies the
+checkout to `~hivemind/hivemind`, installs the systemd units
+(hive-server.service, hive-backup.timer), installs hive-deploy +
+hive-backup to /usr/local/bin, builds, enables, health-checks.
+`hive-deploy` (also captured in deploy/) = pull → rebuild → restart.
+
+### Flatpak client
+`hive-client/packaging/org.hivemind.Client.yml` — GNOME 48 runtime,
+builds the gtkmm-4.0 stack + nlohmann_json + OmniNet from source
+(client-only configure: HIVEMIND_BUILD_SERVER=OFF /
+HIVEMIND_USE_DAEDALUS=OFF, FETCHCONTENT_SOURCE_DIR_OMNINET points at
+the pre-fetched module). Desktop file + metainfo + icon included.
+
+    flatpak-builder --force-clean build-dir \
+        hive-client/packaging/org.hivemind.Client.yml
+
+Not build-tested in the dev sandbox (no flatpak-builder) — run on a
+machine with flatpak + the GNOME 48 SDK installed.
