@@ -36,6 +36,9 @@ public:
     nlohmann::json ui_select_thread(const std::string& id);
     nlohmann::json ui_send(const std::string& body);
     nlohmann::json ui_toggle_theme();                // POST /ui/action/theme
+    /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
+    void connect_with_credentials(const std::string& url, const std::string& key,
+                                  std::function<void(std::string)> done);
     nlohmann::json ui_open_dialog(const std::string& name);  // test hook                // POST /ui/action/theme
     nlohmann::json ui_stop();
     nlohmann::json ui_delete_thread(const std::string& id);

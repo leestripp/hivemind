@@ -652,51 +652,62 @@ void HiveWindow::maybe_show_connect_dialog() {
                 error->set_visible(true);
                 return;   // keep the dialog open
             }
-            // Verify the credentials asynchronously BEFORE committing them:
-            // previously an OK with a bad key saved it, called refresh_all(),
-            // got a 401, and immediately reopened this dialog — forever.
+            // Verify the credentials asynchronously BEFORE committing them
+            // (shared with the UiApi connect action — same probe+save path).
             error->set_text("Checking connection…");
             error->set_visible(true);
             cancel_btn->set_sensitive(false);
             ok_btn->set_sensitive(false);
             server->set_sensitive(false);
             key->set_sensitive(false);
-            std::thread([this, dialog, error, cancel_btn, ok_btn,
-                         server, key, url, k] {
-                std::string err;
-                try {
-                    ApiClient probe{url};
-                    probe.set_api_key(k);
-                    probe.list_agents();   // throws on network/auth failure
-                } catch (const std::exception& e) {
-                    err = e.what();
-                }
-                {
-                    std::lock_guard<std::mutex> lk(queue_m_);
-                    done_queue_.push_back(
-                        [this, dialog, error, cancel_btn, ok_btn,
-                         server, key, url, k, err] {
-                            if (!alive_ || connect_dialog_ != dialog) return;
-                            if (!err.empty()) {
-                                error->set_text("Connection failed: " + err);
-                                cancel_btn->set_sensitive(true);
-                                ok_btn->set_sensitive(true);
-                                server->set_sensitive(true);
-                                key->set_sensitive(true);
-                                return;   // keep the dialog open for a retry
-                            }
-                            server_url_ = url;
-                            api_.set_base_url(server_url_);
-                            api_.set_api_key(k);
-                            save_config();
-                            dialog->destroy();
-                            refresh_all();
-                        });
-                }
-                dispatcher_.emit();
-            }).detach();
+            connect_with_credentials(url, k,
+                [this, dialog, error, cancel_btn, ok_btn,
+                 server, key](std::string err) {
+                    if (!alive_ || connect_dialog_ != dialog) return;
+                    if (!err.empty()) {
+                        error->set_text("Connection failed: " + err);
+                        cancel_btn->set_sensitive(true);
+                        ok_btn->set_sensitive(true);
+                        server->set_sensitive(true);
+                        key->set_sensitive(true);
+                        return;   // keep the dialog open for a retry
+                    }
+                    dialog->destroy();
+                });
         });
     dialog->present();
+}
+
+// Probe-then-commit. Used by the Connect dialog AND the UiApi connect action
+// (one code path — a headless test exercises the real login flow).
+void HiveWindow::connect_with_credentials(const std::string& url,
+                                          const std::string& key,
+                                          std::function<void(std::string)> done) {
+    std::thread([this, url, key, done = std::move(done)]() mutable {
+        std::string err;
+        try {
+            ApiClient probe{url};
+            probe.set_api_key(key);
+            probe.list_agents();   // throws on network/auth failure
+        } catch (const std::exception& e) {
+            err = e.what();
+        }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, url, key, err, done = std::move(done)] {
+                if (!alive_) return;
+                if (err.empty()) {
+                    server_url_ = url;
+                    api_.set_base_url(server_url_);
+                    api_.set_api_key(key);
+                    save_config();
+                    refresh_all();
+                }
+                done(err);
+            });
+        }
+        dispatcher_.emit();
+    }).detach();
 }
 
 // ── async plumbing ──────────────────────────────────────────────────────────

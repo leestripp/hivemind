@@ -108,6 +108,24 @@ void UiApi::start() {
             send_json(resp, w.ui_toggle_theme());
         });
 
+    // Drive the real connect flow headlessly (regression for the Connect
+    // dialog): blocks until the probe finishes, reports the actual error.
+    server_->post("/ui/action/connect",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json b = body_json(req);
+            std::mutex m; std::condition_variable cv; bool done_flag = false;
+            std::string err_out = "no callback";
+            w.connect_with_credentials(b.value("server", ""), b.value("key", ""),
+                [&](std::string err) {
+                    { std::lock_guard<std::mutex> lk(m); err_out = err; done_flag = true; }
+                    cv.notify_one();
+                });
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait_for(lk, std::chrono::seconds(20), [&] { return done_flag; });
+            if (err_out.empty()) send_json(resp, json{{"ok", true}});
+            else send_json(resp, json{{"ok", false}, {"error", err_out}});
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());
