@@ -119,3 +119,20 @@ sudo systemctl restart hivemind
 
 Databases migrate in place; the master key is NOT reprinted (only on a
 fresh `auth.db`).
+
+## 8. Backups (hive-backup)
+
+`/usr/local/bin/hive-backup` (source: `hive-server/deploy/`) runs daily at
+03:30 via `hive-backup.timer`:
+
+- **Online SQLite backups** (`.backup`) of every `*.db` in
+  `~/.local/share/hivemind/` — safe while the server is writing
+- **Hardlink-incremental rsync** of everything else (agent homes, skills,
+  server.json, the secrets key) — unchanged files cost no space
+- Destination `/workspace/backups/hivemind/<timestamp>/` (btrfs RAID1,
+  root-only 0700 — it contains secrets), 14-day retention
+
+Manual run: `sudo hive-backup`. Restore: stop hivemind, copy a snapshot's
+`db/*.db` + `files/` back over `~/.local/share/hivemind/`, start hivemind.
+The agents' *containers* are not backed up — they're disposable; rebuild
+from the Containerfile.
