@@ -178,6 +178,7 @@ private:
     Gtk::ScrolledWindow chat_scroll_;
     bool chat_stick_bottom_ = true;   // auto-scroll unless user scrolled up
     bool chat_scroll_prog_ = false;   // guard: our own scroll in flight
+    bool chat_scroll_idle_ = false;   // coalesces deferred scrolls
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
     Gtk::Button attach_btn_;             // Phase 18: 📎 attach files

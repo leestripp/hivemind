@@ -421,11 +421,22 @@ void HiveWindow::apply_theme() {
 // Font scale slider → gtk-xft-dpi (1/1024 pt units). 1.0 maps to -1 =
 // "follow the system", so the default always respects the desktop's own
 // DPI/scaling; other values override it app-locally.
+// GTK4 gotcha: the adjustment "changed" signal fires DURING the viewport's
+// size-allocation pass. Setting value synchronously there updates the
+// scrollbar but leaves the viewport's child allocation stale (chat looks
+// frozen at the old position until the user scrolls). Deferring to idle —
+// after the frame's layout completes — makes the viewport actually move.
 void HiveWindow::scroll_chat_to_bottom() {
-    auto a = chat_scroll_.get_vadjustment();
-    chat_scroll_prog_ = true;   // don't let our own scroll flip the sticky flag
-    a->set_value(a->get_upper() - a->get_page_size());
-    Glib::signal_idle().connect_once([this] { chat_scroll_prog_ = false; });
+    if (chat_scroll_idle_) return;   // coalesce bursts of "changed" signals
+    chat_scroll_idle_ = true;
+    Glib::signal_idle().connect_once([this] {
+        chat_scroll_idle_ = false;
+        if (!chat_stick_bottom_) return;
+        auto a = chat_scroll_.get_vadjustment();
+        chat_scroll_prog_ = true;   // don't let our own scroll flip the sticky flag
+        a->set_value(a->get_upper() - a->get_page_size());
+        Glib::signal_idle().connect_once([this] { chat_scroll_prog_ = false; });
+    });
 }
 
 void HiveWindow::apply_font_scale() {
@@ -728,7 +739,6 @@ HiveWindow::HiveWindow() {
         });
         adj->property_value().signal_changed().connect([this] {
             if (chat_scroll_prog_) return;   // our own auto-scroll, not the user
-            auto a = chat_scroll_.get_vadjustment();
             chat_stick_bottom_ =
                 a->get_value() >= a->get_upper() - a->get_page_size() - 10.0;
         });
