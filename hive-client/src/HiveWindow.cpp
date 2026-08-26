@@ -739,6 +739,7 @@ HiveWindow::HiveWindow() {
         });
         adj->property_value().signal_changed().connect([this] {
             if (chat_scroll_prog_) return;   // our own auto-scroll, not the user
+            auto a = chat_scroll_.get_vadjustment();
             chat_stick_bottom_ =
                 a->get_value() >= a->get_upper() - a->get_page_size() - 10.0;
         });
