@@ -102,52 +102,64 @@ std::optional<WorkerChannel::RemoteResult> WorkerChannel::exec(
 }
 
 void WorkerChannel::handle(Connection& ws) {
-    // ── first frame: hello + key validation ────────────────────────────
-    auto first = ws.receiveText();
-    if (!first) return;
-    json hello;
-    try { hello = json::parse(*first); }
-    catch (...) {
-        ws.sendText(R"({"op":"error","error":"hello must be JSON"})");
-        ws.close();
-        return;
-    }
-    if (hello.value("op", "") != "hello") {
-        ws.sendText(R"({"op":"error","error":"first frame must be hello"})");
-        ws.close();
-        return;
-    }
-    if (hello.value("proto", 0) != kProto) {
-        ws.sendText(json{{"op","error"},{"error","protocol mismatch"},
-                         {"server_proto",kProto}}.dump());
-        ws.close();
-        return;
-    }
-    const std::string name = hello.value("worker", "");
-    const std::string key  = hello.value("key", "");
-    const std::string caps = hello.contains("caps") ? hello["caps"].dump() : "{}";
-    auto worker = store_.validate(key, caps, kProto);
-    if (!worker || worker->name != name) {
-        ws.sendText(R"({"op":"error","error":"bad worker key"})");
-        ws.close();
-        return;
-    }
+    // OmniNet's contract (v0.7.0): the handler registers callbacks and
+    // RETURNS; OmniNet's own readLoop() then drives the connection. Do NOT
+    // block in receiveText() here — Connection::receive() uses a per-call
+    // buffer and silently drops coalesced frames, while readLoop() keeps
+    // its leftover across reads. (Found 2026-08-26: last exec_chunk +
+    // exec_done arriving in one TCP segment were lost.)
 
-    {
-        std::lock_guard lk(m_);
-        conns_[name] = &ws;
-    }
-    std::cerr << "[workers] " << name << " connected\n";
-    ws.sendText(json{{"op","welcome"},{"worker",name},{"proto",kProto}}.dump());
+    // Per-connection state shared by the callbacks.
+    struct State {
+        bool authed = false;
+        std::string name;
+        std::string key;
+    };
+    auto st = std::make_shared<State>();
 
-    // ── receive loop: bookkeeping inline, everything else to on_frame ──
-    while (auto msg = ws.receiveText()) {
+    ws.onText([this, &ws, st](std::string msg) {
         json frame;
-        try { frame = json::parse(*msg); }
-        catch (...) { continue; }
+        try { frame = json::parse(msg); }
+        catch (...) { return; }
+
+        if (!st->authed) {
+            // ── first frame: hello + key validation ────────────────────
+            if (frame.value("op", "") != "hello") {
+                ws.sendText(R"({"op":"error","error":"first frame must be hello"})");
+                ws.close();
+                return;
+            }
+            if (frame.value("proto", 0) != kProto) {
+                ws.sendText(json{{"op","error"},{"error","protocol mismatch"},
+                                 {"server_proto",kProto}}.dump());
+                ws.close();
+                return;
+            }
+            st->name = frame.value("worker", "");
+            st->key  = frame.value("key", "");
+            const std::string caps =
+                frame.contains("caps") ? frame["caps"].dump() : "{}";
+            auto worker = store_.validate(st->key, caps, kProto);
+            if (!worker || worker->name != st->name) {
+                ws.sendText(R"({"op":"error","error":"bad worker key"})");
+                ws.close();
+                return;
+            }
+            st->authed = true;
+            {
+                std::lock_guard lk(m_);
+                conns_[st->name] = &ws;
+            }
+            std::cerr << "[workers] " << st->name << " connected\n";
+            ws.sendText(json{{"op","welcome"},{"worker",st->name},
+                             {"proto",kProto}}.dump());
+            return;
+        }
+
+        // ── authed frames ──────────────────────────────────────────────
         const std::string op = frame.value("op", "");
         if (op == "heartbeat") {
-            store_.validate(key);   // touches last_seen
+            store_.validate(st->key);   // touches last_seen
         } else if (op == "exec_chunk" || op == "exec_done") {
             std::shared_ptr<Job> job;
             {
@@ -158,11 +170,7 @@ void WorkerChannel::handle(Connection& ws) {
             if (job) {
                 std::lock_guard jl(job->m);
                 if (op == "exec_chunk") {
-                    const std::string d = frame.value("data", "");
-                    job->output += d;
-                    std::cerr << "[workers] chunk job=" << frame.value("id","")
-                              << " " << d.size() << "B total=" << job->output.size()
-                              << " [" << d.substr(0,60) << "]\n";
+                    job->output += frame.value("data", "");
                 } else {
                     job->exit_code = frame.value("exit_code", -1);
                     job->duration_ms = frame.value("duration_ms", 0);
@@ -171,13 +179,20 @@ void WorkerChannel::handle(Connection& ws) {
                 }
             }
         } else if (on_frame) {
-            on_frame(name, frame);  // status / future ops
+            on_frame(st->name, frame);  // status / future ops
         }
-    }
+    });
 
-    {
+    // NOTE onClose is only fired for CLEAN close frames (handleControlFrame);
+    // an abrupt EOF (worker killed, network drop) just breaks the loop.
+    // So: drive readLoop() OURSELVES and clean up after it returns — that
+    // covers both paths. OmniNet runs readLoop() once more after this
+    // handler returns; on an already-closed socket it exits immediately.
+    ws.readLoop();
+
+    if (st->authed) {
         std::lock_guard lk(m_);
-        conns_.erase(name);
+        conns_.erase(st->name);
         // Fail every in-flight job for this worker — exec() callers wake
         // with an error instead of hanging until the outer timeout.
         for (auto& [id, job] : jobs_) {
@@ -189,6 +204,6 @@ void WorkerChannel::handle(Connection& ws) {
                 job->cv.notify_all();
             }
         }
+        std::cerr << "[workers] " << st->name << " disconnected\n";
     }
-    std::cerr << "[workers] " << name << " disconnected\n";
 }

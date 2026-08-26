@@ -86,11 +86,12 @@ int main(int argc, char* argv[]) {
                 }
             });
 
-            while (!g_stop && !dead) {
-                auto msg = ws.receiveText();
-                if (!msg) { std::cerr << "worker: receiveText returned nullopt (closed)\n"; break; }
+            // Callback style + readLoop(): Connection::receiveText() uses a
+            // per-call buffer and silently drops coalesced frames (exec
+            // frames CAN arrive coalesced). readLoop() keeps its leftover.
+            ws.onText([&](std::string msg) {
                 json frame;
-                try { frame = json::parse(*msg); } catch (...) { continue; }
+                try { frame = json::parse(msg); } catch (...) { return; }
                 const std::string op = frame.value("op", "");
                 if (op != "exec")
                     std::cout << "worker: frame: " << frame.dump() << "\n";
@@ -139,7 +140,9 @@ int main(int argc, char* argv[]) {
                                   << done["exit_code"].get<int>() << "\n";
                     }).detach();
                 }
-            }
+            });
+            ws.readLoop();   // blocks until the connection closes
+            std::cerr << "worker: connection closed\n";
             dead = true;
             if (hb.joinable()) hb.join();
         } catch (const std::exception& e) {
