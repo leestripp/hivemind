@@ -158,7 +158,11 @@ void WorkerChannel::handle(Connection& ws) {
             if (job) {
                 std::lock_guard jl(job->m);
                 if (op == "exec_chunk") {
-                    job->output += frame.value("data", "");
+                    const std::string d = frame.value("data", "");
+                    job->output += d;
+                    std::cerr << "[workers] chunk job=" << frame.value("id","")
+                              << " " << d.size() << "B total=" << job->output.size()
+                              << " [" << d.substr(0,60) << "]\n";
                 } else {
                     job->exit_code = frame.value("exit_code", -1);
                     job->duration_ms = frame.value("duration_ms", 0);

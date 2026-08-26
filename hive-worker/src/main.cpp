@@ -114,7 +114,13 @@ int main(int argc, char* argv[]) {
                                     send_frame({{"op","exec_chunk"},{"id",id},
                                         {"stream","stdout"},
                                         {"data",std::string{chunk}}});
-                                } catch (...) {}
+                                    std::cerr << "worker: exec " << id << " chunk "
+                                              << chunk.size() << "B: ["
+                                              << std::string{chunk}.substr(0,60) << "]\n";
+                                } catch (const std::exception& e) {
+                                    std::cerr << "worker: exec " << id
+                                              << " chunk SEND FAILED: " << e.what() << "\n";
+                                }
                             });
                         json done{{"op","exec_done"},{"id",id},
                                   {"exit_code",outcome.exit_code},
