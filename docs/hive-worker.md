@@ -1,6 +1,9 @@
 # hive-worker — remote container execution (Phase 30 design)
 
-Status: DESIGN. Nothing here is implemented. Phase 30 builds this.
+Status: DESIGN — DEFERRED (2026-08-26). Nothing here is implemented.
+Moved to Plan.md §5b Future feature requests: untestable while the
+dev client runs nested inside a podman container. Wanted later —
+revisit after Phase 27 (TLS is a hard prerequisite).
 
 ## Goal
 
