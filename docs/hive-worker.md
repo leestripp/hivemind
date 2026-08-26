@@ -112,7 +112,7 @@ its own project; note in docs if attempted).
    NO SIGINT/SIGTERM handler — default kill closes the socket so the
    server sees the disconnect immediately (a graceful flag would hang
    in the blocking receiveText).
-3. **30.3** exec dispatch over the channel (streamed chunks → exec-log).
+3. ~~**30.3** exec dispatch over the channel (streamed chunks → exec-log)~~ — **DONE** (verified with real podman on dev-rig 2026-08-26).
    This alone makes remote agents useful.
 4. **30.4** Screen-over-WS reverse proxy.
 5. **30.5** TLS everywhere (Caddy on the server, worker pins the CA) —
@@ -120,3 +120,19 @@ its own project; note in docs if attempted).
 
 Non-goals for Phase 30: worker autoscaling, cross-machine shared
 workspaces, worker-to-worker migration of running containers.
+
+
+## OmniNet WebSocket pitfalls (learned 2026-08-26, do NOT rediscover)
+
+1. **`Connection::receiveText()` drops coalesced frames** — its buffer is
+   per-call; two frames in one TCP segment lose the second. Both sides of
+   this channel use the `onText` callback API + `Connection::readLoop()`
+   (which keeps its leftover across reads).
+2. **`onClose` only fires on clean close frames.** Abrupt EOF (kill -9,
+   network drop) silently breaks readLoop. The server therefore drives
+   `ws.readLoop()` itself inside the handler and cleans up (unregister +
+   fail in-flight jobs) after it returns.
+3. **`keepAliveTimeout` (default 5s) becomes SO_RCVTIMEO, inherited by the
+   upgraded WS socket** — 5s of worker silence read as peer-closed and
+   killed execs mid-`podman create`. The channel sets
+   `cfg.keepAliveTimeout = 0` (blocking reads).
