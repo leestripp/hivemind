@@ -51,6 +51,7 @@ private:
     void save_config();
     void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
     void on_theme_toggle();
+    void on_settings();         // user profile: display name + avatar
     void refresh_themed_icons();  // re-tints pixbufs in place (no reparenting!)
     void set_button_icon(Gtk::Button& btn, const std::string& icon,
                          const std::string& tooltip);
@@ -148,11 +149,16 @@ private:
     Gtk::Label approvals_label_;         // child of approvals_btn_
     Gtk::Image approvals_icon_;          // child of approvals_btn_
     Gtk::Button theme_btn_;              // dark/light toggle
+    Gtk::Button settings_btn_;           // user profile settings
     Gtk::Button connect_btn_;
     Gtk::Button stop_btn_;
     Gtk::Button learn_btn_;              // Phase 20: learn-by-demonstration
     Gtk::Button delete_thread_btn_;
     bool dark_mode_ = false;             // persisted in config.json
+    // User profile (persisted in config.json): chat identity for the human.
+    std::string display_name_;           // "" = "You"
+    std::string user_avatar_;            // "" = default user silhouette
+    std::string user_label() const { return display_name_.empty() ? "You" : display_name_; }
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
     Gtk::Box sidebar_{Gtk::Orientation::VERTICAL};

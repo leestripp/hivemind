@@ -309,10 +309,11 @@ constexpr int AVATAR_SUPERSAMPLE = 2; // HiDPI oversampling factor
 Gtk::Widget* make_avatar(const std::string& name, bool is_user,
                          int logical = AVATAR_LOGICAL,
                          const std::string& avatar = "") {
-    // Chosen avatar wins; "" = stable name-hash into the dept-head set.
-    const std::string res = is_user
-        ? "user"
-        : (avatar.empty() ? auto_avatar(name) : avatar);
+    // Chosen avatar wins; "" = user silhouette for the human, stable
+    // name-hash into the dept-head set for agents.
+    const std::string res = avatar.empty()
+        ? (is_user ? "user" : auto_avatar(name))
+        : avatar;
     auto* img = Gtk::make_managed<Gtk::Image>();
     img->set(avatar_pixbuf(res, logical * AVATAR_SUPERSAMPLE));
     img->set_pixel_size(logical);
@@ -353,6 +354,7 @@ void HiveWindow::setup_icons() {
     slot(new_thread_btn_,    "thread-add", "Start a new thread");
     slot(tasks_btn_,         "task-add",   "Schedule a task (routine)");
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
+    slot(settings_btn_,      "settings",   "Settings — your display name & avatar");
     slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
     slot(delete_thread_btn_, "trash",      "Delete the selected thread");
     slot(send_btn_,          "send",       "Send message");
@@ -385,6 +387,7 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
     return invoke_on_ui([this, name] {
         if (name == "new-thread")      on_new_thread();
         else if (name == "new-agent")  on_new_agent();
+        else if (name == "settings")   on_settings();
         else if (name == "approvals")  on_approvals();
         else return json{{"error", "unknown dialog"}};
         return json{{"opened", name}};
@@ -409,6 +412,106 @@ void HiveWindow::apply_theme() {
         ->property_gtk_application_prefer_dark_theme()
         .set_value(dark_mode_);
     refresh_themed_icons();
+}
+
+// Settings — the human's chat identity (display name + avatar), persisted in
+// config.json. Room to grow: add a row here per future preference.
+void HiveWindow::on_settings() {
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title("Settings");
+    install_dialog_titlebar(*dialog, "Settings");
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Save", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::OK);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_margin(12);
+    grid->set_row_spacing(8);
+    grid->set_column_spacing(8);
+
+    auto* name = Gtk::make_managed<Gtk::Entry>();
+    name->set_placeholder_text("You");
+    name->set_text(display_name_);
+
+    // Avatar picker: default user silhouette tile, then the 20 dept heads.
+    auto* avatar_grid = Gtk::make_managed<Gtk::Grid>();
+    avatar_grid->set_column_spacing(6);
+    avatar_grid->set_row_spacing(6);
+    auto* chosen = new std::string(user_avatar_);          // freed in response lambda
+    auto* tiles = new std::vector<
+        std::pair<std::string, Gtk::ToggleButton*>>();     // freed likewise
+    Gtk::ToggleButton* leader = nullptr;
+    auto add_tile = [&](const std::string& val, Gtk::Widget* content,
+                        const std::string& tip, int col, int row, int width = 1) {
+        auto* b = Gtk::make_managed<Gtk::ToggleButton>();
+        b->set_child(*content);
+        b->add_css_class("avatar-pick");
+        b->set_tooltip_text(tip);
+        tiles->push_back({val, b});
+        if (!leader) { leader = b; if (chosen->empty()) b->set_active(true); }
+        else { b->set_group(*leader); if (val == *chosen) b->set_active(true); }
+        b->signal_toggled().connect([b, chosen, val] {
+            if (b->get_active()) *chosen = val;
+        });
+        avatar_grid->attach(*b, col, row, width);
+    };
+    {
+        auto* img = Gtk::make_managed<Gtk::Image>();
+        img->set(avatar_pixbuf("user", 64));
+        img->set_pixel_size(32);
+        add_tile("", img, "Default user avatar", 0, 0);
+    }
+    const auto& avatars = avatar_names();
+    for (size_t i = 0; i < avatars.size(); ++i) {
+        auto* img = Gtk::make_managed<Gtk::Image>();
+        img->set(avatar_pixbuf(avatars[i], 64));
+        img->set_pixel_size(32);
+        add_tile(avatars[i], img, avatars[i], (int)((i + 1) % 5), (int)((i + 1) / 5));
+    }
+
+    auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(label);
+        l->set_halign(Gtk::Align::END);
+        grid->attach(*l, 0, row);
+        w->set_hexpand(true);
+        grid->attach(*w, 1, row);
+    };
+    int row_i = 0;
+    add_row("Display name", name, row_i++);
+    add_row("Avatar", avatar_grid, row_i++);
+    {
+        auto* srv = Gtk::make_managed<Gtk::Label>(server_url_);
+        srv->set_halign(Gtk::Align::START);
+        srv->add_css_class("dim-label");
+        auto* l = Gtk::make_managed<Gtk::Label>("Server");
+        l->set_halign(Gtk::Align::END);
+        grid->attach(*l, 0, row_i);
+        grid->attach(*srv, 1, row_i);
+    }
+
+    dialog->get_content_area()->append(*grid);
+    dialog->signal_response().connect(
+        [this, dialog, name, chosen, tiles](int r) {
+            if (r == (int)Gtk::ResponseType::OK) {
+                display_name_ = name->get_text();
+                user_avatar_  = *chosen;
+                save_config();
+                // Re-render the open thread so the new identity shows now.
+                if (!current_thread_.empty()) {
+                    last_message_id_.clear();
+                    while (auto* c = messages_box_.get_first_child())
+                        messages_box_.remove(*c);
+                    rendered_.clear();
+                    poll_chat();
+                }
+            }
+            delete chosen;
+            delete tiles;
+            dialog->destroy();
+        });
+    dialog->present();
 }
 
 HiveWindow::HiveWindow() {
@@ -437,6 +540,8 @@ HiveWindow::HiveWindow() {
         [this] { maybe_show_connect_dialog(); });
     theme_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_theme_toggle));
+    settings_btn_.signal_clicked().connect(
+        sigc::mem_fun(*this, &HiveWindow::on_settings));
     stop_btn_.signal_clicked().connect([this] { on_stop(); });
     stop_btn_.set_sensitive(false);   // enabled while a turn is running
     stop_btn_.add_css_class("destructive-action");
@@ -452,6 +557,7 @@ HiveWindow::HiveWindow() {
     header_.pack_start(new_thread_btn_);
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
+    header_.pack_end(settings_btn_);
     header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
@@ -592,6 +698,8 @@ void HiveWindow::load_config() {
         api_.set_base_url(server_url_);
         api_.set_api_key(j.value("api_key", ""));
         dark_mode_ = j.value("dark_mode", false);
+        display_name_ = j.value("display_name", "");
+        user_avatar_  = j.value("user_avatar", "");
     } catch (...) {}
 }
 
@@ -604,7 +712,8 @@ void HiveWindow::save_config() {
     fs::path file = dir / "config.json";
     std::ofstream f{file, std::ios::trunc};
     f << json{{"server", server_url_}, {"api_key", api_.api_key()},
-              {"dark_mode", dark_mode_}}.dump(2);
+              {"dark_mode", dark_mode_}, {"display_name", display_name_},
+              {"user_avatar", user_avatar_}}.dump(2);
     f.close();
     fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
 }
@@ -824,7 +933,7 @@ void HiveWindow::poll_chat() {
                         m.value("sender_kind", ""),
                         m.value("sender_kind", "") == "agent"
                             ? agent_name_of(agents_, m.value("sender_id", ""))
-                            : (m.value("sender_kind", "") == "user" ? "You" : "system"),
+                            : (m.value("sender_kind", "") == "user" ? user_label() : "system"),
                         m.value("body", ""),
                         m.value("created_at", ""),
                         m.value("attachments", json::array()));
@@ -1124,7 +1233,8 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
                 break;
             }
     row->append(*make_avatar(sender_label, sender_kind == "user",
-                             AVATAR_LOGICAL, sender_avatar));
+                             AVATAR_LOGICAL,
+                             sender_kind == "user" ? user_avatar_ : sender_avatar));
 
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
     box->set_hexpand(true);
