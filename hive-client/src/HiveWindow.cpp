@@ -41,7 +41,9 @@ const char* kCss = R"(
                  margin: 4px 12px; }
 .hv-sender { font-weight: 600; font-size: 0.85em;
              color: alpha(@window_fg_color, 0.65); }
-.hv-section { font-weight: 700; margin: 8px 8px 2px 8px; }
+.hv-section { font-weight: 700; margin: 0; padding: 7px 10px;
+  background: alpha(@window_fg_color, 0.06);
+  border-bottom: 1px solid alpha(@window_fg_color, 0.08); }
 .hv-time   { color: alpha(@window_fg_color, 0.45); font-size: 0.75em; }
 .hv-code   { font-family: monospace; background: alpha(@window_fg_color, 0.08);
              border-radius: 8px; padding: 8px 10px; margin: 4px 0; }
@@ -650,15 +652,18 @@ HiveWindow::HiveWindow() {
     set_titlebar(header_);
 
     // ── sidebar ───────────────────────────────────────────────────────────
+    // Section headers are full-width darker bands (CSS above) so they read
+    // as titles, not list items. xalign keeps the text left while the band
+    // spans the panel.
     roster_label_.add_css_class("hv-section");
-    roster_label_.set_halign(Gtk::Align::START);
+    roster_label_.set_xalign(0.0f);
     threads_label_.add_css_class("hv-section");
-    threads_label_.set_halign(Gtk::Align::START);
+    threads_label_.set_xalign(0.0f);
 
     roster_scroll_.set_child(roster_list_);
     roster_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
-    roster_scroll_.set_size_request(240, 180);
-    roster_scroll_.set_vexpand(false);
+    roster_scroll_.set_size_request(240, 120);
+    roster_scroll_.set_vexpand(true);
     threads_scroll_.set_child(threads_list_);
     threads_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
     threads_scroll_.set_vexpand(true);
@@ -671,11 +676,33 @@ HiveWindow::HiveWindow() {
         [this](Gtk::ListBoxRow*) { on_thread_selected(); });
 
     sidebar_.add_css_class("hv-sidebar");
-    sidebar_.append(roster_label_);
-    sidebar_.append(roster_scroll_);
-    sidebar_.append(*Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::HORIZONTAL));
-    sidebar_.append(threads_label_);
-    sidebar_.append(threads_scroll_);
+    // Agents / Threads split: draggable vertical paned (neither pane may
+    // shrink away), position persisted as "sidebar_split" in config.json.
+    auto* agents_panel = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    agents_panel->append(roster_label_);
+    agents_panel->append(roster_scroll_);
+    auto* threads_panel = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    threads_panel->append(threads_label_);
+    threads_panel->append(threads_scroll_);
+    auto* split = Gtk::make_managed<Gtk::Paned>(Gtk::Orientation::VERTICAL);
+    split->set_start_child(*agents_panel);
+    split->set_end_child(*threads_panel);
+    split->set_shrink_start_child(false);
+    split->set_shrink_end_child(false);
+    split->set_vexpand(true);
+    split->set_wide_handle(true);
+    split->property_position().signal_changed().connect([this, split] {
+        sidebar_split_ = split->get_position();
+        if (split_save_pending_ || !alive_) return;
+        split_save_pending_ = true;
+        Glib::signal_timeout().connect_once([this] {
+            split_save_pending_ = false;
+            if (alive_) save_config();
+        }, 800);
+    });
+    Glib::signal_idle().connect_once(
+        [split, this] { split->set_position(sidebar_split_); });
+    sidebar_.append(*split);
 
     // ── chat area ─────────────────────────────────────────────────────────
     status_label_.set_halign(Gtk::Align::START);
@@ -784,6 +811,7 @@ void HiveWindow::load_config() {
         display_name_ = j.value("display_name", "");
         user_avatar_  = j.value("user_avatar", "");
         font_scale_   = j.value("font_scale", 1.0);
+        sidebar_split_ = j.value("sidebar_split", 320);
     } catch (...) {}
 }
 
@@ -797,7 +825,8 @@ void HiveWindow::save_config() {
     std::ofstream f{file, std::ios::trunc};
     f << json{{"server", server_url_}, {"api_key", api_.api_key()},
               {"dark_mode", dark_mode_}, {"display_name", display_name_},
-              {"user_avatar", user_avatar_}, {"font_scale", font_scale_}}.dump(2);
+              {"user_avatar", user_avatar_}, {"font_scale", font_scale_},
+              {"sidebar_split", sidebar_split_}}.dump(2);
     f.close();
     fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
 }
