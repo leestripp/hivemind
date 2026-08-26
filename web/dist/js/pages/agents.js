@@ -119,6 +119,9 @@ async function refresh() {
         <div class="agent-meta">
           <div><span>Model</span>${esc(a.model || 'default')}</div>
           <div><span>Workspace</span>${esc(a.workspace_mode || 'shared')}</div>
+          <div><span>Runs on</span>${a.worker && a.worker !== 'local'
+                ? '🖥 ' + esc(a.worker)
+                : 'this server'}</div>
           <div><span>Approvals</span>${a.require_approval ? 'required' : 'auto'}</div>
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
         </div>

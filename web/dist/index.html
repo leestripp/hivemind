@@ -54,6 +54,13 @@
         <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke-linecap="round"/>
       </svg>
     </button>
+    <button class="ab-item" data-page="workers" title="Workers">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="2.5" y="4" width="19" height="12" rx="2"/>
+        <path d="M8 20h8M12 16v4" stroke-linecap="round"/>
+        <path d="M7 10l2 2-2 2M11 14h4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
     <button class="ab-item" data-page="settings" title="Settings">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
         <circle cx="12" cy="12" r="3.2"/>
@@ -401,6 +408,47 @@
       <div class="modal-head"><h3 id="discover-title">Discover</h3><button class="icon-btn" data-close title="Close">✕</button></div>
       <div id="discover-list" class="discover-list"></div>
       <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>
+    </div>
+  </div>
+
+  <div id="page-workers" class="page hidden">
+    <div class="page-body page-wide">
+      <div class="page-head">
+        <div>
+          <h2>🖥️ Workers</h2>
+          <p class="muted">
+            Remote machines running <b>hive-worker</b> — agents assigned to a
+            worker execute there (containers, screen, exec) instead of on
+            this server. The <b>online</b> badge is live from the worker
+            channel; the table refreshes every 5s while this page is open.
+          </p>
+        </div>
+      </div>
+
+      <table class="kv-table" id="workers-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Status</th><th>Capabilities</th><th>Proto</th>
+            <th>Last seen</th><th>Agents</th><th class="col-actions"></th>
+          </tr>
+        </thead>
+        <tbody id="workers-list">
+          <tr><td colspan="7" class="muted">loading…</td></tr>
+        </tbody>
+      </table>
+
+      <div class="card" style="margin-top:18px">
+        <h3 style="margin-top:0">Enrolling a worker</h3>
+        <p class="muted" style="margin-bottom:8px">
+          Keys are minted on the server host only — the raw
+          <code>hmwk_…</code> key is printed <b>once</b>. Run this on the
+          server, then start the worker on the remote machine with the key:
+        </p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <code id="workers-enroll-cmd" style="flex:1;padding:8px 10px;border-radius:6px;background:var(--code-bg,#0002)">hive-server enroll-worker &lt;name&gt; &nbsp;→&nbsp; hive-worker --server ws://&lt;server&gt;:8423 --key hmwk_… --name &lt;name&gt;</code>
+          <button class="btn" id="workers-copy-enroll">Copy</button>
+        </div>
+      </div>
     </div>
   </div>
 

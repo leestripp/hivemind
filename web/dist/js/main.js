@@ -8,11 +8,12 @@ import { enterTasks, initTasks } from './pages/tasks.js';
 import { enterSkills, initSkills } from './pages/skills.js';
 import { enterSecrets, initSecrets } from './pages/secrets.js';
 import { enterFiles, initFiles } from './pages/files.js';
+import { enterWorkers, leaveWorkers, initWorkers } from './pages/workers.js';
 import { getTheme } from './util.js';
 
 document.documentElement.dataset.theme = getTheme();   // Phase 19
 
-const PAGES = ['agents', 'tasks', 'files', 'skills', 'secrets', 'models', 'keys', 'settings'];   // sidebar order
+const PAGES = ['agents', 'tasks', 'files', 'skills', 'secrets', 'models', 'workers', 'keys', 'settings'];   // sidebar order
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'agents';
@@ -29,6 +30,7 @@ function showPage(name) {
   if (name === 'secrets')  enterSecrets();
   if (name === 'settings') enterSettings();
   if (name === 'keys')     enterKeys();
+  if (name === 'workers')  enterWorkers(); else leaveWorkers();
 }
 
 document.querySelectorAll('.ab-item').forEach(b =>
@@ -36,6 +38,7 @@ document.querySelectorAll('.ab-item').forEach(b =>
 
 initAgents();
 initKeys();
+initWorkers();
 initModels();
 initTasks();
 initSkills();
