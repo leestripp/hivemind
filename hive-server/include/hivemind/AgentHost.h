@@ -270,10 +270,10 @@ public:
     void cancel_thread(const std::string& thread_id);
 
 private:
-    /// Fan a message into one agent's queue (Phase 11.1/11.2). First time an
-    /// agent sees a thread it gets a backlog prefix (up to 20 recent
-    /// messages); after that its daedalus queue+history IS the context.
-    /// generation caps agent→agent fan-in loops.
+    /// Fan a message into one agent's queue (Phase 11.1/11.2). The agent's
+    /// daedalus conversation (persisted across restarts) IS the context —
+    /// each turn carries only the new message. generation caps agent→agent
+    /// fan-in loops.
     void fan_in(const std::string& thread_id, const RosterAgent& agent,
                 const std::string& sender_label, const std::string& body,
                 int generation);
@@ -288,6 +288,4 @@ private:
     std::atomic<bool> stopping_{false};
     static constexpr std::size_t kMaxLivePerThread = 32;
     static constexpr int kMaxFanInGenerations = 3;  // agent→agent loop cap
-    // (agent_id, thread_id) pairs the fan-in has primed with backlog
-    std::set<std::pair<std::string, std::string>> seen_;
 };

@@ -690,39 +690,12 @@ void ChatService::fan_in(const std::string& thread_id,
                          const std::string& sender_label,
                          const std::string& body,
                          int generation) {
-    // First time an agent participates in a thread, prepend a backlog of
-    // recent messages so its daedalus history starts with full context.
-    // After that the queue+history accumulates everything naturally.
-    std::string prompt;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        if (seen_.insert({agent.id, thread_id}).second) {
-            auto msgs = threads_.list_messages(thread_id);
-            if (msgs.size() > 20) msgs.erase(msgs.begin(), msgs.end() - 20);
-            std::string backlog;
-            std::size_t budget = 12000;
-            for (auto& m : msgs) {
-                if (m.body == body && m.sender_kind != "agent") continue;
-                std::string who;
-                if (m.sender_kind == "user") who = "You";
-                else if (m.sender_kind == "agent") {
-                    auto a = agents_.get_agent(m.sender_id);
-                    who = a ? a->name : "agent";
-                } else who = "system";
-                std::string b = m.body.size() > 1500
-                    ? m.body.substr(0, 1500) + "\u2026" : m.body;
-                b += attachment_refs(m.attachments_json);
-                std::string entry = who + ": " + b + "\n\n";
-                if (entry.size() > budget) break;
-                budget -= entry.size();
-                backlog += entry;
-            }
-            if (!backlog.empty())
-                prompt = "[Thread history so far]\n" + backlog +
-                         "[End of history]\n\n";
-        }
-    }
-    prompt += "[" + sender_label + "] " + body;
+    // daedalus persists each agent's conversation (messages.json) across
+    // restarts, so the full thread context is already there — every turn
+    // gets ONLY the new message. (Backlog injection removed: threads fix
+    // their participants at creation, so its only trigger was restarts,
+    // where it duplicated restored history.)
+    std::string prompt = "[" + sender_label + "] " + body;
 
     auto live = std::make_shared<LiveTurn>();
     live->agent_id = agent.id;
