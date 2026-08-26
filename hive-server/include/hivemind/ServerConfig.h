@@ -39,6 +39,10 @@ public:
     /// Phase 28: Xvfb geometry for agent screens ("1280x800" default).
     /// Applies to screen stacks STARTED after the change.
     std::string screen_resolution() const { return screen_resolution_; }
+    // Phase 30.2: dedicated WebSocket port for the hive-worker channel
+    // (OmniNet's WebSocket::Server wraps its own HTTP server, so it
+    // cannot share the main API port).
+    int worker_ws_port() const { return worker_ws_port_; }
     void set_screen_resolution(const std::string& res);   // validates WxH
 
     /// Phase 28: pre-start every agent's container at boot so the first
@@ -61,4 +65,5 @@ private:
     std::vector<std::string> cors_origins_;   // "" = use default
     bool warm_containers_ = true;
     std::string screen_resolution_ = "1280x800";
+    int worker_ws_port_ = 8423;
 };

@@ -9,5 +9,7 @@ class WorkerStore;
 ///                               last_seen; online flag comes in 30.2)
 ///   DELETE /api/workers/:name   revoke a worker (key dies with the row)
 /// Enrollment is CLI-only: `hive-server enroll-worker <name>`.
+class WorkerChannel;
 void register_worker_routes(OmniNet::HTTP::Server& server,
-                            WorkerStore& workers);
+                            WorkerStore& workers,
+                            WorkerChannel& channel);

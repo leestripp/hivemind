@@ -10,6 +10,7 @@ set(CORE_SOURCES
     src/Vault.cpp
     src/ConnectorStore.cpp
     src/WorkerStore.cpp
+    src/WorkerChannel.cpp
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp

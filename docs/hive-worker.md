@@ -100,10 +100,18 @@ its own project; note in docs if attempted).
 
 ## Build order
 
-1. **30.1** Worker registry server-side: enroll/revoke, `workers` table,
-   `agent.worker` column, roster shows worker + online state.
-2. **30.2** The channel: WS endpoint + hello/heartbeat + reconnect.
-   Worker binary skeleton that connects and answers status.
+1. **30.1** ✅ Worker registry server-side: enroll/revoke CLI, `workers`
+   table, `agent.worker` column, GET/DELETE /api/workers.
+2. **30.2** ✅ The channel: **dedicated WS port 8423** (`worker_ws_port`
+   in server.json) — OmniNet's WebSocket::Server wraps its own HTTP
+   server and cannot share the main API port; Caddy can proxy
+   /api/workers/channel → 8423 later for the single-port TLS story.
+   hello(key)→welcome, heartbeat→last_seen, `online` flag live.
+   hive-worker binary: `--server ws://host:8423 --key hmwk_… --name N`,
+   exponential-backoff reconnect. NOTE: the worker deliberately installs
+   NO SIGINT/SIGTERM handler — default kill closes the socket so the
+   server sees the disconnect immediately (a graceful flag would hang
+   in the blocking receiveText).
 3. **30.3** exec dispatch over the channel (streamed chunks → exec-log).
    This alone makes remote agents useful.
 4. **30.4** Screen-over-WS reverse proxy.

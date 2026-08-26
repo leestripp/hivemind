@@ -125,6 +125,7 @@ enable_testing()
 option(HIVEMIND_BUILD_SERVER "Build the hive-server daemon" ON)
 if(HIVEMIND_BUILD_SERVER)
     add_subdirectory(hive-server)
+    add_subdirectory(hive-worker)
 endif()
 
 option(HIVEMIND_BUILD_CLIENT "Build the GTK4/gtkmm4 native client" ON)

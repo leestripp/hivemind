@@ -43,6 +43,7 @@
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
 #include "hivemind/WorkerStore.h"
+#include "hivemind/WorkerChannel.h"
 #include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
@@ -123,6 +124,8 @@ int main(int argc, char* argv[]) {
     LLMStore llm_store;
     AuthStore auth_store;
     WorkerStore worker_store;
+    WorkerChannel worker_channel{worker_store,
+                                 ServerConfig::instance().worker_ws_port()};
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,
@@ -229,7 +232,7 @@ int main(int argc, char* argv[]) {
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store, agent_store);
     register_key_routes(server, auth_store);
-    register_worker_routes(server, worker_store);
+    register_worker_routes(server, worker_store, worker_channel);
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
@@ -245,9 +248,11 @@ int main(int argc, char* argv[]) {
     catch (...) { /* admin not always available; ignore */ }
 
     // ─── Run ────────────────────────────────────────────────────────
-    std::jthread server_thread{[&server]() {
-        server.start();
+    // BOTH start()s block in accept loops — one jthread each.
+    std::jthread worker_ws_thread{[&worker_channel]() {
+        worker_channel.start();   // Phase 30.2: hive-worker WS channel
     }};
+    std::jthread server_thread{[&server]() { server.start(); }};
 
     std::cout << "HiveMind listening on http://" << settings.address
               << ":" << settings.port << "\n";
@@ -379,6 +384,7 @@ int main(int argc, char* argv[]) {
     // Persist roster-agent conversation history (daedalus only saves on
     // Agent::shutdown — its destructor doesn't).
     agent_registry.shutdown_all();
+    worker_channel.stop();
     server.stop();
     OmniNet::cleanup();
     return 0;

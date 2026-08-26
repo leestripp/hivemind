@@ -2,6 +2,7 @@
 #include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/WorkerStore.h"
+#include "hivemind/WorkerChannel.h"
 
 #include <nlohmann/json.hpp>
 
@@ -11,10 +12,12 @@ using hivemind::routes::send_json;
 using hivemind::routes::send_error;
 
 void register_worker_routes(OmniNet::HTTP::Server& server,
-                            WorkerStore& workers) {
+                            WorkerStore& workers,
+                            WorkerChannel& channel) {
 
     server.get("/api/workers",
-        [&workers](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+        [&workers, &channel](const OmniNet::HTTP::Request&,
+                             OmniNet::HTTP::Response& resp) {
             json list = json::array();
             for (auto& w : workers.list()) {
                 json caps = json::object();
@@ -23,7 +26,7 @@ void register_worker_routes(OmniNet::HTTP::Server& server,
                                 {"proto", w.proto},
                                 {"last_seen", w.last_seen},
                                 {"created_at", w.created_at},
-                                {"online", false}});   // real flag: 30.2
+                                {"online", channel.is_online(w.name)}});
             }
             send_json(resp, json{{"workers", list}});
         });
