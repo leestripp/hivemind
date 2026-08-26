@@ -22,7 +22,9 @@ public:
     explicit ListAgentsTool(AgentStore& agents) : agents_(agents) {}
     [[nodiscard]] std::string get_name() const override { return "list_agents"; }
     [[nodiscard]] std::string get_description() const override {
-        return "List the other agents on the team (id, name, role).";
+        return "List EVERY agent in the company — the full staff directory "
+               "(id, name, role), including yourself. Always use this to "
+               "look up a teammate's exact name before contacting them.";
     }
     [[nodiscard]] nlohmann::json get_definition() const override;
     nlohmann::json execute(const nlohmann::json& args,
@@ -41,11 +43,14 @@ public:
         : sender_id_(std::move(sender_id)), agents_(agents), registry_(registry) {}
     [[nodiscard]] std::string get_name() const override { return "message_agent"; }
     [[nodiscard]] std::string get_description() const override {
-        return "Send a message to a teammate agent (by name or id). The "
-               "message is posted to your shared thread and delivered "
-               "asynchronously: the reply arrives later as a new message "
-               "to you. Do NOT wait for an immediate answer; continue your "
-               "own work or report what you sent.";
+        return "Send a message to a teammate agent (by name or id — use "
+               "list_agents to find them). This is the ONLY way to contact "
+               "another agent: use it to introduce yourself, say hello, "
+               "delegate a task, or ask a question. The message is posted "
+               "to your shared thread and delivered asynchronously: the "
+               "reply arrives later as a new message to you. Do NOT wait "
+               "for an immediate answer; continue your own work or report "
+               "what you sent.";
     }
     [[nodiscard]] nlohmann::json get_definition() const override;
     nlohmann::json execute(const nlohmann::json& args,
