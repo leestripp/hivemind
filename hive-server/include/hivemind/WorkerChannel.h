@@ -1,8 +1,10 @@
 #pragma once
 
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -37,6 +39,20 @@ public:
 
     bool is_online(const std::string& name) const;
 
+    /// Phase 30.3: synchronous remote exec. Sends an exec frame
+    /// (argv = ["bash","-lc",command]; env_content is the RENDERED env-file
+    /// text, resolved server-side — secrets never persist on the worker),
+    /// collects streamed exec_chunk frames, returns on exec_done.
+    /// nullopt when the worker is offline; throws std::runtime_error on
+    /// worker-side failure (timeout included — exit_code -1, timed_out).
+    struct RemoteResult { int exit_code = -1; std::string output;
+                          bool timed_out = false; int64_t duration_ms = 0; };
+    std::optional<RemoteResult> exec(const std::string& worker,
+                                     const std::string& agent,
+                                     const std::string& command,
+                                     const std::string& env_content,
+                                     int timeout_s);
+
     /// Push a JSON frame to a connected worker (30.3 exec dispatch).
     /// False when the worker is offline.
     bool send(const std::string& name, const nlohmann::json& frame);
@@ -57,4 +73,17 @@ private:
 
     mutable std::mutex m_;
     std::unordered_map<std::string, OmniNet::WebSocket::Connection*> conns_;
+
+    // In-flight remote execs, keyed by job id (filled by exec_chunk /
+    // exec_done frames in the receive loop).
+    struct Job {
+        std::mutex m;
+        std::condition_variable cv;
+        std::string output;
+        int exit_code = -1;
+        int64_t duration_ms = 0;
+        bool done = false;
+    };
+    std::unordered_map<std::string, std::shared_ptr<Job>> jobs_;
+    uint64_t next_job_ = 1;
 };

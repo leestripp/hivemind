@@ -44,6 +44,7 @@
 #include "hivemind/AuthStore.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/WorkerChannel.h"
+#include "hivemind/WorkerRouter.h"
 #include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
@@ -126,6 +127,7 @@ int main(int argc, char* argv[]) {
     WorkerStore worker_store;
     WorkerChannel worker_channel{worker_store,
                                  ServerConfig::instance().worker_ws_port()};
+    WorkerRouter::install(&agent_store, &worker_channel);   // Phase 30.3
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,

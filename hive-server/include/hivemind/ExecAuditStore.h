@@ -27,13 +27,15 @@ public:
         int exit_code = 0;
         bool timed_out = false;
         int64_t duration_ms = 0;
+        std::string worker = "local";   // Phase 30.3: which hive-worker ran it
     };
 
     explicit ExecAuditStore(std::filesystem::path db_path);
     ~ExecAuditStore() = default;
 
     void log(const std::string& agent_id, const std::string& command,
-             int exit_code, bool timed_out, int64_t duration_ms);
+             int exit_code, bool timed_out, int64_t duration_ms,
+             const std::string& worker = "local");
 
     /// Newest first. agent_id empty → all agents.
     std::vector<Entry> list(const std::string& agent_id = "", int limit = 100);

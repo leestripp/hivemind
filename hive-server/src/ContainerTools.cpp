@@ -3,6 +3,7 @@
 // =============================================================================
 #include "hivemind/ContainerTools.h"
 #include "hivemind/ContainerManager.h"
+#include "hivemind/WorkerRouter.h"
 
 nlohmann::json ContainerBashTool::execute(const nlohmann::json& args,
                                           daedalus::HostToolContext& /*ctx*/) {
@@ -20,7 +21,11 @@ nlohmann::json ContainerBashTool::execute(const nlohmann::json& args,
                 {"error", "command was not approved by the user"}};
 
     try {
-        auto res = container_manager().exec(agent_id_, command, timeout);
+        // Phase 30.3: worker-assigned agents exec on their hive-worker.
+        // nullopt = local agent → today's ContainerManager path.
+        auto remote = WorkerRouter::exec(agent_id_, command, timeout);
+        auto res = remote ? std::move(*remote)
+                          : container_manager().exec(agent_id_, command, timeout);
         nlohmann::json out{
             {"exit_code", res.exit_code},
             {"output", res.output},

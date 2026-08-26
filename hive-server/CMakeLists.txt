@@ -11,6 +11,7 @@ set(CORE_SOURCES
     src/ConnectorStore.cpp
     src/WorkerStore.cpp
     src/WorkerChannel.cpp
+    src/WorkerRouter.cpp
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp

@@ -8,11 +8,13 @@
 //                    [--caps '{"gpu":true}']
 
 #include "websocket/WebSocket.h"
+#include "runner.h"
 
 #include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <csignal>
+#include <mutex>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -63,6 +65,13 @@ int main(int argc, char* argv[]) {
             backoff = 1;
             auto connected_at = std::chrono::steady_clock::now();
 
+            // All sends (heartbeat thread + exec threads) share one mutex.
+            std::mutex send_m;
+            auto send_frame = [&](const json& f) {
+                std::lock_guard lk(send_m);
+                ws.sendText(f.dump());
+            };
+
             // heartbeat sender; receive loop below drives reconnect
             std::atomic<bool> dead{false};
             std::thread hb([&] {
@@ -72,7 +81,7 @@ int main(int argc, char* argv[]) {
                     try {
                         auto up = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::steady_clock::now() - connected_at).count();
-                        ws.sendText(json{{"op","heartbeat"},{"uptime_s",up}}.dump());
+                        send_frame({{"op","heartbeat"},{"uptime_s",up}});
                     } catch (...) { dead = true; }
                 }
             });
@@ -82,8 +91,45 @@ int main(int argc, char* argv[]) {
                 if (!msg) break;   // closed
                 json frame;
                 try { frame = json::parse(*msg); } catch (...) { continue; }
-                std::cout << "worker: frame: " << frame.dump() << "\n";
-                // 30.3: dispatch {"op":"exec",...} to ContainerManager here.
+                const std::string op = frame.value("op", "");
+                if (op != "exec")
+                    std::cout << "worker: frame: " << frame.dump() << "\n";
+
+                if (op == "exec") {
+                    // 30.3: run in a detached thread — the receive loop
+                    // stays responsive while chunks stream back.
+                    const std::string id = frame.value("id", "");
+                    const std::string agent = frame.value("agent", "");
+                    std::vector<std::string> argv;
+                    for (auto& a : frame.value("argv", json::array()))
+                        argv.push_back(a.get<std::string>());
+                    const std::string env = frame.value("env", "");
+                    const int timeout = frame.value("timeout_s", 120);
+                    std::thread([&, id, agent, argv, env, timeout] {
+                        auto outcome = hwrunner::run_container_exec(
+                            agent, argv, env, timeout,
+                            [&](std::string_view chunk) {
+                                try {
+                                    send_frame({{"op","exec_chunk"},{"id",id},
+                                        {"stream","stdout"},
+                                        {"data",std::string{chunk}}});
+                                } catch (...) {}
+                            });
+                        json done{{"op","exec_done"},{"id",id},
+                                  {"exit_code",outcome.exit_code},
+                                  {"duration_ms",outcome.duration_ms}};
+                        if (outcome.timed_out) done["timed_out"] = true;
+                        if (!outcome.error.empty()) {
+                            done["exit_code"] = -1;
+                            try {
+                                send_frame({{"op","exec_chunk"},{"id",id},
+                                    {"stream","stderr"},
+                                    {"data","[worker] " + outcome.error + "\n"}});
+                            } catch (...) {}
+                        }
+                        try { send_frame(done); } catch (...) {}
+                    }).detach();
+                }
             }
             dead = true;
             if (hb.joinable()) hb.join();

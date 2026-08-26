@@ -7,6 +7,7 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/ContainerRoutes.h"
 #include "hivemind/ContainerManager.h"
+#include "hivemind/WorkerRouter.h"
 #include "hivemind/ExecAuditStore.h"
 
 #include <nlohmann/json.hpp>
@@ -82,11 +83,18 @@ void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents
             std::string command = body.value("command", "");
             if (command.empty()) { send_error(resp, 400, "command required"); return; }
             int timeout = body.value("timeout", 120);
-            auto res = container_manager().exec(seg[2], command, timeout);
-            send_json(resp, json{
-                {"exit_code", res.exit_code}, {"output", res.output},
-                {"timed_out", res.timed_out},
-            });
+            try {
+                auto remote = WorkerRouter::exec(seg[2], command, timeout);
+                auto res = remote ? std::move(*remote)
+                                  : container_manager().exec(seg[2], command, timeout);
+                send_json(resp, json{
+                    {"exit_code", res.exit_code}, {"output", res.output},
+                    {"timed_out", res.timed_out},
+                });
+            } catch (const std::exception& e) {
+                // Phase 30.3: worker offline etc. — fail fast, clean 503.
+                send_error(resp, 503, e.what());
+            }
         });
 
     // Phase 8: exec audit trail — every container_exec/browser_* command
@@ -105,7 +113,7 @@ void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents
                 entries.push_back({
                     {"id", e.id}, {"ts", e.ts}, {"command", e.command},
                     {"exit_code", e.exit_code}, {"timed_out", e.timed_out},
-                    {"duration_ms", e.duration_ms},
+                    {"duration_ms", e.duration_ms}, {"worker", e.worker},
                 });
             send_json(resp, json{{"entries", entries}});
         });

@@ -6,7 +6,9 @@
 
 #include "websocket/WebSocket.h"
 
+#include <chrono>
 #include <iostream>
+#include <stdexcept>
 
 using json = nlohmann::json;
 using OmniNet::WebSocket::Connection;
@@ -47,6 +49,48 @@ bool WorkerChannel::send(const std::string& name, const json& frame) {
     } catch (...) {
         return false;   // receive loop will unregister on close
     }
+}
+
+std::optional<WorkerChannel::RemoteResult> WorkerChannel::exec(
+        const std::string& worker, const std::string& agent,
+        const std::string& command, const std::string& env_content,
+        int timeout_s) {
+    auto job = std::make_shared<Job>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;   // offline
+        id = std::to_string(next_job_++);
+        jobs_[id] = job;
+    }
+    bool sent = send(worker, json{{"op","exec"},{"id",id},{"agent",agent},
+        {"argv", json::array({"bash","-lc",command})},
+        {"env", env_content},           // rendered env-file text (may be "")
+        {"timeout_s", timeout_s}});
+    if (!sent) {
+        std::lock_guard lk(m_);
+        jobs_.erase(id);
+        return std::nullopt;
+    }
+
+    // Wait for exec_done. Generous outer bound: worker timeout + overhead.
+    std::unique_lock lk(job->m);
+    bool ok = job->cv.wait_for(lk, std::chrono::seconds(timeout_s + 30),
+                               [&] { return job->done; });
+    RemoteResult r;
+    r.exit_code = job->exit_code;
+    r.output = std::move(job->output);
+    r.duration_ms = job->duration_ms;
+    r.timed_out = !ok || (ok && job->exit_code == -1 && job->done
+                          && job->output.find("[timed out]") != std::string::npos);
+    lk.unlock();
+    {
+        std::lock_guard g(m_);
+        jobs_.erase(id);
+    }
+    if (!ok)
+        throw std::runtime_error("worker exec timed out (no exec_done)");
+    return r;
 }
 
 void WorkerChannel::handle(Connection& ws) {
@@ -96,14 +140,43 @@ void WorkerChannel::handle(Connection& ws) {
         const std::string op = frame.value("op", "");
         if (op == "heartbeat") {
             store_.validate(key);   // touches last_seen
+        } else if (op == "exec_chunk" || op == "exec_done") {
+            std::shared_ptr<Job> job;
+            {
+                std::lock_guard lk(m_);
+                auto it = jobs_.find(frame.value("id", ""));
+                if (it != jobs_.end()) job = it->second;
+            }
+            if (job) {
+                std::lock_guard jl(job->m);
+                if (op == "exec_chunk") {
+                    job->output += frame.value("data", "");
+                } else {
+                    job->exit_code = frame.value("exit_code", -1);
+                    job->duration_ms = frame.value("duration_ms", 0);
+                    job->done = true;
+                    job->cv.notify_all();
+                }
+            }
         } else if (on_frame) {
-            on_frame(name, frame);  // exec_chunk / exec_done / status (30.3)
+            on_frame(name, frame);  // status / future ops
         }
     }
 
     {
         std::lock_guard lk(m_);
         conns_.erase(name);
+        // Fail every in-flight job for this worker — exec() callers wake
+        // with an error instead of hanging until the outer timeout.
+        for (auto& [id, job] : jobs_) {
+            std::lock_guard jl(job->m);
+            if (!job->done) {
+                job->output += "\n[worker disconnected]\n";
+                job->exit_code = -1;
+                job->done = true;
+                job->cv.notify_all();
+            }
+        }
     }
     std::cerr << "[workers] " << name << " disconnected\n";
 }
