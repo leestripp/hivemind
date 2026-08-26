@@ -86,10 +86,11 @@ std::optional<WorkerChannel::RemoteResult> WorkerChannel::exec(
                                [&] { return job->done; });
     RemoteResult r;
     r.exit_code = job->exit_code;
-    r.output = std::move(job->output);
     r.duration_ms = job->duration_ms;
+    // timed_out BEFORE the move (checked on job->output, not the moved-from husk)
     r.timed_out = !ok || (ok && job->exit_code == -1 && job->done
                           && job->output.find("[timed out]") != std::string::npos);
+    r.output = std::move(job->output);
     lk.unlock();
     {
         std::lock_guard g(m_);
