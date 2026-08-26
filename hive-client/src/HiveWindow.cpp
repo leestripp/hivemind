@@ -11,6 +11,7 @@
 #include <future>
 
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -71,6 +72,14 @@ const char* kCss = R"(
   box-shadow: 0 0 0 2px @accent_color;
 }
 .avatar-pick-auto { padding: 8px 10px; font-size: 12px; opacity: 0.8; }
+
+/* Settings dialog: section sidebar + content stack */
+.hv-settings-sidebar { background: alpha(@window_fg_color, 0.04);
+  min-width: 150px; }
+.hv-settings-sidebar row { padding: 10px 14px; }
+.hv-settings-sidebar row:selected { background: alpha(@accent_color, 0.18); }
+.hv-settings-page { margin: 16px; }
+.hv-font-scale { min-width: 220px; }
 
 /* Context menus (right-click roster/threads) */
 .hv-menu-item { padding: 6px 12px; min-width: 140px; }
@@ -359,9 +368,6 @@ void HiveWindow::setup_icons() {
     slot(delete_thread_btn_, "trash",      "Delete the selected thread");
     slot(send_btn_,          "send",       "Send message");
 
-    // Theme toggle: single image, swaps sun/moon (shows the mode you'd get).
-    theme_icon_ = Gtk::make_managed<Gtk::Image>();
-    theme_btn_.set_child(*theme_icon_);
 
     // Approvals: icon + live count label, stable structure.
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
@@ -377,10 +383,6 @@ void HiveWindow::refresh_themed_icons() {
     for (auto& s : icon_slots_)
         s.img->set(themed_icon_pixbuf(s.icon, 16, dark_mode_));
     approvals_icon_.set(themed_icon_pixbuf("approvals", 16, dark_mode_));
-    theme_icon_->set(themed_icon_pixbuf(
-        dark_mode_ ? "theme-light" : "theme-dark", 16, dark_mode_));
-    theme_btn_.set_tooltip_text(dark_mode_ ? "Switch to light mode"
-                                           : "Switch to dark mode");
 }
 
 nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
@@ -414,22 +416,111 @@ void HiveWindow::apply_theme() {
     refresh_themed_icons();
 }
 
-// Settings — the human's chat identity (display name + avatar), persisted in
-// config.json. Room to grow: add a row here per future preference.
+// Font scale slider → gtk-xft-dpi (1/1024 pt units). 1.0 maps to -1 =
+// "follow the system", so the default always respects the desktop's own
+// DPI/scaling; other values override it app-locally.
+void HiveWindow::apply_font_scale() {
+    const int dpi = font_scale_ == 1.0
+        ? -1 : (int)std::lround(96.0 * 1024 * font_scale_);
+    Gtk::Settings::get_default()->property_gtk_xft_dpi().set_value(dpi);
+}
+
+// Settings — classic two-pane dialog: section sidebar on the left
+// (Interface / User), settings stack on the right. Interface switches apply
+// live; User identity saves with the Save button. Add a row to a page (or a
+// sidebar row + stack page) per future preference.
 void HiveWindow::on_settings() {
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("Settings");
     install_dialog_titlebar(*dialog, "Settings");
     dialog->set_transient_for(*this);
     dialog->set_modal(true);
+    dialog->set_default_size(620, 480);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
     dialog->add_button("Save", Gtk::ResponseType::OK);
     dialog->set_default_response(Gtk::ResponseType::OK);
 
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_margin(12);
-    grid->set_row_spacing(8);
-    grid->set_column_spacing(8);
+    auto* body = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    auto* sidebar = Gtk::make_managed<Gtk::ListBox>();
+    sidebar->add_css_class("hv-settings-sidebar");
+    auto* stack = Gtk::make_managed<Gtk::Stack>();
+    stack->set_hexpand(true);
+    stack->set_vexpand(true);
+    stack->set_transition_type(Gtk::StackTransitionType::CROSSFADE);
+    auto* sep = Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::VERTICAL);
+    body->append(*sidebar);
+    body->append(*sep);
+    body->append(*stack);
+
+    auto add_section = [&](const char* id, const char* label) {
+        auto* l = Gtk::make_managed<Gtk::Label>(label);
+        l->set_halign(Gtk::Align::START);
+        auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
+        row->set_child(*l);
+        row->set_data("page", (void*)id);
+        sidebar->append(*row);
+    };
+    add_section("interface", "🖥  Interface");
+    add_section("user", "👤  User");
+    sidebar->signal_row_selected().connect([stack](Gtk::ListBoxRow* row) {
+        if (row) stack->set_visible_child(
+            (const char*)row->get_data("page"));
+    });
+
+    // ── Interface page ──────────────────────────────────────────────────
+    auto* iface = Gtk::make_managed<Gtk::Grid>();
+    iface->add_css_class("hv-settings-page");
+    iface->set_row_spacing(14);
+    iface->set_column_spacing(12);
+
+    auto* dark_lbl = Gtk::make_managed<Gtk::Label>("Dark mode");
+    dark_lbl->set_halign(Gtk::Align::END);
+    auto* dark_sw = Gtk::make_managed<Gtk::Switch>();
+    dark_sw->set_halign(Gtk::Align::START);
+    dark_sw->set_active(dark_mode_);
+    // gtkmm 4.20: signal_state_set() rejects plain lambdas — watch the
+    // property instead. set_active above happens before connect, so no
+    // programmatic re-entry is possible.
+    dark_sw->property_active().signal_changed().connect(
+        [this, dark_sw] {
+            dark_mode_ = dark_sw->get_active();
+            apply_theme();
+            save_config();
+        });
+    iface->attach(*dark_lbl, 0, 0);
+    iface->attach(*dark_sw, 1, 0);
+
+    auto* fs_lbl = Gtk::make_managed<Gtk::Label>("Font scale");
+    fs_lbl->set_halign(Gtk::Align::END);
+    auto* fs = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
+    fs->add_css_class("hv-font-scale");
+    fs->set_range(0.75, 1.75);
+    fs->set_increments(0.05, 0.25);
+    fs->add_mark(1.0, Gtk::PositionType::BOTTOM, "100%");
+    fs->set_value(font_scale_);
+    fs->set_tooltip_text("1.00 follows the system DPI/scaling");
+    fs->signal_value_changed().connect([this, fs] {
+        font_scale_ = fs->get_value();
+        apply_font_scale();
+        save_config();
+    });
+    iface->attach(*fs_lbl, 0, 1);
+    iface->attach(*fs, 1, 1);
+
+    auto* srv_lbl = Gtk::make_managed<Gtk::Label>("Server");
+    srv_lbl->set_halign(Gtk::Align::END);
+    auto* srv = Gtk::make_managed<Gtk::Label>(server_url_);
+    srv->set_halign(Gtk::Align::START);
+    srv->add_css_class("dim-label");
+    iface->attach(*srv_lbl, 0, 2);
+    iface->attach(*srv, 1, 2);
+    stack->add(*iface, "interface");
+
+    // ── User page ───────────────────────────────────────────────────────
+    auto* user = Gtk::make_managed<Gtk::Grid>();
+    user->add_css_class("hv-settings-page");
+    user->set_row_spacing(14);
+    user->set_column_spacing(12);
 
     auto* name = Gtk::make_managed<Gtk::Entry>();
     name->set_placeholder_text("You");
@@ -444,7 +535,7 @@ void HiveWindow::on_settings() {
         std::pair<std::string, Gtk::ToggleButton*>>();     // freed likewise
     Gtk::ToggleButton* leader = nullptr;
     auto add_tile = [&](const std::string& val, Gtk::Widget* content,
-                        const std::string& tip, int col, int row, int width = 1) {
+                        const std::string& tip, int col, int row) {
         auto* b = Gtk::make_managed<Gtk::ToggleButton>();
         b->set_child(*content);
         b->add_css_class("avatar-pick");
@@ -455,7 +546,7 @@ void HiveWindow::on_settings() {
         b->signal_toggled().connect([b, chosen, val] {
             if (b->get_active()) *chosen = val;
         });
-        avatar_grid->attach(*b, col, row, width);
+        avatar_grid->attach(*b, col, row);
     };
     {
         auto* img = Gtk::make_managed<Gtk::Image>();
@@ -471,27 +562,21 @@ void HiveWindow::on_settings() {
         add_tile(avatars[i], img, avatars[i], (int)((i + 1) % 5), (int)((i + 1) / 5));
     }
 
-    auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(label);
-        l->set_halign(Gtk::Align::END);
-        grid->attach(*l, 0, row);
-        w->set_hexpand(true);
-        grid->attach(*w, 1, row);
-    };
-    int row_i = 0;
-    add_row("Display name", name, row_i++);
-    add_row("Avatar", avatar_grid, row_i++);
-    {
-        auto* srv = Gtk::make_managed<Gtk::Label>(server_url_);
-        srv->set_halign(Gtk::Align::START);
-        srv->add_css_class("dim-label");
-        auto* l = Gtk::make_managed<Gtk::Label>("Server");
-        l->set_halign(Gtk::Align::END);
-        grid->attach(*l, 0, row_i);
-        grid->attach(*srv, 1, row_i);
-    }
+    auto* name_lbl = Gtk::make_managed<Gtk::Label>("Display name");
+    name_lbl->set_halign(Gtk::Align::END);
+    user->attach(*name_lbl, 0, 0);
+    name->set_hexpand(true);
+    user->attach(*name, 1, 0);
+    auto* av_lbl = Gtk::make_managed<Gtk::Label>("Avatar");
+    av_lbl->set_halign(Gtk::Align::END);
+    av_lbl->set_valign(Gtk::Align::START);
+    user->attach(*av_lbl, 0, 1);
+    user->attach(*avatar_grid, 1, 1);
+    stack->add(*user, "user");
 
-    dialog->get_content_area()->append(*grid);
+    if (auto* r0 = sidebar->get_row_at_index(0)) sidebar->select_row(*r0);
+
+    dialog->get_content_area()->append(*body);
     dialog->signal_response().connect(
         [this, dialog, name, chosen, tiles](int r) {
             if (r == (int)Gtk::ResponseType::OK) {
@@ -538,8 +623,6 @@ HiveWindow::HiveWindow() {
         sigc::mem_fun(*this, &HiveWindow::on_approvals));
     connect_btn_.signal_clicked().connect(
         [this] { maybe_show_connect_dialog(); });
-    theme_btn_.signal_clicked().connect(
-        sigc::mem_fun(*this, &HiveWindow::on_theme_toggle));
     settings_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_settings));
     stop_btn_.signal_clicked().connect([this] { on_stop(); });
@@ -558,7 +641,6 @@ HiveWindow::HiveWindow() {
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(settings_btn_);
-    header_.pack_end(theme_btn_);
     header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
     header_.pack_end(learn_btn_);
@@ -672,6 +754,7 @@ HiveWindow::HiveWindow() {
     load_config();
     setup_icons();   // persistent icon structure, once
     apply_theme();   // dark/light + initial pixbuf tint
+    apply_font_scale();
     set_status("Connecting to hive-server…");
     if (api_.api_key().empty())
         maybe_show_connect_dialog();
@@ -700,6 +783,7 @@ void HiveWindow::load_config() {
         dark_mode_ = j.value("dark_mode", false);
         display_name_ = j.value("display_name", "");
         user_avatar_  = j.value("user_avatar", "");
+        font_scale_   = j.value("font_scale", 1.0);
     } catch (...) {}
 }
 
@@ -713,7 +797,7 @@ void HiveWindow::save_config() {
     std::ofstream f{file, std::ios::trunc};
     f << json{{"server", server_url_}, {"api_key", api_.api_key()},
               {"dark_mode", dark_mode_}, {"display_name", display_name_},
-              {"user_avatar", user_avatar_}}.dump(2);
+              {"user_avatar", user_avatar_}, {"font_scale", font_scale_}}.dump(2);
     f.close();
     fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
 }

@@ -50,6 +50,7 @@ private:
     void load_config();          // ~/.config/hivemind/config.json
     void save_config();
     void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
+    void apply_font_scale();   // font_scale_ → gtk-xft-dpi (1.0 = system auto)
     void on_theme_toggle();
     void on_settings();         // user profile: display name + avatar
     void refresh_themed_icons();  // re-tints pixbufs in place (no reparenting!)
@@ -59,7 +60,6 @@ private:
     // reparented (reparenting a managed member widget can destroy it → crash).
     struct IconSlot { Gtk::Button* btn; Gtk::Image* img; std::string icon; };
     std::vector<IconSlot> icon_slots_;
-    Gtk::Image* theme_icon_ = nullptr;   // swaps sun/moon per mode
     void setup_icons();
     void maybe_show_connect_dialog();   // when no key is configured
 
@@ -148,7 +148,6 @@ private:
     Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
     Gtk::Label approvals_label_;         // child of approvals_btn_
     Gtk::Image approvals_icon_;          // child of approvals_btn_
-    Gtk::Button theme_btn_;              // dark/light toggle
     Gtk::Button settings_btn_;           // user profile settings
     Gtk::Button connect_btn_;
     Gtk::Button stop_btn_;
@@ -158,6 +157,7 @@ private:
     // User profile (persisted in config.json): chat identity for the human.
     std::string display_name_;           // "" = "You"
     std::string user_avatar_;            // "" = default user silhouette
+    double font_scale_ = 1.0;            // UI font scale; 1.0 = system default
     std::string user_label() const { return display_name_.empty() ? "You" : display_name_; }
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
