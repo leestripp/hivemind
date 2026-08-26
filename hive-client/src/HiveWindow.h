@@ -51,6 +51,7 @@ private:
     void save_config();
     void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
     void apply_font_scale();   // font_scale_ → gtk-xft-dpi (1.0 = system auto)
+    void scroll_chat_to_bottom();  // sticky-bottom auto-scroll
     void on_theme_toggle();
     void on_settings();         // user profile: display name + avatar
     void refresh_themed_icons();  // re-tints pixbufs in place (no reparenting!)
@@ -175,6 +176,8 @@ private:
     Gtk::Label status_label_{""};
     Gtk::Label thread_title_;            // active thread name above the chat
     Gtk::ScrolledWindow chat_scroll_;
+    bool chat_stick_bottom_ = true;   // auto-scroll unless user scrolled up
+    bool chat_scroll_prog_ = false;   // guard: our own scroll in flight
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
     Gtk::Button attach_btn_;             // Phase 18: 📎 attach files

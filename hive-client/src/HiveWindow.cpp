@@ -421,6 +421,13 @@ void HiveWindow::apply_theme() {
 // Font scale slider → gtk-xft-dpi (1/1024 pt units). 1.0 maps to -1 =
 // "follow the system", so the default always respects the desktop's own
 // DPI/scaling; other values override it app-locally.
+void HiveWindow::scroll_chat_to_bottom() {
+    auto a = chat_scroll_.get_vadjustment();
+    chat_scroll_prog_ = true;   // don't let our own scroll flip the sticky flag
+    a->set_value(a->get_upper() - a->get_page_size());
+    Glib::signal_idle().connect_once([this] { chat_scroll_prog_ = false; });
+}
+
 void HiveWindow::apply_font_scale() {
     const int dpi = font_scale_ == 1.0
         ? -1 : (int)std::lround(96.0 * 1024 * font_scale_);
@@ -710,6 +717,22 @@ HiveWindow::HiveWindow() {
     status_label_.set_selectable(true);   // Phase 19: error ids are copyable
     chat_scroll_.set_child(messages_box_);
     chat_scroll_.set_vexpand(true);
+    // Sticky-bottom chat: auto-scroll to the newest message whenever content
+    // grows (thread opened, message arrives) UNLESS the user has scrolled
+    // up to read; scrolling back to within ~10px of the bottom re-engages.
+    {
+        auto adj = chat_scroll_.get_vadjustment();
+        adj->signal_changed().connect([this] {   // upper/page: new content or resize
+            if (chat_stick_bottom_ && !chat_scroll_prog_)
+                scroll_chat_to_bottom();
+        });
+        adj->property_value().signal_changed().connect([this] {
+            if (chat_scroll_prog_) return;   // our own auto-scroll, not the user
+            auto a = chat_scroll_.get_vadjustment();
+            chat_stick_bottom_ =
+                a->get_value() >= a->get_upper() - a->get_page_size() - 10.0;
+        });
+    }
     entry_.set_hexpand(true);
     entry_.set_placeholder_text("Message the team…  (Enter to send)");
     entry_.signal_activate().connect([this] { on_send(); });
@@ -1052,11 +1075,8 @@ void HiveWindow::poll_chat() {
                         m.value("attachments", json::array()));
                     last_message_id_ = m.value("id", last_message_id_);
                 }
-                if (!arr.empty()) {
-                    // scroll to bottom
-                    auto adj = chat_scroll_.get_vadjustment();
-                    adj->set_value(adj->get_upper() - adj->get_page_size());
-                }
+                // Sticky-bottom scroll happens via the vadjustment "changed"
+                // handler (fires once the new bubbles are laid out).
                 bool busy = act.value("busy", false);
                 thread_busy_ = busy;
                 stop_btn_.set_sensitive(busy);
@@ -1442,6 +1462,7 @@ void HiveWindow::on_thread_selected() {
     if (!id || *id == current_thread_) return;
     current_thread_ = *id;
     last_message_id_.clear();
+    chat_stick_bottom_ = true;   // opening a thread always shows the newest
     delete_thread_btn_.set_sensitive(true);
     learn_btn_.set_sensitive(true);
     for (auto& t : threads_)
