@@ -42,6 +42,8 @@
 #include "hivemind/routes/KeyRoutes.h"
 #include "hivemind/routes/ConfigRoutes.h"
 #include "hivemind/AuthStore.h"
+#include "hivemind/WorkerStore.h"
+#include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/LLMStore.h"
@@ -65,6 +67,29 @@ static std::atomic<bool> g_shutdown{false};
 static void on_signal(int) { g_shutdown = true; }
 
 int main(int argc, char* argv[]) {
+    // Phase 30.1 CLI: worker enrollment is admin-only, done on the server.
+    //   hive-server enroll-worker <name>   → prints the raw hmwk_ key ONCE
+    //   hive-server revoke-worker <name>
+    if (argc >= 3 && std::string{argv[1]} == "enroll-worker") {
+        try {
+            WorkerStore ws;
+            std::string raw = ws.enroll(argv[2]);
+            std::cout << "worker '" << argv[2] << "' enrolled. Key (shown ONCE):\n"
+                      << raw << "\n"
+                      << "Give it to the worker: hive-worker --key <key>\n";
+            return 0;
+        } catch (const std::exception& e) {
+            std::cerr << "enroll-worker: " << e.what() << "\n";
+            return 1;
+        }
+    }
+    if (argc >= 3 && std::string{argv[1]} == "revoke-worker") {
+        WorkerStore ws;
+        bool ok = ws.remove(argv[2]);
+        std::cout << (ok ? "revoked\n" : "no such worker\n");
+        return ok ? 0 : 1;
+    }
+
     auto settings = load_settings(argc, argv);
 
     std::cout << "HiveMind Node Graph v"
@@ -97,6 +122,7 @@ int main(int argc, char* argv[]) {
     RoutineStore routine_store;
     LLMStore llm_store;
     AuthStore auth_store;
+    WorkerStore worker_store;
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,
@@ -203,6 +229,7 @@ int main(int argc, char* argv[]) {
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store, agent_store);
     register_key_routes(server, auth_store);
+    register_worker_routes(server, worker_store);
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);

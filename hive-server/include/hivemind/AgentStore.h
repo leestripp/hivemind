@@ -24,6 +24,7 @@ struct RosterAgent {
     std::string workspace_mode; // "shared" (company /workspace) — containers land in Phase 2
     std::string container_id;   // "" until Phase 2
     std::string avatar;         // dept avatar name e.g. "engineering-female"; "" = auto (name hash)
+    std::string worker = "local"; // Phase 30: "local" = server's podman, else hive-worker name
     bool require_approval = false; // Phase 3: gate shell commands for human review
     std::string created_at;
     std::string updated_at;
@@ -55,7 +56,8 @@ public:
                              const std::string& model,
                              const std::string& workspace_mode,
                              bool require_approval,
-                             const std::string& avatar = "");
+                             const std::string& avatar = "",
+                             const std::string& worker = "");   // "" = keep current
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

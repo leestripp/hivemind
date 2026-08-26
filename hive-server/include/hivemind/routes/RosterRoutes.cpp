@@ -39,6 +39,7 @@ json agent_json(const RosterAgent& a) {
         {"model", a.model}, {"workspace_mode", a.workspace_mode},
         {"container_id", a.container_id},
         {"require_approval", a.require_approval}, {"avatar", a.avatar},
+        {"worker", a.worker},
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
 }
@@ -240,7 +241,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     body.value("model", existing->model),
                     body.value("workspace_mode", existing->workspace_mode),
                     body.value("require_approval", existing->require_approval),
-                    body.value("avatar", existing->avatar));
+                    body.value("avatar", existing->avatar),
+                    body.value("worker", ""));   // "" = keep current
                 // Name/model changes must not leak into a live host.
                 registry.evict(a.id);
                 // Phase 10 fix: renaming an agent must carry its daedalus

@@ -16,6 +16,15 @@ Authorization: Bearer hm_...
 
 The **master key** is printed once at first server start (also in
 `hivemindctl logs`). Create/revoke more via `/api/keys` (admin scope).
+
+### Workers (Phase 30.1)
+
+- `GET /api/workers` — list enrolled workers (name, caps, proto,
+  last_seen, created_at; `online` flag arrives with the 30.2 channel)
+- `DELETE /api/workers/:name` — revoke (key dies with the row)
+- Enrollment is CLI-only on the server: `hive-server enroll-worker <name>`
+  prints the raw `hmwk_…` key once (hash stored); `revoke-worker <name>`
+  removes it. Agents gain `worker` (default `"local"`) via roster PATCH.
 Scopes: `admin` (everything), `agent` (default), `read` (GET only).
 Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 

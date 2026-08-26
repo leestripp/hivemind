@@ -47,12 +47,14 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.updated_at     = col(7);
     a.require_approval = sqlite3_column_int(st, 8) != 0;
     a.avatar         = col(9);
+    a.worker         = col(10);
+    if (a.worker.empty()) a.worker = "local";
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
-    "       created_at, updated_at, require_approval, avatar FROM agents";
+    "       created_at, updated_at, require_approval, avatar, worker FROM agents";
 
 } // namespace
 
@@ -106,6 +108,11 @@ void AgentStore::ensure_schema() {
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN avatar"
                      " TEXT NOT NULL DEFAULT ''",
                  nullptr, nullptr, nullptr);
+    // Phase 30 (2026-08-26): which hive-worker runs this agent's container;
+    // "local" = the server's own podman.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN worker"
+                     " TEXT NOT NULL DEFAULT 'local'",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 }
 
@@ -137,8 +144,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     const char* sql =
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
         "                   container_id, created_at, updated_at, require_approval,"
-        "                   avatar)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?)";
+        "                   avatar, worker)"
+        " VALUES (?,?,?,?,?,'',?,?,?,?,'local')";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -207,7 +214,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& model,
                                      const std::string& workspace_mode,
                                      bool require_approval,
-                                     const std::string& avatar) {
+                                     const std::string& avatar,
+                                     const std::string& worker) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -221,7 +229,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?,"
-        " updated_at=?, require_approval=?, avatar=? WHERE id=?";
+        " updated_at=?, require_approval=?, avatar=?,"
+        " worker = CASE WHEN ? = '' THEN worker ELSE ? END WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -235,7 +244,9 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 5, now);
     sqlite3_bind_int(st, 6, require_approval ? 1 : 0);
     bind_text(st, 7, avatar);
-    bind_text(st, 8, id);
+    bind_text(st, 8, worker);
+    bind_text(st, 9, worker);
+    bind_text(st, 10, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
