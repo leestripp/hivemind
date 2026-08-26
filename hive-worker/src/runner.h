@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -25,5 +26,21 @@ ExecOutcome run_container_exec(const std::string& agent,
                                const std::string& env_content,
                                int timeout_s,
                                const std::function<void(std::string_view)>& on_chunk);
+
+struct ScreenResult {
+    bool running = false;
+    uint16_t port = 0;
+    std::string password;
+    std::string error;      // "" on success
+};
+
+/// Screen control for an agent's container ON THIS WORKER. Mirrors the
+/// server's ContainerManager screen stack (Phase 24/25): the agent's
+/// container is (re)created from the BROWSER image with 127.0.0.1::6080
+/// published (websockify), then hive-screen.sh brings up the display
+/// stack. image + resolution come from the server (it owns the config).
+/// action: "status" | "start" | "stop".
+ScreenResult screen_ctl(const std::string& agent, const std::string& action,
+                        const std::string& image, const std::string& resolution);
 
 } // namespace hwrunner

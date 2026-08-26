@@ -6,6 +6,7 @@
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/ExecAuditStore.h"
+#include "hivemind/ServerConfig.h"
 
 #include <chrono>
 #include <stdexcept>
@@ -54,4 +55,34 @@ std::optional<ContainerManager::ExecResult> WorkerRouter::exec(
                                            res.timed_out, ms, wname);
     } catch (...) {}
     return res;
+}
+
+// ── 30.4: screen passthroughs ───────────────────────────────────────────
+std::optional<WorkerChannel::ScreenResult> WorkerRouter::screen_ctl(
+        const std::string& agent_id, const std::string& action) {
+    if (!g_agents || !g_channel) return std::nullopt;
+    auto agent = g_agents->get_agent(agent_id);
+    if (!agent || agent->worker == "local") return std::nullopt;
+    const std::string& wname = agent->worker;
+    if (!g_channel->is_online(wname))
+        throw std::runtime_error("worker '" + wname + "' is offline");
+    auto r = g_channel->screen_ctl(wname, agent_id, action,
+        ContainerManager::browser_image_name(),
+        ServerConfig::instance().screen_resolution(),
+        /*timeout_s=*/ action == "start" ? 180 : 30);
+    if (!r)
+        throw std::runtime_error("worker '" + wname + "' went offline");
+    return *r;
+}
+
+std::unique_ptr<OmniNet::Socket> WorkerRouter::screen_stream(
+        const std::string& agent_id, uint16_t port) {
+    if (!g_agents || !g_channel) return nullptr;
+    auto agent = g_agents->get_agent(agent_id);
+    if (!agent || agent->worker == "local") return nullptr;
+    const std::string& wname = agent->worker;
+    if (!g_channel->is_online(wname))
+        throw std::runtime_error("worker '" + wname + "' is offline");
+    // Constructor opens the stream and throws on failure.
+    return std::make_unique<ChannelSocket>(*g_channel, wname, port);
 }

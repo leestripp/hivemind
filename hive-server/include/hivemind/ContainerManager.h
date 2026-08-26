@@ -98,6 +98,10 @@ public:
 
     /// Container exec audit trail (Phase 8). Logged from exec().
     static ExecAuditStore& exec_audit();
+
+    /// Browser/screen image name (Phase 30.4: workers need it for
+    /// screen_ctl container recreation).
+    static const char* browser_image_name() { return kBrowserImage; }
 private:
     /// Run a podman command line (already quoted), capture output + rc.
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);

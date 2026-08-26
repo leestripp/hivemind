@@ -210,4 +210,121 @@ ExecOutcome run_container_exec(
     return oc;
 }
 
+uint16_t screen_port_of(const std::string& agent) {
+    std::string out;
+    if (podman_simple({"port", container_name(agent), "6080"}, &out) != 0)
+        return 0;
+    auto pos = out.rfind(':');
+    if (pos == std::string::npos) return 0;
+    try { return static_cast<uint16_t>(std::stoi(out.substr(pos + 1))); }
+    catch (...) { return 0; }
+}
+
+std::string screen_password_of(const std::string& agent) {
+    std::string pw;
+    if (podman_simple({"exec", container_name(agent),
+                       "cat", "/home/hive/.vnc-password"}, &pw) != 0)
+        return "";
+    while (!pw.empty() && isspace((unsigned char)pw.back())) pw.pop_back();
+    return pw;
+}
+
+ScreenResult screen_ctl(const std::string& agent, const std::string& action,
+                        const std::string& image, const std::string& resolution) {
+    ScreenResult r;
+    const std::string cname = container_name(agent);
+
+    if (action == "status") {
+        r.port = screen_port_of(agent);
+        r.running = r.port != 0;
+        if (r.running) r.password = screen_password_of(agent);
+        return r;
+    }
+
+    if (action == "stop") {
+        std::string out;
+        podman_simple({"exec", cname, "bash", "-lc",
+                       "pkill websockify; pkill -x x11vnc; pkill -x Xvfb; true"},
+                      &out);
+        r.running = false;
+        return r;
+    }
+
+    if (action != "start") { r.error = "unknown action"; return r; }
+
+    // ── start ──────────────────────────────────────────────────────────
+    std::string out;
+    if (podman_simple({"image", "exists", image}, nullptr) != 0) {
+        if (!fs::exists("hive-server/data/Containerfile.hive-agent-browser")) {
+            r.error = "browser image missing and Containerfile not found "
+                      "(run hive-worker from the repository root)";
+            return r;
+        }
+        if (podman_simple({"build", "-t", image, "-f",
+                           "hive-server/data/Containerfile.hive-agent-browser",
+                           "hive-server/data"}, &out) != 0) {
+            r.error = "podman build (browser) failed: " + out;
+            return r;
+        }
+    }
+
+    // Recreate when the container is missing, has no published 6080, or
+    // runs a stale/different image. Home + workspace are bind mounts —
+    // they survive recreation.
+    std::string state;
+    const bool exists =
+        podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
+                      &state) == 0;
+    bool recreate = !exists;
+    if (exists) {
+        std::string cur_img, new_img;
+        podman_simple({"inspect", "-f", "{{.Image}}", cname}, &cur_img);
+        podman_simple({"image", "inspect", "-f", "{{.Id}}", image}, &new_img);
+        if (screen_port_of(agent) == 0 || cur_img != new_img)
+            recreate = true;
+    }
+    if (recreate) {
+        podman_simple({"rm", "-f", cname}, &out);
+        fs::path base = worker_dir();
+        fs::path ws = base / ("workspace-" + agent);
+        fs::path home = base / ("home-" + agent);
+        std::error_code ec;
+        fs::create_directories(ws, ec);
+        fs::create_directories(home, ec);
+        if (podman_simple({"create", "--name", cname, "--memory", "4g",
+                           "--cpus", "2", "--shm-size", "1g",
+                           "-p", "127.0.0.1::6080",
+                           "-v", ws.string() + ":/workspace",
+                           "-v", home.string() + "/:/home/hive:U",
+                           "-w", "/workspace", image}, &out) != 0) {
+            r.error = "podman create (browser) failed: " + out;
+            return r;
+        }
+    }
+    if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
+                      &state) != 0 ||
+        state.find("running") == std::string::npos) {
+        if (podman_simple({"start", cname}, &out) != 0) {
+            r.error = "podman start failed: " + out;
+            return r;
+        }
+    }
+
+    r.port = screen_port_of(agent);
+    if (r.port == 0) {
+        r.error = "container has no published 6080 port";
+        return r;
+    }
+
+    // Idempotent display-stack bring-up inside the container.
+    if (podman_simple({"exec", cname, "hive-screen.sh", resolution},
+                      &out) != 0) {
+        r.error = "display stack failed to start: " + out;
+        return r;
+    }
+    r.running = true;
+    r.password = screen_password_of(agent);
+    return r;
+}
+
 } // namespace hwrunner

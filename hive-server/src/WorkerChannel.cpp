@@ -5,6 +5,8 @@
 #include "hivemind/WorkerStore.h"
 
 #include "websocket/WebSocket.h"
+#include "crypto/Crypto.h"
+#include "net/Socket.h"
 
 #include <chrono>
 #include <iostream>
@@ -178,6 +180,58 @@ void WorkerChannel::handle(Connection& ws) {
                     job->cv.notify_all();
                 }
             }
+        } else if (op == "screen_result") {
+            std::shared_ptr<ScreenJob> sj;
+            {
+                std::lock_guard lk(m_);
+                auto it = screen_jobs_.find(frame.value("id", ""));
+                if (it != screen_jobs_.end()) sj = it->second;
+            }
+            if (sj) {
+                std::lock_guard jl(sj->m);
+                sj->result.running = frame.value("running", false);
+                sj->result.port = frame.value("port", 0);
+                sj->result.password = frame.value("password", "");
+                sj->result.error = frame.value("error", "");
+                sj->done = true;
+                sj->cv.notify_all();
+            }
+        } else if (op == "stream_opened" || op == "stream_error") {
+            // open_stream waits on this via a ScreenJob-shaped slot? no —
+            // streams have their own ack slot:
+            std::shared_ptr<StreamAck> ack;
+            {
+                std::lock_guard lk(m_);
+                auto it = stream_acks_.find(frame.value("sid", ""));
+                if (it != stream_acks_.end()) ack = it->second;
+            }
+            if (ack) {
+                std::lock_guard al(ack->m);
+                ack->ok = (op == "stream_opened");
+                ack->error = frame.value("error", "");
+                ack->done = true;
+                ack->cv.notify_all();
+            }
+        } else if (op == "stream_data" || op == "stream_close") {
+            std::shared_ptr<Stream> stream;
+            {
+                std::lock_guard lk(m_);
+                auto it = streams_.find(frame.value("sid", ""));
+                if (it != streams_.end()) stream = it->second;
+                if (op == "stream_close") streams_.erase(frame.value("sid", ""));
+            }
+            if (stream) {
+                if (op == "stream_data") {
+                    auto bytes = OmniNet::Crypto::base64Decode(
+                        frame.value("b64", ""));
+                    if (bytes && stream->on_data)
+                        stream->on_data(std::string_view{
+                            reinterpret_cast<const char*>(bytes->data()),
+                            bytes->size()});
+                } else if (stream->on_close) {
+                    stream->on_close();
+                }
+            }
         } else if (on_frame) {
             on_frame(st->name, frame);  // status / future ops
         }
@@ -206,4 +260,200 @@ void WorkerChannel::handle(Connection& ws) {
         }
         std::cerr << "[workers] " << st->name << " disconnected\n";
     }
+}
+
+// ── 30.4: screen control ────────────────────────────────────────────────
+std::optional<WorkerChannel::ScreenResult>
+WorkerChannel::screen_ctl(const std::string& worker, const std::string& agent,
+                          const std::string& action, const std::string& image,
+                          const std::string& resolution, int timeout_s) {
+    if (!is_online(worker)) return std::nullopt;
+    const std::string id = "sc-" + std::to_string(next_job_++);
+    auto sj = std::make_shared<ScreenJob>();
+    {
+        std::lock_guard lk(m_);
+        screen_jobs_[id] = sj;
+    }
+    if (!send(worker, {{"op","screen_ctl"},{"id",id},{"agent",agent},
+                       {"action",action},{"image",image},
+                       {"resolution",resolution}})) {
+        std::lock_guard lk(m_);
+        screen_jobs_.erase(id);
+        return std::nullopt;
+    }
+    std::unique_lock lk(sj->m);
+    if (!sj->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                         [&]{ return sj->done; })) {
+        std::lock_guard g(m_);
+        screen_jobs_.erase(id);
+        throw std::runtime_error("worker screen_ctl timed out");
+    }
+    {
+        std::lock_guard g(m_);
+        screen_jobs_.erase(id);
+    }
+    return sj->result;
+}
+
+// ── 30.4: streams ───────────────────────────────────────────────────────
+std::string WorkerChannel::open_stream(const std::string& worker,
+                                       uint16_t port,
+                                       StreamDataCb on_data,
+                                       StreamCloseCb on_close) {
+    if (!is_online(worker)) return "";
+    const std::string sid = "st-" + std::to_string(next_stream_++);
+    auto ack = std::make_shared<StreamAck>();
+    {
+        std::lock_guard lk(m_);
+        stream_acks_[sid] = ack;
+    }
+    if (!send(worker, {{"op","stream_open"},{"sid",sid},{"port",port}})) {
+        std::lock_guard lk(m_);
+        stream_acks_.erase(sid);
+        return "";
+    }
+    {
+        std::unique_lock lk(ack->m);
+        if (!ack->cv.wait_for(lk, std::chrono::seconds(10),
+                              [&]{ return ack->done; })) {
+            std::lock_guard g(m_);
+            stream_acks_.erase(sid);
+            return "";
+        }
+    }
+    {
+        std::lock_guard lk(m_);
+        stream_acks_.erase(sid);
+        if (!ack->ok) return "";
+        streams_[sid] = std::make_shared<Stream>(
+            Stream{worker, std::move(on_data), std::move(on_close)});
+    }
+    return sid;
+}
+
+bool WorkerChannel::stream_send(const std::string& sid,
+                                std::span<const uint8_t> data) {
+    std::shared_ptr<Stream> stream;
+    {
+        std::lock_guard lk(m_);
+        auto it = streams_.find(sid);
+        if (it == streams_.end()) return false;
+        stream = it->second;
+    }
+    return send(stream->worker,
+                {{"op","stream_data"},{"sid",sid},
+                 {"b64", OmniNet::Crypto::base64Encode(data)}});
+}
+
+void WorkerChannel::stream_close(const std::string& sid) {
+    std::shared_ptr<Stream> stream;
+    {
+        std::lock_guard lk(m_);
+        auto it = streams_.find(sid);
+        if (it == streams_.end()) return;
+        stream = it->second;
+        streams_.erase(it);
+    }
+    send(stream->worker, {{"op","stream_close"},{"sid",sid}});
+}
+
+// ── 30.4: ChannelSocket ─────────────────────────────────────────────────
+ChannelSocket::ChannelSocket(WorkerChannel& ch, const std::string& worker,
+                             uint16_t port)
+    : ch_(ch), st_(std::make_shared<State>()) {
+    auto st = st_;   // callbacks capture the state block, not `this`
+    sid_ = ch_.open_stream(worker, port,
+        [st](std::string_view bytes) {
+            {
+                std::lock_guard lk(st->m);
+                st->buf.append(bytes);
+            }
+            st->cv.notify_all();
+        },
+        [st] {
+            {
+                std::lock_guard lk(st->m);
+                st->eof = true;
+            }
+            st->cv.notify_all();
+        });
+    if (sid_.empty())
+        throw OmniNet::SocketException(
+            std::string{"worker stream open failed"}, ECONNREFUSED);
+}
+
+ChannelSocket::~ChannelSocket() {
+    if (isOpen()) {
+        try { ch_.stream_close(sid_); } catch (...) {}
+    }
+}
+
+size_t ChannelSocket::send(std::span<const uint8_t> data) {
+    if (!isOpen()) return 0;
+    return ch_.stream_send(sid_, data) ? data.size() : 0;
+}
+
+size_t ChannelSocket::send(std::string_view data) {
+    return send(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+}
+
+void ChannelSocket::sendAll(std::span<const uint8_t> data) {
+    if (send(data) != data.size())
+        throw OmniNet::SocketException(
+            std::string{"channel stream closed during send"});
+}
+
+size_t ChannelSocket::recv(std::span<uint8_t> buffer) {
+    std::unique_lock lk(st_->m);
+    st_->cv.wait(lk, [&]{ return !st_->buf.empty() || st_->eof; });
+    if (st_->buf.empty()) return 0;   // EOF
+    const size_t n = std::min(buffer.size(), st_->buf.size());
+    std::memcpy(buffer.data(), st_->buf.data(), n);
+    st_->buf.erase(0, n);
+    return n;
+}
+
+std::optional<std::string> ChannelSocket::readLine(size_t maxLength) {
+    // Base impl uses the raw fd — we must byte-pop our queue instead.
+    std::string line;
+    while (line.size() < maxLength) {
+        uint8_t c = 0;
+        if (recv(std::span<uint8_t>(&c, 1)) == 0)
+            return line.empty() ? std::nullopt : std::optional{line};
+        if (c == '\n') {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            return line;
+        }
+        line += static_cast<char>(c);
+    }
+    return line;
+}
+
+bool ChannelSocket::isOpen() const {
+    std::lock_guard lk(st_->m);
+    return !st_->eof;
+}
+
+void ChannelSocket::close() {
+    {
+        std::lock_guard lk(st_->m);
+        if (st_->eof) return;
+        st_->eof = true;
+    }
+    st_->cv.notify_all();
+    try { ch_.stream_close(sid_); } catch (...) {}
+}
+
+void ChannelSocket::shutdown(int how) {
+    // Half-close semantics for the splice: SHUT_WR = no more writes →
+    // close the stream outright (the VNC splice only ever shuts down on
+    // teardown anyway).
+    if (how == SHUT_WR || how == SHUT_RDWR) close();
+}
+
+bool ChannelSocket::waitForRead(std::chrono::milliseconds timeout) const {
+    std::unique_lock lk(st_->m);
+    return st_->cv.wait_for(lk, timeout,
+                            [&]{ return !st_->buf.empty() || st_->eof; });
 }

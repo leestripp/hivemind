@@ -4,6 +4,7 @@
 #include "hivemind/AgentStore.h"
 #include "hivemind/AuthStore.h"
 #include "hivemind/ContainerManager.h"
+#include "hivemind/WorkerRouter.h"
 
 #include <nlohmann/json.hpp>
 
@@ -72,14 +73,11 @@ void pump(OmniNet::Socket& from, OmniNet::Socket& to) {
     }
 }
 
+// 30.4: the upstream is any connected Socket — a direct TCP socket for
+// local containers, a ChannelSocket over the worker channel for remote.
 void splice_to_container(std::unique_ptr<OmniNet::Socket> client,
+                         std::unique_ptr<OmniNet::Socket> up,
                          uint16_t port) {
-    std::unique_ptr<OmniNet::Socket> up;
-    try {
-        up = OmniNet::createConnectedSocket("127.0.0.1", port,
-                                            std::chrono::milliseconds(3000));
-    } catch (...) { return; }   // client socket closes with `client`
-    if (!up) return;
 
     // Fresh upstream handshake to websockify.
     const auto nonce = OmniNet::Crypto::randomBytes(16);
@@ -116,6 +114,66 @@ void splice_to_container(std::unique_ptr<OmniNet::Socket> client,
     t.join();
 }
 
+std::unique_ptr<OmniNet::Socket> connect_upstream(const std::string& id,
+                                                  uint16_t port) {
+    // Remote agent? ChannelSocket over the worker channel (throws on
+    // offline/open-failure — caller treats as "screen unavailable").
+    if (auto remote = WorkerRouter::screen_stream(id, port)) return remote;
+    try {
+        return OmniNet::createConnectedSocket("127.0.0.1", port,
+                                              std::chrono::milliseconds(3000));
+    } catch (...) { return nullptr; }
+}
+
+/// HTTP GET over an arbitrary Socket (used for REMOTE noVNC assets —
+/// the local path uses OmniNet's HTTP client). Connection: close gives
+/// EOF-terminated bodies; returns {status, headers-skip-listed, body}.
+bool http_fetch(OmniNet::Socket& sock, uint16_t port,
+                const std::string& path, Response& resp) {
+    const std::string req =
+        "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" +
+        std::to_string(port) + "\r\nConnection: close\r\n\r\n";
+    try {
+        sock.sendAll(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(req.data()), req.size()));
+        std::string status_line;
+        for (int i = 0; i < 100; ++i) {
+            auto line = sock.readLine();
+            if (!line) return false;
+            if (status_line.empty()) {
+                status_line = *line;   // "HTTP/1.1 200 OK"
+                continue;
+            }
+            if (line->empty() || *line == "\r") break;
+            auto colon = line->find(':');
+            if (colon == std::string::npos) continue;
+            std::string k = line->substr(0, colon);
+            std::string v = line->substr(colon + 1);
+            while (!v.empty() && v.front() == ' ') v.erase(v.begin());
+            std::string lk = k;
+            for (auto& c : lk) c = static_cast<char>(std::tolower(c));
+            static const char* kSkip[] = {"connection", "keep-alive",
+                "transfer-encoding", "content-length", "upgrade"};
+            bool skip = false;
+            for (auto* sk : kSkip) if (lk == sk) { skip = true; break; }
+            if (!skip) resp.setHeader(k, v);
+        }
+        int status = 200;
+        if (sscanf(status_line.c_str(), "HTTP/%*s %d", &status) != 1)
+            status = 502;
+        resp.setStatus(static_cast<OmniNet::HTTP::StatusCode>(status));
+        std::string body;
+        for (;;) {
+            auto chunk = sock.recvAll(16384);
+            if (chunk.empty()) break;
+            body.append(reinterpret_cast<const char*>(chunk.data()),
+                        chunk.size());
+        }
+        resp.setBody(body);
+        return true;
+    } catch (...) { return false; }
+}
+
 } // namespace
 
 void register_screen_routes(OmniNet::HTTP::Server& server,
@@ -127,7 +185,21 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
     // NOTE: capture BY VALUE — route handlers outlive this function.
     auto resolve = [port_resolver](const std::string& id) -> uint16_t {
         if (port_resolver) return port_resolver(id);
+        // 30.4: worker-assigned agent → screen_ctl status over channel.
+        try {
+            if (auto r = WorkerRouter::screen_ctl(id, "status"))
+                return (r->error.empty() && r->running) ? r->port
+                                                        : uint16_t{0};
+        } catch (...) { return 0; }   // worker offline → screen down
         return container_manager().screen_port(id);
+    };
+    // 30.4: remote screen password (rides in the redirect URL).
+    auto password_of = [](const std::string& id) -> std::string {
+        try {
+            if (auto r = WorkerRouter::screen_ctl(id, "status"))
+                return r->password;
+        } catch (...) {}
+        return container_manager().screen_password(id);
     };
     // ── GET /api/agents/:id/screen — status ─────────────────────────────
     server.get("/api/agents/:id/screen",
@@ -155,6 +227,16 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 routes::send_error(resp, 404, "agent not found"); return;
             }
             try {
+                // 30.4: worker-assigned → screen_ctl start over channel.
+                if (auto r = WorkerRouter::screen_ctl(id, "start")) {
+                    if (!r->error.empty()) {
+                        routes::send_error(resp, 502, r->error); return;
+                    }
+                    routes::send_json(resp, json{{"running", r->running},
+                                                 {"port", r->port},
+                                                 {"url", "/screen/" + id + "/"}});
+                    return;
+                }
                 const uint16_t port = container_manager().ensure_screen(id);
                 routes::send_json(resp, json{{"running", true},
                                              {"port", port},
@@ -171,13 +253,23 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             if (id.empty() || !agents.get_agent(id)) {
                 routes::send_error(resp, 404, "agent not found"); return;
             }
+            // 30.4: worker-assigned → screen_ctl stop over channel.
+            try {
+                if (WorkerRouter::screen_ctl(id, "stop")) {
+                    routes::send_json(resp, json{{"running", false},
+                                                 {"stopped", true}});
+                    return;
+                }
+            } catch (const std::exception& e) {
+                routes::send_error(resp, 502, e.what()); return;
+            }
             const bool stopped = container_manager().stop_screen(id);
             routes::send_json(resp, json{{"running", false}, {"stopped", stopped}});
         });
 
     // ── GET /screen/* — noVNC asset proxy (own auth) ────────────────────
     server.get("/screen/*",
-        [&agents, &auth, resolve](const Request& req, Response& resp) {
+        [&agents, &auth, resolve, password_of](const Request& req, Response& resp) {
             if (!screen_authorized(req, auth)) {
                 routes::send_error(resp, 401, "missing or invalid key"); return;
             }
@@ -211,7 +303,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                     "/screen/" + seg[1] +
                     "/vnc.html?autoconnect=true&resize=scale"
                     "&path=%2Fscreen%2Fws%3Fagent%3D" + seg[1] +   // ABSOLUTE — relative paths resolve against /screen/<id>/vnc.html and double up
-                    "&password=" + container_manager().screen_password(seg[1]);
+                    "&password=" + password_of(seg[1]);
                 if (!req.queryParameter("key", "").empty())
                     loc += "&key=" + req.queryParameter("key", "");
                 if (req.queryParameter("view_only", "") == "1")
@@ -228,6 +320,27 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 if (seg[i] == "..") { routes::send_error(resp, 400, "bad path"); return; }
                 rest += "/" + seg[i];
             }
+
+            // 30.4: remote agent → fetch over the worker channel.
+            {
+                std::unique_ptr<OmniNet::Socket> remote;
+                try { remote = WorkerRouter::screen_stream(seg[1], port); }
+                catch (const std::exception& e) {
+                    routes::send_error(resp, 503, e.what()); return;
+                }
+                if (remote) {
+                    resp = OmniNet::HTTP::Response::ok();
+                    if (!http_fetch(*remote, port, rest, resp)) {
+                        routes::send_error(resp, 502,
+                                           "remote screen asset fetch failed");
+                        return;
+                    }
+                    if (!set_cookie.empty())
+                        resp.setHeader("Set-Cookie", set_cookie);
+                    return;
+                }
+            }
+
             OmniNet::HTTP::ClientRequest creq;
             creq.method("GET")
                 .url("http://127.0.0.1:" + std::to_string(port) + rest);
@@ -275,7 +388,13 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
         const std::string id = req.queryParameter("agent", "");
         const uint16_t port = resolve(id);
         if (port == 0) return;
-        std::thread(splice_to_container, std::move(socket), port).detach();
+        std::thread([client = std::move(socket), id, port]() mutable {
+            std::unique_ptr<OmniNet::Socket> up;
+            try { up = connect_upstream(id, port); }
+            catch (...) { return; }   // client socket closes with `client`
+            if (!up) return;
+            splice_to_container(std::move(client), std::move(up), port);
+        }).detach();
     };
     server.registerProtocolSwitch("/screen/ws", std::move(h));
 }

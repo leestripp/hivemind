@@ -3,7 +3,12 @@
 #include <optional>
 #include <string>
 
+#include <memory>
+
 #include "hivemind/ContainerManager.h"   // ExecResult
+#include "hivemind/WorkerChannel.h"      // ScreenResult
+
+namespace OmniNet { class Socket; }
 
 class AgentStore;
 class WorkerChannel;
@@ -36,4 +41,19 @@ public:
     static std::optional<ContainerManager::ExecResult> exec(
         const std::string& agent_id, const std::string& command,
         int timeout_s);
+
+    /// 30.4: nullopt = local agent, use ContainerManager screen calls.
+    /// For worker agents: screen control over the channel (image +
+    /// resolution passed from server config; the worker runs the same
+    /// podman steps). Throws std::runtime_error when the worker is
+    /// offline; ScreenResult.error set on worker-side failure.
+    static std::optional<WorkerChannel::ScreenResult> screen_ctl(
+        const std::string& agent_id, const std::string& action);
+
+    /// 30.4: open a Socket facade to the agent's REMOTE screen port
+    /// (ChannelSocket over the worker channel). nullptr = local agent,
+    /// use a direct TCP socket. Throws when the worker is offline or the
+    /// stream fails to open.
+    static std::unique_ptr<OmniNet::Socket> screen_stream(
+        const std::string& agent_id, uint16_t port);
 };

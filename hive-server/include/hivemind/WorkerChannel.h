@@ -1,6 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
+#include <cstdint>
+#include <span>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -9,6 +12,8 @@
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
+
+#include "net/Socket.h"   // ChannelSocket inherits OmniNet::Socket
 
 namespace OmniNet::WebSocket { class Server; class Connection; }
 
@@ -57,6 +62,32 @@ public:
     /// False when the worker is offline.
     bool send(const std::string& name, const nlohmann::json& frame);
 
+    /// Phase 30.4: synchronous screen control on the worker (the worker
+    /// runs the podman steps ContainerManager runs locally). image +
+    /// resolution are passed through from server config.
+    /// nullopt when the worker is offline; error field set on failure.
+    struct ScreenResult { bool running = false; uint16_t port = 0;
+                          std::string password; std::string error; };
+    std::optional<ScreenResult> screen_ctl(const std::string& worker,
+                                           const std::string& agent,
+                                           const std::string& action,
+                                           const std::string& image,
+                                           const std::string& resolution,
+                                           int timeout_s = 60);
+
+    /// Phase 30.4: TCP stream over the channel. open_stream blocks until
+    /// the worker acknowledges (stream_opened) or fails (stream_error /
+    /// offline → ""). stream_send/stream_close drive it; inbound bytes
+    /// arrive via on_data (called from the WS handler thread — keep it
+    /// fast), EOF/error via on_close (exactly once).
+    using StreamDataCb = std::function<void(std::string_view)>;
+    using StreamCloseCb = std::function<void()>;
+    std::string open_stream(const std::string& worker, uint16_t port,
+                            StreamDataCb on_data, StreamCloseCb on_close);
+    bool stream_send(const std::string& sid,
+                     std::span<const uint8_t> data);
+    void stream_close(const std::string& sid);
+
     /// Hook for frames that are not channel bookkeeping (30.3: exec_chunk,
     /// exec_done, status). Called with the worker name + parsed frame.
     std::function<void(const std::string& worker,
@@ -86,4 +117,79 @@ private:
     };
     std::unordered_map<std::string, std::shared_ptr<Job>> jobs_;
     uint64_t next_job_ = 1;
+
+    // 30.4: in-flight screen_ctl requests (id → result slot)
+    struct ScreenJob {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        ScreenResult result;
+    };
+    std::unordered_map<std::string, std::shared_ptr<ScreenJob>> screen_jobs_;
+
+    // 30.4: stream_open acknowledgements (sid → waiter)
+    struct StreamAck {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        bool ok = false;
+        std::string error;
+    };
+    std::unordered_map<std::string, std::shared_ptr<StreamAck>> stream_acks_;
+
+    // 30.4: open streams (sid → callbacks + worker name)
+    struct Stream {
+        std::string worker;
+        StreamDataCb on_data;
+        StreamCloseCb on_close;
+    };
+    std::unordered_map<std::string, std::shared_ptr<Stream>> streams_;
+    uint64_t next_stream_ = 1;
+};
+
+/**
+ * ChannelSocket — Phase 30.4: an OmniNet::Socket facade over a worker
+ * channel stream. Lets the existing screen splice code (raw pump +
+ * upstream websockify handshake) run unchanged against a REMOTE
+ * container: bytes written here ride stream_data frames to the worker,
+ * which relays them to 127.0.0.1:<port>; inbound frames fill the recv
+ * queue. recv() blocks (condition variable) and returns 0 on EOF,
+ * matching Socket's "0 = closed" convention.
+ *
+ * The inbound callbacks capture a shared_ptr<State>, NOT `this` — a
+ * frame in flight on the WS handler thread while the socket is being
+ * destroyed then writes into a dead state block instead of freed memory.
+ */
+class ChannelSocket final : public OmniNet::Socket {
+public:
+    /// Opens the stream in the constructor; throws
+    /// OmniNet::SocketException when the worker is offline or the worker
+    /// fails to connect to the port.
+    ChannelSocket(WorkerChannel& ch, const std::string& worker,
+                  uint16_t port);
+    ~ChannelSocket() override;
+
+    // Socket interface — only the fd-backed primitives need overrides;
+    // recvAll/recvExactly ride on virtual recv().
+    size_t send(std::span<const uint8_t> data) override;
+    size_t send(std::string_view data) override;
+    void sendAll(std::span<const uint8_t> data) override;
+    size_t recv(std::span<uint8_t> buffer) override;
+    std::optional<std::string> readLine(size_t maxLength = 8192) override;
+    bool isOpen() const override;
+    void close() override;
+    void shutdown(int how);   // base is non-virtual; teardown via close()
+    bool waitForRead(std::chrono::milliseconds timeout) const override;
+
+private:
+    struct State {
+        mutable std::mutex m;
+        mutable std::condition_variable cv;
+        std::string buf;        // pending inbound bytes
+        bool eof = false;
+    };
+
+    WorkerChannel& ch_;
+    std::string sid_;
+    std::shared_ptr<State> st_;
 };

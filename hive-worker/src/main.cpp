@@ -8,6 +8,9 @@
 //                    [--caps '{"gpu":true}']
 
 #include "websocket/WebSocket.h"
+#include "crypto/Crypto.h"
+#include "net/Socket.h"
+#include "OmniNet.h"
 #include "runner.h"
 
 #include <nlohmann/json.hpp>
@@ -19,6 +22,8 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <map>
+#include <memory>
 #include <thread>
 
 using json = nlohmann::json;
@@ -86,6 +91,34 @@ int main(int argc, char* argv[]) {
                 }
             });
 
+            // ── 30.4: TCP streams over the channel ─────────────────────
+            // stream_open → connect 127.0.0.1:port here, pump bytes both
+            // ways as base64 stream_data frames; stream_close either side.
+            // NOTE: no port allowlist — the channel is key-authenticated
+            // and `exec` already grants the server a full shell here.
+            struct Stream {
+                std::unique_ptr<OmniNet::Socket> sock;
+                std::atomic<bool> closed{false};
+            };
+            std::mutex streams_m;
+            std::map<std::string, std::shared_ptr<Stream>> streams;
+            auto close_stream = [&](const std::string& sid, bool tell_peer) {
+                std::shared_ptr<Stream> st;
+                {
+                    std::lock_guard lk(streams_m);
+                    auto it = streams.find(sid);
+                    if (it == streams.end()) return;
+                    st = it->second;
+                    streams.erase(it);
+                }
+                if (st->closed.exchange(true)) return;   // already closed
+                try { st->sock->close(); } catch (...) {}
+                if (tell_peer) {
+                    try { send_frame({{"op","stream_close"},{"sid",sid}}); }
+                    catch (...) {}
+                }
+            };
+
             // Callback style + readLoop(): Connection::receiveText() uses a
             // per-call buffer and silently drops coalesced frames (exec
             // frames CAN arrive coalesced). readLoop() keeps its leftover.
@@ -139,6 +172,74 @@ int main(int argc, char* argv[]) {
                         std::cerr << "worker: exec " << id << " done, exit="
                                   << done["exit_code"].get<int>() << "\n";
                     }).detach();
+                } else if (op == "screen_ctl") {
+                    // 30.4: synchronous reply — the server blocks on it.
+                    const std::string id = frame.value("id", "");
+                    auto r = hwrunner::screen_ctl(
+                        frame.value("agent", ""), frame.value("action", ""),
+                        frame.value("image", ""),
+                        frame.value("resolution", "1280x800"));
+                    json resp{{"op","screen_result"},{"id",id},
+                              {"running",r.running},{"port",r.port},
+                              {"password",r.password}};
+                    if (!r.error.empty()) resp["error"] = r.error;
+                    try { send_frame(resp); } catch (...) {}
+                } else if (op == "stream_open") {
+                    const std::string sid = frame.value("sid", "");
+                    const int port = frame.value("port", 0);
+                    auto st = std::make_shared<Stream>();
+                    try {
+                        st->sock = OmniNet::createConnectedSocket(
+                            "127.0.0.1", static_cast<uint16_t>(port),
+                            std::chrono::milliseconds(3000));
+                        if (!st->sock) throw std::runtime_error("connect failed");
+                    } catch (const std::exception& e) {
+                        try { send_frame({{"op","stream_error"},{"sid",sid},
+                                          {"error",e.what()}}); } catch (...) {}
+                        return;
+                    }
+                    {
+                        std::lock_guard lk(streams_m);
+                        streams[sid] = st;
+                    }
+                    try { send_frame({{"op","stream_opened"},{"sid",sid}}); }
+                    catch (...) {}
+                    // reader: socket → stream_data frames (detached; the
+                    // shared_ptr keeps Stream alive until the pump exits)
+                    std::thread([&, sid, st] {
+                        for (;;) {
+                            std::vector<uint8_t> chunk;
+                            try { chunk = st->sock->recvAll(16384); }
+                            catch (...) { break; }
+                            if (chunk.empty()) break;   // EOF
+                            try {
+                                send_frame({{"op","stream_data"},{"sid",sid},
+                                    {"b64", OmniNet::Crypto::base64Encode(
+                                        std::span<const uint8_t>(chunk))}});
+                            } catch (...) { break; }
+                        }
+                        close_stream(sid, /*tell_peer=*/true);
+                    }).detach();
+                } else if (op == "stream_data") {
+                    const std::string sid = frame.value("sid", "");
+                    std::shared_ptr<Stream> st;
+                    {
+                        std::lock_guard lk(streams_m);
+                        auto it = streams.find(sid);
+                        if (it != streams.end()) st = it->second;
+                    }
+                    if (st && !st->closed) {
+                        auto bytes = OmniNet::Crypto::base64Decode(
+                            frame.value("b64", ""));
+                        if (bytes && !bytes->empty()) {
+                            try {
+                                st->sock->sendAll(std::span<const uint8_t>(
+                                    *bytes));
+                            } catch (...) { close_stream(sid, true); }
+                        }
+                    }
+                } else if (op == "stream_close") {
+                    close_stream(frame.value("sid", ""), /*tell_peer=*/false);
                 }
             });
             ws.readLoop();   // blocks until the connection closes
