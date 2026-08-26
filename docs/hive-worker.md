@@ -114,7 +114,16 @@ its own project; note in docs if attempted).
    in the blocking receiveText).
 3. ~~**30.3** exec dispatch over the channel (streamed chunks → exec-log)~~ — **DONE** (verified with real podman on dev-rig 2026-08-26).
    This alone makes remote agents useful.
-4. **30.4** Screen-over-WS reverse proxy.
+4. ~~**30.4** Screen-over-WS reverse proxy~~ — **DONE** (verified with real
+   podman on dev-rig 2026-08-26). Generic TCP streams over the channel
+   (`stream_open`/`stream_data`(base64)/`stream_close`), synchronous
+   `screen_ctl` (start/stop/status — worker runs the ContainerManager
+   podman steps: browser image, `-p 127.0.0.1::6080`, hive-screen.sh),
+   and a `ChannelSocket` (OmniNet::Socket facade over a stream) so the
+   existing `/screen/ws` splice + asset proxy run unchanged. Verified:
+   vnc.html + rfb.js through the tunnel, WS splice delivers the RFB
+   greeting. NOTE: streams have no port allowlist — the channel is
+   key-authenticated and `exec` already grants a full shell.
 5. **30.5** TLS everywhere (Caddy on the server, worker pins the CA) —
    prerequisite for calling this production.
 

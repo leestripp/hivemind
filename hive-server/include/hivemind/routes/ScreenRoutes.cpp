@@ -210,9 +210,16 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             }
             auto& cm = container_manager();
             const uint16_t port = resolve(id);
+            // 30.4: for worker agents the podman/image facts live on the
+            // WORKER — report true when the channel says it's running
+            // rather than the (irrelevant) local state.
+            auto remote = WorkerRouter::screen_ctl(id, "status");
+            const bool is_remote = remote.has_value();
             routes::send_json(resp, json{
-                {"podman", ContainerManager::podman_available()},
-                {"browser_image", cm.browser_image_present()},
+                {"podman", is_remote ? true
+                                     : ContainerManager::podman_available()},
+                {"browser_image", is_remote ? (remote->error.empty())
+                                            : cm.browser_image_present()},
                 {"running", port != 0},
                 {"port", port},
                 {"url", port ? "/screen/" + id + "/" : ""},
