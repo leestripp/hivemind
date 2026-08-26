@@ -1,9 +1,8 @@
 # hive-worker — remote container execution (Phase 30 design)
 
-Status: DESIGN — DEFERRED (2026-08-26). Nothing here is implemented.
-Moved to Plan.md §5b Future feature requests: untestable while the
-dev client runs nested inside a podman container. Wanted later —
-revisit after Phase 27 (TLS is a hard prerequisite).
+Status: ACTIVE (un-deferred 2026-08-26). Build order 30.1→30.5 in
+Plan.md §5. Tested loopback on dev-rig (worker + server same box,
+ws://localhost) — TLS (30.5) only gates REAL remote workers.
 
 ## Goal
 
