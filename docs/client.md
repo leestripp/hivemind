@@ -45,9 +45,17 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 
 ## Theme & icons
 
-- **Dark/light mode**: header-bar moon/sun button toggles
-  `gtk-application-prefer-dark-theme`; the choice persists as
-  `"dark_mode": true|false` in `~/.config/hivemind/config.json`.
+- **Settings dialog** (gear button in the header): two-pane layout —
+  section sidebar left (Interface, User), settings stack right.
+  - *Interface*: **dark/light mode** switch
+    (`gtk-application-prefer-dark-theme`), **font scale** slider
+    (75–175% via `gtk-xft-dpi`; 100% = follow the system DPI/scaling),
+    read-only server address.
+  - *User*: display name (replaces the "You" label on your bubbles) and
+    avatar picker (default silhouette or any dept head); saving
+    re-renders the open thread immediately.
+  - All of it persists in `~/.config/hivemind/config.json`
+    (`dark_mode`, `font_scale`, `display_name`, `user_avatar`).
 - **Icons** (`data/icons/*.svg`) are 24×24 `currentColor`-stroked SVGs
   bundled into the binary via GResource (`glib-compile-resources`).
   GTK's pixbuf loader doesn't resolve `currentColor` from CSS, so
