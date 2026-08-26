@@ -28,14 +28,25 @@ with each other, and only come back when they need your approval.
   agent can run the whole team.
 - **Approvals** — flip `require_approval` on an agent and its commands park
   in an approval queue until you approve/deny them.
+- **Distributed workers** (`hive-worker`) — enroll any Linux machine and
+  assign agents to it: their containers, exec and screen sessions run on
+  that machine over a persistent, auto-reconnecting WebSocket channel.
+  Enroll with `hive-server enroll-worker <name>` (key shown once), run
+  `hive-worker --server ws://<server>:8423 --key hmwk_… --name <name>`
+  on the remote host, then set the agent's `worker` field. Live status on
+  the web **Workers** page.
+- **Live screen share** — every agent's container runs a full desktop
+  (Xvfb + x11vnc + noVNC + Chromium); watch or take over from the client's
+  **Computer** button — works for local *and* worker-hosted agents
+  (tunneled through the worker channel).
 - **Routines & skills** — scheduled prompts ("watch this, ping me daily")
   fired by a 30 s scheduler tick, and a **global skill library**
   (Anthropic SKILL.md format) shared across agents via per-agent enable
   toggles — plus per-agent learned skills that stay agent-owned.
 - **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
   live chat, approvals inbox, scheduled-task dialog, right-click agent
-  management. Plus the **web dashboard**: Agents, Tasks, Skills, Models,
-  API keys, settings.
+  management. Plus the **web dashboard**: Agents, Tasks, Files, Skills,
+  Secrets, Models, Workers, API keys, Settings.
 - **Any model** — providers/models live in HiveMind's own store
   (`llm.db`, managed on the web Models page) and are injected into agents
   at spawn; pick per agent. No vendor lock-in.
@@ -44,9 +55,9 @@ with each other, and only come back when they need your approval.
 
 ```bash
 # 1. System packages
-sudo apt install -y cmake g++ libcurl4-gnutls-dev nlohmann-json3-dev \
+sudo apt install -y cmake g++ nlohmann-json3-dev \
     sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev \
-    libgtkmm-4.0-dev podman
+    libgtkmm-4.0-dev podman   # no libcurl — OmniNet is the only HTTP stack
 
 # 2. Build & run
 ./hivemindctl build
@@ -73,9 +84,11 @@ reads the DB and is never patched.
 
 ```
 hive-server/   C++23 + OmniNet server: roster, threads, approvals,
-               routines, containers, web UI (web/dist)
+               routines, containers, worker channel, web UI (web/dist)
 hive-client/   GTK4/gtkmm4 native client
-tests/         ctest suite (9 tests)
+hive-worker/   Remote executor daemon — runs agent containers on other
+               machines, driven over a WebSocket channel (Phase 30)
+tests/         ctest suite
 hivemindctl    build/start/stop/status/logs/client/test
 ```
 
@@ -92,6 +105,9 @@ GET/POST/DELETE       /api/skills[/name]                     global skill librar
 GET/POST/DELETE       /api/secrets[/name]                    secret broker (write-only values)
 GET/POST              /api/agents/:id/global-skills          per-agent global-skill toggle
 GET/POST              /api/agents/:id/container/{status,start,stop,exec}
+GET/DELETE            /api/workers[/:name]                   worker registry
+GET/POST              /api/agents/:id/screen/{status,start,stop,password}
+GET                   /screen/:agentid/…  + /screen/:agentid/ws   noVNC proxy
 GET/POST/DELETE       /api/providers[/:name]  GET …/:name/discover
 GET/POST/DELETE       /api/models[/:name]     POST …/:name/default
 ```
@@ -107,7 +123,11 @@ GET/POST/DELETE       /api/models[/:name]     POST …/:name/default
 | `docs/client.md` | GTK4 native client — dialogs, menus, theming |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
 | `docs/containers.md` | Podman sandboxing |
+| `docs/hive-worker.md` | Distributed workers — enroll, channel protocol, exec/screen ops |
+| `docs/computer-use.md` | Live screen share (Xvfb/noVNC) design |
 | `docs/design.md` | Architecture deep-dive |
 | `Plan.md` | Roadmap & phase status |
 
-See `docs/api.md` and `Plan.md` (roadmap, phases 0–8) for details.
+See `docs/api.md` and `Plan.md` (roadmap, phases 0–30) for details.
+
+Current release: **0.5.0** — distributed workers milestone.

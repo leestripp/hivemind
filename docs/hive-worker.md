@@ -1,8 +1,11 @@
 # hive-worker — remote container execution (Phase 30 design)
 
-Status: ACTIVE (un-deferred 2026-08-26). Build order 30.1→30.5 in
-Plan.md §5. Tested loopback on dev-rig (worker + server same box,
-ws://localhost) — TLS (30.5) only gates REAL remote workers.
+Status: **30.1–30.4 DONE (2026-08-26, in release 0.5.0)** — registry,
+channel, exec dispatch, screen proxy all shipped and user-validated
+end-to-end (GTK client → server → worker on dev-rig → container reply +
+live screen share). Only **30.5 TLS** remains — it gates REAL remote
+workers (secrets cross the wire per-exec); localhost/LAN workers are
+fine on plain ws:// until then.
 
 ## Goal
 

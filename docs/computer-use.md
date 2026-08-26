@@ -9,7 +9,12 @@
 
 Every containerized agent can expose a live desktop you can watch and
 drive from the browser ("🖥 Computer" on the web agents page / client
-inspector). The primary use is **login handoff**: the agent browses with
+inspector) — including **worker-hosted agents** (Phase 30.4): the whole
+noVNC asset + WebSocket path tunnels through the worker channel
+(`ChannelSocket`), so the browser/client path is identical either way.
+Known flake: the first open right after a container cold-start can race
+Xvfb/x11vnc startup — close and click again (a readiness poll is the
+planned fix). The primary use is **login handoff**: the agent browses with
 its own chromium, hits a login wall, you take over the same screen, log in,
 and hand control back — the profile persists, so the session survives.
 

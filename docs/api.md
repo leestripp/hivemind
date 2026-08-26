@@ -17,14 +17,19 @@ Authorization: Bearer hm_...
 The **master key** is printed once at first server start (also in
 `hivemindctl logs`). Create/revoke more via `/api/keys` (admin scope).
 
-### Workers (Phase 30.1)
+### Workers (Phase 30)
 
 - `GET /api/workers` — list enrolled workers (name, caps, proto,
-  last_seen, created_at; `online` flag arrives with the 30.2 channel)
-- `DELETE /api/workers/:name` — revoke (key dies with the row)
+  last_seen, created_at, **`online`** — live from the worker channel :8423)
+- `DELETE /api/workers/:name` — revoke (key dies with the row; connected
+  worker drops and cannot reconnect)
 - Enrollment is CLI-only on the server: `hive-server enroll-worker <name>`
   prints the raw `hmwk_…` key once (hash stored); `revoke-worker <name>`
   removes it. Agents gain `worker` (default `"local"`) via roster PATCH.
+- Agents whose `worker` names an enrolled worker execute **there**:
+  container exec (30.3) and screen sessions (30.4) are routed over the
+  channel transparently — the container/screen endpoints below are
+  unchanged. See `docs/hive-worker.md` for the channel protocol.
 Scopes: `admin` (everything), `agent` (default), `read` (GET only).
 Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 
@@ -84,7 +89,8 @@ A roster agent is a persistent, named teammate (see `docs/agents.md`).
 {
   "name": "Nova",                     // required, unique, sanitized to a daedalus agent name
   "role": "research assistant",       // persona injected into the system prompt
-  "model": "kimi-for-coding",         // daedalus SettingsStore model; "" = store default
+  "model": "kimi-for-coding",         // LLMStore model name; "" = store default
+  "worker": "local",                  // "local" or an enrolled worker name (Phase 30)
   "workspace_mode": "shared",         // "shared" = podman container (default), "host" = no container
   "require_approval": false,          // true → commands park in the approval queue
   "avatar": "engineering"             // dept avatar, e.g. "engineering", "sales-female"; "" = auto (name hash)

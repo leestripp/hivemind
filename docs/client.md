@@ -9,8 +9,10 @@
 ./hivemindctl client          # or: ./build/hive-client/hive-client
 ```
 
-Expects hive-server on `http://127.0.0.1:8421` (start it with
-`./hivemindctl start`).
+Connects to any hive-server — the **Connect** dialog (header button, or
+automatic on auth failure) takes the server URL + API key and persists
+them in `~/.config/hivemind/config.json`. Local dev default:
+`http://127.0.0.1:8421` (start it with `./hivemindctl start`).
 
 ## Tour
 
@@ -25,7 +27,8 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 - **+ Agent:** name, role, **Provider/Model dropdowns** (live from the
   server's model store; model list filters by provider), workspace mode
   (`shared` = container, `host` = none), the require-approval switch, and an
-  **avatar picker** — Auto (palette hash) or one of six hive-bot tiles.
+  **avatar picker** — Auto (name hash) or one of the 20 department-head
+  tiles.
 - **+ Thread:** pick one or more participants (multi-select = group thread).
 - **⏰ Add Task (header):** schedule a routine — name, agent, prompt, and a
   schedule type dropdown that swaps the fields below it (once: date+time /
@@ -74,12 +77,24 @@ Expects hive-server on `http://127.0.0.1:8421` (start it with
 
 ## Right-click agent menu
 
-**🖥 Computer** (Phase 26: the agent's live screen — POSTs screen/start,
-then opens the noVNC view embedded in a WebKitGTK window; falls back to
-the system browser when the client was built without WebKitGTK 6.0) ·
+**🖥 Computer** (Phase 26/30.4: the agent's live screen — POSTs
+screen/start, then opens the noVNC view embedded in a WebKitGTK window;
+falls back to the system browser when the client was built without
+WebKitGTK 6.0). Works for worker-hosted agents too — the server tunnels
+the screen through the worker channel. Note: the first open after a
+container cold-start can race VNC startup — just click again. ·
 Add Task… · **Skills…** (Phase 14.2: shared-library switches + read-only
 learned-skills list) · **Inspector…** (Phase 14.4: agent details + container
 status with Start/Stop) · Edit Agent · Delete Agent.
+
+## Workers (Phase 30)
+
+Agents assigned to a remote worker run their containers/screen there, but
+the client experience is unchanged — chat, approvals, Computer, exec log
+all work through the server regardless. Worker *assignment* is done via
+the web roster card / API (`worker` field) and worker status lives on the
+web **Workers** page; a client-side worker dropdown is a candidate
+follow-up.
 
 ## Attention indicators (Phase 14.1)
 

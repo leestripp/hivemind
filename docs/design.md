@@ -37,8 +37,9 @@ Two first-party libraries do the heavy lifting (both
 gitlab.com/leestripp, consumed as-is — **never patched**):
 
 - **daedalus** — the agent engine (`daedalus::Agent`): LLM streaming, tools,
-  MCP, skills, memory, context compression. Owns all model/provider/credential
-  state in its SettingsStore.
+  MCP, skills, memory, context compression. Model/provider/credential state
+  is owned by HiveMind's LLMStore and INJECTED into AgentConfig explicit
+  fields at spawn (Phase 13) — daedalus' own SettingsStore is not consulted.
 - **OmniNet** — the HTTP/WebSocket server.
 
 A third project, **icarus**, is our own CLI agent built on daedalus; it is
@@ -58,8 +59,10 @@ Hive-Mind/
 │   ├── src/                  # server sources
 │   └── data/                 # Containerfiles, systemd unit
 ├── hive-client/              # GTK4/gtkmm4 native client
-├── web/dist/                 # web UI (keys/settings; ops dashboard in Phase 13)
-├── tests/                    # ctest suite (linked against hivemind_core)
+├── hive-worker/              # remote executor daemon (Phase 30; OmniNet-only link)
+├── web/dist/                 # zero-build web dashboard (Agents/Tasks/Files/
+│                             # Skills/Secrets/Models/Workers/Keys/Settings)
+├── tests/                    # ctest suite (20 tests, linked against hivemind_core)
 └── docs/
 ```
 
@@ -127,9 +130,9 @@ Clients poll `activity` (in-progress stream) + `messages?after=` (completed)
 
 ## 6. Containers (agent sandboxes)
 
-**Agents never execute on the host.** Workspace modes: `shared` (default —
-containerized) or `host` (explicit escape hatch for dev machines without
-podman).
+**Agents never execute on the host.** The only workspace mode is `shared`
+(containerized) — the former `host` escape hatch was removed 2026-08-25
+(legacy rows normalize to `shared` on load).
 
 - `ContainerManager` wraps the **podman CLI** (no libpod). Containers are
   `hive-<agent_id>`, image `localhost/hive-agent:latest`, auto-built from
@@ -149,8 +152,16 @@ podman).
   with the same name.
 - If the runtime is unavailable the turn still runs: `container_exec`
   returns a structured error the agent can report.
-- Containers run on the server machine. Remote machines are a future
-  `hive-worker` mode; exec routing hides behind `ContainerManager`.
+- Containers run on the server machine **by default** — agents with a
+  `worker` tag execute on that remote machine (Phase 30): `WorkerRouter`
+  mirrors the `ContainerManager` interface and dispatches over the worker
+  channel (WorkerChannel, dedicated WS port 8423) to `hive-worker`, which
+  runs the identical podman steps locally. Secret env-file content is
+  rendered server-side and crosses the channel per-exec; screen sessions
+  tunnel back over the same channel (30.4, `ChannelSocket` lets the
+  existing noVNC splice run unchanged). Protocol + ops:
+  `docs/hive-worker.md`. TLS (30.5) is still pending — workers are
+  localhost/LAN-only until then.
 
 A browser/computer-use variant image
 (`Containerfile.hive-agent-browser`: chromium/playwright/Xvfb/noVNC) is
@@ -213,8 +224,9 @@ Statuses: `pending → approved | denied | expired`.
 
 `hive-client` (gtkmm-4.0, Ubuntu 26.04): chat-first daily driver.
 
-- `ApiClient`: blocking libcurl+JSON calls, always on worker threads;
-  results marshalled to the GTK loop via a `Glib::Dispatcher` queue.
+- `ApiClient`: blocking OmniNet::HTTP::Client calls (libcurl was removed
+  repo-wide 2026-08-25 — OmniNet is the only HTTP stack), always on worker
+  threads; results marshalled to the GTK loop via a `Glib::Dispatcher` queue.
 - `HiveWindow`: roster sidebar (double-click → DM), thread list, chat
   transcript (CSS bubbles), composer, approvals inbox with pending badge,
   new-agent/new-thread dialogs. (The 1.x **Workflows** deep-link button was
@@ -246,8 +258,11 @@ LLMStore), **Keys**, **Settings**. See `docs/web.md`. (Phase 12 removed the
 | Agent runtime state (history, memory, skills) | `~/.local/share/hivemind/agents/<id>/` |
 | API keys | `~/.local/share/hivemind/auth.db` (hashes only) |
 | Server config (workspace_root) | `~/.local/share/hivemind/server.json` |
-| LLM providers/models (server) | `~/.local/share/hivemind/llm.db` (LLMStore) |
-| daedalus agent credentials/models | daedalus SettingsStore (`~/.local/share/daedalus/daedalus.db`) |
+| LLM providers/models (server) | `~/.local/share/hivemind/llm.db` (LLMStore — sole source of truth since Phase 13; daedalus SettingsStore is NOT consulted) |
+| Secrets (AES-GCM at rest) | `~/.local/share/hivemind/secrets.db` |
+| OAuth connectors | `~/.local/share/hivemind/connectors.db` |
+| Exec audit log | `~/.local/share/hivemind/exec_audit.db` |
+| Worker registry (Phase 30) | `~/.local/share/hivemind/workers.db` (hmwk_ key hashes, caps, last_seen) |
 | Containers/images/volumes | podman (rootless, per-user) |
 
 ## 13. Concurrency rules

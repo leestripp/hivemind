@@ -75,6 +75,19 @@ agent tool call → ContainerBashTool → podman exec -u hive -w /workspace \
     hive-<agent_id> bash -lc '<command>'
 ```
 
+### …or to another machine (Phase 30)
+
+When the agent's `worker` field names an enrolled worker, the same call is
+routed by **WorkerRouter** over the worker channel to that machine's
+`hive-worker`, which runs the identical podman steps there (container
+create/warm-up, exec with `HIVE_SECRET_*` env injection, chunked output
+streaming back into the same exec-log). The base image builds on first use
+**on the worker**. NOTE: worker agents get a per-agent workspace
+(`workspace-<name>`) local to the worker machine — NOT the shared company
+drive, and the `index.md` skeleton is NOT seeded there yet (candidate
+follow-up: sync the skeleton + optionally shared-drive content over the
+channel). See `docs/hive-worker.md`.
+
 ## Managing containers
 
 ```bash
@@ -123,6 +136,7 @@ persists in `/home/hive`).
 | `newuidmap: write to uid_map failed` | running inside a nested/restricted container — run hive-server on a normal host/VM |
 | first turn takes minutes | base image is building (once per machine) |
 | agent can't see a teammate's file | it's in their private home; use `/workspace` for shared artifacts |
+| exec fails with "worker … offline/unavailable" | the agent's assigned worker is disconnected — check the web Workers page, restart hive-worker there, or PATCH the agent back to `"local"` |
 
 
 ## Browser tools (Phase 6)

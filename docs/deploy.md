@@ -138,9 +138,19 @@ git push rig main
 ssh hivemind@dev-rig 'cd ~/hivemind && git pull --ff-only \
     && cmake --build build -j$(nproc)'
 
-# 3. restart — ROOT ONLY, run on the rig by the human:
-#    sudo systemctl restart hive-server
+# 3. restart — as the hivemind user (2026-08-26: the rig now runs
+#    SYSTEMD USER units, no root needed):
+ssh hivemind@dev-rig 'systemctl --user restart hivemind-dev'
+#    (hive-worker on the rig: systemctl --user restart hive-worker-dev-rig)
 ```
+
+Rig unit notes (2026-08-26): server = `hivemind-dev.service`, worker =
+`hive-worker-dev-rig.service`, both systemd **user** units started with
+`systemd-run --user --collect` — and MUST run with CWD = `~/hivemind`
+(web/dist + Containerfile paths are cwd-relative; `systemd-run` does NOT
+inherit your shell's cd — use `--working-directory=` or wrap with
+`bash -c 'cd ~/hivemind && exec …'`). Stop with SIGINT for graceful
+agent-history save (SIGTERM's flag path has hung once).
 
 Web-UI-only changes (`web/dist/**`) take effect on the next page load
 without a restart — StaticRoutes serves them straight from the checkout

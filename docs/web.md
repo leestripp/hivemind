@@ -22,8 +22,8 @@ web/dist/
 ├── js/main.js            # boot + hash router (#/agents, #/tasks, …)
 ├── js/api.js             # fetch wrapper (API key auth header)
 ├── js/util.js            # $, esc, log helpers
-└── js/pages/             # one module per page: agents, tasks, skills, secrets,
-                          # models, keys, settings
+└── js/pages/             # one module per page: agents, tasks, files, skills,
+                          # secrets, models, workers, keys, settings
 ```
 
 Every page module exports `init<Page>()` (wire events once) and
@@ -37,7 +37,9 @@ hm_…`); the web UI prompts once and stores it in `localStorage`.
 
 ### Agents (`#/agents`)
 
-The roster as cards: avatar, name, role, model, approval mode. Actions:
+The roster as cards: avatar, name, role, model, approval mode, and a
+**Runs on** row (`this server` or `🖥 <worker>` for worker-hosted agents).
+Actions:
 create agent, start/stop container, spawn (installs daedalus + writes the
 agent's `AGENTS.md`). Deletion lives in the GTK client (right-click → Delete
 Agent shows the cascade summary; see `docs/client.md`). Agent chat opens in
@@ -78,6 +80,20 @@ LLM providers and their models: add provider (name, host, API key,
 timeout), add model per provider, delete. Backed by the server's LLMStore
 (`~/.local/share/hivemind/llm.db`) — the same source the GTK client's
 New Agent dialog reads for its Provider/Model dropdowns.
+
+### Workers (`#/workers`)
+
+Live view of enrolled `hive-worker` machines (Phase 30): name, **online
+badge** driven by the worker channel (refreshes every 5 s while the page
+is open), capabilities, protocol version, last heartbeat, assigned-agent
+count, and per-row revoke. An "Enrolling a worker" card shows the exact
+CLI command — key minting stays CLI-only by design (the raw `hmwk_…` key
+is printed once on the server host).
+
+### Files (`#/files`)
+
+Browser for the shared workspace volume (Phase ~20): navigate folders,
+preview/download files, upload attachments.
 
 ### API Keys (`#/keys`)
 

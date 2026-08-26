@@ -20,7 +20,8 @@ prompts at it once — you *work* with it over time:
 - It can be **gated**: with `require_approval`, every command it wants to
   run waits for your approval first.
 
-Create one via the GTK client (**+ Agent**) or the API:
+Create one via the GTK client (**+ Agent**) or the API (all API examples
+here assume `-H "Authorization: Bearer $KEY"` — see docs/api.md):
 
 ```bash
 curl -X POST localhost:8421/api/agents -H 'Content-Type: application/json' -d '{
@@ -94,9 +95,31 @@ manually if you want it gone.
 
 ## Models
 
-`model` is any name in the daedalus SettingsStore
-(`~/.local/share/daedalus/daedalus.db`, managed by icarus). Blank = store
-default. Different teammates can use different models/providers.
+`model` is any model name in HiveMind's own **LLMStore**
+(`~/.local/share/hivemind/llm.db`) — managed on the web **Models** page or
+via `/api/providers` + `/api/models`. Blank = store default. Credentials
+and endpoints are injected into the agent's daedalus config at spawn;
+different teammates can use different models/providers.
+
+## Where an agent runs (worker assignment)
+
+The `worker` field (default `"local"`) decides **which machine** the
+agent's container, exec and screen sessions run on:
+
+- `"local"` — the hive-server host itself.
+- Any enrolled worker name — the agent executes on that machine via
+  `hive-worker` (see `docs/hive-worker.md`). The roster PATCH accepts it,
+  the web roster card shows it ("Runs on"), and the Workers page counts
+  assignments per worker.
+
+```bash
+curl -X PATCH localhost:8421/api/agents/<id> \
+  -H 'Content-Type: application/json' -d '{"worker": "dev-rig"}'
+```
+
+If the named worker is offline, container/exec/screen calls for that agent
+fail with a worker-unavailable error until it reconnects — reassign or
+wait.
 
 ## Tools every roster agent has
 
@@ -104,7 +127,7 @@ default. Different teammates can use different models/providers.
 |---|---|
 | `container_exec` | Run a bash command in its container (`/workspace`, user `hive`, sudo) |
 | `list_agents` | See the team |
-| `message_agent` | Task a teammate and get its reply |
+| `message_agent` | Task a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
 | `create_agent` | Add a teammate to the roster |
 | `run_icarus` | Hand a self-contained task to an icarus subprocess |
 | daedalus built-ins | memory tools, skills, MCP servers, etc. (host shell `execute_bash` is disabled for containerized agents) |
