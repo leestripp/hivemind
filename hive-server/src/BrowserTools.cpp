@@ -2,8 +2,12 @@
 #include "hivemind/BrowserTools.h"
 #include "hivemind/ContainerManager.h"
 #include "hivemind/SecretStore.h"
+#include "hivemind/WorkerRouter.h"
+
+#include "crypto/Crypto.h"   // OmniNet: base64Encode (remote driver push)
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 namespace fs = std::filesystem;
@@ -27,6 +31,31 @@ void install_driver(const std::string& agent_id) {
     if (ec)
         throw std::runtime_error("cannot install browser driver: " +
                                  ec.message());
+
+    // Worker-hosted agent (Phase 30): the server-side home dir is NOT the
+    // mount the container sees — the worker has its own per-agent home.
+    // Push the driver content over the channel instead (base64 through
+    // exec; same refresh-on-every-call semantics).
+    if (WorkerRouter::is_remote(agent_id)) {
+        std::ifstream in(src, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+        if (content.empty())
+            throw std::runtime_error("cannot read browser driver source");
+        const std::string b64 = OmniNet::Crypto::base64Encode(
+            std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(content.data()),
+                content.size()));
+        auto r = WorkerRouter::exec(
+            agent_id,
+            "printf %s '" + b64 + "' | base64 -d "
+            "> /home/hive/browser_driver.py",
+            30);
+        if (!r || r->exit_code != 0)
+            throw std::runtime_error(
+                "cannot install browser driver on worker: " +
+                (r ? r->output : std::string{"routing failed"}));
+    }
 }
 
 /// Run one driver action; returns the driver's JSON (or an error object).
@@ -36,7 +65,10 @@ json run_driver(const std::string& agent_id, const std::string& cmdline,
     catch (const std::exception& e) {
         return {{"status", "error"}, {"error", e.what()}};
     }
-    auto r = container_manager().exec(agent_id, cmdline, timeout_s);
+    // Phase 30: worker-hosted agents run the driver on their worker.
+    auto wr = WorkerRouter::exec(agent_id, cmdline, timeout_s);
+    auto r = wr ? std::move(*wr)
+                : container_manager().exec(agent_id, cmdline, timeout_s);
     if (r.exit_code == -1)   // podman itself unavailable
         return {{"status", "error"}, {"error", r.output}};
     // The driver prints one JSON line; exec merges stderr, so parse the

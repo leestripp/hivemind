@@ -282,7 +282,18 @@ void AgentHost::ensure_agent() {
             "you. Use the container_exec tool for ALL command execution — it "
             "runs inside your container (there is no host shell). "
             "Before doing file work in /workspace, read /workspace/index.md "
-            "— it maps the company drive (departments, projects, conventions).";
+            "— it maps the company drive (departments, projects, conventions)."
+            "\n\nComputer use: your container has a full desktop with a "
+            "persistent Chrome browser you drive with the browser_* tools "
+            "(browser_navigate to open a URL, browser_read to see the page, "
+            "browser_click/browser_type/browser_press to interact, "
+            "browser_screenshot to capture what you see, browser_eval for "
+            "JavaScript). Use these for ANY website task — reading pages, "
+            "filling forms, logging into services. The user can watch your "
+            "screen live (the Computer button); if you hit a login wall or "
+            "captcha, tell the user and PAUSE — they can take over the same "
+            "browser session, log in, and hand control back (the profile "
+            "persists). Never say you lack browsing tools: you have them.";
         if (!container_err.empty())
             prompt_addendum +=
                 "\n\nWARNING: the container runtime is currently unavailable ("

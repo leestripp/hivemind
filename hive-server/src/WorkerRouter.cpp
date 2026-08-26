@@ -21,6 +21,12 @@ void WorkerRouter::install(AgentStore* agents, WorkerChannel* channel) {
     g_channel = channel;
 }
 
+bool WorkerRouter::is_remote(const std::string& agent_id) {
+    if (!g_agents || !g_channel) return false;
+    auto agent = g_agents->get_agent(agent_id);
+    return agent && agent->worker != "local";
+}
+
 std::optional<ContainerManager::ExecResult> WorkerRouter::exec(
         const std::string& agent_id, const std::string& command,
         int timeout_s) {

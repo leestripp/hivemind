@@ -36,6 +36,11 @@ class WorkerRouter {
 public:
     static void install(AgentStore* agents, WorkerChannel* channel);
 
+    /// Lightweight routing probe: true when the agent is assigned to a
+    /// worker (regardless of that worker's online state — exec() itself
+    /// throws on offline). False when not installed / unknown / "local".
+    static bool is_remote(const std::string& agent_id);
+
     /// nullopt = local agent, use ContainerManager::exec. Throws
     /// std::runtime_error when the assigned worker is offline/unknown.
     static std::optional<ContainerManager::ExecResult> exec(
