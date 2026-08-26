@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
 
             while (!g_stop && !dead) {
                 auto msg = ws.receiveText();
-                if (!msg) break;   // closed
+                if (!msg) { std::cerr << "worker: receiveText returned nullopt (closed)\n"; break; }
                 json frame;
                 try { frame = json::parse(*msg); } catch (...) { continue; }
                 const std::string op = frame.value("op", "");
@@ -96,6 +96,7 @@ int main(int argc, char* argv[]) {
                     std::cout << "worker: frame: " << frame.dump() << "\n";
 
                 if (op == "exec") {
+                    std::cerr << "worker: exec " << frame.value("id","") << " received\n";
                     // 30.3: run in a detached thread — the receive loop
                     // stays responsive while chunks stream back.
                     const std::string id = frame.value("id", "");
@@ -128,13 +129,15 @@ int main(int argc, char* argv[]) {
                             } catch (...) {}
                         }
                         try { send_frame(done); } catch (...) {}
+                        std::cerr << "worker: exec " << id << " done, exit="
+                                  << done["exit_code"].get<int>() << "\n";
                     }).detach();
                 }
             }
             dead = true;
             if (hb.joinable()) hb.join();
         } catch (const std::exception& e) {
-            std::cerr << "worker: connect failed: " << e.what() << "\n";
+            std::cerr << "worker: exception: " << e.what() << "\n";
         }
         if (g_stop) break;
         std::cerr << "worker: reconnecting in " << backoff << "s\n";

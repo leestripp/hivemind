@@ -19,6 +19,13 @@ WorkerChannel::WorkerChannel(WorkerStore& store, int port)
     cfg.address = "0.0.0.0";   // workers dial in from other machines
     cfg.port = static_cast<uint16_t>(port_);
     cfg.logRequests = false;
+    // CRITICAL: OmniNet applies keepAliveTimeout (default 5s) as
+    // SO_RCVTIMEO on the socket, and the upgraded WebSocket connection
+    // INHERITS it — 5s of worker silence (e.g. a long podman create
+    // during exec dispatch) looked like "peer closed" and the channel
+    // dropped mid-exec. 0 disables the timeout: SO_RCVTIMEO {0,0} =
+    // blocking reads, which is exactly right for a long-lived channel.
+    cfg.keepAliveTimeout = std::chrono::seconds{0};
     ws_ = std::make_unique<OmniNet::WebSocket::Server>(cfg);
     ws_->on("/api/workers/channel", [this](Connection& ws) { handle(ws); });
 }

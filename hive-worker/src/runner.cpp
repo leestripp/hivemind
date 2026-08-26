@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
+#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -115,8 +116,10 @@ ExecOutcome run_container_exec(
     if (argv.empty()) { oc.error = "empty argv"; return oc; }
     const auto t0 = std::chrono::steady_clock::now();
 
+    std::cerr << "runner: ensure_container " << agent << "\n";
     try { ensure_container(agent); }
     catch (const std::exception& e) { oc.error = e.what(); return oc; }
+    std::cerr << "runner: container up, spawning podman exec\n";
 
     // Rendered env content → 0600 tmpfs file (deleted after the exec).
     std::string env_path;
