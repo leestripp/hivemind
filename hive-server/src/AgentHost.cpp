@@ -692,9 +692,10 @@ void ChatService::fan_in(const std::string& thread_id,
                          int generation) {
     // daedalus persists each agent's conversation (messages.json) across
     // restarts, so the full thread context is already there — every turn
-    // gets ONLY the new message. (Backlog injection removed: threads fix
-    // their participants at creation, so its only trigger was restarts,
-    // where it duplicated restored history.)
+    // gets ONLY the new message. DO NOT add a thread-history backlog here
+    // (removed 2026-08-26): threads fix participants at creation, so its
+    // only trigger was restarts, where it duplicated restored history.
+    // See docs/agents.md "Conversation context".
     std::string prompt = "[" + sender_label + "] " + body;
 
     auto live = std::make_shared<LiveTurn>();

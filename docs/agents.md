@@ -50,6 +50,26 @@ and reloads prior history — it picks up where you left off.
 > the server calls on SIGTERM (`hivemindctl stop`, systemd, Ctrl-C).
 > `kill -9` can lose the in-flight turn.
 
+## Conversation context (daedalus owns it — no backlog)
+
+**Each turn sends ONLY the new message** (`[sender] body`). The agent's full
+conversation context is daedalus' own persisted history
+(`messages.json`, restored on every host reconstruction), which survives
+server restarts. HiveMind deliberately does NOT prepend thread history:
+
+- Threads fix their participants at creation (`POST /api/threads
+  {agent_ids[]}`) — there is no add-agent-to-existing-thread flow, so no
+  agent ever joins a conversation with history it missed.
+- An earlier "first time in thread" backlog (last 20 messages / 12 KB) was
+  removed (2026-08-26): its in-memory tracking set reset on every restart,
+  so it duplicated exactly what daedalus had already restored — and it
+  double-included the triggering message in agent↔agent threads.
+
+**Do not reintroduce a backlog/history prefix in `ChatService::fan_in`.**
+If a future feature lets agents join pre-existing threads, hand context over
+explicitly at that point (e.g. a one-shot summary message), not by replaying
+raw history into the prompt.
+
 ## Avatars
 
 Each agent has a chat/roster avatar. Pick one of the 20 built-in
