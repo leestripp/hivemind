@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <thread>
 #include <vector>
 
@@ -125,6 +126,11 @@ private:
     nlohmann::json threads_ = nlohmann::json::array();
     std::string current_thread_;
     std::string last_message_id_;
+    // Message IDs already rendered in the open thread. Overlapping poll_chat
+    // calls (timer + post-send) both snapshot the same `after` cursor and can
+    // return the same new message — without this dedupe the bubble appends
+    // twice (observed 2026-08-27 over a high-latency link to hub.example.com).
+    std::unordered_set<std::string> rendered_msg_ids_;
     int pending_approvals_ = -1;   // -1 = first poll (don't notify on load)
     bool thread_busy_ = false;
     // Phase 14.1 — attention: per-thread last-seen activity (ISO strings

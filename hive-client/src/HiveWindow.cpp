@@ -606,6 +606,7 @@ void HiveWindow::on_settings() {
                 // Re-render the open thread so the new identity shows now.
                 if (!current_thread_.empty()) {
                     last_message_id_.clear();
+                    rendered_msg_ids_.clear();
                     while (auto* c = messages_box_.get_first_child())
                         messages_box_.remove(*c);
                     rendered_.clear();
@@ -1034,6 +1035,7 @@ void HiveWindow::refresh_all() {
                 if (current_thread_.empty() && !threads_.empty()) {
                     current_thread_ = threads_[0].value("id", "");
                     last_message_id_.clear();
+                    rendered_msg_ids_.clear();
                     if (auto* row = threads_list_.get_row_at_index(0))
                         threads_list_.select_row(*row);
                     poll_chat();
@@ -1076,6 +1078,13 @@ void HiveWindow::poll_chat() {
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
                 for (auto& m : arr) {
+                    // Dedupe: a concurrent poll that snapshotted the same
+                    // `after` cursor returns these messages too — render
+                    // each id once. (last_message_id_ only advances in this
+                    // callback, so overlapping fetches overlap in results.)
+                    const std::string mid = m.value("id", "");
+                    if (!mid.empty() && !rendered_msg_ids_.insert(mid).second)
+                        continue;
                     append_message_bubble(
                         m.value("sender_kind", ""),
                         m.value("sender_kind", "") == "agent"
@@ -1455,6 +1464,7 @@ void HiveWindow::on_agent_selected() {
                 if (!alive_) return;
                 current_thread_ = t.value("id", "");
                 last_message_id_.clear();
+                rendered_msg_ids_.clear();
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
                 rendered_.clear();
@@ -1473,6 +1483,7 @@ void HiveWindow::on_thread_selected() {
     if (!id || *id == current_thread_) return;
     current_thread_ = *id;
     last_message_id_.clear();
+    rendered_msg_ids_.clear();
     chat_stick_bottom_ = true;   // opening a thread always shows the newest
     delete_thread_btn_.set_sensitive(true);
     learn_btn_.set_sensitive(true);
@@ -2844,6 +2855,7 @@ void HiveWindow::on_new_thread() {
                             if (!alive_) return;
                             current_thread_ = nt.value("id", "");
                             last_message_id_.clear();
+                            rendered_msg_ids_.clear();
                             while (auto* c = messages_box_.get_first_child())
                                 messages_box_.remove(*c);
                             rendered_.clear();
@@ -2902,6 +2914,7 @@ void HiveWindow::on_delete_thread() {
                 if (current_thread_ == tid) {
                     current_thread_.clear();
                     last_message_id_.clear();
+                    rendered_msg_ids_.clear();
                     delete_thread_btn_.set_sensitive(false);
                     learn_btn_.set_sensitive(false);
                     while (auto* ch = messages_box_.get_first_child())
@@ -2965,6 +2978,7 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
     return invoke_on_ui([this, nt, new_id] {
         current_thread_ = new_id;
         last_message_id_.clear();
+        rendered_msg_ids_.clear();
         while (auto* c = messages_box_.get_first_child())
             messages_box_.remove(*c);
         rendered_.clear();
@@ -2979,6 +2993,7 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
             if (t.value("id", "") == id) {
                 current_thread_ = id;
                 last_message_id_.clear();
+                rendered_msg_ids_.clear();
                 delete_thread_btn_.set_sensitive(true);
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
@@ -3018,6 +3033,7 @@ nlohmann::json HiveWindow::ui_delete_thread(const std::string& id) {
         if (current_thread_ == id) {
             current_thread_.clear();
             last_message_id_.clear();
+            rendered_msg_ids_.clear();
             delete_thread_btn_.set_sensitive(false);
             while (auto* ch = messages_box_.get_first_child())
                 messages_box_.remove(*ch);
