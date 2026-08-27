@@ -24,18 +24,21 @@ json prop(const std::string& desc) {
 /// rebuilds never run a stale driver.
 void install_driver(const std::string& agent_id) {
     const fs::path src = "hive-server/data/browser_driver.py";
-    const fs::path dst =
-        ContainerManager::agent_home_dir(agent_id) / "browser_driver.py";
-    std::error_code ec;
-    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
-    if (ec)
-        throw std::runtime_error("cannot install browser driver: " +
-                                 ec.message());
+
+    if (!WorkerRouter::is_remote(agent_id)) {
+        const fs::path dst =
+            ContainerManager::agent_home_dir(agent_id) / "browser_driver.py";
+        std::error_code ec;
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+            throw std::runtime_error("cannot install browser driver: " +
+                                     ec.message());
+    }
 
     // Worker-hosted agent (Phase 30): the server-side home dir is NOT the
-    // mount the container sees — the worker has its own per-agent home.
-    // Push the driver content over the channel instead (base64 through
-    // exec; same refresh-on-every-call semantics).
+    // mount the container sees (it may not even exist locally) — the worker
+    // has its own per-agent home. Push the driver content over the channel
+    // instead (base64 through exec; same refresh-on-every-call semantics).
     if (WorkerRouter::is_remote(agent_id)) {
         std::ifstream in(src, std::ios::binary);
         std::string content((std::istreambuf_iterator<char>(in)),
