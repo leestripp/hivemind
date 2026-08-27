@@ -110,6 +110,39 @@ else()
         GIT_TAG        main
     )
     FetchContent_MakeAvailable(OmniNet)
+
+    # Keep the fetched checkout tracking origin/main. FetchContent caches
+    # _deps/omninet-src and does NOT re-fetch on reconfigure when GIT_TAG is
+    # unchanged, so a branch tag like "main" silently goes stale (this is how
+    # we ran weeks behind the connection-thread leak fix in 1.0.0). Fetch and
+    # fast-forward at configure time unless the checkout has local edits.
+    option(OMNINET_AUTO_UPDATE "Fetch+ff the vendored OmniNet checkout at configure time" ON)
+    if(OMNINET_AUTO_UPDATE AND EXISTS "${omninet_SOURCE_DIR}/.git")
+        execute_process(
+            COMMAND git status --porcelain
+            WORKING_DIRECTORY "${omninet_SOURCE_DIR}"
+            OUTPUT_VARIABLE _omninet_dirty OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(_omninet_dirty STREQUAL "")
+            execute_process(
+                COMMAND git fetch origin
+                WORKING_DIRECTORY "${omninet_SOURCE_DIR}"
+                RESULT_VARIABLE _fetch_rc OUTPUT_QUIET ERROR_QUIET)
+            if(_fetch_rc EQUAL 0)
+                execute_process(
+                    COMMAND git reset --hard origin/main
+                    WORKING_DIRECTORY "${omninet_SOURCE_DIR}"
+                    OUTPUT_QUIET ERROR_QUIET)
+                execute_process(
+                    COMMAND git describe --tags
+                    WORKING_DIRECTORY "${omninet_SOURCE_DIR}"
+                    OUTPUT_VARIABLE _omninet_ver OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET)
+                message(STATUS "[hivemind] OmniNet updated to ${_omninet_ver} (origin/main)")
+            endif()
+        else()
+            message(WARNING "[hivemind] OmniNet checkout has local edits — skipping auto-update")
+        endif()
+    endif()
 endif()
 
 get_target_property(_omninet_inc OmniNet INCLUDE_DIRECTORIES)
