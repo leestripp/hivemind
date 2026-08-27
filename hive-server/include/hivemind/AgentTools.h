@@ -8,6 +8,15 @@ class AgentStore;
 class ThreadStore;
 class RoutineStore;
 class AgentRegistry;
+class WorkerStore;
+class WorkerChannel;
+
+namespace agent_tools {
+/// Phase 30: give the collaboration tools visibility of enrolled hive-workers
+/// (list_workers / create_agent's worker param). Called once from main() next
+/// to WorkerRouter::install — same global-access pattern.
+void install_worker_access(WorkerStore* workers, WorkerChannel* channel);
+}  // namespace agent_tools
 
 /**
  * Collaboration tools registered on every roster agent (HiveMind 2.0,
@@ -69,13 +78,33 @@ public:
     [[nodiscard]] std::string get_name() const override { return "create_agent"; }
     [[nodiscard]] std::string get_description() const override {
         return "Create a new teammate agent with a name, role and optional "
-               "model. Returns the new agent's id.";
+               "model. Optional 'worker' places it on an enrolled hive-worker "
+               "rig (use list_workers to see them); default is 'local' — the "
+               "server's own machine. Returns the new agent's id.";
     }
     [[nodiscard]] nlohmann::json get_definition() const override;
     nlohmann::json execute(const nlohmann::json& args,
                            daedalus::HostToolContext& ctx) override;
 private:
     AgentStore& agents_;
+};
+
+/// list_workers — Phase 30: discover enrolled hive-worker rigs (name,
+/// online status, capabilities) so an orchestrator can decide where to
+/// place a new teammate with create_agent's worker param.
+class ListWorkersTool final : public daedalus::BaseTool {
+public:
+    [[nodiscard]] std::string get_name() const override { return "list_workers"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "List enrolled hive-worker rigs — remote machines that can "
+               "run agent containers — with name, online status and "
+               "capabilities (gpu, arch). Pass a worker's name as 'worker' "
+               "to create_agent to place the new teammate on that rig. "
+               "Only ONLINE workers can actually start a container.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
 };
 
 /// save_routine — Phase 20 learn-by-demonstration: after the user

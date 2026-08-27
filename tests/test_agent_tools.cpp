@@ -4,6 +4,7 @@
 #include "hivemind/AgentStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/WorkerStore.h"
 
 #include <cassert>
 #include <filesystem>
@@ -35,6 +36,36 @@ int main() {
     StubCtx ctx;
 
     SaveRoutineTool tool{a.id, routines, threads};
+
+    // ── CreateAgentTool worker placement + ListWorkersTool (Phase 30) ──
+    WorkerStore workers_db{tmp / "workers.db"};
+    agent_tools::install_worker_access(&workers_db, nullptr);  // no channel: all offline
+
+    CreateAgentTool cat{agents};
+    ListWorkersTool lwt;
+
+    // default placement is local
+    auto r = cat.execute(json{{"name", "LocalOne"}, {"role", "tester"}}, ctx);
+    assert(r["status"] == "success");
+    assert(r["worker"] == "local");
+
+    // unknown worker rejected
+    r = cat.execute(json{{"name", "Ghost"}, {"role", "x"}, {"worker", "no-such-rig"}}, ctx);
+    assert(r["status"] == "error");
+
+    // enrolled-but-offline worker rejected with a useful error
+    workers_db.enroll("rig-a");
+    r = cat.execute(json{{"name", "Offliner"}, {"role", "x"}, {"worker", "rig-a"}}, ctx);
+    assert(r["status"] == "error");
+    assert(r["error"].get<std::string>().find("offline") != std::string::npos);
+
+    // list_workers reports enrolled rigs (offline without a channel)
+    auto lw = lwt.execute(json::object(), ctx);
+    assert(lw["status"] == "success");
+    assert(lw["workers"].size() == 1);
+    assert(lw["workers"][0]["name"] == "rig-a");
+    assert(lw["workers"][0]["online"] == false);
+
 
     // schema sanity
     auto def = tool.get_definition();

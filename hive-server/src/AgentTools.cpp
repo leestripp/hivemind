@@ -2,6 +2,8 @@
 // src/AgentTools.cpp — collaboration tools (HiveMind 2.0, Plan.md Phase 3)
 // =============================================================================
 #include "hivemind/AgentTools.h"
+#include "hivemind/WorkerStore.h"
+#include "hivemind/WorkerChannel.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/AgentHost.h"     // AgentRegistry
 #include "hivemind/ContainerManager.h"
@@ -51,6 +53,18 @@ json fn_def(const std::string& name, const std::string& desc, json params) {
 }
 
 } // namespace
+
+// ─── worker discovery (Phase 30) ────────────────────────────────────────────
+namespace {
+WorkerStore*   g_workers = nullptr;
+WorkerChannel* g_wchannel = nullptr;
+}
+
+void agent_tools::install_worker_access(WorkerStore* workers,
+                                        WorkerChannel* channel) {
+    g_workers = workers;
+    g_wchannel = channel;
+}
 
 // ─── ListAgentsTool ─────────────────────────────────────────────────────────
 
@@ -121,7 +135,9 @@ json CreateAgentTool::get_definition() const {
              json{{"role", {{"type", "string"},
                             {"description", "What this teammate does."}}}},
              json{{"model", {{"type", "string"},
-                             {"description", "Optional model name (default: store default)."}}}}},
+                             {"description", "Optional model name (default: store default)."}}}},
+             json{{"worker", {{"type", "string"},
+                              {"description", "Optional hive-worker rig name to run this teammate on (see list_workers). Default 'local' = the server's own machine. Only online workers can start containers."}}}}},
             {"name", "role"}));
 }
 
@@ -129,12 +145,51 @@ json CreateAgentTool::execute(const json& args, daedalus::HostToolContext&) {
     std::string name = args.value("name", "");
     std::string role = args.value("role", "");
     std::string model = args.value("model", "");
+    std::string worker = args.value("worker", "");
+    // Validate placement up front so the agent gets a useful error instead of
+    // a teammate that only fails later, at first container exec.
+    if (!worker.empty() && worker != "local") {
+        if (!g_workers || !g_workers->get(worker))
+            return error("unknown worker '" + worker +
+                         "' — use list_workers to see enrolled rigs");
+        // No channel installed => nothing can be online (matches
+        // ListWorkersTool's null-channel => online:false semantics).
+        if (!g_wchannel || !g_wchannel->is_online(worker))
+            return error("worker '" + worker +
+                         "' is offline — it cannot start a container right now");
+    }
     try {
-        auto a = agents_.create_agent(name, role, model);
-        return ok({{"id", a.id}, {"name", a.name}, {"role", a.role}});
+        auto a = agents_.create_agent(name, role, model, "shared", false, "",
+                                      worker);
+        return ok({{"id", a.id}, {"name", a.name}, {"role", a.role},
+                   {"worker", a.worker}});
     } catch (const std::exception& e) {
         return error(e.what());
     }
+}
+
+// ─── ListWorkersTool (Phase 30) ─────────────────────────────────────────────
+
+json ListWorkersTool::get_definition() const {
+    return fn_def(get_name(), get_description(), params_object({}, {}));
+}
+
+json ListWorkersTool::execute(const json&, daedalus::HostToolContext&) {
+    if (!g_workers) return error("worker registry unavailable");
+    json arr = json::array();
+    for (auto& w : g_workers->list()) {
+        json caps = json::object();
+        try { caps = json::parse(w.caps); } catch (...) {}
+        arr.push_back({{"name", w.name},
+                       {"online", g_wchannel ? g_wchannel->is_online(w.name)
+                                             : false},
+                       {"caps", caps},
+                       {"last_seen", w.last_seen}});
+    }
+    return ok({{"workers", arr},
+               {"note", "Pass a worker's name as 'worker' to create_agent. "
+                        "Empty list = only the server itself ('local') is "
+                        "available."}});
 }
 
 // ─── SaveRoutineTool (Phase 20: learn-by-demonstration) ─────────────────────
@@ -147,7 +202,7 @@ json SaveRoutineTool::get_definition() const {
              json{{"prompt", {{"type", "string"},
                               {"description", "Self-contained instruction for future runs: the distilled steps, URLs, paths, values. No references to 'the chat above'."}}}},
              json{{"schedule", {{"type", "object"},
-                                {"description", "Schedule spec: {type:'once',at:'YYYY-MM-DDTHH:MM'} | {type:'interval',every_minutes:N} | {type:'daily',time:'HH:MM'} | {type:'weekly',days:[0-6],time:'HH:MM'} (server-local time)."}}}}},
+                                {"description", "Schedule spec: {type:'once',at:'YYYY-MM-DDTHH:MM'} | {type:'interval',every_minutes:N} | {type:'daily',time:'HH:MM'} | {type:'weekly',days:[0-6],time:'HH:MM'} (UTC)."}}}}},
             {"name", "prompt", "schedule"}));
 }
 
