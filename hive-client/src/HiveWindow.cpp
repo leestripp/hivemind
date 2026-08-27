@@ -221,7 +221,10 @@ std::string prose_to_markup(const std::string& text) {
     return out;
 }
 
-// "2026-08-23T06:09:43.6Z" → "06:09" (today) or "Aug 22, 22:14"
+// "2026-08-23T06:09:43.6Z" → "06:09 UTC" (today) or "Aug 22, 22:14 UTC".
+// All timestamps are UTC by design (2026-08-27 decision: no local-time
+// conversion, no TZ setting) — the "UTC" suffix makes that explicit so
+// nobody mistakes chat times for local time.
 std::string format_msg_time(const std::string& iso) {
     if (iso.size() < 16) return {};
     std::string hm = iso.substr(11, 5);
@@ -230,13 +233,13 @@ std::string format_msg_time(const std::string& iso) {
     std::tm* lt = std::localtime(&t);
     char today[11];
     std::strftime(today, sizeof today, "%Y-%m-%d", lt);
-    if (date == today) return hm;
+    if (date == today) return hm + " UTC";
     // older: short date + time
     std::tm tm{};
     strptime(date.c_str(), "%Y-%m-%d", &tm);
     char buf[32];
     std::strftime(buf, sizeof buf, "%b %d", &tm);
-    return std::string(buf) + ", " + hm;
+    return std::string(buf) + ", " + hm + " UTC";
 }
 
 // ── GResource SVG icons ───────────────────────────────────────────────────
