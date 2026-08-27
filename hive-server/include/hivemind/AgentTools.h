@@ -195,22 +195,3 @@ private:
     RoutineStore& routines_;
 };
 
-/// run_icarus — delegate a heavy duty task to an icarus subprocess
-/// (our reconfigurable agent host). Graceful error when icarus isn't
-/// installed on this machine.
-class RunIcarusTool final : public daedalus::BaseTool {
-public:
-    RunIcarusTool(std::string agent_id, std::string workdir)
-        : agent_id_(std::move(agent_id)), workdir_(std::move(workdir)) {}
-    [[nodiscard]] std::string get_name() const override { return "run_icarus"; }
-    [[nodiscard]] std::string get_description() const override {
-        return "Delegate a self-contained task to an icarus agent subprocess "
-               "(autonomous worker with its own tools) and return its output.";
-    }
-    [[nodiscard]] nlohmann::json get_definition() const override;
-    nlohmann::json execute(const nlohmann::json& args,
-                           daedalus::HostToolContext& ctx) override;
-private:
-    std::string agent_id_;
-    std::string workdir_;
-};

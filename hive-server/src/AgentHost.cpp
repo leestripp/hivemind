@@ -391,17 +391,6 @@ void AgentHost::ensure_agent() {
         std::make_unique<UpdateRoutineTool>(info_.id, routines_));
     agent_->register_tool(
         std::make_unique<DeleteRoutineTool>(info_.id, routines_));
-    // run_icarus only when the binary actually exists on this host —
-    // otherwise the tool is dead weight in every system prompt and its
-    // only answer is "not installed". (2026-08-27: icarus is baked into
-    // neither the container image nor installed on hosts yet.)
-    {
-        std::string home = std::getenv("HOME") ? std::getenv("HOME") : ".";
-        if (std::system("command -v icarus >/dev/null 2>&1") == 0 ||
-            std::filesystem::exists(home + "/.local/bin/icarus"))
-            agent_->register_tool(
-                std::make_unique<RunIcarusTool>(info_.id, dir_.string()));
-    }
 }
 
 void AgentHost::enqueue(PendingTurn turn) {

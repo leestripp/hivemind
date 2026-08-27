@@ -42,8 +42,6 @@ RUN userdel -r ubuntu 2>/dev/null || true; \
 # Company workspace mount point (shared volume is mounted here at create).
 RUN mkdir -p /workspace && chown hive:hive /workspace
 
-# TODO(Phase 3): bake the icarus binary in (COPY icarus /usr/local/bin/)
-# once the run_icarus delegation tool lands — or bind-mount a host build.
 
 USER hive
 WORKDIR /workspace

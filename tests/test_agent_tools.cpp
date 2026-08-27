@@ -157,6 +157,43 @@ int main() {
     assert(!routines.get(rid));
     assert(drt.execute(json{{"id", rid}}, ctx)["status"] == "error");  // gone
 
+    // ── Phase 32: name-or-id lookup, schedule_text, dup-name guard ──
+    // (rid above was morning-digest — renamed + deleted; one-off remains)
+    // update by NAME (case-insensitive)
+    auto up2 = urt.execute(json{{"routine", "ONE-off"}, {"enabled", false}}, ctx);
+    assert(up2["status"] == "success");
+    // delete by name
+    auto del2 = drt.execute(json{{"routine", "one-off"}}, ctx);
+    assert(del2["status"] == "success");
+    assert(drt.execute(json{{"routine", "one-off"}}, ctx)["status"] == "error");
+    assert(lrt.execute(json::object(), ctx)["routines"].empty());
+
+    // fresh routine for the list/dup-guard checks
+    auto sv = tool.execute(json{{"name", "weekly-report"},
+                                {"prompt", "Summarize /workspace/reports weekly"},
+                                {"schedule", json{{"type", "weekly"},
+                                                  {"days", json::array({1})},
+                                                  {"time", "09:00"}}}}, ctx);
+    assert(sv["status"] == "success");
+
+    // list shows human-readable schedule text + prompt
+    lr = lrt.execute(json::object(), ctx);
+    assert(lr["routines"].size() == 1);
+    assert(lr["routines"][0]["name"] == "weekly-report");
+    assert(lr["routines"][0]["schedule_text"].get<std::string>().find("09:00")
+           != std::string::npos);
+    assert(!lr["routines"][0].value("prompt", "").empty());
+
+    // duplicate name on save rejected, points at update_routine
+    auto dup = tool.execute(json{{"name", "weekly-report"},
+                                 {"prompt", "again"},
+                                 {"schedule", json{{"type", "daily"},
+                                                   {"time", "10:00"}}}}, ctx);
+    assert(dup["status"] == "error");
+    assert(dup["error"].get<std::string>().find("update_routine")
+           != std::string::npos);
+    assert(routines.list().size() == 1);   // still just the one
+
     fs::remove_all(tmp);
     std::cout << "test_agent_tools: OK\n";
     return 0;

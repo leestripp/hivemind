@@ -37,6 +37,31 @@ std::optional<RosterAgent> find_agent(AgentStore& agents, const std::string& key
     return std::nullopt;
 }
 
+// Find one of the agent's OWN routines by exact id, else exact name,
+// else case-insensitive name. Agents think in names, not UUIDs.
+std::optional<Routine> find_routine(RoutineStore& routines,
+                                    const std::string& agent_id,
+                                    const std::string& key) {
+    auto own = [&]() {
+        std::vector<Routine> out;
+        for (auto& r : routines.list())
+            if (r.agent_id == agent_id) out.push_back(r);
+        return out;
+    };
+    if (auto r = routines.get(key))
+        if (r->agent_id == agent_id) return r;
+    for (auto& r : own())
+        if (r.name == key) return r;
+    std::string lower;
+    for (char ch : key) lower += static_cast<char>(std::tolower(ch));
+    for (auto& r : own()) {
+        std::string ln;
+        for (char ch : r.name) ln += static_cast<char>(std::tolower(ch));
+        if (ln == lower) return r;
+    }
+    return std::nullopt;
+}
+
 json params_object(std::initializer_list<json> props,
                    std::initializer_list<const char*> required) {
     json properties = json::object();
@@ -216,6 +241,10 @@ json SaveRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
     const json schedule = args["schedule"];
     const std::string bad = hm::validate_schedule(schedule);
     if (!bad.empty()) return error("invalid schedule: " + bad);
+    // Duplicate names silently made second routines — point at update instead.
+    if (find_routine(routines_, agent_id_, name))
+        return error("you already have a routine named '" + name +
+                     "' — use update_routine to change it, or pick another name");
     try {
         // Same shape as RoutineRoutes: one dedicated thread per routine.
         auto t = threads_.create_thread("routine: " + name, "dm", {agent_id_});
@@ -242,8 +271,12 @@ json ListRoutinesTool::execute(const json&, daedalus::HostToolContext&) {
     json arr = json::array();
     for (auto& r : routines_.list()) {
         if (r.agent_id != agent_id_) continue;   // own routines only
+        json sched = json::parse(r.schedule_json, nullptr, false);
         arr.push_back({{"id", r.id}, {"name", r.name},
-                       {"schedule", json::parse(r.schedule_json, nullptr, false)},
+                       {"schedule", sched},
+                       {"schedule_text", sched.is_object()
+                            ? hm::describe_schedule(sched) : r.schedule_json},
+                       {"prompt", r.prompt},
                        {"enabled", r.enabled},
                        {"next_fire_at", r.next_fire_at},
                        {"last_fired_at", r.last_fired_at}});
@@ -259,8 +292,8 @@ json ListRoutinesTool::execute(const json&, daedalus::HostToolContext&) {
 json UpdateRoutineTool::get_definition() const {
     return fn_def(get_name(), get_description(),
         params_object(
-            {json{{"id", {{"type", "string"},
-                          {"description", "Routine id (see list_routines)."}}}},
+            {json{{"routine", {{"type", "string"},
+                               {"description", "Routine name or id (see list_routines)."}}}},
              json{{"name", {{"type", "string"},
                             {"description", "New name (omit to keep)."}}}},
              json{{"prompt", {{"type", "string"},
@@ -269,17 +302,16 @@ json UpdateRoutineTool::get_definition() const {
                                 {"description", "New schedule spec (UTC) — same shape as save_routine (omit to keep)."}}}},
              json{{"enabled", {{"type", "boolean"},
                                {"description", "false pauses, true resumes (omit to keep)."}}}}},
-            {"id"}));
+            {"routine"}));
 }
 
 json UpdateRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
-    const std::string id = args.value("id", "");
-    if (id.empty()) return error("need 'id'");
-    auto r = routines_.get(id);
-    if (!r) return error("unknown routine id '" + id + "'");
-    if (r->agent_id != agent_id_)
-        return error("routine '" + r->name + "' belongs to another agent — "
-                     "you can only change your own");
+    const std::string key = args.value("routine", args.value("id", ""));
+    if (key.empty()) return error("need 'routine' (name or id)");
+    auto r = find_routine(routines_, agent_id_, key);
+    if (!r) return error("no routine of yours named '" + key +
+                         "' — see list_routines");
+    const std::string id = r->id;
 
     const std::string name = args.value("name", r->name);
     const std::string prompt = args.value("prompt", r->prompt);
@@ -310,75 +342,18 @@ json UpdateRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
 json DeleteRoutineTool::get_definition() const {
     return fn_def(get_name(), get_description(),
         params_object(
-            {json{{"id", {{"type", "string"},
-                          {"description", "Routine id (see list_routines)."}}}}},
-            {"id"}));
+            {json{{"routine", {{"type", "string"},
+                               {"description", "Routine name or id (see list_routines)."}}}}},
+            {"routine"}));
 }
 
 json DeleteRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
-    const std::string id = args.value("id", "");
-    if (id.empty()) return error("need 'id'");
-    auto r = routines_.get(id);
-    if (!r) return error("unknown routine id '" + id + "'");
-    if (r->agent_id != agent_id_)
-        return error("routine '" + r->name + "' belongs to another agent — "
-                     "you can only delete your own");
+    const std::string key = args.value("routine", args.value("id", ""));
+    if (key.empty()) return error("need 'routine' (name or id)");
+    auto r = find_routine(routines_, agent_id_, key);
+    if (!r) return error("no routine of yours named '" + key +
+                         "' — see list_routines");
+    const std::string id = r->id;
     if (!routines_.remove(id)) return error("delete failed");
     return ok({{"deleted", true}, {"name", r->name}});
-}
-
-// ─── RunIcarusTool ──────────────────────────────────────────────────────────
-
-json RunIcarusTool::get_definition() const {
-    return fn_def(get_name(), get_description(),
-        params_object(
-            {json{{"task", {{"type", "string"},
-                            {"description", "Self-contained task for icarus."}}}},
-             json{{"timeout", {{"type", "integer"},
-                               {"description", "Timeout seconds (default 600)."}}}}},
-            {"task"}));
-}
-
-json RunIcarusTool::execute(const json& args, daedalus::HostToolContext&) {
-    std::string task = args.value("task", "");
-    if (task.empty()) return error("need 'task'");
-    int timeout = args.value("timeout", 600);
-    if (timeout <= 0 || timeout > 3600) timeout = 600;
-
-    // Locate icarus: PATH first, then the usual user install location.
-    std::string bin;
-    if (std::system("command -v icarus >/dev/null 2>&1") == 0) {
-        bin = "icarus";
-    } else {
-        std::string home = std::getenv("HOME") ? std::getenv("HOME") : ".";
-        std::string local = home + "/.local/bin/icarus";
-        if (std::filesystem::exists(local)) bin = local;
-    }
-    if (bin.empty())
-        return error("icarus is not installed on this machine "
-                     "(gitlab.com/leestripp/icarus)");
-
-    // Run icarus non-interactively in the agent's working directory.
-    // CLI: icarus --help shows flags; we use the common prompt-arg form.
-    auto quote = [](const std::string& s) {
-        std::string out = "'";
-        for (char ch : s) out += (ch == '\'') ? "'\\''" : std::string(1, ch);
-        return out + "'";
-    };
-    std::string cmd = "cd " + quote(workdir_) + " && timeout " +
-                      std::to_string(timeout) + " " + bin + " " + quote(task) +
-                      " 2>&1";
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return error("failed to spawn icarus");
-    std::string output;
-    char buf[4096];
-    while (std::fgets(buf, sizeof(buf), pipe)) {
-        output += buf;
-        if (output.size() > 1 << 20) { output += "\n[output truncated]"; break; }
-    }
-    int rc = pclose(pipe);
-    int code = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
-    return ok({{"exit_code", code},
-               {"timed_out", code == 124},
-               {"output", output}});
 }

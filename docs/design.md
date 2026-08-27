@@ -43,8 +43,9 @@ gitlab.com/leestripp, consumed as-is — **never patched**):
 - **OmniNet** — the HTTP/WebSocket server.
 
 A third project, **icarus**, is our own CLI agent built on daedalus; it is
-the reference implementation for how a daedalus host should be wired, and
-can be spawned per-role via the `run_icarus` tool.
+the reference implementation for how a daedalus host should be wired.
+(The old `run_icarus` delegation tool was removed 2026-08-27 — icarus was
+never installed on hosts or baked into container images.)
 
 **Platform:** Linux only (Ubuntu 26.04 LTS target). No Windows/macOS.
 
@@ -174,17 +175,17 @@ Every roster agent gets these host-registered tools:
 | Tool | Purpose |
 |---|---|
 | `list_agents` | Roster discovery (id, name, role) |
-| `message_agent` | Send a task/question to a teammate; runs their turn inline and returns the reply |
+| `message_agent` | Send a task/question to a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
 | `create_agent` | Spin up a new teammate |
-| `run_icarus` | Delegate a self-contained task to an icarus subprocess |
 | `container_exec` | (containerized agents) run commands in their sandbox |
 
-`message_agent` is **synchronous but nested**: the target's turn runs inside
-the caller's tool call on the same thread. Two guards make this safe:
-
-- `agent_exec_mutex` is a `std::recursive_mutex` (same-thread nesting OK,
-  cross-thread still serialized — daedalus 0.9.6 shares global state).
-- A thread-local depth counter caps delegation chains at 4.
+`message_agent` is **async** (rewritten 2026-08-25, commit 5ac1810 — the
+original synchronous nested-turn design hung on its first live test): the
+message posts to an auto-created pair thread ("A ↔ B", kind=group), the
+target is fanned in normally, and its reply fan-in wakes the asking agent
+there (generation-capped at 3). The exchange is visible in the client;
+agents do not relay answers back to the user's DM — the user watches the
+pair thread.
 
 This enables the **chief-of-staff pattern** without any special code: give
 an agent a coordinator role and it will discover, delegate, and even create

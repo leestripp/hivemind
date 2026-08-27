@@ -134,7 +134,6 @@ wait.
 | `list_routines` | List your own routines (id, schedule, enabled, next fire) |
 | `update_routine` | Rename / reschedule / change prompt / pause+resume your own routines |
 | `delete_routine` | Delete one of your own routines |
-| `run_icarus` | Hand a self-contained task to an icarus subprocess — **only registered when the icarus binary exists on the host** (2026-08-27: not yet baked into container images) |
 | daedalus built-ins | memory tools, skills, MCP servers, etc. (host shell `execute_bash` is disabled for containerized agents) |
 
 ## Chief-of-staff pattern
