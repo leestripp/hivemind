@@ -294,12 +294,13 @@ void AgentHost::ensure_agent() {
             "captcha, tell the user and PAUSE — they can take over the same "
             "browser session, log in, and hand control back (the profile "
             "persists). Never say you lack browsing tools: you have them.";
-        if (!container_err.empty())
-            prompt_addendum +=
-                "\n\nWARNING: the container runtime is currently unavailable ("
-                + container_err +
-                "). container_exec will return errors until it is fixed — "
-                "tell the user if you need to run commands.";
+        // NOTE: deliberately no container_err warning here — the system
+        // prompt must stay byte-static per agent so provider-side prompt
+        // caching hits. A flapping runtime would change the prompt between
+        // host reconstructions and bust the cache. The agent still learns
+        // about outages dynamically: container_exec/browser_* return the
+        // runtime error as their tool result at call time.
+        (void)container_err;
     }
 
     if (!info_.role.empty()) {
