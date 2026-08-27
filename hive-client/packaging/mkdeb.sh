@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BUILD="$ROOT/build"
+BUILD="$ROOT/build-deb"   # own dir — never clobber the main build config
 PKG="hivemind-client"
 
 # 0.5.0-8-g2388fba → 0.5.0-8  (strip git hash; deb revision allows one dash)

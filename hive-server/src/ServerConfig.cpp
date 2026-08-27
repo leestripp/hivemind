@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
@@ -71,7 +72,42 @@ std::string ServerConfig::workspace_root() {
                        : expand_home(workspace_root_);
     std::error_code ec;
     fs::create_directories(root, ec);
+    seed_workspace(fs::path{root});
     return root;
+}
+
+// First-run seeding of the shared company drive from the in-repo
+// skeleton (hive-server/data/workspace/): index.md is the map every
+// containerized agent is told to read before file work (AgentHost
+// system prompt). Never overwrites — only runs when index.md is
+// missing, so user content and custom layouts are safe.
+void ServerConfig::seed_workspace(const fs::path& root) {
+    std::error_code ec;
+    if (fs::exists(root / "index.md", ec)) return;
+
+    // The skeleton ships in the repo. Find it relative to the CWD
+    // (the systemd unit runs from the checkout) or the executable.
+    fs::path skel;
+    for (const fs::path& cand : {fs::path{"hive-server/data/workspace"},
+                                 fs::path{"/proc/self/exe"}.parent_path()
+                                         .parent_path().parent_path()
+                                 / "hive-server" / "data" / "workspace"}) {
+        if (fs::exists(cand / "index.md", ec)) { skel = cand; break; }
+    }
+    if (skel.empty()) {
+        std::cerr << "[config] workspace skeleton not found "
+                     "(hive-server/data/workspace) — starting empty\n";
+        return;
+    }
+    fs::copy(skel, root,
+             fs::copy_options::recursive | fs::copy_options::skip_existing,
+             ec);
+    // Empty skeleton dirs that git can't track:
+    for (const char* d : {"projects", "inbox", "attachments",
+                          "scratch", "archive"})
+        fs::create_directories(root / d, ec);
+    std::cerr << "[config] seeded company workspace " << root
+              << " from " << skel << "\n";
 }
 
 void ServerConfig::set_workspace_root(const std::string& path) {

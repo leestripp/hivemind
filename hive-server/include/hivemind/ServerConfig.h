@@ -56,6 +56,7 @@ public:
 
     /// Default root when nothing is configured.
     static std::string default_workspace_root();
+    static void seed_workspace(const std::filesystem::path& root);
 
 private:
     void load();

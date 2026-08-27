@@ -118,6 +118,11 @@ int main(int argc, char* argv[]) {
     // ─── Application state ──────────────────────────────────────────
 
     // HiveMind 2.0 — roster / chat state (Plan.md Phase 1)
+    // Resolve (and first-run seed) the shared company workspace now,
+    // not lazily at first container create — /workspace/index.md must
+    // exist before any agent container mounts it.
+    ServerConfig::instance().workspace_root();
+
     AgentStore agent_store;
     ThreadStore thread_store;
     ApprovalStore approval_store;
