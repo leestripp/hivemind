@@ -69,23 +69,83 @@ journalctl -u hivemind -f
 Rootless podman note: the service user needs `loginctl enable-linger ubuntu`
 so user-scope podman survives logout, and containers run as that user.
 
-## 4. Caddy (TLS + reverse proxy)
+## 4. nginx + Let's Encrypt (TLS + reverse proxy)
 
-`/etc/caddy/Caddyfile`:
+Two TLS endpoints: the **web UI / API** and the **worker channel**
+(WebSocket, what hive-worker dials). Use a subdomain for the channel so
+paths stay simple.
 
-```
-hive.example.com {
-    reverse_proxy 127.0.0.1:8421
+`/etc/nginx/sites-available/hivemind`:
+
+```nginx
+# Web UI + REST API + agent screen WebSockets
+server {
+    server_name hive.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8421;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket (screen share /screen/:id/ws). Harmless for plain HTTP.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;   # screen sessions are long-lived
+    }
+}
+
+# Worker channel — hive-worker dials wss://workers.example.com/api/workers/channel
+server {
+    server_name workers.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8423;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 86400s;  # the channel is persistent (15s heartbeats)
+        proxy_send_timeout 86400s;
+    }
 }
 ```
 
-```bash
-sudo systemctl reload caddy
+The `Connection $connection_upgrade` map goes in `http {}` — on Ubuntu
+add `/etc/nginx/conf.d/websocket-upgrade.conf`:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 ```
 
-Caddy obtains/renews the certificate automatically (ports 80+443 must be
-open in the firewall/DO cloud firewall). WebSocket routes (`/ws/*`) work
-through `reverse_proxy` with no extra config.
+Then certificates + enable:
+
+```bash
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo ln -s /etc/nginx/sites-available/hivemind /etc/nginx/sites-enabled/
+sudo certbot --nginx -d hive.example.com -d workers.example.com
+sudo systemctl reload nginx
+```
+
+Certbot rewrites the blocks for TLS and auto-renews (ports 80+443 open
+in the DO cloud firewall). Point BOTH DNS A records at the droplet first.
+
+With nginx in front, bind hive-server to localhost so the raw ports are
+unreachable from the internet:
+
+```bash
+# ~/.local/share/hivemind/server.json:
+#   "worker_ws_bind": "127.0.0.1"
+# and start the server with --bind 127.0.0.1
+```
+
+Workers then connect with `hive-worker --server wss://workers.example.com
+--key hmwk_… --name <name>` — OmniNet's TLS client verifies the Let's
+Encrypt cert against the system CA bundle (no pinning needed for public
+certs; `SSL_CERT_FILE=/path/to/ca.pem` overrides for self-signed testing).
 
 ## 5. Lock down
 

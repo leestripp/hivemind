@@ -126,7 +126,8 @@ int main(int argc, char* argv[]) {
     AuthStore auth_store;
     WorkerStore worker_store;
     WorkerChannel worker_channel{worker_store,
-                                 ServerConfig::instance().worker_ws_port()};
+                                 ServerConfig::instance().worker_ws_port(),
+                                 ServerConfig::instance().worker_ws_bind()};
     WorkerRouter::install(&agent_store, &worker_channel);   // Phase 30.3
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;

@@ -15,10 +15,12 @@
 using json = nlohmann::json;
 using OmniNet::WebSocket::Connection;
 
-WorkerChannel::WorkerChannel(WorkerStore& store, int port)
+WorkerChannel::WorkerChannel(WorkerStore& store, int port, std::string bind)
     : store_(store), port_(port) {
     OmniNet::HTTP::Server::Config cfg;
-    cfg.address = "0.0.0.0";   // workers dial in from other machines
+    // Workers dial in from other machines. Behind nginx (30.5) set
+    // worker_ws_bind=127.0.0.1 in server.json — only nginx reaches it.
+    cfg.address = std::move(bind);
     cfg.port = static_cast<uint16_t>(port_);
     cfg.logRequests = false;
     // CRITICAL: OmniNet applies keepAliveTimeout (default 5s) as

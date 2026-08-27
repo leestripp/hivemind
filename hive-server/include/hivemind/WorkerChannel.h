@@ -36,7 +36,7 @@ class WorkerStore;
  */
 class WorkerChannel {
 public:
-    WorkerChannel(WorkerStore& store, int port);
+    WorkerChannel(WorkerStore& store, int port, std::string bind = "0.0.0.0");
     ~WorkerChannel();
 
     void start();

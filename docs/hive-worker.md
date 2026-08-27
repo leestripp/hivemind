@@ -5,7 +5,11 @@ channel, exec dispatch, screen proxy all shipped and user-validated
 end-to-end (GTK client → server → worker on dev-rig → container reply +
 live screen share). Only **30.5 TLS** remains — it gates REAL remote
 workers (secrets cross the wire per-exec); localhost/LAN workers are
-fine on plain ws:// until then.
+fine on plain ws:// until then. DONE 2026-08-27: `wss://` works with no
+code changes (OmniNet TLS client: system CA + verify-peer + SNI; override
+with SSL_CERT_FILE for self-signed). Production topology: nginx terminates
+TLS on the droplet (workers.<domain> → 127.0.0.1:8423), server binds
+localhost via worker_ws_bind in server.json.
 
 ## Goal
 

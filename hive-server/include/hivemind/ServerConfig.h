@@ -43,6 +43,7 @@ public:
     // (OmniNet's WebSocket::Server wraps its own HTTP server, so it
     // cannot share the main API port).
     int worker_ws_port() const { return worker_ws_port_; }
+    const std::string& worker_ws_bind() const { return worker_ws_bind_; }
     void set_screen_resolution(const std::string& res);   // validates WxH
 
     /// Phase 28: pre-start every agent's container at boot so the first
@@ -66,4 +67,5 @@ private:
     bool warm_containers_ = true;
     std::string screen_resolution_ = "1280x800";
     int worker_ws_port_ = 8423;
+    std::string worker_ws_bind_ = "0.0.0.0";   // "127.0.0.1" behind nginx
 };
