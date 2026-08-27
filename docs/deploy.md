@@ -71,42 +71,36 @@ so user-scope podman survives logout, and containers run as that user.
 
 ## 4. nginx + Let's Encrypt (TLS + reverse proxy)
 
-Two TLS endpoints: the **web UI / API** and the **worker channel**
-(WebSocket, what hive-worker dials). Use a subdomain for the channel so
-paths stay simple.
+Two TLS endpoints behind ONE hostname (path-split — the worker channel
+path is unique, no subdomain/extra DNS needed). Verified live 2026-08-27
+on a DO droplet (hub.example.com).
 
 `/etc/nginx/sites-available/hivemind`:
 
 ```nginx
-# Web UI + REST API + agent screen WebSockets
+# Worker channel — persistent WebSocket, hive-worker dials here
 server {
     server_name hive.example.com;
 
-    location / {
-        proxy_pass http://127.0.0.1:8421;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # WebSocket (screen share /screen/:id/ws). Harmless for plain HTTP.
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 3600s;   # screen sessions are long-lived
-    }
-}
-
-# Worker channel — hive-worker dials wss://workers.example.com/api/workers/channel
-server {
-    server_name workers.example.com;
-
-    location / {
+    location = /api/workers/channel {
         proxy_pass http://127.0.0.1:8423;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_read_timeout 86400s;  # the channel is persistent (15s heartbeats)
         proxy_send_timeout 86400s;
+    }
+
+    # Web UI + REST API + agent screen WebSockets
+    location / {
+        proxy_pass http://127.0.0.1:8421;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;   # screen sessions are long-lived
     }
 }
 ```
@@ -126,12 +120,12 @@ Then certificates + enable:
 ```bash
 sudo apt install -y nginx certbot python3-certbot-nginx
 sudo ln -s /etc/nginx/sites-available/hivemind /etc/nginx/sites-enabled/
-sudo certbot --nginx -d hive.example.com -d workers.example.com
+sudo certbot --nginx -d hive.example.com
 sudo systemctl reload nginx
 ```
 
 Certbot rewrites the blocks for TLS and auto-renews (ports 80+443 open
-in the DO cloud firewall). Point BOTH DNS A records at the droplet first.
+in the DO cloud firewall). Point the DNS A record at the droplet first.
 
 With nginx in front, bind hive-server to localhost so the raw ports are
 unreachable from the internet:
