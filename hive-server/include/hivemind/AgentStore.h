@@ -37,12 +37,15 @@ public:
     ~AgentStore();
 
     /// Create an agent. Throws std::invalid_argument on empty/duplicate name.
+    /// worker: "local" (default) = the server's own podman, or an enrolled
+    /// hive-worker name (Phase 30). Empty string is stored as "local".
     RosterAgent create_agent(const std::string& name,
                              const std::string& role = "",
                              const std::string& model = "",
                              const std::string& workspace_mode = "shared",
                              bool require_approval = false,
-                             const std::string& avatar = "");
+                             const std::string& avatar = "",
+                             const std::string& worker = "");
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);

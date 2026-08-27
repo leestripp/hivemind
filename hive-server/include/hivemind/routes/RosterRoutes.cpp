@@ -174,9 +174,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string ws = body.value("workspace_mode", "shared");
             if (ws == "host") ws = "shared";   // host mode removed (2026-08-25)
             bool req_appr = body.value("require_approval", false);
+            // Phase 30: "worker" = "local" (default) or an enrolled hive-worker
+            // name. Placement errors surface at exec time (worker offline), so
+            // an unknown name is accepted here — same contract as the PATCH.
+            const std::string worker = body.value("worker", "local");
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
-                                             body.value("avatar", ""));
+                                             body.value("avatar", ""), worker);
                 send_json(resp, agent_json(a), 201);
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());

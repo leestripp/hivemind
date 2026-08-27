@@ -25,7 +25,7 @@ The **master key** is printed once at first server start (also in
   worker drops and cannot reconnect)
 - Enrollment is CLI-only on the server: `hive-server enroll-worker <name>`
   prints the raw `hmwk_…` key once (hash stored); `revoke-worker <name>`
-  removes it. Agents gain `worker` (default `"local"`) via roster PATCH.
+  removes it. Agents gain `worker` (default `"local"`) via roster POST/PATCH.
 - Agents whose `worker` names an enrolled worker execute **there**:
   container exec (30.3) and screen sessions (30.4) are routed over the
   channel transparently — the container/screen endpoints below are

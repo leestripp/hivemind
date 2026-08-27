@@ -37,9 +37,16 @@ int main() {
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 
+    // ── worker placement (Phase 30) ───────────────────────────────────────
+    assert(a.worker == "local");   // default when not specified
+    auto w = store.create_agent("Rigger", "gpu jobs", "", "shared", false, "",
+                                "rig-gpu");
+    assert(w.worker == "rig-gpu");
+    assert(store.get_agent(w.id)->worker == "rig-gpu");   // persisted
+
     // ── get / list ────────────────────────────────────────────────────────
     auto b = store.create_agent("Pixel", "coder");
-    assert(store.list_agents().size() == 2);
+    assert(store.list_agents().size() == 3);
     auto got = store.get_agent(a.id);
     assert(got && got->name == "Nova");
     auto by_name = store.get_agent_by_name("Pixel");
@@ -52,6 +59,14 @@ int main() {
     assert(updated.model.empty());
     assert(updated.updated_at >= a.created_at);
     assert(updated.require_approval == true);
+
+    // update_agent worker: "" keeps current, explicit value replaces
+    auto moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared",
+                                    false, "", "" /*keep*/);
+    assert(moved.worker == "rig-gpu");
+    moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared",
+                               false, "", "local");
+    assert(moved.worker == "local");
 
     // name clash on update rejected
     threw = false;
@@ -68,7 +83,7 @@ int main() {
     // ── persistence across instances (same db path) ───────────────────────
     {
         AgentStore store2{tmp / "agents.db"};
-        assert(store2.list_agents().size() == 2);
+        assert(store2.list_agents().size() == 3);
         auto again = store2.get_agent(a.id);
         assert(again && again->role == "ops lead");
     }
@@ -76,7 +91,7 @@ int main() {
     // ── delete ────────────────────────────────────────────────────────────
     assert(store.delete_agent(b.id));
     assert(!store.delete_agent(b.id));  // already gone
-    assert(store.list_agents().size() == 1);
+    assert(store.list_agents().size() == 2);
 
     fs::remove_all(tmp);
     std::cout << "test_agent_store: OK\n";

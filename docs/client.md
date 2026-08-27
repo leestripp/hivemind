@@ -91,10 +91,16 @@ status with Start/Stop) · Edit Agent · Delete Agent.
 
 Agents assigned to a remote worker run their containers/screen there, but
 the client experience is unchanged — chat, approvals, Computer, exec log
-all work through the server regardless. Worker *assignment* is done via
-the web roster card / API (`worker` field) and worker status lives on the
-web **Workers** page; a client-side worker dropdown is a candidate
-follow-up.
+all work through the server regardless.
+
+**Placement:** the New/Edit Agent dialog shows a **Worker** row whenever
+at least one enrolled hive-worker is *online* (per `GET /api/workers`).
+Options are "This server (local)" plus each online rig; offline rigs are
+not offered (they can't start a container), and with none online the row
+is hidden entirely. Editing an agent whose worker has since gone offline
+still shows that rig flagged "(offline)" so the agent can be moved back
+to the server. Worker status/enrolment lives on the web **Workers** page
+and `hive-server enroll-worker <name>`.
 
 ## Attention indicators (Phase 14.1)
 

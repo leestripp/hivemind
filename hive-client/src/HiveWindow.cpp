@@ -2605,6 +2605,40 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 break;
             }
     }
+    // Phase 30: worker placement. Query the enrolled hive-workers and offer
+    // the ONLINE ones as execution targets. An offline rig can't start a
+    // container, so it is hidden from the list — and when no worker is
+    // online at all, the row is omitted entirely (creation stays local).
+    // Exception: when editing an agent that already lives on a worker that
+    // has since gone offline, that worker is shown flagged "(offline)" so
+    // the agent can be moved back to the server.
+    struct WorkerEntry { std::string name; bool online; };
+    std::vector<WorkerEntry> all_workers;
+    try {
+        for (auto& w : api_.list_workers().value("workers", nlohmann::json::array()))
+            all_workers.push_back({w.value("name", ""), w.value("online", false)});
+    } catch (...) { /* server unreachable — worker row stays hidden */ }
+    const std::string cur_worker =
+        existing ? existing->value("worker", "local") : "local";
+    auto* worker_names = new std::vector<std::string>();  // dialog lifetime
+    auto* worker = Gtk::make_managed<Gtk::DropDown>();
+    {
+        std::vector<Glib::ustring> items;
+        worker_names->push_back("local");
+        items.push_back("This server (local)");
+        for (auto& w : all_workers) {
+            if (!w.online && w.name != cur_worker) continue;
+            worker_names->push_back(w.name);
+            items.push_back(w.online ? w.name : w.name + "  (offline)");
+        }
+        worker->set_model(Gtk::StringList::create(items));
+        guint sel = 0;
+        for (size_t i = 0; i < worker_names->size(); ++i)
+            if ((*worker_names)[i] == cur_worker) { sel = (guint)i; break; }
+        worker->set_selected(sel);
+    }
+    const bool show_worker_row = worker_names->size() > 1;
+
     // Host mode removed (2026-08-25): agents always run containerized.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
     if (existing) {
@@ -2705,31 +2739,35 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
+    if (show_worker_row) add_row("Worker", worker, row_i++);
     // (no Workspace row — always containerized)
     add_row("Avatar", avatar_grid, row_i++);
     grid->attach(*appr, 1, row_i);
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
                 std::string ws = "shared";
                 const auto msel = model->get_selected();
                 std::string m = msel < model_names->size() ? (*model_names)[msel] : "";
+                const auto wsel = worker->get_selected();
+                const std::string wk = wsel < worker_names->size() ? (*worker_names)[wsel] : "local";
                 const std::string av = *chosen_avatar;
                 delete chosen_avatar;
                 delete model_names;
+                delete worker_names;
                 delete templates_json;
                 delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
-                           m, ws, av, edit_id,
+                           m, ws, av, wk, edit_id,
                            ap = appr->get_active()] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av);
+                        api_.create_agent(n, r2, m, ws, ap, av, wk);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av);
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });
@@ -2740,6 +2778,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         }
         if (r != (int)Gtk::ResponseType::OK) {
             delete chosen_avatar;
+            delete worker_names;
             delete templates_json;
             delete avatar_tiles;
         }

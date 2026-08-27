@@ -73,11 +73,13 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& model,
                                        const std::string& workspace_mode,
                                        bool require_approval,
-                                       const std::string& avatar) {
+                                       const std::string& avatar,
+                                       const std::string& worker) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar}};
+    if (!worker.empty()) body["worker"] = worker;   // Phase 30: "" = server default ("local")
     return request("POST", "/api/agents", &body);
 }
 
@@ -87,13 +89,17 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& model,
                                        const std::string& workspace_mode,
                                        bool require_approval,
-                                       const std::string& avatar) {
+                                       const std::string& avatar,
+                                       const std::string& worker) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
-                        {"avatar", avatar}};
+                        {"avatar", avatar},
+                        {"worker", worker}};   // server: "" = keep current
     return request("PATCH", "/api/agents/" + id, &body);
 }
+
+nlohmann::json ApiClient::list_workers() { return request("GET", "/api/workers"); }
 
 nlohmann::json ApiClient::delete_agent(const std::string& id,
                                        const std::string& reassign_to) {

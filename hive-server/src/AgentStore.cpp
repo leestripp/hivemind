@@ -121,7 +121,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& model,
                                      const std::string& workspace_mode,
                                      bool require_approval,
-                                     const std::string& avatar) {
+                                     const std::string& avatar,
+                                     const std::string& worker) {
     if (name.empty())
         throw std::invalid_argument("agent name must not be empty");
     if (get_agent_by_name(name))
@@ -136,6 +137,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                            ? "shared" : workspace_mode;
     a.require_approval = require_approval;
     a.avatar         = avatar;
+    a.worker         = worker.empty() ? "local" : worker;   // Phase 30
     a.created_at     = iso_now();
     a.updated_at     = a.created_at;
 
@@ -145,7 +147,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
         "                   container_id, created_at, updated_at, require_approval,"
         "                   avatar, worker)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?,'local')";
+        " VALUES (?,?,?,?,?,'',?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -160,6 +162,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     bind_text(st, 7, a.updated_at);
     sqlite3_bind_int(st, 8, a.require_approval ? 1 : 0);
     bind_text(st, 9, a.avatar);
+    bind_text(st, 10, a.worker);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
