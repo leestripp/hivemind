@@ -141,6 +141,57 @@ Workers then connect with `hive-worker --server wss://workers.example.com
 Encrypt cert against the system CA bundle (no pinning needed for public
 certs; `SSL_CERT_FILE=/path/to/ca.pem` overrides for self-signed testing).
 
+## 4b. Brute-force protection (verified live 2026-08-27)
+
+hive-server itself has NO login throttling — a wrong key just gets 401,
+unlimited attempts. Two layers fix this at the nginx edge:
+
+**nginx rate limit** — `/etc/nginx/conf.d/rate-limit.conf`:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=hivemind_api:10m rate=10r/s;
+```
+
+and inside the `location /` block:
+
+```nginx
+limit_req zone=hivemind_api burst=20 nodelay;
+limit_req_status 429;
+```
+
+**fail2ban** — bans IPs with repeated 401s. Filter
+`/etc/fail2ban/filter.d/hivemind-auth.conf`:
+
+```ini
+[Definition]
+failregex = ^<HOST> - - \[[^\]]*\] "[A-Z]+ [^"]*" 401 .*$
+ignoreregex =
+```
+
+Jail `/etc/fail2ban/jail.d/hivemind.conf`:
+
+```ini
+[hivemind-auth]
+enabled  = true
+port     = http,https        # web ports ONLY — SSH stays reachable
+filter   = hivemind-auth
+logpath  = /var/log/nginx/access.log
+maxretry = 5
+findtime = 600
+bantime  = 3600
+```
+
+```bash
+sudo apt install -y fail2ban
+sudo systemctl restart fail2ban
+fail2ban-client status hivemind-auth
+```
+
+Verified behavior: attempts 1–5 → 401, attempt 6 → connection dropped
+(banned 1h). Parallel flood → 429 after burst=20. Unban with
+`fail2ban-client unban <ip>` (or --all). Note: `/api/health` is public
+so false positives are impossible — only protected routes return 401.
+
 ## 5. Lock down
 
 ```bash
