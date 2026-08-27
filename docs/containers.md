@@ -32,8 +32,9 @@ podman build -t localhost/hive-agent:latest \
 
 ### Workspace layout (2026-08-25)
 
-The company drive follows a fixed skeleton (seeded on install; canonical
-copy in `hive-server/data/workspace/`). `index.md` at the root is the map —
+The company drive follows a fixed skeleton — **seeded on first server
+start** from the canonical copy in `hive-server/data/workspace/` (only
+when `index.md` is missing; never overwrites your content). `index.md` at the root is the map —
 the agent system prompt tells every containerized agent to read it before
 doing file work, so conventions live in ONE file instead of per-agent
 config:
@@ -57,6 +58,17 @@ Agents work in their department folder (or a project folder for cross-dept
 work) and keep README.md files current so any agent or human can pick work
 up cold. Add a department by creating `departments/<name>/` + README.md and
 adding one line to `index.md` — no agent/template changes needed.
+
+### Permissions model (2026-08-27)
+
+The image creates user `hive` with uid = the host server/worker user's
+uid (`--build-arg HIVE_UID=$(id -u)`, baked per machine at first image
+build) and containers run with `--userns=keep-id` — the uid maps 1:1, so
+`/workspace` is writable from BOTH the container AND the host (drop files
+in `inbox/` as the host user; agents read them inside). Without keep-id
+the container user maps to a host subuid and writes fail with EACCES.
+Worker agents (remote machines) still get per-agent workspaces on the
+worker — a shared folder can't cross machines.
 | `/home/hive` | **Private** per-agent bind mount from `~/.local/share/hivemind/agents/<id>/home` |
 | user `hive` + `sudo` (no password) | base image |
 | git, curl, python3+pip, build-essential, jq, … | base image |
