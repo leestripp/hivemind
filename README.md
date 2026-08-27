@@ -92,6 +92,16 @@ tests/         ctest suite
 hivemindctl    build/start/stop/status/logs/client/test
 ```
 
+## Security
+
+- Bearer API keys (SHA-256 hashed at rest; master key shown once at first run)
+- TLS via nginx + Let's Encrypt in front; server binds localhost-only
+- Brute-force: fail2ban bans after 5 failed keys + nginx rate limiting
+  (verified live — see docs/deploy.md §4b)
+- Workers authenticate over `wss://` with per-worker keys; TLS verified
+  (OmniNet client enforces cert verification against the system CA)
+- Agent sandboxes: rootless podman containers, per-agent workspaces
+
 ## API sketch
 
 ```

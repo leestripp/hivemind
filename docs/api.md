@@ -33,6 +33,11 @@ The **master key** is printed once at first server start (also in
 Scopes: `admin` (everything), `agent` (default), `read` (GET only).
 Responses: `401` missing/invalid/revoked key, `403` insufficient scope.
 
+The server itself does NOT throttle failed auth — unlimited attempts get
+401. On internet-facing installs, brute-force protection lives at the
+nginx edge (fail2ban bans after 5×401, plus a 10 req/s rate limit) —
+see docs/deploy.md §4b. A wrong key is never logged with its value.
+
 **CORS** (Phase 9): default is no CORS headers — the web UI is same-origin.
 For cross-origin browser clients, add exact origins (or `"*"`) to
 `~/.local/share/hivemind/server.json` `"cors_origins"` and restart;
