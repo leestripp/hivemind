@@ -100,7 +100,11 @@ void ContainerManager::ensure_image() {
             std::string{"Containerfile not found at "} + containerfile +
             " (run hive-server from the repository root)");
 
+    // HIVE_UID = the uid this server process runs as — keep-id (see
+    // ensure_running) maps it 1:1, making the shared /workspace
+    // writable from both sides of the mount.
     auto build = run(std::string{"podman build -t "} + kImage +
+                         " --build-arg HIVE_UID=" + std::to_string(geteuid()) +
                          " -f hive-server/data/Containerfile.hive-agent"
                          " hive-server/data",
                      /*timeout_s=*/1800);
@@ -143,7 +147,7 @@ std::string ContainerManager::ensure_running(const std::string& agent_id) {
 
         std::string cmd =
             std::string{"podman create --name "} + shell_quote(cname) +
-            " --memory 4g --cpus 2"
+            " --memory 4g --cpus 2 --userns=keep-id"
             " -v " + shell_quote(ws) + ":/workspace"
             " -v " + shell_quote(home.string()) + ":/home/hive:U"
             " -w /workspace " + kImage;
@@ -304,7 +308,7 @@ uint16_t ContainerManager::ensure_screen(const std::string& agent_id) {
         const std::string ws = ServerConfig::instance().workspace_root();
         std::string cmd =
             std::string{"podman create --name "} + shell_quote(cname) +
-            " --memory 4g --cpus 2"
+            " --memory 4g --cpus 2 --userns=keep-id"
             " --shm-size 1g"   // Chrome hangs ("Page Unresponsive") on the 64MB default
             " -p 127.0.0.1::6080"
             " -v " + shell_quote(ws) + ":/workspace"

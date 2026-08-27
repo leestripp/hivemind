@@ -71,6 +71,7 @@ void ensure_container(const std::string& agent) {
                 "image missing and Containerfile not found "
                 "(run hive-worker from the repository root)");
         if (podman_simple({"build", "-t", kImage, "-f",
+                           "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
                            "hive-server/data/Containerfile.hive-agent",
                            "hive-server/data"}, &img) != 0)
             throw std::runtime_error("podman build failed: " + img);
@@ -95,7 +96,7 @@ void ensure_container(const std::string& agent) {
 
     std::string out;
     if (podman_simple({"create", "--name", cname, "--memory", "4g",
-                       "--cpus", "2",
+                       "--cpus", "2", "--userns=keep-id",
                        "-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
                        "-w", "/workspace", kImage}, &out) != 0)
@@ -261,6 +262,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
             return r;
         }
         if (podman_simple({"build", "-t", image, "-f",
+                           "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
                            "hive-server/data/Containerfile.hive-agent-browser",
                            "hive-server/data"}, &out) != 0) {
             r.error = "podman build (browser) failed: " + out;

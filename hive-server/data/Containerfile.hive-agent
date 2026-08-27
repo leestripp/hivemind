@@ -28,8 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         vim-tiny \
     && rm -rf /var/lib/apt/lists/*
 
-# Named agent user with passwordless sudo.
-RUN useradd -m -s /bin/bash hive \
+# Named agent user with passwordless sudo. HIVE_UID MUST equal the host
+# user's uid: containers run with --userns=keep-id so the bind-mounted
+# /workspace stays owned by (and writable by) BOTH the host user and the
+# container's hive user. The base image's stock `ubuntu` user sits on
+# uid 1000 — remove it so hive can take whatever uid the host needs.
+ARG HIVE_UID=1000
+RUN userdel -r ubuntu 2>/dev/null || true; \
+    useradd -m -u ${HIVE_UID} -s /bin/bash hive \
     && echo "hive ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/hive \
     && chmod 0440 /etc/sudoers.d/hive
 
