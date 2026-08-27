@@ -6,24 +6,25 @@
 #include <string_view>
 
 /**
- * Scheduled-trigger time computation (server-local time).
+ * Scheduled-trigger time computation — UTC everywhere (2026-08-27).
  *
  * Schedule specs (stored in triggers.config_json under "schedule"):
- *   {"type":"once",     "at":"2026-08-09T14:30"}       — fire once at a local datetime
+ *   {"type":"once",     "at":"2026-08-09T14:30"}       — fire once at a UTC datetime
  *   {"type":"interval", "every_minutes":30}            — fire every N minutes
- *   {"type":"daily",    "time":"09:00"}                — fire every day at HH:MM
- *   {"type":"weekly",   "days":[1,3,5], "time":"09:00"} — weekdays (0=Sun) at HH:MM
+ *   {"type":"daily",    "time":"09:00"}                — fire every day at HH:MM UTC
+ *   {"type":"weekly",   "days":[1,3,5], "time":"09:00"} — weekdays (0=Sun) at HH:MM UTC
  *
- * All timestamps are ISO local "YYYY-MM-DDTHH:MM:SS" (lexicographically
- * comparable). The scheduler fires triggers whose next_fire_at <= now.
+ * All timestamps are ISO UTC "YYYY-MM-DDTHH:MM:SS" (lexicographically
+ * comparable), computed with gmtime_r/timegm — never the host's local TZ.
+ * The scheduler fires triggers whose next_fire_at <= now.
  */
 
 using json = nlohmann::json;
 
 namespace hm {
 
-/// Current local time as ISO "YYYY-MM-DDTHH:MM:SS".
-std::string now_iso_local();
+/// Current UTC time as ISO "YYYY-MM-DDTHH:MM:SS".
+std::string now_iso_local();   // name kept for API stability; returns UTC
 
 /// Next fire time strictly after `reference` (usually max(now, last_fired)),
 /// or nullopt if the schedule never fires again (e.g. "once" already fired).

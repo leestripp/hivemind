@@ -1,4 +1,6 @@
-// src/Schedule.cpp — scheduled-trigger time computation (server-local time).
+// src/Schedule.cpp — scheduled-trigger time computation.
+// UTC everywhere (2026-08-27): schedules are entered and fired in UTC
+// regardless of the host's TZ (gmtime_r/timegm, never localtime/mktime).
 #include "hivemind/Schedule.h"
 
 #include <cstdio>
@@ -19,11 +21,11 @@ std::string tm_to_iso(const std::tm& t) {
 
 std::string time_t_to_iso(std::time_t tt) {
     std::tm t{};
-    localtime_r(&tt, &t);
+    gmtime_r(&tt, &t);
     return tm_to_iso(t);
 }
 
-// Parse "YYYY-MM-DDTHH:MM[:SS]" (local). Returns time_t or -1.
+// Parse "YYYY-MM-DDTHH:MM[:SS]" as UTC. Returns time_t or -1.
 std::time_t iso_to_time_t(std::string_view iso) {
     if (iso.size() < 16) return -1;
     std::tm t{};
@@ -34,7 +36,7 @@ std::time_t iso_to_time_t(std::string_view iso) {
     t.tm_min  = std::stoi(std::string(iso.substr(14, 2)));
     t.tm_sec  = iso.size() >= 19 ? std::stoi(std::string(iso.substr(17, 2))) : 0;
     t.tm_isdst = -1;
-    return std::mktime(&t);
+    return ::timegm(&t);
 }
 
 bool valid_hhmm(std::string_view s) {
@@ -51,17 +53,17 @@ std::time_t next_daily(std::time_t ref, std::string_view hhmm,
                        const std::vector<int>& days) {
     int hh = std::stoi(std::string(hhmm.substr(0, 2)));
     int mm = std::stoi(std::string(hhmm.substr(3, 2)));
-    // Scan forward up to 8 days (covers weekly sets + DST edge cases).
+    // Scan forward up to 8 days (covers weekly sets; UTC → no DST edges).
     std::tm base{};
-    localtime_r(&ref, &base);
+    gmtime_r(&ref, &base);
     base.tm_hour = hh; base.tm_min = mm; base.tm_sec = 0; base.tm_isdst = -1;
     for (int d = 0; d < 8; ++d) {
         std::tm cand = base;
         cand.tm_mday += d;
         cand.tm_isdst = -1;
-        std::time_t ct = std::mktime(&cand);
+        std::time_t ct = ::timegm(&cand);
         std::tm norm{};
-        localtime_r(&ct, &norm);
+        gmtime_r(&ct, &norm);
         if (ct <= ref) continue;
         if (days.empty()) return ct;                       // daily
         for (int want : days) if (norm.tm_wday == want) return ct;

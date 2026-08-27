@@ -2282,7 +2282,7 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
     once_date->set_placeholder_text("YYYY-MM-DD");
     once_date->set_max_width_chars(12);
     auto* once_time = Gtk::make_managed<Gtk::Entry>();
-    once_time->set_placeholder_text("HH:MM");
+    once_time->set_placeholder_text("HH:MM UTC");
     once_time->set_max_width_chars(6);
     once_box->append(*once_date);
     once_box->append(*once_time);
@@ -2295,14 +2295,14 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
 
     // daily: time entry
     auto* daily_time = Gtk::make_managed<Gtk::Entry>();
-    daily_time->set_placeholder_text("HH:MM (e.g. 09:00)");
+    daily_time->set_placeholder_text("HH:MM UTC (e.g. 09:00)");
     daily_time->set_max_width_chars(10);
     stack->add(*daily_time, "daily", "Daily");
 
     // weekly: time entry + weekday checkboxes
     auto* weekly_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
     auto* weekly_time = Gtk::make_managed<Gtk::Entry>();
-    weekly_time->set_placeholder_text("HH:MM (e.g. 09:00)");
+    weekly_time->set_placeholder_text("HH:MM UTC (e.g. 09:00)");
     weekly_time->set_max_width_chars(10);
     weekly_box->append(*weekly_time);
     auto* days_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
@@ -2373,7 +2373,14 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
     add_row("Prompt", prompt_scroll, 2);
     add_row("Schedule", type_dd, 3);
     grid->attach(*stack, 1, 4);
-    grid->attach(*err, 1, 5);
+    // UTC reminder (2026-08-27): schedules fire on the UTC clock, and the
+    // user must enter times accordingly — say so right under the fields.
+    auto* utc_note = Gtk::make_managed<Gtk::Label>("All times are UTC (server clock)");
+    utc_note->add_css_class("dim-label");
+    utc_note->add_css_class("caption");
+    utc_note->set_halign(Gtk::Align::START);
+    grid->attach(*utc_note, 1, 5);
+    grid->attach(*err, 1, 6);
     dialog->get_content_area()->append(*grid);
 
     dialog->signal_response().connect(
