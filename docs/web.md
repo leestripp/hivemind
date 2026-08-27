@@ -90,6 +90,17 @@ count, and per-row revoke. An "Enrolling a worker" card shows the exact
 CLI command — key minting stays CLI-only by design (the raw `hmwk_…` key
 is printed once on the server host).
 
+### System (`#/system`)
+
+Host health dashboard backed by the server's **SystemMonitor** — a tiny
+sampler thread (15 s interval, in-memory 24 h ring buffer, ~6 kB; no
+SQLite, nothing survives restart). Stat cards: hostname/cores/uptime,
+memory, CPU, `/` disk, hive-server RSS, running agent containers. Canvas
+line graphs for memory % and CPU % over 1 h / 6 h / 24 h. Agent usage
+table: per-agent execs, timeouts, avg exec ms, and message counts over
+the last 24 h (exec audit + thread stores). The page polls every 10 s
+**only while it is the active page** (`leaveSystem()` clears the timer).
+
 ### Files (`#/files`)
 
 Browser for the shared workspace volume (Phase ~20): navigate folders,

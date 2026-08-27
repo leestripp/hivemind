@@ -6,6 +6,7 @@
 
 set(CORE_SOURCES
     src/Schedule.cpp
+    src/SystemMonitor.cpp
     src/Files.cpp
     src/Vault.cpp
     src/ConnectorStore.cpp
@@ -34,6 +35,7 @@ set(EXECUTOR_SOURCES
 
 set(ROUTE_SOURCES
     include/hivemind/routes/StaticRoutes.cpp
+    include/hivemind/routes/SystemRoutes.cpp
     include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/AgentRoutes.cpp

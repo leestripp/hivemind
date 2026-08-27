@@ -40,6 +40,17 @@ public:
     /// Newest first. agent_id empty → all agents.
     std::vector<Entry> list(const std::string& agent_id = "", int limit = 100);
 
+    /// Per-agent rollup since an ISO-8601 UTC cutoff (System page usage
+    /// stats): exec count, timeouts, average duration, most recent ts.
+    struct AgentStats {
+        std::string agent_id;
+        int64_t count = 0;
+        int64_t timeouts = 0;
+        int64_t avg_ms = 0;
+        std::string last_ts;
+    };
+    std::vector<AgentStats> stats_since(const std::string& since_iso);
+
     static constexpr size_t kCommandLimit = 500;
 
 private:

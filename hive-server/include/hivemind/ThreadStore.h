@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <filesystem>
 #include <sqlite3.h>
@@ -77,6 +78,13 @@ public:
 
     /// Messages in chronological order. If after_id is non-empty, only
     /// messages created after that message (exclusive) are returned.
+    /// Per-sender message counts since an ISO-8601 UTC cutoff (System page
+    /// usage stats). Key: sender_id (agent id / "user"), value: {agent,user}
+    /// counts split by sender_kind.
+    struct SenderCounts { int64_t agent = 0; int64_t user = 0; };
+    std::unordered_map<std::string, SenderCounts>
+    message_counts_since(const std::string& since_iso);
+
     std::vector<ThreadMessage> list_messages(const std::string& thread_id,
                                              const std::string& after_id = "");
 

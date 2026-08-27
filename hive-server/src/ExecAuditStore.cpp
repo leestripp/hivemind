@@ -101,3 +101,29 @@ std::vector<ExecAuditStore::Entry> ExecAuditStore::list(
     sqlite3_close(db);
     return out;
 }
+
+std::vector<ExecAuditStore::AgentStats> ExecAuditStore::stats_since(
+    const std::string& since_iso) {
+    sqlite3* db = open_conn();
+    std::vector<AgentStats> out;
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT agent_id, COUNT(*), SUM(timed_out), AVG(duration_ms), MAX(ts)"
+        " FROM exec_audit WHERE ts >= ? GROUP BY agent_id"
+        " ORDER BY COUNT(*) DESC";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, since_iso);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            AgentStats a;
+            a.agent_id = col_text(st, 0);
+            a.count    = sqlite3_column_int64(st, 1);
+            a.timeouts = sqlite3_column_int64(st, 2);
+            a.avg_ms   = sqlite3_column_int64(st, 3);
+            a.last_ts  = col_text(st, 4);
+            out.push_back(std::move(a));
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}

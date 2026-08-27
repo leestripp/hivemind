@@ -428,3 +428,24 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 [data-theme="light"] *::-webkit-scrollbar-thumb { background: #b8c0cc; }
 [data-theme="light"] .error-toast { border-color: #d92d20; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
 [data-theme="light"] .icon-btn:hover { background: #e2e6ec; }
+
+/* ── System page ─────────────────────────────────────────────────── */
+.sys-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.sys-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 16px; min-width: 160px; flex: 1 1 160px;
+}
+.sys-label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.sys-value { font-size: 1.5rem; font-weight: 600; margin: 2px 0; }
+.sys-value.warn { color: #ebcb8b; }
+.sys-value.crit { color: #e01b24; }
+.sys-sub { color: var(--muted); font-size: 0.82rem; }
+.sys-rangebar { display: flex; gap: 6px; align-items: flex-start; }
+.sys-range.active { border-color: var(--accent); color: var(--accent); }
+.sys-graphs { display: flex; flex-wrap: wrap; gap: 12px; }
+.sys-graphbox {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; flex: 1 1 320px;
+}
+.sys-graphtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
+.sys-graph { width: 100%; height: 140px; display: block; }

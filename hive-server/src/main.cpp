@@ -23,6 +23,8 @@
 #include "hivemind/DbUtil.h"
 
 #include "hivemind/routes/StaticRoutes.h"
+#include "hivemind/routes/SystemRoutes.h"
+#include "hivemind/SystemMonitor.h"
 #include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/AgentRoutes.h"
@@ -253,6 +255,9 @@ int main(int argc, char* argv[]) {
     register_screen_routes(server, agent_store, auth_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
+    static SystemMonitor system_monitor;
+    system_monitor.start();
+    register_system_routes(server, system_monitor, agent_store, thread_store);
     register_static_routes(server);
 
     // 4. Admin endpoints (dashboard at /omninet/*).

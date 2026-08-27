@@ -412,3 +412,27 @@ std::vector<ThreadMessage> ThreadStore::list_messages(const std::string& thread_
     sqlite3_close(db);
     return out;
 }
+
+std::unordered_map<std::string, ThreadStore::SenderCounts>
+ThreadStore::message_counts_since(const std::string& since_iso) {
+    sqlite3* db = open_conn();
+    std::unordered_map<std::string, SenderCounts> out;
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT sender_id, sender_kind, COUNT(*) FROM messages"
+        " WHERE created_at >= ? AND sender_kind IN ('agent','user')"
+        " GROUP BY sender_id, sender_kind";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, since_iso.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* id   = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+            const char* kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+            auto& c = out[id ? id : ""];
+            if (kind && std::string(kind) == "agent") c.agent = sqlite3_column_int64(st, 2);
+            else                                      c.user  = sqlite3_column_int64(st, 2);
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}

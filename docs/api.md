@@ -19,6 +19,12 @@ The **master key** is printed once at first server start (also in
 
 ### Workers (Phase 30)
 
+- `GET /api/system` — host facts + current sample (hostname, cores,
+  uptime, mem/cpu/disk %, load, hive-server RSS, running containers)
+- `GET /api/system/history?minutes=N` — 15 s samples for the last N
+  minutes (max 24 h, in-memory ring buffer)
+- `GET /api/system/agents` — per-agent usage rollup, last 24 h: exec
+  count, timeouts, avg duration, last exec, messages sent
 - `GET /api/workers` — list enrolled workers (name, caps, proto,
   last_seen, created_at, **`online`** — live from the worker channel :8423)
 - `DELETE /api/workers/:name` — revoke (key dies with the row; connected
