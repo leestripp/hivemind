@@ -111,6 +111,52 @@ int main() {
     assert(once["status"] == "success");
     assert(routines.list().size() == 2);
 
+    // ── routine management tools (list / update / delete, own-only) ──
+    auto other = agents.create_agent("OtherAgent", "someone else");
+    ListRoutinesTool lrt{a.id, routines};
+    UpdateRoutineTool urt{a.id, routines};
+    DeleteRoutineTool drt{a.id, routines};
+
+    // list: sees both of Tester's routines, not other agents'
+    auto lr = lrt.execute(json::object(), ctx);
+    assert(lr["status"] == "success");
+    assert(lr["routines"].size() == 2);
+
+    // update: reschedule + rename + pause own routine
+    const std::string rid = routines.list()[0].id;
+    auto up = urt.execute(json{{"id", rid},
+                               {"name", "renamed-digest"},
+                               {"schedule", json{{"type", "interval"},
+                                                 {"every_minutes", 30}}},
+                               {"enabled", false}}, ctx);
+    assert(up["status"] == "success");
+    assert(up["name"] == "renamed-digest");
+    assert(up["enabled"] == false);
+    assert(!up.value("next_fire_at", "").empty());
+    auto ru = routines.get(rid);
+    assert(ru && ru->name == "renamed-digest" && !ru->enabled);
+    assert(ru->schedule_json.find("interval") != std::string::npos);
+
+    // update: invalid schedule rejected
+    up = urt.execute(json{{"id", rid}, {"schedule", json{{"type", "daily"}}}}, ctx);
+    assert(up["status"] == "error");
+
+    // cross-agent protection: other agent cannot touch Tester's routine
+    UpdateRoutineTool urt_other{other.id, routines};
+    DeleteRoutineTool drt_other{other.id, routines};
+    ListRoutinesTool lrt_other{other.id, routines};
+    assert(lrt_other.execute(json::object(), ctx)["routines"].empty());
+    up = urt_other.execute(json{{"id", rid}, {"name", "hijacked"}}, ctx);
+    assert(up["status"] == "error");
+    assert(drt_other.execute(json{{"id", rid}}, ctx)["status"] == "error");
+    assert(routines.get(rid));   // untouched
+
+    // delete own routine
+    auto del = drt.execute(json{{"id", rid}}, ctx);
+    assert(del["status"] == "success");
+    assert(!routines.get(rid));
+    assert(drt.execute(json{{"id", rid}}, ctx)["status"] == "error");  // gone
+
     fs::remove_all(tmp);
     std::cout << "test_agent_tools: OK\n";
     return 0;

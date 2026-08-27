@@ -135,6 +135,66 @@ private:
     ThreadStore& threads_;
 };
 
+/// list_routines — the calling agent's own scheduled tasks (routines are
+/// per-agent; an agent manages only its own).
+class ListRoutinesTool final : public daedalus::BaseTool {
+public:
+    explicit ListRoutinesTool(std::string agent_id, RoutineStore& routines)
+        : agent_id_(std::move(agent_id)), routines_(routines) {}
+    [[nodiscard]] std::string get_name() const override { return "list_routines"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "List your scheduled routines (id, name, schedule, enabled, "
+               "next fire time). Use the id with update_routine / "
+               "delete_routine.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+private:
+    std::string agent_id_;
+    RoutineStore& routines_;
+};
+
+/// update_routine — edit name/prompt/schedule (and enable/disable) of one
+/// of the calling agent's own routines. next_fire_at is recomputed when
+/// the schedule changes (same policy as RoutineRoutes PATCH).
+class UpdateRoutineTool final : public daedalus::BaseTool {
+public:
+    explicit UpdateRoutineTool(std::string agent_id, RoutineStore& routines)
+        : agent_id_(std::move(agent_id)), routines_(routines) {}
+    [[nodiscard]] std::string get_name() const override { return "update_routine"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Edit one of your routines: rename, change the prompt, "
+               "reschedule, or pause/resume it (enabled:false/true). Only "
+               "routines you own can be changed.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+private:
+    std::string agent_id_;
+    RoutineStore& routines_;
+};
+
+/// delete_routine — permanently remove one of the calling agent's own
+/// routines.
+class DeleteRoutineTool final : public daedalus::BaseTool {
+public:
+    explicit DeleteRoutineTool(std::string agent_id, RoutineStore& routines)
+        : agent_id_(std::move(agent_id)), routines_(routines) {}
+    [[nodiscard]] std::string get_name() const override { return "delete_routine"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Delete one of your routines permanently. Only routines you "
+               "own can be deleted.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+private:
+    std::string agent_id_;
+    RoutineStore& routines_;
+};
+
 /// run_icarus — delegate a heavy duty task to an icarus subprocess
 /// (our reconfigurable agent host). Graceful error when icarus isn't
 /// installed on this machine.

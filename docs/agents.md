@@ -128,8 +128,13 @@ wait.
 | `container_exec` | Run a bash command in its container (`/workspace`, user `hive`, sudo) |
 | `list_agents` | See the team |
 | `message_agent` | Task a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
-| `create_agent` | Add a teammate to the roster |
-| `run_icarus` | Hand a self-contained task to an icarus subprocess |
+| `create_agent` | Add a teammate to the roster (optional `worker` places it on an online rig — see `list_workers`) |
+| `list_workers` | See enrolled hive-worker rigs and whether they are online |
+| `save_routine` | Save a demonstrated workflow as a scheduled task (see `docs/design.md` routines) |
+| `list_routines` | List your own routines (id, schedule, enabled, next fire) |
+| `update_routine` | Rename / reschedule / change prompt / pause+resume your own routines |
+| `delete_routine` | Delete one of your own routines |
+| `run_icarus` | Hand a self-contained task to an icarus subprocess — **only registered when the icarus binary exists on the host** (2026-08-27: not yet baked into container images) |
 | daedalus built-ins | memory tools, skills, MCP servers, etc. (host shell `execute_bash` is disabled for containerized agents) |
 
 ## Chief-of-staff pattern

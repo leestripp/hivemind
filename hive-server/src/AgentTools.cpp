@@ -232,6 +232,101 @@ json SaveRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
     }
 }
 
+// ─── ListRoutinesTool ───────────────────────────────────────────────────────
+
+json ListRoutinesTool::get_definition() const {
+    return fn_def(get_name(), get_description(), params_object({}, {}));
+}
+
+json ListRoutinesTool::execute(const json&, daedalus::HostToolContext&) {
+    json arr = json::array();
+    for (auto& r : routines_.list()) {
+        if (r.agent_id != agent_id_) continue;   // own routines only
+        arr.push_back({{"id", r.id}, {"name", r.name},
+                       {"schedule", json::parse(r.schedule_json, nullptr, false)},
+                       {"enabled", r.enabled},
+                       {"next_fire_at", r.next_fire_at},
+                       {"last_fired_at", r.last_fired_at}});
+    }
+    return ok({{"routines", arr},
+               {"note", arr.empty()
+                   ? "You have no routines. save_routine creates one."
+                   : "Use update_routine / delete_routine with an id."}});
+}
+
+// ─── UpdateRoutineTool ──────────────────────────────────────────────────────
+
+json UpdateRoutineTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"id", {{"type", "string"},
+                          {"description", "Routine id (see list_routines)."}}}},
+             json{{"name", {{"type", "string"},
+                            {"description", "New name (omit to keep)."}}}},
+             json{{"prompt", {{"type", "string"},
+                              {"description", "New self-contained prompt (omit to keep)."}}}},
+             json{{"schedule", {{"type", "object"},
+                                {"description", "New schedule spec (UTC) — same shape as save_routine (omit to keep)."}}}},
+             json{{"enabled", {{"type", "boolean"},
+                               {"description", "false pauses, true resumes (omit to keep)."}}}}},
+            {"id"}));
+}
+
+json UpdateRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
+    const std::string id = args.value("id", "");
+    if (id.empty()) return error("need 'id'");
+    auto r = routines_.get(id);
+    if (!r) return error("unknown routine id '" + id + "'");
+    if (r->agent_id != agent_id_)
+        return error("routine '" + r->name + "' belongs to another agent — "
+                     "you can only change your own");
+
+    const std::string name = args.value("name", r->name);
+    const std::string prompt = args.value("prompt", r->prompt);
+    if (name.empty() || prompt.empty())
+        return error("name and prompt must not be empty");
+
+    json schedule = json::parse(r->schedule_json, nullptr, false);
+    std::string next = r->next_fire_at;
+    if (args.contains("schedule")) {
+        if (!args["schedule"].is_object()) return error("schedule must be an object");
+        const std::string bad = hm::validate_schedule(args["schedule"]);
+        if (!bad.empty()) return error("invalid schedule: " + bad);
+        schedule = args["schedule"];
+        // Recompute from now — same policy as RoutineRoutes PATCH.
+        next = hm::compute_next_fire(schedule, hm::now_iso_local(), r->created_at)
+                   .value_or("");
+    }
+    if (!routines_.update(id, name, prompt, schedule.dump(), next))
+        return error("update failed");
+    if (args.contains("enabled") && args["enabled"].is_boolean())
+        routines_.set_enabled(id, args["enabled"].get<bool>());
+    return ok({{"id", id}, {"name", name}, {"next_fire_at", next},
+               {"enabled", routines_.get(id)->enabled}});
+}
+
+// ─── DeleteRoutineTool ──────────────────────────────────────────────────────
+
+json DeleteRoutineTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"id", {{"type", "string"},
+                          {"description", "Routine id (see list_routines)."}}}}},
+            {"id"}));
+}
+
+json DeleteRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
+    const std::string id = args.value("id", "");
+    if (id.empty()) return error("need 'id'");
+    auto r = routines_.get(id);
+    if (!r) return error("unknown routine id '" + id + "'");
+    if (r->agent_id != agent_id_)
+        return error("routine '" + r->name + "' belongs to another agent — "
+                     "you can only delete your own");
+    if (!routines_.remove(id)) return error("delete failed");
+    return ok({{"deleted", true}, {"name", r->name}});
+}
+
 // ─── RunIcarusTool ──────────────────────────────────────────────────────────
 
 json RunIcarusTool::get_definition() const {
