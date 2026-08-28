@@ -7,7 +7,7 @@ extern "C" { GResource* hivemind_get_resource(void); }
 namespace hive {
 
 HiveApplication::HiveApplication()
-    : Gtk::Application("com.hivemind.client",
+    : Gtk::Application("org.hivemind.Client",
                        Gio::Application::Flags::DEFAULT_FLAGS) {}
 
 Glib::RefPtr<HiveApplication> HiveApplication::create() {

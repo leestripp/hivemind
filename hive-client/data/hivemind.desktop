@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=HiveMind
-Comment=Your team of always-on AI agents (Linux-native)
-Exec=hive-client
-Icon=org.hivemind.Client
-Categories=Development;Utility;
-Terminal=false

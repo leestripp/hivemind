@@ -54,6 +54,15 @@ if(WEBKIT_FOUND)
     target_link_libraries(hive-client PRIVATE PkgConfig::WEBKIT)
 endif()
 
-install(TARGETS hive-client DESTINATION "bin")
-install(FILES data/hivemind.desktop DESTINATION "share/applications")
-install(FILES data/icons/org.hivemind.Client.svg DESTINATION "share/icons/hicolor/scalable/apps")
+include(GNUInstallDirs)
+
+install(TARGETS hive-client DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# Desktop file is configured so Exec= carries the absolute install path;
+# desktop sessions do not reliably have ~/.local/bin in PATH.
+configure_file(data/org.hivemind.Client.desktop.in
+               ${CMAKE_CURRENT_BINARY_DIR}/org.hivemind.Client.desktop @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.hivemind.Client.desktop
+        DESTINATION "share/applications")
+install(FILES data/icons/org.hivemind.Client.svg
+        DESTINATION "share/icons/hicolor/scalable/apps")
