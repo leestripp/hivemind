@@ -73,6 +73,8 @@ private:
     void poll_approvals();
     void poll_roster();          // agents busy/state (Phase 27)
     std::string roster_sig_;   // last busy/state signature
+    std::string current_dm_agent_;  // agent whose DM is focused ("" if none)
+    bool restoring_selection_ = false;  // rebuild_roster reselect guard
 
     // ── UI callbacks ──────────────────────────────────────────────────────
     void on_agent_selected();

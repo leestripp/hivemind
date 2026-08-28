@@ -694,6 +694,11 @@ HiveWindow::HiveWindow() {
     threads_list_.set_selection_mode(Gtk::SelectionMode::SINGLE);
     roster_list_.signal_row_activated().connect(
         [this](Gtk::ListBoxRow*) { on_agent_selected(); });
+    roster_list_.signal_row_selected().connect(
+        [this](Gtk::ListBoxRow* row) {
+            if (restoring_selection_ || !row) return;
+            on_agent_selected();
+        });
     threads_list_.signal_row_selected().connect(
         [this](Gtk::ListBoxRow*) { on_thread_selected(); });
 
@@ -1175,6 +1180,14 @@ void HiveWindow::poll_approvals() {
 // ── rendering ───────────────────────────────────────────────────────────────
 
 void HiveWindow::rebuild_roster() {
+    // Preserve the user's selection: removing a ListBoxRow destroys it and
+    // silently clears the selection (the "agent unselects itself" bug —
+    // any agent's busy/state flip triggers a rebuild on the 1.5s poll).
+    std::string selected_id;
+    if (auto* sel = roster_list_.get_selected_row())
+        if (auto* id = static_cast<std::string*>(sel->get_data("agent_id")))
+            selected_id = *id;
+
     while (auto* row = roster_list_.get_row_at_index(0))
         roster_list_.remove(*row);
     for (auto& a : agents_) {
@@ -1235,6 +1248,15 @@ void HiveWindow::rebuild_roster() {
             });
         row->add_controller(rc);
         roster_list_.append(*row);
+    }
+
+    if (!selected_id.empty()) {
+        restoring_selection_ = true;
+        for (int i = 0; auto* row = roster_list_.get_row_at_index(i); ++i) {
+            auto* id = static_cast<std::string*>(row->get_data("agent_id"));
+            if (id && *id == selected_id) { roster_list_.select_row(*row); break; }
+        }
+        restoring_selection_ = false;
     }
 }
 
@@ -1457,8 +1479,11 @@ void HiveWindow::on_agent_selected() {
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("agent_id"));
     if (!id) return;
-    // Start (or focus) a DM with this agent.
+    // Already in this agent's DM — don't churn threads on re-selection.
     std::string aid = *id;
+    if (aid == current_dm_agent_) return;
+    current_dm_agent_ = aid;
+    // Start (or focus) a DM with this agent.
     run_async([this, aid] {
         json t = api_.create_thread("", {aid}, /*reuse_dm=*/true);
         {
@@ -1485,6 +1510,7 @@ void HiveWindow::on_thread_selected() {
     auto* id = static_cast<std::string*>(row->get_data("thread_id"));
     if (!id || *id == current_thread_) return;
     current_thread_ = *id;
+    current_dm_agent_.clear();   // user picked a thread explicitly
     last_message_id_.clear();
     rendered_msg_ids_.clear();
     chat_stick_bottom_ = true;   // opening a thread always shows the newest
@@ -1502,7 +1528,10 @@ void HiveWindow::on_thread_selected() {
 
 void HiveWindow::on_send() {
     std::string text = entry_.get_text();
-    if (current_thread_.empty()) return;
+    if (current_thread_.empty()) {
+        set_status("Select an agent or thread first — message not sent.");
+        return;
+    }
     if (text.empty() && pending_attachments_.empty()) return;
     entry_.set_text("");
     json atts = pending_attachments_;            // take
