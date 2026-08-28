@@ -16,6 +16,25 @@ int main() {
     assert(ContainerManager::shell_quote("") == "''");
     assert(ContainerManager::shell_quote("a b;c`d") == "'a b;c`d'");
 
+    // routes_have_default: /proc/net/route parsing (dead-pasta detection)
+    const std::string with_default =
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth0\t00000000\t0200000A\t0003\t0\t0\t0\t00000000\n"
+        "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n";
+    assert(ContainerManager::routes_have_default(with_default));
+    const std::string no_default =   // forwarder died: only the local route
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n";
+    assert(!ContainerManager::routes_have_default(no_default));
+    assert(!ContainerManager::routes_have_default(""));
+    assert(!ContainerManager::routes_have_default("Iface\tDestination\n"));
+    // spaces instead of tabs, and a default route not on the first data row
+    const std::string spaces =
+        "Iface   Destination Gateway Flags\n"
+        "lo      0000007F    00000000 0001\n"
+        "tap0    00000000    0200000A 0003\n";
+    assert(ContainerManager::routes_have_default(spaces));
+
     // agent_home_dir ends with agents/<id>/home
     auto home = ContainerManager::agent_home_dir("xyz");
     assert(home.string().find("agents/xyz/home") != std::string::npos);

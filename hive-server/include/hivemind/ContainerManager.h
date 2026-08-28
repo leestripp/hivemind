@@ -2,8 +2,10 @@
 
 class ExecAuditStore;
 
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <filesystem>
 
 /**
@@ -45,6 +47,12 @@ public:
 
     /// Shell-quote a single argument (single-quote style). Pure; for tests.
     static std::string shell_quote(const std::string& arg);
+
+    /// True when /proc/net/route contents contain a default route
+    /// (destination "00000000"). Pure; exposed for tests. A rootless
+    /// container whose pasta/slirp4netns forwarder died keeps its netns
+    /// but loses the default route -> "Network is unreachable".
+    static bool routes_have_default(std::string_view proc_net_route);
 
     /// Build localhost/hive-agent:latest from the shipped Containerfile
     /// if it isn't present. Throws std::runtime_error on build failure.
@@ -103,6 +111,18 @@ public:
     /// screen_ctl container recreation).
     static const char* browser_image_name() { return kBrowserImage; }
 private:
+    /// Self-healing guard (droplet incident 2026-08-28): if the agent's
+    /// container is running but its rootless network forwarder (pasta)
+    /// died, the netns loses its default route and every outbound call
+    /// fails with "Network is unreachable". exec() probes /proc/net/route
+    /// and restarts the container once when the route is missing.
+    /// Best-effort: probe failures (container stopped etc.) are ignored —
+    /// ensure_running() owns start failures.
+    void repair_network_if_dead(const std::string& agent_id);
+
+    /// Serializes network repairs so concurrent execs don't restart twice.
+    std::mutex net_repair_mtx_;
+
     /// Run a podman command line (already quoted), capture output + rc.
     static ExecResult run(const std::string& cmdline, int timeout_s = 0);
 

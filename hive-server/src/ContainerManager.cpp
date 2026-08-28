@@ -6,11 +6,14 @@
 #include "hivemind/SecretStore.h"
 #include "hivemind/ServerConfig.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -129,6 +132,64 @@ ContainerManager::Status ContainerManager::status(const std::string& agent_id) {
     return s;
 }
 
+bool ContainerManager::routes_have_default(std::string_view proc_net_route) {
+    // /proc/net/route columns: Iface Destination Gateway Flags ...
+    // Header line starts with "Iface". A default route has Destination
+    // "00000000" (hex, little-endian 0.0.0.0) and an up flag.
+    size_t pos = 0;
+    bool first = true;
+    while (pos < proc_net_route.size()) {
+        size_t eol = proc_net_route.find('\n', pos);
+        if (eol == std::string_view::npos) eol = proc_net_route.size();
+        std::string_view line = proc_net_route.substr(pos, eol - pos);
+        pos = eol + 1;
+        if (first) { first = false; continue; }   // header
+        // split on whitespace, take column 2 (Destination)
+        size_t col = 0, i = 0;
+        std::string_view dest;
+        while (i <= line.size()) {
+            while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+            if (i >= line.size()) break;
+            size_t start = i;
+            while (i < line.size() && line[i] != ' ' && line[i] != '\t') ++i;
+            if (col == 1) { dest = line.substr(start, i - start); break; }
+            ++col;
+        }
+        if (dest == "00000000") return true;
+    }
+    return false;
+}
+
+void ContainerManager::repair_network_if_dead(const std::string& agent_id) {
+    std::lock_guard<std::mutex> lk(net_repair_mtx_);
+    const std::string cname = container_name(agent_id);
+    auto probe = run("podman exec " + shell_quote(cname) +
+                     " cat /proc/net/route", /*timeout_s=*/10);
+    if (probe.exit_code != 0) return;   // not running / unreadable — not ours to fix
+    if (routes_have_default(probe.output)) return;
+
+    std::cerr << "[containers] " << cname
+              << " lost its default route (dead rootless network forwarder) "
+                 "— restarting container\n";
+    auto rst = run("podman restart " + shell_quote(cname), /*timeout_s=*/60);
+    if (rst.exit_code != 0) {
+        std::cerr << "[containers] restart failed: " << rst.output << "\n";
+        return;
+    }
+    // pasta takes a moment to re-plumb; poll up to ~10s for the route.
+    for (int i = 0; i < 20; ++i) {
+        auto p2 = run("podman exec " + shell_quote(cname) +
+                      " cat /proc/net/route", 10);
+        if (p2.exit_code == 0 && routes_have_default(p2.output)) {
+            std::cerr << "[containers] " << cname << " network restored\n";
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    std::cerr << "[containers] " << cname
+              << " still has no default route after restart\n";
+}
+
 std::string ContainerManager::ensure_running(const std::string& agent_id) {
     if (!podman_available())
         throw std::runtime_error("podman is not installed on this machine");
@@ -196,6 +257,8 @@ ContainerManager::ExecResult ContainerManager::exec(const std::string& agent_id,
                                                     int timeout_s) {
     if (!podman_available())
         return {-1, "podman is not installed on this machine", false};
+
+    repair_network_if_dead(agent_id);
 
     // Phase 15: inject granted secrets via --env-file so values never show
     // up in podman's argv (visible in ps) or the shell history.
