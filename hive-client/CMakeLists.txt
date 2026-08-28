@@ -56,3 +56,4 @@ endif()
 
 install(TARGETS hive-client DESTINATION "bin")
 install(FILES data/hivemind.desktop DESTINATION "share/applications")
+install(FILES data/icons/org.hivemind.Client.svg DESTINATION "share/icons/hicolor/scalable/apps")
