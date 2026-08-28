@@ -128,7 +128,7 @@ GET/POST/DELETE       /api/models[/:name]     POST …/:name/default
 |---|---|
 | `docs/api.md` | REST API reference (auth, roster, threads, routines, skills, containers, models) |
 | `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, Caddy TLS, lockdown |
-| `docs/agents.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
+| `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Global skill library design — symlinks, local/global split |
 | `docs/client.md` | GTK4 native client — dialogs, menus, theming |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |

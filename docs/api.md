@@ -84,7 +84,7 @@ see `docs/deploy.md`.
 
 ## 2. Roster (agents)
 
-A roster agent is a persistent, named teammate (see `docs/agents.md`).
+A roster agent is a persistent, named teammate (see `AGENTS.md`).
 
 | Method | Path | Description |
 |---|---|---|

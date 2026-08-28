@@ -24,7 +24,7 @@ orchestration model.
 | Client | `hive-client/` → `build/hive-client/hive-client` (GTK4/gtkmm4) |
 | Worker | `hive-worker/` → `build/hive-worker/hive-worker` (OmniNet-only, dials out to :8423) |
 | Agent engine | **daedalus** (FetchContent, tag `0.9.6` via `-DDAEDALUS_TAG`) |
-| HTTP/WS | **OmniNet** (FetchContent, `main`) — the ONLY HTTP client/stack |
+| HTTP/WS | **OmniNet** (FetchContent, `main`) — auto-updated at configure time via `OMNINET_AUTO_UPDATE` (default ON); checkouts have a local-edits guard. The ONLY HTTP client/stack. |
 | Tests | `ctest --test-dir build` or `./hivemindctl test` — 20 tests, built `-UNDEBUG` |
 
 ## 2. Hard rules (learned the expensive way)
@@ -76,6 +76,12 @@ orchestration model.
     `receive()/receiveText()` use per-call buffers — coalesced frames in
     one TCP segment are silently discarded; drive the socket with
     `readLoop()` + onText callbacks on BOTH ends.
+13. **FetchContent `GIT_TAG main` goes stale silently.** `FetchContent`
+    caches `_deps/<dep>-src` and does NOT re-fetch when the declared tag is
+    unchanged. Our root CMake now runs `git fetch && reset --hard origin/main`
+    at configure time for OmniNet (`OMNINET_AUTO_UPDATE`, default ON, skipped
+    if dirty). This is how we caught the 1.0.0 connection-thread leak fix; without
+    it you can vendor an old `main` for weeks.
 
 ## 3. Layout map
 
@@ -128,9 +134,64 @@ in `index.html` + wire `main.js` (copy `workers.js` — the newest).
 - Rig deployment: dev-rig runs hive-server + hive-worker as systemd USER
   units (`hivemind-dev`, `hive-worker-dev-rig`), CWD = repo root.
 
-## 6. Current status (0.5.0, 2026-08-26)
+## 6. Agent runtime details (what every AgentHost gets)
 
-Phases 0–30.4 done and user-verified (see Plan.md). Open: **30.5 TLS**
+These are implementation facts that change rarely but trip up new work:
+
+### Tools registered in `AgentHost::ensure_agent()`
+
+Containerized agents get `container_exec` plus the browser suite;
+all roster agents get the collaboration/routine tools:
+
+| Tool | Purpose |
+|---|---|
+| `container_exec` | Bash in the agent's podman container (`/workspace`, user `hive`, sudo). Host `execute_bash` is DISABLED; the replacement must be named something else (see rule 8). |
+| `browser_navigate/click/type/press/read/screenshot/eval/tabs/back/reload` | Headless Chromium over CDP inside the container; visible via the web **Computer** tab. |
+| `browser_fill_secret` | Fill a form from the agent's encrypted secret store; approval-gated when `require_approval` is on. |
+| `list_agents` | Roster list (used for delegation). |
+| `message_agent` | Async delegation: posts to the pair thread; fan-in wakes the asker. Do NOT make this synchronous. |
+| `create_agent` | Add a teammate; optional `worker` field places the container on an enrolled `hive-worker`. |
+| `list_workers` | Online/offline worker rigs. |
+| `save_routine` / `list_routines` / `update_routine` / `delete_routine` | Own-routines-only; `id` or name accepted. |
+
+### Routine schedules (UTC only)
+
+Supported `schedule.type`: `once`, `interval`, `daily`, `weekly`. Time strings
+are always `"HH:MM"` UTC; weekly uses `days: [0..6]` with 0=Sunday.
+`Schedule::validate_schedule()` and `compute_next_fire()` are the source of
+truth. The 30-second scheduler runs from `AgentHost`/main.cpp.
+
+### Approvals & watchdog
+
+- Approval requests wait **600 s** (`AgentHost::request_approval()` →
+  `ApprovalStore::wait(id, 600)`); auto-review rules short-circuit this.
+- A single agent turn is capped at **240 s** (`HIVEMIND_TURN_TIMEOUT_S`,
+  default 240). A hung LLM call is aborted so the agent's queue unblocks.
+- `require_approval: true` gates `container_exec` and browser actions.
+
+### Thread/context model
+
+- Threads fix participants at creation; there is no "add agent to existing
+  thread" flow.
+- Conversation history lives in daedalus' `messages.json`, restored on every
+  AgentHost reconstruction. `ChatService::fan_in` sends ONLY the new message;
+  do not prepend backlogs.
+- Deleting an agent cascades: solo threads deleted, group threads keep going
+  with a system note, routines deleted or reassigned via `?reassign_to=`.
+  The on-disk agent dir is kept; the podman container is removed best-effort.
+
+### Skills
+
+- **Global skills** (`~/.local/share/hivemind/skills/`) are shared; enabling
+  one symlinks it into the agent's `~/.agents/skills/`.
+- **Local skills** are per-agent, learned per-agent, owned per-agent.
+- Format is Anthropic SKILL.md. See `docs/skills.md` for the enable flow.
+
+## 7. Current status (0.5.0, 2026-08-27)
+
+Phases 0–30.4 done and user-verified (see Plan.md). OmniNet updated
+from a stale `main` checkout to **1.0.0** (connection-thread leak fixed),
+with root CMakeLists auto-ff at configure time. Open: **30.5 TLS**
 (hard prerequisite before workers leave localhost/LAN — Caddy on the
 server, worker pins the CA), screen cold-start readiness race, packaging
 follow-ups (first real Flatpak build).

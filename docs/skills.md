@@ -62,7 +62,7 @@ Enable rules enforced by the server:
 - Deleting a skill from the global library **removes every agent's symlink
   first**, so no agent is left with a dangling link.
 - Agent deletion cleans its skills dir along with the rest of its cascade
-  (see `docs/agents.md`).
+  (see `AGENTS.md`).
 
 ## SKILL.md format
 
