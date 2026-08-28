@@ -50,6 +50,10 @@ and reloads prior history — it picks up where you left off.
 > **Graceful stops matter.** History is written on `Agent::shutdown()`, which
 > the server calls on SIGTERM (`hivemindctl stop`, systemd, Ctrl-C).
 > `kill -9` can lose the in-flight turn.
+>
+> **Turn watchdog:** a single agent turn is capped at **240 seconds** (env
+> `HIVEMIND_TURN_TIMEOUT_S`, default 240). If the LLM call hangs, the agent is
+> aborted and its queue unblocks.
 
 ## Conversation context (daedalus owns it — no backlog)
 
@@ -126,6 +130,8 @@ wait.
 | Tool | What it does |
 |---|---|
 | `container_exec` | Run a bash command in its container (`/workspace`, user `hive`, sudo) |
+| `browser_*` | Control a persistent headless Chromium in the container (`navigate`, `click`, `type`, `read`, `screenshot`, `eval`, `tabs`, etc.) — see **Computer use** below |
+| `browser_fill_secret` | Fill a form field from the agent's encrypted secret store (approval-gated) |
 | `list_agents` | See the team |
 | `message_agent` | Task a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
 | `create_agent` | Add a teammate to the roster (optional `worker` places it on an online rig — see `list_workers`) |
@@ -135,6 +141,28 @@ wait.
 | `update_routine` | Rename / reschedule / change prompt / pause+resume your own routines |
 | `delete_routine` | Delete one of your own routines |
 | daedalus built-ins | memory tools, skills, MCP servers, etc. (host shell `execute_bash` is disabled for containerized agents) |
+
+## Computer use (browser tools)
+
+Containerized agents can drive a persistent Chromium browser over CDP on a
+headless Xvfb display inside their own container. The user can watch the same
+session via the web **Computer** tab and take over at any time.
+
+Registered tools:
+
+| Tool | Purpose |
+|---|---|
+| `browser_navigate` | Open a URL and return final URL + title |
+| `browser_click` | Click an element by CSS selector |
+| `browser_type` / `browser_press` | Type text or press keys (Enter, Tab, etc.) |
+| `browser_read` | Read visible page text (truncated to ~6,000 chars) |
+| `browser_screenshot` | Save a viewport screenshot to `/workspace` |
+| `browser_eval` | Evaluate JavaScript and return JSON |
+| `browser_tabs` / `browser_back` / `browser_reload` | Tab list and navigation |
+| `browser_fill_secret` | Fill a form field from the agent's encrypted secret store |
+
+Browser actions are approval-gated when the agent has `require_approval: true`.
+The browser session is per-agent and survives across turns.
 
 ## Chief-of-staff pattern
 
@@ -160,6 +188,15 @@ A routine = named prompt + schedule, attached to an agent, with its own
 thread (`routine: <name>`). The 30-second scheduler fires due routines; the
 agent's reply appears in the routine thread.
 
+Schedule types (`schedule` field):
+
+| Type | Fields | Example |
+|---|---|---|
+| `once` | `"at": "YYYY-MM-DDTHH:MM"` UTC | `{ "type": "once", "at": "2026-09-01T14:00" }` |
+| `interval` | `"every_minutes": <int>` | `{ "type": "interval", "every_minutes": 5 }` |
+| `daily` | `"time": "HH:MM"` UTC | `{ "type": "daily", "time": "08:30" }` |
+| `weekly` | `"time": "HH:MM"`, `"days": [0..6]` (0=Sunday) | `{ "type": "weekly", "time": "09:00", "days": [1,3,5] }` |
+
 ```bash
 curl -X POST localhost:8421/api/routines -H 'Content-Type: application/json' -d '{
   "agent_id": "<id>", "name": "morning-brief",
@@ -167,6 +204,10 @@ curl -X POST localhost:8421/api/routines -H 'Content-Type: application/json' -d 
   "schedule": {"type": "daily", "time": "08:30"}
 }'
 ```
+
+Agents think in routine **names**, not UUIDs: `list_routines`, `update_routine`,
+and `delete_routine` all accept a routine id or an exact/case-insensitive name
+match, but only for routines the agent owns.
 
 ## Skills
 
