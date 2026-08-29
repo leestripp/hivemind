@@ -24,9 +24,7 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-
-constexpr const char* kImage = "localhost/hive-agent:latest";
+namespace hwrunner {
 
 std::string container_name(const std::string& agent) {
     // agent ids are server-generated ids; clamp to a safe charset anyway.
@@ -36,9 +34,9 @@ std::string container_name(const std::string& agent) {
     return out;
 }
 
-fs::path worker_dir() {
-    return fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
-         / ".local" / "share" / "hive-worker";
+std::string worker_dir() {
+    return (fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
+         / ".local" / "share" / "hive-worker").string();
 }
 
 /// Quick synchronous podman call (no streaming); returns exit code.
@@ -60,20 +58,22 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
     return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
 }
 
-void ensure_container(const std::string& agent) {
+void ensure_container(const std::string& agent, const std::string& image) {
     const std::string cname = container_name(agent);
 
     std::string img;
-    if (podman_simple({"image", "exists", kImage}, nullptr) != 0) {
+    if (podman_simple({"image", "exists", image}, nullptr) != 0) {
         // Same convention as the server: run from the repo root.
         if (!fs::exists("hive-server/data/Containerfile.hive-agent"))
             throw std::runtime_error(
                 "image missing and Containerfile not found "
                 "(run hive-worker from the repository root)");
-        if (podman_simple({"build", "-t", kImage, "-f",
+        // Context = repo root (v2 Containerfile COPYs the hive-agent
+        // binary from build/hive-agent/).
+        if (podman_simple({"build", "-t", image, "-f",
                            "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
                            "hive-server/data/Containerfile.hive-agent",
-                           "hive-server/data"}, &img) != 0)
+                           "."}, &img) != 0)
             throw std::runtime_error("podman build failed: " + img);
     }
 
@@ -105,15 +105,11 @@ void ensure_container(const std::string& agent) {
                        "-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
                        "-v", skills.string() + ":/skills:ro",
-                       "-w", "/workspace", kImage}, &out) != 0)
+                       "-w", "/workspace", image}, &out) != 0)
         throw std::runtime_error("podman create failed: " + out);
     if (podman_simple({"start", cname}, &out) != 0)
         throw std::runtime_error("podman start failed: " + out);
 }
-
-} // namespace
-
-namespace hwrunner {
 
 ExecOutcome run_container_exec(
         const std::string& agent, const std::vector<std::string>& argv,

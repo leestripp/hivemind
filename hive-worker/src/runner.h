@@ -7,6 +7,23 @@
 
 namespace hwrunner {
 
+// ----- container lifecycle (exposed for the v2 fleet manager, Phase B) ---
+
+/// hive-<agent> with unsafe chars clamped to '-'.
+std::string container_name(const std::string& agent);
+
+/// ~/.local/share/hive-worker
+std::string worker_dir();
+
+/// Quick synchronous podman call (no streaming); returns exit code.
+int podman_simple(const std::vector<std::string>& args, std::string* out);
+
+/// Ensure the agent's container exists + runs on THIS worker.
+/// image defaults to the v1 image; the v2 fleet passes its own tag.
+void ensure_container(const std::string& agent,
+                      const std::string& image = "localhost/hive-agent:latest");
+
+
 struct ExecOutcome {
     int exit_code = -1;
     bool timed_out = false;

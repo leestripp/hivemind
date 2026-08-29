@@ -12,6 +12,7 @@
 #include "net/Socket.h"
 #include "OmniNet.h"
 #include "runner.h"
+#include "fleet.h"
 #include "mcp_bridge.h"
 
 #include <nlohmann/json.hpp>
@@ -52,6 +53,11 @@ struct SkillSync {
 static std::mutex sync_m;
 static std::unordered_map<std::string, SkillSync> syncs;
 
+// Phase B (v2): the fleet. Events from in-container hive-agent processes
+// are forwarded to the server; set once the channel is up (see below).
+static std::unique_ptr<hwfleet::Fleet> g_fleet;
+static std::function<void(const json&)> g_send_frame;  // set per connection
+
 int main(int argc, char* argv[]) {
     std::string server = "ws://127.0.0.1:8423";
     std::string key, name, caps = R"({"arch":"x86_64"})";
@@ -68,6 +74,41 @@ int main(int argc, char* argv[]) {
         return 2;
     }
     const std::string url = server + "/api/workers/channel";
+
+    // Phase B (v2): the fleet lives OUTSIDE the reconnect loop - agents
+    // keep running across channel drops. Events route via g_send_frame,
+    // which the connection below refreshes on every (re)connect.
+    g_fleet = std::make_unique<hwfleet::Fleet>(
+        [](const std::string& agent_id, const json& ev) {
+            if (!g_send_frame) return;     // between connections: drop
+            const std::string kind = ev.value("ev", "");
+            json f;
+            if (kind == "ready")
+                f = {{"op","agent_status"},{"agent",agent_id},
+                     {"state","ready"}};
+            else if (kind == "delta")
+                f = {{"op","task_delta"},{"agent",agent_id},
+                     {"task",ev.value("task","")},
+                     {"text",ev.value("text","")}};
+            else if (kind == "message")
+                f = {{"op","task_result"},{"agent",agent_id},
+                     {"task",ev.value("task","")},
+                     {"thread_id",ev.value("thread_id","")},
+                     {"body",ev.value("body","")},
+                     {"error",ev.value("error","")}};
+            else if (kind == "approval_request")
+                f = {{"op","approval_req"},{"agent",agent_id},
+                     {"id",ev.value("id","")},
+                     {"command",ev.value("command","")}};
+            else if (kind == "status")
+                f = {{"op","agent_status"},{"agent",agent_id},
+                     {"state",ev.value("state","")},
+                     {"detail",ev.value("error","")}};
+            else
+                f = {{"op","agent_log"},{"agent",agent_id},
+                     {"event",ev}};
+            try { g_send_frame(f); } catch (...) {}
+        });
 
     int backoff = 1;
     while (!g_stop) {
@@ -93,6 +134,7 @@ int main(int argc, char* argv[]) {
                 std::lock_guard lk(send_m);
                 ws.sendText(f.dump());
             };
+            g_send_frame = send_frame;
 
             // heartbeat sender; receive loop below drives reconnect
             std::atomic<bool> dead{false};
@@ -103,7 +145,10 @@ int main(int argc, char* argv[]) {
                     try {
                         auto up = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::steady_clock::now() - connected_at).count();
-                        send_frame({{"op","heartbeat"},{"uptime_s",up}});
+                        send_frame({{"op","heartbeat"},{"uptime_s",up},
+                                    {"agents", g_fleet
+                                        ? g_fleet->statuses()
+                                        : json::object()}});
                         hwbridge::reap_idle();
                     } catch (...) { dead = true; }
                 }
@@ -146,6 +191,67 @@ int main(int argc, char* argv[]) {
                 const std::string op = frame.value("op", "");
                 if (op != "exec")
                     std::cout << "worker: frame: " << frame.dump() << "\n";
+
+                // -- v2 fleet ops (Plan.md Phase B) --------------------
+                if (op == "agent_spawn") {
+                    // ensure_container may BUILD the image on first use:
+                    // detached thread keeps the receive loop responsive.
+                    const json specj = frame;
+                    std::thread([specj] {
+                        const std::string aid = specj.value("agent_id","");
+                        try {
+                            hwfleet::AgentSpec spec;
+                            spec.id            = aid;
+                            spec.name          = specj.value("name","");
+                            spec.model         = specj.value("model","");
+                            spec.api_host      = specj.value("api_host","");
+                            spec.chat_endpoint = specj.value("chat_endpoint","");
+                            spec.provider      = specj.value("provider","");
+                            spec.max_context   = specj.value("max_context",0L);
+                            spec.temperature   = specj.value("temperature",-1.0);
+                            spec.auto_approve  = specj.value("auto_approve",false);
+                            spec.system_prompt = specj.value("system_prompt","");
+                            spec.mcp_servers   = specj.value("mcp_servers",
+                                                             json::array());
+                            spec.image         = specj.value("image","");
+                            g_fleet->spawn(spec);
+                        } catch (const std::exception& e) {
+                            try {
+                                g_send_frame({{"op","agent_status"},
+                                              {"agent",aid},
+                                              {"state","down"},
+                                              {"detail",e.what()}});
+                            } catch (...) {}
+                        }
+                    }).detach();
+                    return;
+                }
+                if (op == "agent_stop") {
+                    const std::string aid = frame.value("agent_id","");
+                    std::thread([aid] {
+                        if (g_fleet) g_fleet->stop(aid);
+                        try {
+                            g_send_frame({{"op","agent_status"},
+                                          {"agent",aid},{"state","down"}});
+                        } catch (...) {}
+                    }).detach();
+                    return;
+                }
+                if (op == "task" || op == "approval_resp" || op == "cancel") {
+                    const std::string aid = frame.value("agent_id","");
+                    if (!g_fleet || !g_fleet->send_to(aid, frame)) {
+                        try {
+                            g_send_frame({{"op","task_result"},
+                                          {"agent",aid},
+                                          {"task",frame.value("id","")},
+                                          {"thread_id",
+                                           frame.value("thread_id","")},
+                                          {"body",""},
+                                          {"error","agent not running here"}});
+                        } catch (...) {}
+                    }
+                    return;
+                }
 
                 if (op == "exec") {
                     std::cerr << "worker: exec " << frame.value("id","") << " received\n";
