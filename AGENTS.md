@@ -1,4 +1,4 @@
-# AGENTS.md — HiveMind 2.0 (0.5.0)
+# AGENTS.md — HiveMind 2.0 (0.5.3)
 
 > Quick-start reference for AI coding agents. Read this before touching code.
 > Deeper rationale: `docs/design.md`. Roadmap & phase status: `Plan.md`.
@@ -12,7 +12,10 @@ HiveMind 2.0 is a **self-hosted team of always-on AI agents for Linux**
 (`daedalus::Agent`) you message in threads; they run commands in rootless
 podman containers as user `hive` (passwordless sudo) — on the server by
 default or on any enrolled `hive-worker` machine — delegate to each other,
-wait for human approval when gated, and fire scheduled routines. The 1.x
+deliver files to each other across machines (`send_file` → the server's
+company workspace), wait for human approval when gated, and fire scheduled
+routines. Agents on the same worker rig share ONE `/workspace` mount so
+siblings can collaborate on the same project files. The 1.x
 node-graph engine was **removed** (Phase 12); threads + fan-in are the
 orchestration model.
 
@@ -91,6 +94,13 @@ orchestration model.
     if dirty). This is how we caught the 1.0.0 connection-thread leak fix; without
     it you can vendor an old `main` for weeks.
 
+15. **`CMAKE_INSTALL_PREFIX` must be a CACHE default** — a plain
+    `set()` after `project()` silently resolved `$ENV{HOME}` at configure
+    time and baked the wrong user's path into the .desktop `Exec=`
+    (GNOME dropped the launcher). Use `INITIALIZED_TO_DEFAULT` + CACHE
+    FORCE; `cmake --install --prefix` redirects file DESTINATIONS but NOT
+    content baked by `configure_file` (like .desktop Exec paths).
+
 ## 3. Layout map
 
 ```
@@ -112,7 +122,9 @@ State at runtime (`~/.local/share/hivemind/`): `agents.db`, `threads.db`,
 `approvals.db`, `routines.db`, `auth.db`, `llm.db`, `secrets.db`,
 `connectors.db`, `exec_audit.db`, `workers.db`, `skills/` (global library),
 `agents/<id>/` (per-agent daedalus dir + container home), `workspace/`
-(shared company volume).
+(shared company volume). Worker rigs keep their state at
+`~/.local/share/hive-worker/`: `workspace/` (ONE shared mount for all
+containers on that rig, Phase 31), `home-<agentid>/` (per-agent homes).
 
 ## 4. Common tasks
 
@@ -196,14 +208,17 @@ truth. The 30-second scheduler runs from `AgentHost`/main.cpp.
 - **Local skills** are per-agent, learned per-agent, owned per-agent.
 - Format is Anthropic SKILL.md. See `docs/skills.md` for the enable flow.
 
-## 7. Current status (0.5.0, 2026-08-27)
+## 7. Current status (0.5.3, 2026-08-29)
 
-Phases 0–30.4 done and user-verified (see Plan.md). OmniNet updated
-from a stale `main` checkout to **1.0.0** (connection-thread leak fixed),
-with root CMakeLists auto-ff at configure time. Open: **30.5 TLS**
-(hard prerequisite before workers leave localhost/LAN — Caddy on the
-server, worker pins the CA), screen cold-start readiness race, packaging
-follow-ups (first real Flatpak build).
+Phases 0–31 done and user-verified (see Plan.md). Workers now connect over
+**wss://** through nginx (30.5 TLS effectively live; the OmniNet
+idle-close bug it exposed is fixed upstream, rule 13). Phase 31: shared
+per-rig workspaces + the `send_file` tool (worker → company workspace,
+confined, 50 MB cap). Also this cycle: container network self-heal (dead
+pasta detection via /proc/net/route), client roster selection persistence
+fix, app icon + .desktop launcher (install-prefix pitfall = rule 15).
+Open: screen cold-start readiness race, packaging follow-ups (first real
+Flatpak build).
 
 **Auth:** all `/api/*` calls need `Authorization: Bearer <key>`; the master
 key prints once at first start. Worker channel auth: `hmwk_` keys from
