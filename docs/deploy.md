@@ -44,6 +44,13 @@ Run hive-worker on the hub's own machine. Agents placed on worker
 "droplet" are online whenever the hub is. This replaces v1's "local"
 agents.
 
+## Development environment
+
+The dev agent runs ON THE HOST system (moved out of the nested sandbox,
+2026-08-29): podman works natively there, so hive-agent/hive-worker
+container testing happens locally — build, run, and beat on containers
+directly. The droplet stays a deployment target, not a test proxy.
+
 ## Migrating from v1
 
 Threads/messages/roster DBs carry over (the hub keeps them). Agents get
