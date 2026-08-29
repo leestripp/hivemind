@@ -1,295 +1,71 @@
-# HiveMind 2.0 — Design
+# HiveMind design (v2, 2026-08-29)
 
-> **Audience:** contributors, reviewers, and AI coding agents picking up the project.
-> **Scope:** what HiveMind 2.0 is, how the pieces fit, and the decisions that
-> constrain changes. Roadmap and phase status live in `../Plan.md`.
+HiveMind is a team of persistent AI agents that live in containers on
+worker machines, with a central communications hub and a native GTK4
+client. This document describes the v2 architecture — see Plan.md for the
+migration phases.
 
----
+## Principles
 
-## Contents
+1. **The brain lives where the work is.** Agents (daedalus) run inside
+   their containers on workers — skills, MCP servers, shell access and
+   files are all local to the agent. Nothing is tunneled.
+2. **The server is a comms hub, not a host.** It routes messages between
+   clients, workers and agents. It holds no LLM credentials and runs no
+   workloads.
+3. **Outbound-only workers.** Workers dial the hub over one WebSocket;
+   rigs need no inbound ports, no DNS, no TLS setup.
+4. **File locality.** Work artifacts stay on the machine that produced
+   them; bytes cross machines only when explicitly requested (file_fetch,
+   show_image, push_file).
+5. **Linux-only.** podman (rootless), systemd --user, GTK4/gtkmm4.
 
-1. [Overview](#1-overview)
-2. [Repository layout](#2-repository-layout)
-3. [Server architecture](#3-server-architecture)
-4. [Roster agents](#4-roster-agents)
-5. [Threads & chat flow](#5-threads--chat-flow)
-6. [Containers (agent sandboxes)](#6-containers-agent-sandboxes)
-7. [Collaboration model](#7-collaboration-model)
-8. [Approvals](#8-approvals)
-9. [Routines & skills](#9-routines--skills)
-10. [GTK client](#10-gtk-client)
-11. [Web UI](#11-web-ui)
-12. [Persistence map](#12-persistence-map)
-13. [Concurrency rules](#13-concurrency-rules)
-14. [Extension points](#14-extension-points)
+## Components
 
----
+### hive-server — the comms hub
 
-## 1. Overview
+- Owns: threads, messages, attachments, roster, approvals relay, skills
+  library (canonical copy), worker registry.
+- Routes: client→agent tasks, agent→client replies, agent↔agent messages
+  (pair threads, generation-capped), approval round-trips.
+- Does NOT: run agents, hold LLM keys, spawn containers, proxy shells.
 
-HiveMind 2.0 is a **self-hosted team of always-on AI agents for Linux**.
-The unit of the product is the **roster agent**: a persistent, named
-teammate you message like a colleague. Agents remember their conversations,
-run commands in their own podman containers, coordinate with each other,
-and pause for human approval when configured to.
+### hive-worker — fleet manager + router
 
-Two first-party libraries do the heavy lifting (both
-gitlab.com/leestripp, consumed as-is — **never patched**):
+- One per machine (including the server's own host for always-online
+  agents).
+- Spawns/owns podman containers; each container runs **hive-agent**.
+- Shared `/workspace` mount per worker so its agents collaborate on the
+  same files; per-agent home volumes for history/memory.
+- Synced skills library mounted read-only into every container at
+  daedalus' global skills dir.
+- Relays the task protocol between hub and the in-container agents.
 
-- **daedalus** — the agent engine (`daedalus::Agent`): LLM streaming, tools,
-  MCP, skills, memory, context compression. Model/provider/credential state
-  is owned by HiveMind's LLMStore and INJECTED into AgentConfig explicit
-  fields at spawn (Phase 13) — daedalus' own SettingsStore is not consulted.
-- **OmniNet** — the HTTP/WebSocket server.
+### hive-agent — the brain (in-container)
 
-A third project, **icarus**, is our own CLI agent built on daedalus; it is
-the reference implementation for how a daedalus host should be wired.
-(The old `run_icarus` delegation tool was removed 2026-08-27 — icarus was
-never installed on hosts or baked into container images.)
+- Thin host around `daedalus::Agent` (icarus-style wiring).
+- stdio NDJSON task protocol in; delta/message/approval/image events out.
+- Full daedalus feature set: skills with scripts, MCP servers spawned as
+  local child processes, persistent memory + conversation history on the
+  home volume.
+- Credentials arrive as spawn env from the worker — never stored on the
+  hub.
 
-**Platform:** Linux only (Ubuntu 26.04 LTS target). No Windows/macOS.
+### hive-client — GTK4/gtkmm4 (unchanged shape)
 
-## 2. Repository layout
+- Roster, threads, chat, streaming replies, inline images, approvals UI.
+- Connects to the hub only; knows nothing about containers or workers
+  beyond presence display.
 
-```
-Hive-Mind/
-├── CMakeLists.txt            # superbuild: deps (daedalus, OmniNet) + subdirs
-├── hivemindctl               # build/start/stop/restart/status/logs/client/test
-├── hive-server/
-│   ├── include/hivemind/     # headers (+ routes/*.cpp live beside headers)
-│   ├── src/                  # server sources
-│   └── data/                 # Containerfiles, systemd unit
-├── hive-client/              # GTK4/gtkmm4 native client
-├── hive-worker/              # remote executor daemon (Phase 30; OmniNet-only link)
-├── web/dist/                 # zero-build web dashboard (Agents/Tasks/Files/
-│                             # Skills/Secrets/Models/Workers/Keys/Settings)
-├── tests/                    # ctest suite (20 tests, linked against hivemind_core)
-└── docs/
-```
+## Data flow: a user message
 
-`hive-server` builds two targets: `hivemind_core` (static lib, everything
-except `main.cpp` — also what tests link) and the `hive-server` binary.
-
-## 3. Server architecture
-
-One process, one port (default 8421), all state on the local machine:
-
-```
-OmniNet HTTP server
- ├── Roster/chat routes  → AgentStore / ThreadStore / ChatService
- ├── Approval routes     → ApprovalStore
- ├── Routine routes      → RoutineStore  (fired by the 30 s scheduler tick)
- ├── Container routes    → ContainerManager (podman CLI)
- └── static catch-all    → web/dist (must be registered LAST)
-```
-
-Application state is constructed in `main.cpp` and passed to route
-registrars by reference: `AgentStore`, `ThreadStore`, `ApprovalStore`,
-`RoutineStore`, `AgentRegistry`, `ChatService`.
-
-**Shutdown path matters:** daedalus only persists conversation history from
-`Agent::shutdown()` (its destructor does not save). The SIGTERM/SIGINT path
-calls `AgentRegistry::shutdown_all()` before stopping the server.
-
-## 4. Roster agents
-
-A roster row (`agents.db`) is the registry entry: id, unique name, role,
-model, workspace_mode, require_approval.
-
-The live runtime is an **AgentHost** (kept in `AgentRegistry`, keyed by id):
-
-- Lazy: the `daedalus::Agent` is constructed on first turn.
-- Long-lived: kept alive across turns (construct/destruct churn in daedalus
-  0.9.6 is unsafe; see §13).
-- Persistent: the host dir `~/.local/share/hivemind/agents/<id>/` is the
-  daedalus `project_root`, and the roster name (sanitized) is
-  `AgentConfig::agent_name`, so daedalus namespaces messages/memory under
-  `<dir>/.daedalus/daedalus-<name>/`. Restart the server and the agent
-  resumes with full context.
-- The `role` becomes a system-prompt persona preamble.
-- **ProxySink:** daedalus takes its sink at construction, so the Agent holds
-  a stable ProxySink that forwards to a per-turn StreamingSink (streams
-  assistant deltas to the activity endpoint, captures tool calls/errors,
-  routes command-approval requests).
-
-## 5. Threads & chat flow
-
-`threads.db` holds threads, agent participants, and messages (microsecond
-timestamps keep insertion order; incremental fetch via `?after=<msg_id>`).
-
-Posting a user message:
-
-1. `POST /api/threads/:id/messages` → message stored, **202** returned.
-2. `ChatService` spawns a detached thread per agent participant with a
-   `LiveTurn` tracker.
-3. Each turn: `AgentHost::run_turn(prompt, on_delta)` — deltas append to the
-   tracker's `partial` (polled via `/api/threads/:id/activity`).
-4. Completion → full reply stored as an agent message; tracker marked done.
-
-Clients poll `activity` (in-progress stream) + `messages?after=` (completed)
-— hive-client polls both every 1.5 s. WS push is a deliberate deferral.
-
-## 6. Containers (agent sandboxes)
-
-**Agents never execute on the host.** The only workspace mode is `shared`
-(containerized) — the former `host` escape hatch was removed 2026-08-25
-(legacy rows normalize to `shared` on load).
-
-- `ContainerManager` wraps the **podman CLI** (no libpod). Containers are
-  `hive-<agent_id>`, image `localhost/hive-agent:latest`, auto-built from
-  `hive-server/data/Containerfile.hive-agent` on first use.
-- **Company workspace model:** `/workspace` is the configured host folder
-  (`workspace_root` in server.json, default
-  `~/.local/share/hivemind/workspace`; set via Settings page or
-  `PUT /api/config`, admin-only) bind-mounted into every agent container;
-  `/home/hive` is a per-agent bind mount from the host agent dir.
-  Department volumes are a future extension.
-- The in-container user is `hive` with **passwordless sudo** — agents
-  install their own CLI tools mid-task.
-- **ExecBridge:** the built-in host `execute_bash` is disabled for
-  containerized agents and replaced by the host-registered tool
-  **`container_exec`** (`podman exec -u hive -w /workspace … bash -lc`).
-  Distinct name because daedalus' `tools_disabled` also hides host tools
-  with the same name.
-- If the runtime is unavailable the turn still runs: `container_exec`
-  returns a structured error the agent can report.
-- Containers run on the server machine **by default** — agents with a
-  `worker` tag execute on that remote machine (Phase 30): `WorkerRouter`
-  mirrors the `ContainerManager` interface and dispatches over the worker
-  channel (WorkerChannel, dedicated WS port 8423) to `hive-worker`, which
-  runs the identical podman steps locally. Secret env-file content is
-  rendered server-side and crosses the channel per-exec; screen sessions
-  tunnel back over the same channel (30.4, `ChannelSocket` lets the
-  existing noVNC splice run unchanged). Protocol + ops:
-  `docs/hive-worker.md`. TLS (30.5) is still pending — workers are
-  localhost/LAN-only until then.
-
-A browser/computer-use variant image
-(`Containerfile.hive-agent-browser`: chromium/playwright/Xvfb/noVNC) is
-shipped for Phase 6 (login handoff, no-API websites).
-
-## 7. Collaboration model
-
-Every roster agent gets these host-registered tools:
-
-| Tool | Purpose |
-|---|---|
-| `list_agents` | Roster discovery (id, name, role) |
-| `message_agent` | Send a task/question to a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
-| `send_file` | Deliver a file from the agent's /workspace into the company workspace on the hive-server (confined dest, 50 MB cap, opt-in overwrite, optional teammate notify) |
-| `create_agent` | Spin up a new teammate |
-| `container_exec` | (containerized agents) run commands in their sandbox |
-
-`message_agent` is **async** (rewritten 2026-08-25, commit 5ac1810 — the
-original synchronous nested-turn design hung on its first live test): the
-message posts to an auto-created pair thread ("A ↔ B", kind=group), the
-target is fanned in normally, and its reply fan-in wakes the asking agent
-there (generation-capped at 3). The exchange is visible in the client;
-agents do not relay answers back to the user's DM — the user watches the
-pair thread.
-
-This enables the **chief-of-staff pattern** without any special code: give
-an agent a coordinator role and it will discover, delegate, and even create
-specialists via tool calls.
-
-## 8. Approvals
-
-`require_approval=true` on a roster agent flips its daedalus
-`auto_approve` off. Then:
-
-- Host `execute_bash`: daedalus asks the sink → `request_command_approval`
-  parks a row in `approvals.db` and **blocks the turn** until a human
-  resolves it via REST (10 min timeout → `expired`/deny).
-- `container_exec`: daedalus doesn't gate host tools, so the tool enforces
-  the same queue itself.
-
-Statuses: `pending → approved | denied | expired`.
-
-## 9. Routines & skills
-
-- **Routines** (`routines.db`): named prompt + schedule (once/interval/
-  daily/weekly — same schedule spec the 1.x triggers used). Each routine owns a thread; the 30 s
-  scheduler tick posts due prompts into it via `ChatService`, so the agent's
-  reply lands in a thread the user can read. A routine that throws is
-  disabled rather than re-firing every tick.
-- **Skills:** two layers (see `docs/skills.md`).
-  *Global:* the server manages a shared library at
-  `~/.local/share/hivemind/skills/`; enabling a skill for an agent creates a
-  **relative symlink** in `<agent_dir>/.agents/skills/` (resolves through
-  daedalus' existing project-local discovery; container phase must bind-mount
-  the library at matching depth). *Local:* `POST /api/agents/:id/skills`
-  writes an Anthropic-format `SKILL.md` into the agent's own
-  `.agents/skills/<name>/` — teach-by-demonstration v1 = narrated steps saved
-  as a skill. Locals are agent-owned and deliberately not centrally managed.
-
-## 10. GTK client
-
-`hive-client` (gtkmm-4.0, Ubuntu 26.04): chat-first daily driver.
-
-- `ApiClient`: blocking OmniNet::HTTP::Client calls (libcurl was removed
-  repo-wide 2026-08-25 — OmniNet is the only HTTP stack), always on worker
-  threads; results marshalled to the GTK loop via a `Glib::Dispatcher` queue.
-- `HiveWindow`: roster sidebar (double-click → DM), thread list, chat
-  transcript (CSS bubbles), composer, approvals inbox with pending badge,
-  new-agent/new-thread dialogs. (The 1.x **Workflows** deep-link button was
-  removed in Phase 12 with the graph engine.)
-- Polling (1.5 s) drives messages/activity/approvals — no WebSocket yet.
-
-## 11. Web UI
-
-Zero-build static SPA (plain ES modules, hash router) served from
-`web/dist` by the catch-all route — the management console; chat stays in
-the GTK client. Pages: **Agents** (roster cards, containers, delete with
-cascade summary), **Tasks** (routine dashboard: toggles, run-now, add-task
-modal with dynamic schedule fields, one-shot cleanup), **Skills** (global
-library + per-agent enable chips), **Models** (providers/models over
-LLMStore), **Keys**, **Settings**. See `docs/web.md`. (Phase 12 removed the
-1.x node-graph workflow engine; the canvas port is a later phase.)
-
-## 12. Persistence map
-
-| What | Where |
-|---|---|
-| Roster (incl. `avatar` column) | `~/.local/share/hivemind/agents.db` |
-| Threads/messages | `~/.local/share/hivemind/threads.db` |
-| Approvals | `~/.local/share/hivemind/approvals.db` |
-| Routines | `~/.local/share/hivemind/routines.db` |
-| Global skill library | `~/.local/share/hivemind/skills/<name>/SKILL.md` |
-| Skill enable state | symlinks in `agents/<id>/.agents/skills/` (no DB) |
-| Client avatar SVGs | `hive-client/data/avatars/` (20 dept heads + `user.svg`, compiled into gresources) |
-| Agent runtime state (history, memory, skills) | `~/.local/share/hivemind/agents/<id>/` |
-| API keys | `~/.local/share/hivemind/auth.db` (hashes only) |
-| Server config (workspace_root) | `~/.local/share/hivemind/server.json` |
-| LLM providers/models (server) | `~/.local/share/hivemind/llm.db` (LLMStore — sole source of truth since Phase 13; daedalus SettingsStore is NOT consulted) |
-| Secrets (AES-GCM at rest) | `~/.local/share/hivemind/secrets.db` |
-| OAuth connectors | `~/.local/share/hivemind/connectors.db` |
-| Exec audit log | `~/.local/share/hivemind/exec_audit.db` |
-| Worker registry (Phase 30) | `~/.local/share/hivemind/workers.db` (hmwk_ key hashes, caps, last_seen) |
-| Containers/images/volumes | podman (rootless, per-user) |
-
-## 13. Concurrency rules
-
-1. **daedalus 0.9.6 shares global state** across Agent instances. All
-   construct/run/destruct is serialized by the recursive
-   `agent_exec_mutex()` (`AgentSerialization.h`). Correct, not concurrent.
-   Parallel agent execution needs a daedalus upgrade, not local hacks.
-2. One turn at a time per roster agent (`AgentHost::turn_mtx_`).
-3. Nested same-thread turns (delegation) are allowed; depth-capped at 4.
-4. SQLite stores open a fresh connection per operation — safe from any
-   thread, no shared handles.
-5. Chat turns run on detached threads; the HTTP handlers return immediately.
-6. GTK client: no blocking calls on the main loop, ever.
-
-## 14. Extension points
-
-- **New agent tool:** subclass `daedalus::BaseTool`, register in
-  `AgentHost::ensure_agent()`. Use a unique name (never a disabled
-  built-in's name).
-- **New store:** copy the `AgentStore` pattern (own .db file, fresh
-  connection per op, ctor takes a path for tests).
-- **New routes:** `routes/FooRoutes.{h,cpp}`, register in `main.cpp`
-  **before** `register_static_routes`. Parse multi-param paths with a
-  local `path_segments()` helper — OmniNet `pathParam(i)` is unreliable
-  for multi-param routes.
-- **New test:** `tests/test_foo.cpp` + `hivemind_test(test_foo)` in
-  `tests/CMakeLists.txt` (asserts stay live — tests build with `-UNDEBUG`).
+1. Client POSTs the message to the hub's thread API.
+2. Hub stores it and looks up each agent participant's worker placement.
+3. Hub sends a `task` op down that worker's WebSocket.
+4. Worker writes the task to the agent container's hive-agent stdin.
+5. hive-agent runs the turn (skills/MCP/shell all local to the container),
+   streaming `delta` events; the final `message` event carries the reply
+   plus any attachment metadata (e.g. images to show).
+6. Worker relays events up the channel; hub stores the reply as a
+   message; the client's poll picks it up and renders (images download
+   through the hub's file endpoint).

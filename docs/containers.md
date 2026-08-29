@@ -1,183 +1,42 @@
-# Containers — the agent's computer
+# Containers (v2) — the agent's home
 
-> HiveMind agents never run commands on the host. Every containerized agent
-> works inside its own rootless podman container as user `hive` with
-> passwordless sudo.
+Every HiveMind agent lives in a podman container on its worker. The
+container is not a sandbox we reach into — it is where the agent (the
+daedalus brain, packaged as **hive-agent**) actually runs.
 
----
+## Layout
 
-## Setup (Ubuntu 26.04)
+| Mount | Source | Mode | Purpose |
+|-------|--------|------|---------|
+| `/workspace` | worker's shared workspace dir | rw | Shared by all agents on the worker — this is how teammates collaborate on files |
+| `$HOME` | per-agent host dir (home volume) | rw | daedalus history, memory, config — survives container replacement |
+| `/skills` | worker's synced skills library | ro | Mounted at daedalus' global skills location; every agent sees the same skills |
 
-```bash
-sudo apt install -y podman
-# That's it for a single-user box — rootless podman works out of the box.
-# Optional (keep containers alive after logout):
-loginctl enable-linger $USER
-```
+Rootless podman with `--userns=keep-id`: files created in-container land
+on the host owned by the worker user.
 
-The base image builds itself on first use (first agent turn or
-`POST …/container/start`) — ~2–4 minutes once, layer-cached after:
+## The payload: hive-agent
 
-```bash
-# manual build, if you prefer:
-podman build -t localhost/hive-agent:latest \
-    -f hive-server/data/Containerfile.hive-agent hive-server/data
-```
+The container's main process is hive-agent, a thin daedalus host:
 
-## What an agent gets
+- Reads its identity + model credentials from env (injected by the worker
+  at spawn; credentials live on the worker host only).
+- Speaks NDJSON on stdio: tasks in, events out (delta / message /
+  approval / image / status).
+- Skills load from `/skills` automatically (daedalus scans its global
+  skills dir); skill helper scripts execute locally — same machine as the
+  brain, no sync tricks.
+- MCP servers are local child processes (stdio) or direct network
+  clients. Full MCP support, in-container, no shortcuts.
 
-| Inside the container | Host source |
-|---|---|
-| `/workspace` | **Shared company folder** — the `workspace_root` setting, bind-mounted into every agent container. Default `~/.local/share/hivemind/workspace`; set your own (e.g. `~/projects`) in the web UI **Settings → Company workspace** or `PUT /api/config` (admin key). Applies to containers created after the change. |
+## Lifecycle
 
-### Workspace layout (2026-08-25)
+The worker creates containers on agent spawn (`agent_spawn` op), starts/
+stops them on demand, restarts crashed agents, and reaps containers when
+an agent is deleted from the roster. The hub never talks to podman.
 
-The company drive follows a fixed skeleton — **seeded on first server
-start** from the canonical copy in `hive-server/data/workspace/` (only
-when `index.md` is missing; never overwrites your content). `index.md` at the root is the map —
-the agent system prompt tells every containerized agent to read it before
-doing file work, so conventions live in ONE file instead of per-agent
-config:
+## Networking
 
-```
-index.md                  ← the map + house rules (kebab-case, ISO dates,
-                            README.md per project, archive don't delete…)
-departments/
-  engineering/            README.md per department (scope, agents,
-  marketing/              conventions)
-  executive/
-  chief-of-staff/
-projects/<name>/          cross-department initiatives (README.md each)
-inbox/                    user drops requests/files here for agents
-attachments/<thread-id>/  chat uploads (server-managed)
-scratch/                  volatile temp work
-archive/                  finished work — moved, never deleted
-```
-
-Agents work in their department folder (or a project folder for cross-dept
-work) and keep README.md files current so any agent or human can pick work
-up cold. Add a department by creating `departments/<name>/` + README.md and
-adding one line to `index.md` — no agent/template changes needed.
-
-### Permissions model (2026-08-27)
-
-The image creates user `hive` with uid = the host server/worker user's
-uid (`--build-arg HIVE_UID=$(id -u)`, baked per machine at first image
-build) and containers run with `--userns=keep-id` — the uid maps 1:1, so
-`/workspace` is writable from BOTH the container AND the host (drop files
-in `inbox/` as the host user; agents read them inside). Without keep-id
-the container user maps to a host subuid and writes fail with EACCES.
-Worker agents (remote machines) still get per-agent workspaces on the
-worker — a shared folder can't cross machines.
-| `/home/hive` | **Private** per-agent bind mount from `~/.local/share/hivemind/agents/<id>/home` |
-| user `hive` + `sudo` (no password) | base image |
-| git, curl, python3+pip, build-essential, jq, … | base image |
-| limits: 4 GiB RAM, 2 CPUs | `podman create` flags |
-
-Agents install whatever else they need mid-task (`sudo apt install …`,
-`pip install …`); installed packages persist with the container.
-
-## How commands get there
-
-For containerized agents the host-side `execute_bash` is disabled and a
-host-registered tool **`container_exec`** takes over:
-
-```
-agent tool call → ContainerBashTool → podman exec -u hive -w /workspace \
-    hive-<agent_id> bash -lc '<command>'
-```
-
-### …or to another machine (Phase 30)
-
-When the agent's `worker` field names an enrolled worker, the same call is
-routed by **WorkerRouter** over the worker channel to that machine's
-`hive-worker`, which runs the identical podman steps there (container
-create/warm-up, exec with `HIVE_SECRET_*` env injection, chunked output
-streaming back into the same exec-log). The base image builds on first use
-**on the worker**. NOTE: worker agents get a per-agent workspace
-(`workspace-<name>`) local to the worker machine — NOT the shared company
-drive, and the `index.md` skeleton is NOT seeded there yet (candidate
-follow-up: sync the skeleton + optionally shared-drive content over the
-channel). See `docs/hive-worker.md`.
-
-## Managing containers
-
-```bash
-curl localhost:8421/api/agents/<id>/container/status
-curl -X POST localhost:8421/api/agents/<id>/container/start   # idempotent
-curl -X POST localhost:8421/api/agents/<id>/container/stop
-curl -X POST localhost:8421/api/agents/<id>/container/exec \
-     -H 'Content-Type: application/json' -d '{"command":"ls -la /workspace"}'
-```
-
-Or directly: `podman ps --filter name=hive-`.
-
-## Workspace modes
-
-| `workspace_mode` | Meaning |
-|---|---|
-| `shared` | Containerized; shared `/workspace` + private home |
-
-**Containers are mandatory** (decision 2026-08-25). The former `host`
-escape hatch (no container, no sudo, no isolation) is REMOVED — legacy
-`host` rows in agents.db normalize to `shared` on load. The web API
-`workspace_mode` field remains for forward compatibility but only
-`shared` is accepted/used.
-
-Department volumes (named volumes mounted into a chosen subset of agents)
-are a planned extension of the shared mode.
-
-## Browser/computer-use variant (Phase 6)
-
-`hive-server/data/Containerfile.hive-agent-browser` layers the browser +
-desktop stack onto the base image for agents that operate websites with no
-API — including the **login handoff** flow (agent pauses at a login wall,
-you authenticate via the live session view, control returns; the profile
-persists in `/home/hive`).
-
-> The display stack: Xvfb + openbox + x11vnc + noVNC/websockify +
-> playwright chromium (Phase 25, working — verified with a real noVNC
-> client). See docs/computer-use.md for the architecture, the wire path,
-> operating instructions, and the failed Wayland detour (Phase 24).
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `container_exec` returns "podman is not installed" | `apt install podman` on the server machine |
-| `newuidmap: write to uid_map failed` | running inside a nested/restricted container — run hive-server on a normal host/VM |
-| first turn takes minutes | base image is building (once per machine) |
-| agent can't see a teammate's file | it's in their private home; use `/workspace` for shared artifacts |
-| exec fails with "worker … offline/unavailable" | the agent's assigned worker is disconnected — check the web Workers page, restart hive-worker there, or PATCH the agent back to `"local"` |
-
-
-## Browser tools (Phase 6)
-
-Containerized agents get `browser_*` tools alongside `container_exec`:
-
-| Tool | Action |
-|---|---|
-| `browser_navigate` | open URL (returns final URL + title) |
-| `browser_click` / `browser_type` / `browser_press` | interact by CSS selector / key |
-| `browser_read` | page visible text (~6000 chars cap) |
-| `browser_screenshot` | viewport PNG into the workspace |
-| `browser_eval` | run JavaScript, JSON result |
-| `browser_tabs` / `browser_back` / `browser_reload` | session navigation |
-| `browser_fill_secret` | type a granted secret by NAME into a field |
-
-Implementation: `hive-server/data/browser_driver.py` is copied into the
-agent's home mount on each call and runs via `container_exec`. It connects
-to a persistent Chromium over CDP (auto-launched on the Xvfb display :99),
-so the browser the agent drives is the same one the user sees in the web
-UI's Computer view — login handoff = user takes over, authenticates,
-agent resumes on the same page. Profile persists at `~/.browser-profile`
-in the agent's home mount.
-
-`browser_fill_secret` checks the SecretStore grant on the host BEFORE any
-container call; the value rides in via exec's `HIVE_SECRET_<NAME>` env
-injection and the driver never echoes it — the secret never enters the
-LLM context, tool args, or tool output.
-
-Tools honor `require_approval` with the same approval queue as
-`container_exec` (approval summaries contain the action + target, never
-secret values).
+Containers share the worker host's network namespace by default (simple,
+matches v1 behavior). Agents that need isolation can be moved to a slirp
+netns later — the agent doesn't know the difference either way.

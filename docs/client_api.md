@@ -131,3 +131,9 @@ curl -s http://127.0.0.1:8481/ui/messages    # poll until the reply renders
 - **DM dedup is caller-scoped**: server-side `POST /api/threads` reuses an
   existing 1:1 thread only when the request has `"reuse_dm": true`
   (sent by the roster click, NOT by New Thread or this API's new-thread).
+
+## v2 note
+
+The UiApi is unchanged in v2 — it drives the local client UI for headless
+tests (xvfb). The client's SERVER-side API surface also keeps its v1
+shape (threads/messages/roster); only the hub's internals changed.

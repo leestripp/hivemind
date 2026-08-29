@@ -1,0 +1,30 @@
+# Rewrite design
+Our current Hive Mind design is to limited.
+We MUST re3-design, rewrite.
+
+# hve-server
+Comunications hub
+hive-worker connects to this server, cmms only
+Server only needs to manage hive-worker connections and route comms.
+This is far more flexable as we can still run a hive-worker on the droplet and have always online hive-agents running in their containers.
+
+# hive-worker
+Comms are routed from server->worker->agent and also agent->worker->server
+Spawns podman containers with hive-agent inside.
+hive-worker sends tasks to the hive-agent inside the container.
+hive-worker manages its containers with a shared /workspace so the hive-agent's it manages can work on the same /workspace together.
+Containers need full MCP support.
+
+# hive-agent - runs in the container
+NEW!
+The daedalus lib is already an agent, ready for this, it already has all features needed to run complex tasks etc..
+We needs Skills working correctly, even with scripts.
+MCP servers need to run fully, no shortcuts.
+Server needs a Skills manager, that can sync up all connected workers, hive-worker knows the correct locations for the Skills. Remember we need a Globals skills location that daedalus already knows. So maybe a -v shared virtual mount.
+
+# hive-client
+GTK4/gtkmm4 app on Linux
+Connects to the hive-server to display all comms/messages same as we have now.
+Tasks sent from the client are sent to the server which routes to the correct agent.
+Can display images and videos, via streaming or upload download.
+Current design of this app is solid.
