@@ -1,9 +1,12 @@
 # ⚡ HiveMind 2.0
 
-A **self-hosted team of always-on AI agents** for Linux. Create named
-teammates, message them like colleagues, and hand off real work — they run
-in their own podman containers with sudo, remember everything, coordinate
-with each other, and only come back when they need your approval.
+![HiveMind](resources/banner.png)
+
+A **self-hosted team of always-on AI agents** for Linux — spread across as
+many machines as you own. Create named teammates, message them like
+colleagues, and hand off real work — they run in their own podman
+containers with sudo, remember everything, share files with each other,
+and only come back when they need your approval.
 
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
@@ -24,8 +27,10 @@ with each other, and only come back when they need your approval.
   whatever CLI tools the job needs. Shared company `/workspace` volume +
   private `/home/hive` per agent.
 - **Teamwork** — agents discover, message and delegate to each other
-  (`list_agents` / `message_agent` / `create_agent` tools). A chief-of-staff
-  agent can run the whole team.
+  (`list_agents` / `message_agent` / `create_agent` tools), and deliver
+  files to each other across machines with `send_file` — an agent on a
+  remote rig drops finished work straight into the company workspace.
+  A chief-of-staff agent can run the whole team.
 - **Approvals** — flip `require_approval` on an agent and its commands park
   in an approval queue until you approve/deny them.
 - **Distributed workers** (`hive-worker`) — enroll any Linux machine and
@@ -34,7 +39,9 @@ with each other, and only come back when they need your approval.
   Enroll with `hive-server enroll-worker <name>` (key shown once), run
   `hive-worker --server ws://<server>:8423 --key hmwk_… --name <name>`
   on the remote host, then set the agent's `worker` field. Live status on
-  the web **Workers** page.
+  the web **Workers** page. Agents on the same rig share one `/workspace`
+  (per-rig company drive), so they can collaborate on the same project
+  files; `send_file` moves files between rigs and the server.
 - **Live screen share** — every agent's container runs a full desktop
   (Xvfb + x11vnc + noVNC + Chromium); watch or take over from the client's
   **Computer** button — works for local *and* worker-hosted agents
@@ -100,7 +107,8 @@ hivemindctl    build/start/stop/status/logs/client/test
   (verified live — see docs/deploy.md §4b)
 - Workers authenticate over `wss://` with per-worker keys; TLS verified
   (OmniNet client enforces cert verification against the system CA)
-- Agent sandboxes: rootless podman containers, per-agent workspaces
+- Agent sandboxes: rootless podman containers; workspace writes are path-confined
+  (send_file destinations can't escape the company drive)
 
 ## API sketch
 
