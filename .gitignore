@@ -1,7 +1,7 @@
 # Git
 
 build/
-build-hive-agent/
+build-*/
 .daedalus/
 lint-results.yaml
 compile_commands.json
