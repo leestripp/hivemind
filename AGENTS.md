@@ -173,6 +173,7 @@ all roster agents get the collaboration/routine tools:
 | `send_file` | Deliver a file from the agent's /workspace to the company workspace on the server (Phase 31). Confined dest (parent must exist), 50MB cap, `overwrite` opt-in, optional `notify` teammate. Remote agents: bytes ride the worker channel (`file_fetch` op). |
 | `create_agent` | Add a teammate; optional `worker` field places the container on an enrolled `hive-worker`. |
 | `list_workers` | Online/offline worker rigs. |
+| `search_skills` / `install_skill` | Skill marketplace discovery: keyword-search the registry (`web/dist/skills-registry.json`), then git-install into the shared library + auto-enable for the caller. Agents should search here FIRST before web-searching for a capability. |
 | `save_routine` / `list_routines` / `update_routine` / `delete_routine` | Own-routines-only; `id` or name accepted. |
 
 ### Routine schedules (UTC only)
