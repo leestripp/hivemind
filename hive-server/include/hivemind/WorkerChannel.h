@@ -62,6 +62,19 @@ public:
     /// False when the worker is offline.
     bool send(const std::string& name, const nlohmann::json& frame);
 
+    /// Phase 31: synchronous file fetch from a worker's shared workspace.
+    /// Sends file_fetch {agent, path} (path is the agent-visible
+    /// /workspace-relative path); the worker reads it from ITS host
+    /// workspace dir and streams chunked base64 file_data frames, then
+    /// file_done (or file_error). Data comes back DECODED (raw bytes).
+    /// nullopt when the worker is offline; ok=false + error on failure.
+    struct FileResult { bool ok = false; std::string data;
+                        std::string error; int64_t size = 0; };
+    std::optional<FileResult> fetch_file(const std::string& worker,
+                                         const std::string& agent,
+                                         const std::string& path,
+                                         int timeout_s = 120);
+
     /// Phase 30.4: synchronous screen control on the worker (the worker
     /// runs the podman steps ContainerManager runs locally). image +
     /// resolution are passed through from server config.
@@ -126,6 +139,17 @@ private:
         ScreenResult result;
     };
     std::unordered_map<std::string, std::shared_ptr<ScreenJob>> screen_jobs_;
+
+    // 31: file_fetch jobs (id → waiter)
+    struct FileJob {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        std::string b64;        // accumulated base64 chunks
+        std::string error;
+        int64_t size = 0;
+    };
+    std::unordered_map<std::string, std::shared_ptr<FileJob>> file_jobs_;
 
     // 30.4: stream_open acknowledgements (sid → waiter)
     struct StreamAck {

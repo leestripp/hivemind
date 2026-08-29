@@ -67,6 +67,26 @@ int main() {
     fs::create_symlink(outside, tmp / "sneaky", ec);
     if (!ec) assert(!resolve_confined(tmp, "sneaky"));
 
+    // ── resolve_confined_create (send_file, Phase 31) ─────────────────
+    // New file in an existing confined dir: allowed.
+    auto nf = resolve_confined_create(tmp, "sub/deep/new.txt");
+    assert(nf && nf->filename() == "new.txt");
+    assert(!fs::exists(*nf));
+    // Existing file resolves too.
+    auto ex = resolve_confined_create(tmp, "sub/deep/f.txt");
+    assert(ex && fs::exists(*ex));
+    // Rejections: escapes, absolute, missing parent, empty, bare root.
+    assert(!resolve_confined_create(tmp, ".."));
+    assert(!resolve_confined_create(tmp, "../evil.txt"));
+    assert(!resolve_confined_create(tmp, "sub/../../evil.txt"));
+    assert(!resolve_confined_create(tmp, "/etc/evil.txt"));
+    assert(!resolve_confined_create(tmp, "no/such/dir/f.txt"));
+    assert(!resolve_confined_create(tmp, ""));
+    // Symlinked parent escaping root rejected.
+    if (!ec) assert(!resolve_confined_create(tmp, "sneaky/f.txt"));
+    // Existing symlink target escaping root rejected.
+    if (!ec) assert(!resolve_confined_create(tmp, "sneaky"));
+
     fs::remove_all(tmp);
     fs::remove(outside);
     std::cout << "test_files: OK\n";

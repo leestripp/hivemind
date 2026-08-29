@@ -25,7 +25,10 @@
 #include <map>
 #include <memory>
 #include <thread>
+#include <filesystem>
+#include <fstream>
 
+namespace fs = std::filesystem;
 using json = nlohmann::json;
 using OmniNet::WebSocket::Connection;
 
@@ -171,6 +174,60 @@ int main(int argc, char* argv[]) {
                         try { send_frame(done); } catch (...) {}
                         std::cerr << "worker: exec " << id << " done, exit="
                                   << done["exit_code"].get<int>() << "\n";
+                    }).detach();
+                } else if (op == "file_fetch") {
+                    // Phase 31: read a file from THIS rig's shared
+                    // workspace and stream it back as base64 chunks.
+                    const std::string id = frame.value("id", "");
+                    const std::string path = frame.value("path", "");
+                    std::thread([&, id, path] {
+                        auto fail = [&](const std::string& err) {
+                            try { send_frame({{"op","file_error"},
+                                              {"id",id},{"error",err}}); }
+                            catch (...) {}
+                        };
+                        // Confine: path must be relative, no "..".
+                        std::string rel = path;
+                        while (!rel.empty() && rel.front() == '/')
+                            rel.erase(rel.begin());
+                        if (rel.rfind("workspace/", 0) == 0)
+                            rel.erase(0, 10);   // strip agent-visible prefix
+                        if (rel.empty() ||
+                            rel.find("..") != std::string::npos) {
+                            fail("bad path");
+                            return;
+                        }
+                        const fs::path fpath =
+                            fs::path{std::getenv("HOME")} /
+                            ".local/share/hive-worker/workspace" / rel;
+                        std::error_code ec;
+                        if (!fs::is_regular_file(fpath, ec)) {
+                            fail("not found: /workspace/" + rel);
+                            return;
+                        }
+                        const auto size = fs::file_size(fpath, ec);
+                        if (ec || size > 50u * 1024 * 1024) {
+                            fail(ec ? "stat failed" : "file too large (50MB cap)");
+                            return;
+                        }
+                        std::ifstream in(fpath, std::ios::binary);
+                        if (!in) { fail("read failed"); return; }
+                        std::string buf(192 * 1024, '\0');
+                        while (in) {
+                            in.read(buf.data(), (std::streamsize)buf.size());
+                            const auto got = (size_t)in.gcount();
+                            if (got == 0) break;
+                            try {
+                                send_frame({{"op","file_chunk"},{"id",id},
+                                    {"data", OmniNet::Crypto::base64Encode(
+                                        std::span<const uint8_t>{
+                                            (const uint8_t*)buf.data(), got})}});
+                            } catch (...) { return; }
+                        }
+                        try {
+                            send_frame({{"op","file_done"},{"id",id},
+                                        {"size",(int64_t)size}});
+                        } catch (...) {}
                     }).detach();
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.

@@ -10,11 +10,17 @@
 #include "hivemind/RoutineStore.h"
 #include "hivemind/Schedule.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/WorkerRouter.h"
+#include "hivemind/ServerConfig.h"
+#include "hivemind/Files.h"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <cstdlib>
 #include <sys/wait.h>
 
+namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 
@@ -148,6 +154,106 @@ json MessageAgentTool::execute(const json& args, daedalus::HostToolContext&) {
     } catch (const std::exception& e) {
         return error(std::string{"delivery failed: "} + e.what());
     }
+}
+
+// ─── SendFileTool ───────────────────────────────────────────────────────────
+
+json SendFileTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"path", {{"type", "string"},
+                  {"description", "Source file in YOUR /workspace (e.g. 'drafts/report.md' or '/workspace/drafts/report.md')."}}}},
+             json{{"dest", {{"type", "string"},
+                  {"description", "Destination path relative to the company workspace root (e.g. 'departments/engineering/report.md'). The folder must already exist."}}}},
+             json{{"overwrite", {{"type", "boolean"},
+                  {"description", "Replace an existing file at dest (default false)."}}}},
+             json{{"notify", {{"type", "string"},
+                  {"description", "Optional teammate name to notify in your shared thread when the file lands."}}}}},
+            {"path", "dest"}));
+}
+
+json SendFileTool::execute(const json& args, daedalus::HostToolContext&) {
+    std::string path = args.value("path", "");
+    std::string dest = args.value("dest", "");
+    const bool overwrite = args.value("overwrite", false);
+    const std::string notify = args.value("notify", "");
+    if (path.empty() || dest.empty())
+        return error("need 'path' and 'dest'");
+
+    // Normalise the source to a /workspace-relative path.
+    std::string rel = path;
+    while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+    if (rel.rfind("workspace/", 0) == 0) rel.erase(0, 10);
+    if (rel.empty() || rel.find("..") != std::string::npos)
+        return error("path must be a file inside your /workspace");
+
+    constexpr size_t kMaxBytes = 50u * 1024 * 1024;
+    const fs::path ws_root = ServerConfig::instance().workspace_root();
+
+    // ── fetch the bytes ─────────────────────────────────────────────
+    std::string bytes;
+    if (auto remote = WorkerRouter::fetch_file(sender_id_, rel)) {
+        if (!remote->ok) return error("fetch failed: " + remote->error);
+        bytes = std::move(remote->data);
+    } else {
+        // Local agent: the company workspace IS the agent's /workspace.
+        auto src = hm::files::resolve_confined(ws_root, rel);
+        if (!src) return error("not found in workspace: " + rel);
+        std::error_code ec;
+        const auto sz = fs::file_size(*src, ec);
+        if (ec) return error("stat failed");
+        if (sz > kMaxBytes) return error("file too large (50MB cap)");
+        std::ifstream in(*src, std::ios::binary);
+        if (!in) return error("read failed");
+        bytes.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+        // Same-dir no-op guard: sending a file onto itself.
+        auto dst_check = hm::files::resolve_confined_create(ws_root, dest);
+        if (dst_check && fs::equivalent(*src, *dst_check, ec) && !ec)
+            return error("source and destination are the same file");
+    }
+    if (bytes.size() > kMaxBytes) return error("file too large (50MB cap)");
+
+    // ── confined write into the company workspace ───────────────────
+    auto dst = hm::files::resolve_confined_create(ws_root, dest);
+    if (!dst)
+        return error("bad destination (must be inside the company "
+                     "workspace, in an existing folder)");
+    std::error_code ec;
+    if (fs::exists(*dst, ec) && !overwrite)
+        return error("'" + dest + "' already exists (pass overwrite=true "
+                     "to replace it)");
+
+    {
+        std::ofstream out(*dst, std::ios::binary | std::ios::trunc);
+        if (!out) return error("write failed (permissions?)");
+        out.write(bytes.data(), (std::streamsize)bytes.size());
+        if (!out) return error("write failed mid-file");
+    }
+
+    // ── optional teammate notification ──────────────────────────────
+    json res{{"delivered", true},
+             {"dest", dest},
+             {"bytes", (int64_t)bytes.size()}};
+    if (!notify.empty()) {
+        auto target = find_agent(agents_, notify);
+        auto* chat = registry_.chat_service();
+        if (target && chat && target->id != sender_id_) {
+            auto me = agents_.get_agent(sender_id_);
+            const std::string from = me ? me->name : "A teammate";
+            const double kb = (double)bytes.size() / 1024.0;
+            char sz[64];
+            std::snprintf(sz, sizeof sz, "%.1f KB", kb);
+            try {
+                chat->post_agent_message(
+                    sender_id_, target->id,
+                    "📎 " + from + " sent a file to the company workspace: "
+                    "`/workspace/" + dest + "` (" + sz + ")");
+                res["notified"] = target->name;
+            } catch (...) {}
+        }
+    }
+    return ok(res);
 }
 
 // ─── CreateAgentTool ────────────────────────────────────────────────────────

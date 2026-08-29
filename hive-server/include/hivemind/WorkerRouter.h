@@ -47,6 +47,14 @@ public:
         const std::string& agent_id, const std::string& command,
         int timeout_s);
 
+    /// Phase 31: nullopt = local agent, read the file from the host
+    /// workspace directly. For remote agents fetches the file over the
+    /// worker channel (raw bytes in FileResult::data). Throws when the
+    /// assigned worker is offline.
+    static std::optional<WorkerChannel::FileResult> fetch_file(
+        const std::string& agent_id, const std::string& path,
+        int timeout_s = 120);
+
     /// 30.4: nullopt = local agent, use ContainerManager screen calls.
     /// For worker agents: screen control over the channel (image +
     /// resolution passed from server config; the worker runs the same

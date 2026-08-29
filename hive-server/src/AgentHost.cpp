@@ -381,6 +381,8 @@ void AgentHost::ensure_agent() {
     agent_->register_tool(std::make_unique<ListAgentsTool>(agents_));
     agent_->register_tool(
         std::make_unique<MessageAgentTool>(info_.id, agents_, registry_));
+    agent_->register_tool(
+        std::make_unique<SendFileTool>(info_.id, agents_, registry_));  // Phase 31
     agent_->register_tool(std::make_unique<CreateAgentTool>(agents_));
     agent_->register_tool(std::make_unique<ListWorkersTool>());   // Phase 30
     agent_->register_tool(

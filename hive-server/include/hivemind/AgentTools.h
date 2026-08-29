@@ -71,6 +71,40 @@ private:
     AgentRegistry& registry_;
 };
 
+/// send_file — deliver a file from the agent's /workspace into the
+/// company workspace on the hive-server (Phase 31). For agents on
+/// hive-worker rigs the bytes ride the worker channel; for local agents
+/// it is a confined copy inside the shared drive. Destination is a
+/// relative path under the company workspace root (parent must exist);
+/// overwrite requires overwrite=true. Optional 'notify' posts a note to
+/// a teammate's shared thread.
+class SendFileTool final : public daedalus::BaseTool {
+public:
+    SendFileTool(std::string sender_id, AgentStore& agents,
+                 AgentRegistry& registry)
+        : sender_id_(std::move(sender_id)), agents_(agents), registry_(registry) {}
+    [[nodiscard]] std::string get_name() const override { return "send_file"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Send a file from your /workspace to the company workspace on "
+               "the hive-server. Use this to deliver finished work (reports, "
+               "builds, designs) so teammates on other machines can see it. "
+               "'path' is the source file in YOUR workspace, 'dest' is where "
+               "it lands in the company workspace (e.g. "
+               "'departments/engineering/report.md' — the folder must "
+               "already exist). Existing files are NOT overwritten unless "
+               "overwrite=true. Max 50 MB. Optionally 'notify' a teammate "
+               "by name — they get a thread message saying the file arrived.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+
+private:
+    std::string sender_id_;
+    AgentStore& agents_;
+    AgentRegistry& registry_;
+};
+
 /// create_agent — spin up a new named teammate on the roster.
 class CreateAgentTool final : public daedalus::BaseTool {
 public:

@@ -63,6 +63,24 @@ std::optional<ContainerManager::ExecResult> WorkerRouter::exec(
     return res;
 }
 
+std::optional<WorkerChannel::FileResult> WorkerRouter::fetch_file(
+        const std::string& agent_id, const std::string& path,
+        int timeout_s) {
+    if (!g_agents || !g_channel) return std::nullopt;   // not installed
+    auto agent = g_agents->get_agent(agent_id);
+    if (!agent || agent->worker == "local") return std::nullopt;
+
+    const std::string& wname = agent->worker;
+    if (!g_channel->is_online(wname))
+        throw std::runtime_error("worker '" + wname + "' is offline");
+
+    auto r = g_channel->fetch_file(wname, agent_id, path, timeout_s);
+    if (!r)
+        throw std::runtime_error("worker '" + wname +
+                                 "' went offline mid-fetch");
+    return r;
+}
+
 // ── 30.4: screen passthroughs ───────────────────────────────────────────
 std::optional<WorkerChannel::ScreenResult> WorkerRouter::screen_ctl(
         const std::string& agent_id, const std::string& action) {

@@ -182,6 +182,28 @@ void WorkerChannel::handle(Connection& ws) {
                     job->cv.notify_all();
                 }
             }
+        } else if (op == "file_chunk" || op == "file_done" ||
+                   op == "file_error") {
+            std::shared_ptr<FileJob> fj;
+            {
+                std::lock_guard lk(m_);
+                auto it = file_jobs_.find(frame.value("id", ""));
+                if (it != file_jobs_.end()) fj = it->second;
+            }
+            if (fj) {
+                std::lock_guard jl(fj->m);
+                if (op == "file_chunk") {
+                    fj->b64 += frame.value("data", "");
+                } else if (op == "file_error") {
+                    fj->error = frame.value("error", "unknown");
+                    fj->done = true;
+                    fj->cv.notify_all();
+                } else {
+                    fj->size = frame.value("size", 0);
+                    fj->done = true;
+                    fj->cv.notify_all();
+                }
+            }
         } else if (op == "screen_result") {
             std::shared_ptr<ScreenJob> sj;
             {
@@ -262,6 +284,51 @@ void WorkerChannel::handle(Connection& ws) {
         }
         std::cerr << "[workers] " << st->name << " disconnected\n";
     }
+}
+
+// ── 31: file fetch (worker → server) ────────────────────────────────────
+std::optional<WorkerChannel::FileResult>
+WorkerChannel::fetch_file(const std::string& worker, const std::string& agent,
+                          const std::string& path, int timeout_s) {
+    auto job = std::make_shared<FileJob>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;   // offline
+        id = "f" + std::to_string(next_job_++);
+        file_jobs_[id] = job;
+    }
+    bool sent = send(worker, json{{"op","file_fetch"},{"id",id},
+                                  {"agent",agent},{"path",path}});
+    if (!sent) {
+        std::lock_guard lk(m_);
+        file_jobs_.erase(id);
+        return std::nullopt;
+    }
+
+    std::unique_lock lk(job->m);
+    bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                                 [&] { return job->done; });
+    FileResult r;
+    r.error = job->error;
+    r.size = job->size;
+    std::string b64 = std::move(job->b64);
+    lk.unlock();
+    {
+        std::lock_guard g(m_);
+        file_jobs_.erase(id);
+    }
+    if (!done) {
+        r.ok = false;
+        if (r.error.empty()) r.error = "worker file fetch timed out";
+        return r;
+    }
+    if (!r.error.empty()) { r.ok = false; return r; }
+    auto dec = OmniNet::Crypto::base64Decode(b64);
+    if (!dec) { r.ok = false; r.error = "base64 decode failed"; return r; }
+    r.data.assign(dec->begin(), dec->end());
+    r.ok = true;
+    return r;
 }
 
 // ── 30.4: screen control ────────────────────────────────────────────────

@@ -37,4 +37,11 @@ std::filesystem::path unique_path(const std::filesystem::path& dir,
 std::optional<std::filesystem::path>
 resolve_confined(const std::filesystem::path& root, const std::string& rel);
 
+/// Same confinement as resolve_confined but for WRITES: the target itself
+/// may not exist yet (it will be created); its PARENT must exist and be
+/// confined. Rejects absolute paths, ".." escapes, and symlink hops.
+std::optional<std::filesystem::path>
+resolve_confined_create(const std::filesystem::path& root,
+                        const std::string& rel);
+
 } // namespace hm::files
