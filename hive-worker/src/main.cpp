@@ -356,6 +356,43 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
+                } else if (op == "file_push") {
+                    // Phase 33 D: server → worker file into the shared
+                    // workspace. Chunks carry first/eof flags.
+                    const std::string id = frame.value("id", "");
+                    std::string rel = frame.value("path", "");
+                    while (!rel.empty() && rel.front() == '/')
+                        rel.erase(rel.begin());
+                    if (rel.empty() || rel.find("..") != std::string::npos) {
+                        try { send_frame({{"op","file_push_ack"},{"id",id},
+                                          {"ok",false},{"error","bad path"}}); }
+                        catch (...) {}
+                    } else {
+                        auto dec = OmniNet::Crypto::base64Decode(
+                            frame.value("data", ""));
+                        const fs::path fp =
+                            fs::path{std::getenv("HOME")} /
+                            ".local/share/hive-worker/workspace" / rel;
+                        std::error_code ec;
+                        fs::create_directories(fp.parent_path(), ec);
+                        const bool first = frame.value("first", false);
+                        std::ofstream out(fp, std::ios::binary |
+                            (first ? std::ios::trunc : std::ios::app));
+                        if (dec)
+                            out.write((const char*)dec->data(),
+                                      (std::streamsize)dec->size());
+                        out.close();
+                        if (frame.value("eof", false)) {
+                            const auto sz = fs::file_size(fp, ec);
+                            try { send_frame({{"op","file_push_ack"},
+                                    {"id",id},{"ok",(bool)dec},
+                                    {"bytes",(int64_t)(ec?0:sz)},
+                                    {"error", dec ? "" : "bad base64"}}); }
+                            catch (...) {}
+                            std::cerr << "[files] pushed " << rel << " ("
+                                      << (ec?0:sz) << " B)\n";
+                        }
+                    }
                 } else if (op == "mcp_rpc") {
                     // Phase 33: tunnel a JSON-RPC call to an MCP server
                     // running inside the agent's container.

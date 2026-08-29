@@ -1,5 +1,7 @@
 // FileRoutes.cpp — Phase 18: chat attachments + shared-workspace files API.
 #include "hivemind/routes/FileRoutes.h"
+#include "hivemind/AgentStore.h"
+#include "hivemind/WorkerChannel.h"
 
 #include "hivemind/Files.h"
 #include "hivemind/ServerConfig.h"
@@ -48,7 +50,9 @@ json entry_json(const fs::path& root, const fs::directory_entry& e) {
 } // namespace
 
 void register_file_routes(OmniNet::HTTP::Server& server,
-                          ThreadStore& threads) {
+                          ThreadStore& threads,
+                          AgentStore& agents,
+                          WorkerChannel* wchannel) {
     // ── POST /api/threads/:id/attachments?name=<filename> ─────────────
     // Raw request body is the file content (no multipart parsing; the
     // client sets ?name=). Saved into the shared workspace so containers
@@ -147,6 +151,49 @@ void register_file_routes(OmniNet::HTTP::Server& server,
                            target->filename().string() + "\"");
             resp.setBody(data);
             apply_cors(resp);
+        });
+
+    // ── POST /api/agents/:id/push-file?path=<workspace-rel> ───────────
+    // Phase 33 D: push a file to the agent's WORKER rig workspace
+    // (server→worker over the channel). Local agents: 400 (write to the
+    // server workspace via the attachments endpoint instead). Raw body
+    // = file content, 10 MB cap (channel overhead on top).
+    server.post("/api/agents/:id/push-file",
+        [&agents, wchannel](const OmniNet::HTTP::Request& req,
+                            OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api agents :id push-file
+            if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
+            auto agent = agents.get_agent(seg[2]);
+            if (!agent) { send_error(resp, 404, "agent not found"); return; }
+            if (agent->worker.empty() || agent->worker == "local") {
+                send_error(resp, 400,
+                    "agent runs locally — use /api/threads/:id/attachments");
+                return;
+            }
+            if (!wchannel || !wchannel->is_online(agent->worker)) {
+                send_error(resp, 503, "worker offline"); return;
+            }
+            std::string rel = req.queryParameter("path", "");
+            while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+            if (rel.empty() || rel.find("..") != std::string::npos) {
+                send_error(resp, 400, "bad path"); return;
+            }
+            const auto body = req.body();
+            if (body.empty()) { send_error(resp, 400, "empty body"); return; }
+            if (body.size() > kMaxUpload) {
+                send_error(resp, 413, "file too large (10 MB max)"); return;
+            }
+            auto r = wchannel->push_file(agent->worker, rel,
+                std::string(reinterpret_cast<const char*>(body.data()),
+                            body.size()));
+            if (!r) { send_error(resp, 503, "worker went offline"); return; }
+            if (!r->ok) { send_error(resp, 502, r->error); return; }
+            send_json(resp, json{{"pushed", rel},
+                                 {"worker", agent->worker},
+                                 {"bytes", r->bytes},
+                                 {"note", "file is on the RIG at /workspace/" +
+                                          rel + " — it was NOT copied to the "
+                                          "server"}}, 201);
         });
 }
 

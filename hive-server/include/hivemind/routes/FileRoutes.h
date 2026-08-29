@@ -18,6 +18,10 @@
 #include <OmniNet.h>
 
 class ThreadStore;
+class AgentStore;
+class WorkerChannel;
 
 void register_file_routes(OmniNet::HTTP::Server& server,
-                          ThreadStore& threads);
+                          ThreadStore& threads,
+                          AgentStore& agents,          // Phase 33 D
+                          WorkerChannel* wchannel);    // Phase 33 D (nullable)

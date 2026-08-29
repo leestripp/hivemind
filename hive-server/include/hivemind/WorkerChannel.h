@@ -114,6 +114,16 @@ public:
                                          const std::string& agent,
                                          const std::string& skill,
                                          int timeout_s = 180);
+    /// Phase 33 D: push a file into the worker's shared workspace
+    /// (server→worker; the reverse of fetch_file). rel_path is
+    /// /workspace-relative; the worker confines it under
+    /// ~/.local/share/hive-worker/workspace/. Chunked base64 frames
+    /// (first/eof flags), acked via file_push_ack. nullopt offline.
+    std::optional<PushResult> push_file(const std::string& worker,
+                                        const std::string& rel_path,
+                                        const std::string& data,
+                                        int timeout_s = 120);
+
     /// Phase 33: remove an enabled skill on the worker (unlink + delete the
     /// rig-local copy).
     std::optional<PushResult> remove_skill(const std::string& worker,

@@ -232,7 +232,7 @@ void WorkerChannel::handle(Connection& ws) {
                 mj->done = true;
                 mj->cv.notify_all();
             }
-        } else if (op == "skill_ack") {
+        } else if (op == "skill_ack" || op == "file_push_ack") {
             std::shared_ptr<SkillJob> sj;
             {
                 std::lock_guard lk(m_);
@@ -752,4 +752,55 @@ WorkerChannel::mcp_rpc(const std::string& worker, const std::string& agent,
     lk.unlock();
     if (!done) { r.ok = false; r.error = "mcp rpc timed out"; }
     return r;
+}
+
+std::optional<WorkerChannel::PushResult>
+WorkerChannel::push_file(const std::string& worker, const std::string& rel_path,
+                         const std::string& data, int timeout_s) {
+    PushResult res;
+    if (rel_path.empty() || rel_path.find("..") != std::string::npos ||
+        rel_path.front() == '/') {
+        res.error = "bad path";
+        return res;
+    }
+    auto job = std::make_shared<SkillJob>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;
+        id = "p" + std::to_string(next_job_++);
+        skill_jobs_[id] = job;
+    }
+    struct JobGuard {
+        WorkerChannel* ch; std::string id;
+        ~JobGuard() { std::lock_guard lk(ch->m_); ch->skill_jobs_.erase(id); }
+    } guard{this, id};
+
+    constexpr size_t kChunk = 192 * 1024;
+    size_t off = 0;
+    bool first = true;
+    do {
+        const size_t n = std::min(kChunk, data.size() - off);
+        const bool eof = (off + n) >= data.size();
+        if (!send(worker, json{{"op","file_push"},{"id",id},
+                {"path",rel_path},{"first",first},{"eof",eof},
+                {"data", OmniNet::Crypto::base64Encode(
+                    std::span<const uint8_t>{
+                        (const uint8_t*)data.data() + off, n})}})) {
+            res.error = "worker offline mid-push";
+            return res;
+        }
+        off += n;
+        first = false;
+    } while (off < data.size() || (data.empty() && first));
+    // empty file: the single frame above (first=true eof=true) covers it
+
+    std::unique_lock lk(job->m);
+    const bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                                       [&] { return job->done; });
+    res = job->result;
+    lk.unlock();
+    if (!done) { res.ok = false; res.error = "worker file push timed out"; }
+    if (res.bytes == 0) res.bytes = (int64_t)data.size();
+    return res;
 }

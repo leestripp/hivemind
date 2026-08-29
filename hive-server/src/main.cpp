@@ -253,7 +253,8 @@ int main(int argc, char* argv[]) {
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,
                            agent_registry, chat_service, routine_store);
-    register_file_routes(server, thread_store);
+    register_file_routes(server, thread_store, agent_store,
+                         &worker_channel);
     register_connector_routes(server, connector_store, secret_store);
     register_container_routes(server, agent_store);
     register_approval_routes(server, approval_store, agent_store);
