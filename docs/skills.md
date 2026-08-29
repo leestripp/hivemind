@@ -104,3 +104,13 @@ Local skills flow the other way: you (or a routine) teach the agent, and the
 agent saves what it learned into its own `.agents/skills/` via the teach
 flow (`POST /api/agents/:id/skills`). Those are the agent's to keep, refine,
 or forget — they never appear on the global Skills page.
+
+## Worker agents (Phase 33)
+
+Enabling a skill for an agent that runs on a hive-worker rig syncs the
+skill directory to the rig over the worker channel and mounts it
+in-container at `/skills/<name>` (read-only), linked from
+`~/.agents/skills/`. Sync is automatic on enable, on `install_skill`, and
+on every worker reconnect; disable/remove deletes the rig copy. The
+agent's brain reads skill instructions from the server-side link either
+way — heavy skill payloads (renders, builds) run on the rig.

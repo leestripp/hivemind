@@ -152,3 +152,43 @@ workspaces, worker-to-worker migration of running containers.
    upgraded WS socket** — 5s of worker silence read as peer-closed and
    killed execs mid-`podman create`. The channel sets
    `cfg.keepAliveTimeout = 0` (blocking reads).
+
+## Phase 33 — worker-native skills, MCP tunnel, file push
+
+Three more channel ops make the rig self-sufficient (no inbound ports, no
+files left behind on the server):
+
+- **Skill sync** (`skill_begin`/`skill_file`/`skill_end` → `skill_ack`,
+  `skill_remove`): enabling a global skill for a worker agent streams the
+  skill directory (base64 chunks, 50 MB cap) into
+  `~/.local/share/hive-worker/skills/<name>/` and symlinks the agent's
+  container home `.agents/skills/<name>` → `/skills/<name>` (the skills
+  library is bind-mounted `/skills:ro`). The server re-pushes enabled
+  skills on every worker reconnect (reconcile), so rig state survives
+  reinstalls. Removal deletes both copy and link.
+- **MCP tunnel** (`mcp_rpc` → `mcp_rpc_reply`): per-agent MCP servers are
+  declared in the roster (`PATCH /api/agents/:id` `{"mcp_servers":
+  [{"name","command","args":[],"env":{}}]}`). For worker agents, AgentHost
+  seeds the agent's per-agent daedalus SettingsStore with a
+  `streamable-http` entry pointing at the loopback **McpBridge**
+  (`http://127.0.0.1:8424/mcp/<agent>/<server>`, `mcp_bridge_port` in
+  server.json) and registers the real spawn spec with the bridge. Each
+  JSON-RPC POST becomes an `mcp_rpc` op; the worker lazily spawns the
+  server INSIDE the agent's container (`podman exec -i hive-<agent> …`),
+  bridges newline-delimited stdio, serializes per (agent, server), and
+  reaps processes idle >10 min. Local agents get `stdio` entries running
+  `podman exec -i` directly from the server. Notifications (no JSON-RPC
+  id) are fire-and-forget (HTTP 202).
+  Debug: `GET /api/agents/:id/mcp-tools` shows the seeded config, what
+  daedalus loaded, and which `mcp__<server>__<tool>` names are registered.
+- **File push** (`file_push` → `file_push_ack`): `POST
+  /api/agents/:id/push-file?path=<workspace-rel>` (raw body, 10 MB cap)
+  streams a user-supplied input INTO the rig's shared workspace. The file
+  lands on the rig only — it is never copied to the server (file
+  locality: artifacts stay where produced; only requested files cross,
+  via the existing `file_fetch`).
+
+Verified live (2026-08-29): remotion-create skill synced to dev-rig and a
+worker agent scaffolded + rendered a 3 s mp4 entirely on the rig; a
+Blender 4.5 MCP server rendered a PNG through the tunnel from the agent's
+normal tool loop; push-file round-tripped an md5-verified binary.
