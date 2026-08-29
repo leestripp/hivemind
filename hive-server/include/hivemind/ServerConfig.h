@@ -43,6 +43,8 @@ public:
     // (OmniNet's WebSocket::Server wraps its own HTTP server, so it
     // cannot share the main API port).
     int worker_ws_port() const { return worker_ws_port_; }
+    // Phase 33: loopback MCP bridge (daedalus streamable-http → worker channel)
+    int mcp_bridge_port() const { return mcp_bridge_port_; }
     const std::string& worker_ws_bind() const { return worker_ws_bind_; }
     void set_screen_resolution(const std::string& res);   // validates WxH
 
@@ -68,5 +70,6 @@ private:
     bool warm_containers_ = true;
     std::string screen_resolution_ = "1280x800";
     int worker_ws_port_ = 8423;
+    int mcp_bridge_port_ = 8424;   // loopback only
     std::string worker_ws_bind_ = "0.0.0.0";   // "127.0.0.1" behind nginx
 };

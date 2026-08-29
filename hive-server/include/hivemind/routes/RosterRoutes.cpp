@@ -40,6 +40,7 @@ json agent_json(const RosterAgent& a) {
         {"container_id", a.container_id},
         {"require_approval", a.require_approval}, {"avatar", a.avatar},
         {"worker", a.worker},
+        {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
 }
@@ -246,7 +247,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     body.value("workspace_mode", existing->workspace_mode),
                     body.value("require_approval", existing->require_approval),
                     body.value("avatar", existing->avatar),
-                    body.value("worker", ""));   // "" = keep current
+                    body.value("worker", ""),   // "" = keep current
+                    // Phase 33: accept array or string; "" = keep current
+                    body.contains("mcp_servers")
+                        ? (body["mcp_servers"].is_array()
+                               ? body["mcp_servers"].dump()
+                               : body.value("mcp_servers", ""))
+                        : "");
                 // Name/model changes must not leak into a live host.
                 registry.evict(a.id);
                 // Phase 10 fix: renaming an agent must carry its daedalus

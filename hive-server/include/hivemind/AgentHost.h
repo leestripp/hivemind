@@ -35,6 +35,7 @@
  */
 class ProxySink;  // forwards AgentSink callbacks to a per-turn target
 class AgentRegistry;
+class McpBridge;
 class ChatService;
 class LLMStore;
 
@@ -47,7 +48,8 @@ public:
     AgentHost(RosterAgent info, std::filesystem::path dir,
               AgentStore& agents, ApprovalStore& approvals,
               AgentRegistry& registry, LLMStore& llm,
-              RoutineStore& routines, ThreadStore& threads);
+              RoutineStore& routines, ThreadStore& threads,
+              McpBridge* mcp_bridge = nullptr);   // Phase 33
     ~AgentHost();
 
     AgentHost(const AgentHost&) = delete;
@@ -135,6 +137,8 @@ private:
     bool containerized_ = false;            // workspace_mode != "host"
     std::mutex turn_mtx_;                   // one turn at a time per agent
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
+    McpBridge* mcp_bridge_ = nullptr;   // Phase 33 (nullptr = MCP disabled)
+    void seed_mcp_servers();            // Phase 33: daedalus.db + bridge specs
     std::unique_ptr<daedalus::Agent> agent_;
 
     // Phase 8 idle eviction state
@@ -161,9 +165,11 @@ private:
 class AgentRegistry {
 public:
     AgentRegistry(AgentStore& agents, ApprovalStore& approvals,
-                  LLMStore& llm, RoutineStore& routines, ThreadStore& threads)
+                  LLMStore& llm, RoutineStore& routines, ThreadStore& threads,
+                  McpBridge* mcp_bridge = nullptr)   // Phase 33
         : agents_(agents), approvals_(approvals), llm_(llm),
-          routines_(routines), threads_(threads) {}
+          routines_(routines), threads_(threads),
+          mcp_bridge_(mcp_bridge) {}
 
     /// Get the live host for a roster agent, constructing it on first use.
     /// An evicted (dead) host is replaced with a fresh one.
@@ -200,6 +206,7 @@ private:
     ApprovalStore& approvals_;
     LLMStore& llm_;
     RoutineStore& routines_;
+    McpBridge* mcp_bridge_ = nullptr;   // Phase 33
     ThreadStore& threads_;
     std::mutex m_;
     std::unordered_map<std::string, std::unique_ptr<AgentHost>> hosts_;

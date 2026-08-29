@@ -46,6 +46,7 @@
 #include "hivemind/AuthStore.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/WorkerChannel.h"
+#include "hivemind/McpBridge.h"
 #include "hivemind/WorkerRouter.h"
 #include "hivemind/AgentTools.h"
 #include "hivemind/routes/WorkerRoutes.h"
@@ -136,6 +137,8 @@ int main(int argc, char* argv[]) {
     WorkerChannel worker_channel{worker_store,
                                  ServerConfig::instance().worker_ws_port(),
                                  ServerConfig::instance().worker_ws_bind()};
+    McpBridge mcp_bridge{worker_channel,
+                         ServerConfig::instance().mcp_bridge_port()};  // 33
     WorkerRouter::install(&agent_store, &worker_channel);   // Phase 30.3
     // Phase 30: let the collaboration tools see the worker registry too
     // (list_workers tool + create_agent's worker placement param).
@@ -152,7 +155,7 @@ int main(int argc, char* argv[]) {
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,
-                                 routine_store, thread_store};
+                                 routine_store, thread_store, &mcp_bridge};
     ChatService chat_service{agent_store, thread_store, agent_registry};
     agent_registry.set_chat_service(&chat_service);  // message_agent tool
 
@@ -279,6 +282,7 @@ int main(int argc, char* argv[]) {
         worker_channel.start();   // Phase 30.2: hive-worker WS channel
     }};
     std::jthread server_thread{[&server]() { server.start(); }};
+    mcp_bridge.start();   // Phase 33: loopback MCP tunnel (own jthread)
 
     std::cout << "HiveMind listening on http://" << settings.address
               << ":" << settings.port << "\n";

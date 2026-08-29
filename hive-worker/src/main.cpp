@@ -12,6 +12,7 @@
 #include "net/Socket.h"
 #include "OmniNet.h"
 #include "runner.h"
+#include "mcp_bridge.h"
 
 #include <nlohmann/json.hpp>
 
@@ -103,6 +104,7 @@ int main(int argc, char* argv[]) {
                         auto up = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::steady_clock::now() - connected_at).count();
                         send_frame({{"op","heartbeat"},{"uptime_s",up}});
+                        hwbridge::reap_idle();
                     } catch (...) { dead = true; }
                 }
             });
@@ -354,6 +356,31 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
+                } else if (op == "mcp_rpc") {
+                    // Phase 33: tunnel a JSON-RPC call to an MCP server
+                    // running inside the agent's container.
+                    const std::string id = frame.value("id", "");
+                    const std::string agent = frame.value("agent", "");
+                    const std::string server = frame.value("server", "");
+                    const std::string command = frame.value("command", "");
+                    const std::vector<std::string> args =
+                        frame.value("args", std::vector<std::string>{});
+                    const json env = frame.value("env", json::object());
+                    const std::string payload = frame.value("payload", "");
+                    std::thread([=]() mutable {
+                        std::string err;
+                        std::string reply = hwbridge::rpc(
+                            agent, server, command, args, env, payload,
+                            120, err);
+                        try {
+                            if (reply.empty())
+                                send_frame({{"op","mcp_rpc_reply"},{"id",id},
+                                            {"ok",false},{"error",err}});
+                            else
+                                send_frame({{"op","mcp_rpc_reply"},{"id",id},
+                                            {"ok",true},{"payload",reply}});
+                        } catch (...) {}
+                    }).detach();
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

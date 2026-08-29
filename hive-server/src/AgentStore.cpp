@@ -49,12 +49,15 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.avatar         = col(9);
     a.worker         = col(10);
     if (a.worker.empty()) a.worker = "local";
+    a.mcp_servers    = col(11);
+    if (a.mcp_servers.empty()) a.mcp_servers = "[]";
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
-    "       created_at, updated_at, require_approval, avatar, worker FROM agents";
+    "       created_at, updated_at, require_approval, avatar, worker,"
+"       mcp_servers FROM agents";
 
 } // namespace
 
@@ -110,6 +113,8 @@ void AgentStore::ensure_schema() {
                  nullptr, nullptr, nullptr);
     // Phase 30 (2026-08-26): which hive-worker runs this agent's container;
     // "local" = the server's own podman.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN mcp_servers"
+                     " TEXT NOT NULL DEFAULT '[]'", nullptr, nullptr, nullptr);
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN worker"
                      " TEXT NOT NULL DEFAULT 'local'",
                  nullptr, nullptr, nullptr);
@@ -218,7 +223,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& workspace_mode,
                                      bool require_approval,
                                      const std::string& avatar,
-                                     const std::string& worker) {
+                                     const std::string& worker,
+                                     const std::string& mcp_servers) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -233,7 +239,9 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     const char* sql =
         "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?,"
         " updated_at=?, require_approval=?, avatar=?,"
-        " worker = CASE WHEN ? = '' THEN worker ELSE ? END WHERE id=?";
+        " worker = CASE WHEN ? = '' THEN worker ELSE ? END,"
+        " mcp_servers = CASE WHEN ? = '' THEN mcp_servers ELSE ? END"
+        " WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -249,7 +257,9 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 7, avatar);
     bind_text(st, 8, worker);
     bind_text(st, 9, worker);
-    bind_text(st, 10, id);
+    bind_text(st, 10, mcp_servers);
+    bind_text(st, 11, mcp_servers);
+    bind_text(st, 12, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

@@ -47,6 +47,7 @@ void ServerConfig::load() {
         warm_containers_ = j.value("warm_containers", true);
         screen_resolution_ = j.value("screen_resolution", "1280x800");
         worker_ws_port_ = j.value("worker_ws_port", 8423);
+        mcp_bridge_port_ = j.value("mcp_bridge_port", 8424);
         worker_ws_bind_ = j.value("worker_ws_bind", std::string{"0.0.0.0"});
         cors_origins_.clear();
         if (j.contains("cors_origins") && j["cors_origins"].is_array())

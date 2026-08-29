@@ -10,6 +10,11 @@
 #include "hivemind/AgentTools.h"
 
 #include "hivemind/LLMStore.h"
+#include "hivemind/McpBridge.h"
+#include "hivemind/ServerConfig.h"
+#include <sqlite3.h>
+
+using nlohmann::json;
 #include "daedalus/default_paths.h"
 
 #include <algorithm>
@@ -218,10 +223,12 @@ private:
 AgentHost::AgentHost(RosterAgent info, fs::path dir,
                      AgentStore& agents, ApprovalStore& approvals,
                      AgentRegistry& registry, LLMStore& llm,
-                     RoutineStore& routines, ThreadStore& threads)
+                     RoutineStore& routines, ThreadStore& threads,
+                     McpBridge* mcp_bridge)
     : info_(std::move(info)), dir_(std::move(dir)),
       agents_(agents), approvals_(approvals), registry_(registry),
       llm_(llm), routines_(routines), threads_(threads),
+      mcp_bridge_(mcp_bridge),
       proxy_sink_(std::make_shared<ProxySink>()) {
     fs::create_directories(dir_);
 }
@@ -341,6 +348,24 @@ void AgentHost::ensure_agent() {
         cfg.max_context_size = d->max_context_size;
         cfg.temperature    = d->temperature;
     }
+
+    // Phase 33: skills — daedalus only loads skills when the host opts in
+    // (AgentConfig.skills_dirs + skills). The enable routes/tools write
+    // symlinks into <dir>/.agents/skills/; WITHOUT this wiring daedalus
+    // never scanned that dir (latent no-op since the skills UI shipped).
+    {
+        const fs::path links = dir_ / ".agents" / "skills";
+        std::error_code ec;
+        if (fs::is_directory(links, ec)) {
+            cfg.skills_dirs.push_back(links);
+            for (const auto& de : fs::directory_iterator(links, ec)) {
+                if (ec) break;
+                cfg.skills.push_back(de.path().filename().string());
+            }
+        }
+    }
+
+    seed_mcp_servers();   // Phase 33: per-agent MCP config + bridge specs
 
     bool containerized = containerized_;
     agent_ = std::make_unique<daedalus::Agent>(std::move(cfg), proxy_sink_);
@@ -596,7 +621,8 @@ AgentHost& AgentRegistry::get_or_create(const RosterAgent& agent) {
         auto dir = AgentStore::agents_base_dir() / agent.id;
         auto host = std::make_unique<AgentHost>(agent, dir, agents_,
                                                 approvals_, *this, llm_,
-                                                routines_, threads_);
+                                                routines_, threads_,
+                                                mcp_bridge_);
         it = hosts_.emplace(agent.id, std::move(host)).first;
     }
     return *it->second;
@@ -922,4 +948,144 @@ std::unordered_map<std::string, ChatService::LiveTurn> ChatService::agent_activi
         for (auto& t : turns)
             if (!t->done) out[t->agent_id] = *t;  // later threads overwrite; fine for status
     return out;
+}
+
+// ─── Phase 33: per-agent MCP servers ────────────────────────────────────────
+// Config source: RosterAgent.mcp_servers (JSON array [{name, command,
+// args[], env{}}] — roster-controlled, never agent free text). We seed the
+// agent's per-agent daedalus SettingsStore (daedalus.db, mcp_servers table)
+// BEFORE the daedalus::Agent is constructed — McpServerManager loads at init.
+//
+// Local agents: the MCP server runs INSIDE the agent's container —
+// transport=stdio, command=podman, args=[exec,-i,hive-<id>,<cmd>,<args...>].
+// Worker agents: transport=streamable-http pointing at the loopback
+// McpBridge, which tunnels JSON-RPC over the worker channel; the spawn spec
+// is registered with the bridge (worker side spawns inside the container).
+void AgentHost::seed_mcp_servers() {
+    json arr;
+    try { arr = json::parse(info_.mcp_servers); } catch (...) { return; }
+    if (!arr.is_array() || arr.empty()) return;
+
+    const bool remote = !info_.worker.empty() && info_.worker != "local";
+    if (remote && !mcp_bridge_) {
+        std::fprintf(stderr, "[mcp] %s: worker agent but no bridge — "
+                     "MCP servers skipped\n", info_.name.c_str());
+        return;
+    }
+
+    const fs::path dbdir = dir_ / ".daedalus" /
+                           ("daedalus-" + sanitize_agent_name(info_.name));
+    std::error_code ec;
+    fs::create_directories(dbdir, ec);
+    const std::string dbpath = (dbdir / "daedalus.db").string();
+
+    sqlite3* db = nullptr;
+    if (sqlite3_open(dbpath.c_str(), &db) != SQLITE_OK) {
+        std::fprintf(stderr, "[mcp] %s: open %s failed\n",
+                     info_.name.c_str(), dbpath.c_str());
+        if (db) sqlite3_close(db);
+        return;
+    }
+    sqlite3_busy_timeout(db, 2000);
+    auto exec = [&](const char* sql) {
+        char* err = nullptr;
+        sqlite3_exec(db, sql, nullptr, nullptr, &err);
+        if (err) sqlite3_free(err);
+    };
+    // Same columns as daedalus SettingsStore (it creates the rest of its
+    // schema idempotently on first open; schema_version absent = fresh).
+    exec("CREATE TABLE IF NOT EXISTS mcp_servers ("
+         " name TEXT PRIMARY KEY, transport TEXT NOT NULL DEFAULT 'stdio',"
+         " command TEXT, args_json TEXT, env_json TEXT, url TEXT,"
+         " bearer_token TEXT, description TEXT,"
+         " enabled INTEGER NOT NULL DEFAULT 1)");
+
+    const int port = ServerConfig::instance().mcp_bridge_port();
+    std::set<std::string> keep;
+    for (const auto& e : arr) {
+        const std::string name = e.value("name", "");
+        const std::string command = e.value("command", "");
+        bool okn = !name.empty() && name.size() <= 64;
+        for (char c : name)
+            if (!((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-')) okn = false;
+        if (!okn || command.empty()) {
+            std::fprintf(stderr, "[mcp] %s: skipping bad entry (name='%s')\n",
+                         info_.name.c_str(), name.c_str());
+            continue;
+        }
+        std::vector<std::string> args;
+        for (const auto& a : e.value("args", json::array()))
+            if (a.is_string()) args.push_back(a.get<std::string>());
+        const json env = e.value("env", json::object());
+        keep.insert(name);
+
+        std::string transport, cmd = command, url;
+        json args_json = args, env_json = env;
+        if (remote) {
+            mcp_bridge_->configure(info_.id, name, info_.worker,
+                                   command, args, env);
+            transport = "streamable-http";
+            cmd.clear();
+            args_json = json::array();
+            env_json = json::object();
+            url = "http://127.0.0.1:" + std::to_string(port) +
+                  "/mcp/" + info_.id + "/" + name;
+        } else {
+            // Run the MCP server inside the agent's own container.
+            std::vector<std::string> a{"exec", "-i", "hive-" + info_.id,
+                                       command};
+            for (auto& x : args) a.push_back(x);
+            transport = "stdio";
+            cmd = "podman";
+            args_json = a;
+        }
+
+        sqlite3_stmt* st = nullptr;
+        const char* sql =
+            "INSERT OR REPLACE INTO mcp_servers"
+            " (name, transport, command, args_json, env_json, url,"
+            "  bearer_token, description, enabled)"
+            " VALUES (?,?,?,?,?,?,'','',1)";
+        if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+            const std::string aj = args_json.dump(), ej = env_json.dump();
+            sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, transport.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 3, cmd.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 4, aj.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 5, ej.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 6, url.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(st) != SQLITE_DONE)
+                std::fprintf(stderr, "[mcp] %s: insert '%s' failed: %s\n",
+                             info_.name.c_str(), name.c_str(),
+                             sqlite3_errmsg(db));
+            sqlite3_finalize(st);
+        }
+    }
+    // Config is authoritative — drop rows no longer declared.
+    for (const auto& name : [&] {
+             std::set<std::string> existing;
+             sqlite3_stmt* st = nullptr;
+             if (sqlite3_prepare_v2(db, "SELECT name FROM mcp_servers",
+                                    -1, &st, nullptr) == SQLITE_OK) {
+                 while (sqlite3_step(st) == SQLITE_ROW) {
+                     const auto* p = sqlite3_column_text(st, 0);
+                     if (p) existing.insert((const char*)p);
+                 }
+                 sqlite3_finalize(st);
+             }
+             return existing;
+         }()) {
+        if (keep.count(name)) continue;
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, "DELETE FROM mcp_servers WHERE name=?",
+                               -1, &st, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+    sqlite3_close(db);
+    std::fprintf(stderr, "[mcp] %s: seeded %zu server(s)%s\n",
+                 info_.name.c_str(), keep.size(),
+                 remote ? " (via worker bridge)" : " (in-container)");
 }

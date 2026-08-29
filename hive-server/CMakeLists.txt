@@ -5,6 +5,7 @@
 # ============================================================================
 
 set(CORE_SOURCES
+    src/McpBridge.cpp
     src/Schedule.cpp
     src/SystemMonitor.cpp
     src/Files.cpp
