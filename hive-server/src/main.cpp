@@ -140,6 +140,15 @@ int main(int argc, char* argv[]) {
     // Phase 30: let the collaboration tools see the worker registry too
     // (list_workers tool + create_agent's worker placement param).
     agent_tools::install_worker_access(&worker_store, &worker_channel);
+    // Phase 33: on worker (re)connect, re-push every enabled global skill
+    // for each agent homed on that rig (self-heals after worker downtime).
+    worker_channel.on_worker_online = [&agent_store](const std::string& wname) {
+        for (const auto& a : agent_store.list_agents()) {
+            if (a.worker != wname) continue;
+            for (const auto& sk : agent_tools::list_enabled_skills(a.id))
+                agent_tools::push_skill_to_worker(a, sk);
+        }
+    };
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
     AgentRegistry agent_registry{agent_store, approval_store, llm_store,

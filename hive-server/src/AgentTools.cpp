@@ -94,10 +94,60 @@ WorkerStore*   g_workers = nullptr;
 WorkerChannel* g_wchannel = nullptr;
 }
 
+namespace {
+// Defined in the skill-marketplace section further down (anonymous
+// namespaces merge within the TU).
+fs::path agent_skills_root(const std::string& agent_id);
+}
+
 void agent_tools::install_worker_access(WorkerStore* workers,
                                         WorkerChannel* channel) {
     g_workers = workers;
     g_wchannel = channel;
+}
+
+// ─── Phase 33: worker skill sync hooks ──────────────────────────────────────
+void agent_tools::push_skill_to_worker(const RosterAgent& agent,
+                                       const std::string& skill) {
+    if (!g_wchannel || agent.worker.empty() || agent.worker == "local")
+        return;
+    if (!g_wchannel->is_online(agent.worker)) {
+        std::fprintf(stderr, "[skills] worker %s offline — skill %s for %s "
+                     "will sync on reconnect\n",
+                     agent.worker.c_str(), skill.c_str(), agent.name.c_str());
+        return;
+    }
+    auto r = g_wchannel->push_skill(agent.worker, agent.id, skill);
+    if (!r)
+        std::fprintf(stderr, "[skills] push %s -> %s: worker went offline\n",
+                     skill.c_str(), agent.worker.c_str());
+    else if (!r->ok)
+        std::fprintf(stderr, "[skills] push %s -> %s FAILED: %s\n",
+                     skill.c_str(), agent.worker.c_str(), r->error.c_str());
+    else
+        std::fprintf(stderr, "[skills] pushed %s -> %s (%d files, %lld B)\n",
+                     skill.c_str(), agent.worker.c_str(), r->files,
+                     (long long)r->bytes);
+}
+
+void agent_tools::remove_skill_on_worker(const RosterAgent& agent,
+                                         const std::string& skill) {
+    if (!g_wchannel || agent.worker.empty() || agent.worker == "local")
+        return;
+    if (!g_wchannel->is_online(agent.worker)) return;
+    g_wchannel->remove_skill(agent.worker, agent.id, skill);
+}
+
+std::vector<std::string> agent_tools::list_enabled_skills(
+        const std::string& agent_id) {
+    std::vector<std::string> out;
+    const fs::path dir = agent_skills_root(agent_id);
+    std::error_code ec;
+    for (const auto& de : fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (de.is_symlink(ec)) out.push_back(de.path().filename().string());
+    }
+    return out;
 }
 
 // ─── ListAgentsTool ─────────────────────────────────────────────────────────
@@ -671,10 +721,18 @@ json hivemind::InstallSkillTool::execute(const json& args, daedalus::HostToolCon
                        {"warning", "installed but enable-symlink failed: " +
                                    ec.message()}});
 
-    return ok(json{{"installed", sname},
-                   {"description", fm.value("description", "")},
-                   {"version", fm.value("version", "")},
-                   {"enabled", true},
-                   {"note", "Skill is at ~/.agents/skills/" + sname +
-                            "/ — read its SKILL.md before using it."}});
+    json res = ok(json{{"installed", sname},
+                       {"description", fm.value("description", "")},
+                       {"version", fm.value("version", "")},
+                       {"enabled", true},
+                       {"note", "Skill is at ~/.agents/skills/" + sname +
+                                "/ — read its SKILL.md before using it."}});
+    // Phase 33: worker agents get the skill FILES on their rig too.
+    if (auto me = agents_.get_agent(agent_id_)) {
+        if (!me->worker.empty() && me->worker != "local") {
+            agent_tools::push_skill_to_worker(*me, sname);
+            res["synced_to_worker"] = me->worker;
+        }
+    }
+    return res;
 }

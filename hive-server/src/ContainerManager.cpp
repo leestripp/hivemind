@@ -206,15 +206,45 @@ std::string ContainerManager::ensure_running(const std::string& agent_id) {
         fs::path home = agent_home_dir(agent_id);
         fs::create_directories(home);
 
+        // Phase 33: the shared skill library is mounted read-only at
+        // /skills; per-agent enable links live in the home mount (below).
+        fs::path skills = agent_home_dir(agent_id).parent_path()
+                              .parent_path().parent_path() / "skills";
+        fs::create_directories(skills);
+
         std::string cmd =
             std::string{"podman create --name "} + shell_quote(cname) +
             " --memory 4g --cpus 2 --userns=keep-id"
             " -v " + shell_quote(ws) + ":/workspace"
             " -v " + shell_quote(home.string()) + ":/home/hive:U"
+            " -v " + shell_quote(skills.string()) + ":/skills:ro"
             " -w /workspace " + kImage;
         auto r = run(cmd);
         if (r.exit_code != 0)
             throw std::runtime_error("podman create failed: " + r.output);
+    }
+
+    // Phase 33: mirror the agent's enabled-skill links into the container
+    // home. The daedalus brain scans agents/<id>/.agents/skills/ (host
+    // side, relative links into the shared library); the container sees
+    // home/.agents/skills/<name> -> /skills/<name> (absolute target), so
+    // skill scripts run in-container at the same ~/.agents/skills/... path
+    // the brain references. Runs every ensure — cheap and self-healing.
+    {
+        const fs::path src_links = agent_home_dir(agent_id).parent_path()
+                                   / ".agents" / "skills";
+        const fs::path dst_links = agent_home_dir(agent_id)
+                                   / ".agents" / "skills";
+        std::error_code ec;
+        fs::create_directories(dst_links, ec);
+        for (const auto& de : fs::directory_iterator(src_links, ec)) {
+            if (ec) break;
+            if (!de.is_symlink(ec)) continue;
+            const fs::path link = dst_links / de.path().filename();
+            fs::remove(link, ec);
+            fs::create_symlink(fs::path("/skills") / de.path().filename(),
+                               link, ec);
+        }
     }
 
     st = status(agent_id);

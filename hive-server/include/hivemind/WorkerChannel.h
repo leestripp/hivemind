@@ -101,6 +101,29 @@ public:
                      std::span<const uint8_t> data);
     void stream_close(const std::string& sid);
 
+    /// Phase 33: push a skill directory to a worker (server→worker).
+    /// Reads <skills_root>/<skill>/ on the SERVER and streams it as
+    /// skill_begin / skill_file (192KB base64 chunks, eof flag) / skill_end;
+    /// the worker writes ~/.local/share/hive-worker/skills/<skill>/ and
+    /// links home-<agent>/.agents/skills/<skill> → /skills/<skill>, then
+    /// acks (skill_ack). nullopt when offline; ok=false + error on failure.
+    struct PushResult { bool ok = false; std::string error;
+                        int files = 0; int64_t bytes = 0; };
+    std::optional<PushResult> push_skill(const std::string& worker,
+                                         const std::string& agent,
+                                         const std::string& skill,
+                                         int timeout_s = 180);
+    /// Phase 33: remove an enabled skill on the worker (unlink + delete the
+    /// rig-local copy).
+    std::optional<PushResult> remove_skill(const std::string& worker,
+                                           const std::string& agent,
+                                           const std::string& skill,
+                                           int timeout_s = 30);
+
+    /// Phase 33: fired after a worker's hello is accepted (reconcile hook —
+    /// main.cpp uses it to re-push enabled skills after worker downtime).
+    std::function<void(const std::string& worker)> on_worker_online;
+
     /// Hook for frames that are not channel bookkeeping (30.3: exec_chunk,
     /// exec_done, status). Called with the worker name + parsed frame.
     std::function<void(const std::string& worker,
@@ -130,6 +153,15 @@ private:
     };
     std::unordered_map<std::string, std::shared_ptr<Job>> jobs_;
     uint64_t next_job_ = 1;
+
+    // 33: in-flight skill pushes (id → ack slot)
+    struct SkillJob {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        PushResult result;
+    };
+    std::unordered_map<std::string, std::shared_ptr<SkillJob>> skill_jobs_;
 
     // 30.4: in-flight screen_ctl requests (id → result slot)
     struct ScreenJob {

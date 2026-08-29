@@ -3,14 +3,20 @@
 
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
+#include "hivemind/AgentStore.h"
 
 #include "websocket/WebSocket.h"
 #include "crypto/Crypto.h"
 #include "net/Socket.h"
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <system_error>
+
+namespace fs33 = std::filesystem;
 
 using json = nlohmann::json;
 using OmniNet::WebSocket::Connection;
@@ -157,6 +163,13 @@ void WorkerChannel::handle(Connection& ws) {
             std::cerr << "[workers] " << st->name << " connected\n";
             ws.sendText(json{{"op","welcome"},{"worker",st->name},
                              {"proto",kProto}}.dump());
+            if (on_worker_online) {
+                // Reconcile off the handler thread — pushes block on acks.
+                const std::string wname = st->name;
+                std::thread([this, wname] {
+                    try { on_worker_online(wname); } catch (...) {}
+                }).detach();
+            }
             return;
         }
 
@@ -203,6 +216,22 @@ void WorkerChannel::handle(Connection& ws) {
                     fj->done = true;
                     fj->cv.notify_all();
                 }
+            }
+        } else if (op == "skill_ack") {
+            std::shared_ptr<SkillJob> sj;
+            {
+                std::lock_guard lk(m_);
+                auto it = skill_jobs_.find(frame.value("id", ""));
+                if (it != skill_jobs_.end()) sj = it->second;
+            }
+            if (sj) {
+                std::lock_guard jl(sj->m);
+                sj->result.ok = frame.value("ok", false);
+                sj->result.error = frame.value("error", "");
+                sj->result.files = frame.value("files", 0);
+                sj->result.bytes = frame.value("bytes", (int64_t)0);
+                sj->done = true;
+                sj->cv.notify_all();
             }
         } else if (op == "screen_result") {
             std::shared_ptr<ScreenJob> sj;
@@ -525,4 +554,152 @@ bool ChannelSocket::waitForRead(std::chrono::milliseconds timeout) const {
     std::unique_lock lk(st_->m);
     return st_->cv.wait_for(lk, timeout,
                             [&]{ return !st_->buf.empty() || st_->eof; });
+}
+
+// ─── Phase 33: skill sync (server → worker) ─────────────────────────────────
+namespace {
+
+fs33::path server_skills_root() {
+    return AgentStore::agents_base_dir().parent_path() / "skills";
+}
+
+bool valid_skill_name33(const std::string& n) {
+    if (n.empty() || n.size() > 64) return false;
+    for (char c : n) {
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+std::optional<WorkerChannel::PushResult>
+WorkerChannel::push_skill(const std::string& worker, const std::string& agent,
+                          const std::string& skill, int timeout_s) {
+    PushResult res;
+    if (!valid_skill_name33(skill)) {
+        res.error = "bad skill name";
+        return res;
+    }
+    const fs33::path root = server_skills_root() / skill;
+    std::error_code ec;
+    if (!fs33::is_directory(root, ec)) {
+        res.error = "skill not in server library: " + skill;
+        return res;
+    }
+
+    auto job = std::make_shared<SkillJob>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;   // offline
+        id = "s" + std::to_string(next_job_++);
+        skill_jobs_[id] = job;
+    }
+    struct JobGuard {  // always drop the job slot
+        WorkerChannel* ch; std::string id;
+        ~JobGuard() { std::lock_guard lk(ch->m_); ch->skill_jobs_.erase(id); }
+    } guard{this, id};
+
+    if (!send(worker, json{{"op","skill_begin"},{"id",id},
+                           {"agent",agent},{"skill",skill}})) {
+        res.error = "worker offline mid-send";
+        return res;
+    }
+
+    // Stream every regular file as 192KB base64 chunks with an eof flag.
+    constexpr size_t kChunk = 192 * 1024;
+    constexpr int64_t kCapBytes = 50ll * 1024 * 1024;
+    int files = 0;
+    int64_t bytes = 0;
+    bool send_failed = false;
+    for (auto it = fs33::recursive_directory_iterator(root, ec);
+         !send_failed && it != fs33::recursive_directory_iterator();
+         it.increment(ec)) {
+        if (ec) break;
+        if (!it->is_regular_file(ec)) continue;
+        const fs33::path rel = it->path().lexically_relative(root);
+        std::ifstream in(it->path(), std::ios::binary);
+        if (!in) continue;
+        std::string buf(kChunk, '\0');
+        while (in) {
+            in.read(buf.data(), (std::streamsize)buf.size());
+            const auto got = (size_t)in.gcount();
+            const bool eof = in.eof();
+            if (got == 0 && !eof) break;
+            bytes += (int64_t)got;
+            if (bytes > kCapBytes) {
+                send(worker, json{{"op","skill_abort"},{"id",id},
+                                  {"error","skill too large (50MB cap)"}});
+                res.error = "skill too large (50MB cap)";
+                return res;
+            }
+            if (!send(worker, json{{"op","skill_file"},{"id",id},
+                    {"path",rel.generic_string()},
+                    {"data", OmniNet::Crypto::base64Encode(
+                        std::span<const uint8_t>{
+                            (const uint8_t*)buf.data(), got})},
+                    {"eof",eof}})) {
+                send_failed = true;
+                break;
+            }
+            if (eof) break;
+        }
+        ++files;
+    }
+    if (send_failed) {
+        res.error = "worker went offline mid-push";
+        return res;
+    }
+    if (!send(worker, json{{"op","skill_end"},{"id",id},
+                           {"files",files},{"bytes",bytes}})) {
+        res.error = "worker offline at end";
+        return res;
+    }
+
+    std::unique_lock lk(job->m);
+    const bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                                       [&] { return job->done; });
+    res = job->result;
+    res.files = files;
+    res.bytes = bytes;
+    lk.unlock();
+    if (!done) {
+        res.ok = false;
+        if (res.error.empty()) res.error = "worker skill push timed out";
+    }
+    return res;
+}
+
+std::optional<WorkerChannel::PushResult>
+WorkerChannel::remove_skill(const std::string& worker, const std::string& agent,
+                            const std::string& skill, int timeout_s) {
+    PushResult res;
+    if (!valid_skill_name33(skill)) { res.error = "bad skill name"; return res; }
+    auto job = std::make_shared<SkillJob>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;
+        id = "s" + std::to_string(next_job_++);
+        skill_jobs_[id] = job;
+    }
+    struct JobGuard {
+        WorkerChannel* ch; std::string id;
+        ~JobGuard() { std::lock_guard lk(ch->m_); ch->skill_jobs_.erase(id); }
+    } guard{this, id};
+
+    if (!send(worker, json{{"op","skill_remove"},{"id",id},
+                           {"agent",agent},{"skill",skill}})) {
+        res.error = "worker offline mid-send";
+        return res;
+    }
+    std::unique_lock lk(job->m);
+    const bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                                       [&] { return job->done; });
+    res = job->result;
+    lk.unlock();
+    if (!done) { res.ok = false; res.error = "worker remove timed out"; }
+    return res;
 }

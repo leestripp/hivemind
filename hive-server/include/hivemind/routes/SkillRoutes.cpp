@@ -3,6 +3,7 @@
 // Global skills library + per-agent enable symlinks (see header).
 // -----------------------------------------------------------------------------
 #include "hivemind/routes/SkillRoutes.h"
+#include "hivemind/AgentTools.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/AgentStore.h"
 
@@ -320,6 +321,11 @@ void register_skill_routes(OmniNet::HTTP::Server& server,
                 if (ec) { send_error(resp, 500, "symlink failed: " + ec.message()); return; }
             } else {
                 if (fs::is_symlink(link, ec)) fs::remove(link, ec);
+            }
+            // Phase 33: worker agents get the skill FILES on their rig.
+            if (auto ra = agents.get_agent(seg[2])) {
+                if (enable) agent_tools::push_skill_to_worker(*ra, name);
+                else        agent_tools::remove_skill_on_worker(*ra, name);
             }
             send_json(resp, json{{"name", name}, {"enabled", enable}});
         });

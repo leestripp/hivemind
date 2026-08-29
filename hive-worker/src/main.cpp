@@ -27,6 +27,8 @@
 #include <thread>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -37,6 +39,17 @@ using OmniNet::WebSocket::Connection;
 // loop immediately observes the disconnect (correct `online` flag).
 // A flag-based graceful stop would hang in the blocking receiveText().
 static std::atomic<bool> g_stop{false};
+
+// Phase 33: in-progress skill syncs (id → state)
+struct SkillSync {
+    std::string agent;
+    std::string skill;
+    fs::path dir;
+    int files = 0;
+    int64_t bytes = 0;
+};
+static std::mutex sync_m;
+static std::unordered_map<std::string, SkillSync> syncs;
 
 int main(int argc, char* argv[]) {
     std::string server = "ws://127.0.0.1:8423";
@@ -229,6 +242,118 @@ int main(int argc, char* argv[]) {
                                         {"size",(int64_t)size}});
                         } catch (...) {}
                     }).detach();
+                } else if (op == "skill_begin" || op == "skill_file" ||
+                           op == "skill_end" || op == "skill_abort" ||
+                           op == "skill_remove") {
+                    // Phase 33: skill sync from the server. Files land in
+                    // ~/.local/share/hive-worker/skills/<skill>/; on skill_end
+                    // the agent's home gets ~/.agents/skills/<skill> →
+                    // /skills/<skill> (absolute target resolves in-container).
+                    const std::string id = frame.value("id", "");
+                    auto fail = [&](const std::string& err) {
+                        try { send_frame({{"op","skill_ack"},{"id",id},
+                                          {"ok",false},{"error",err}}); }
+                        catch (...) {}
+                    };
+                    const fs::path wbase = fs::path{std::getenv("HOME")} /
+                                           ".local/share/hive-worker";
+                    if (op == "skill_remove") {
+                        const std::string agent = frame.value("agent", "");
+                        const std::string skill = frame.value("skill", "");
+                        std::error_code ec;
+                        fs::remove(wbase / ("home-" + agent) /
+                                   ".agents/skills" / skill, ec);
+                        fs::remove_all(wbase / "skills" / skill, ec);
+                        try { send_frame({{"op","skill_ack"},{"id",id},
+                                          {"ok",!ec},
+                                          {"error", ec ? ec.message() : ""}}); }
+                        catch (...) {}
+                    } else if (op == "skill_begin") {
+                        const std::string skill = frame.value("skill", "");
+                        // validate name: [a-z0-9-] only
+                        bool okn = !skill.empty() && skill.size() <= 64;
+                        for (char c : skill)
+                            if (!((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'))
+                                okn = false;
+                        if (!okn) { fail("bad skill name"); }
+                        else {
+                            std::lock_guard lk(sync_m);
+                            syncs[id] = SkillSync{frame.value("agent",""),
+                                                  skill, {}, 0, 0};
+                            std::error_code ec;
+                            fs::remove_all(wbase / "skills" / skill, ec);
+                            fs::create_directories(wbase / "skills" / skill, ec);
+                        }
+                    } else if (op == "skill_file") {
+                        std::lock_guard lk(sync_m);
+                        auto it = syncs.find(id);
+                        if (it == syncs.end()) { fail("unknown sync id"); }
+                        else {
+                            SkillSync& sy = it->second;
+                            std::string rel = frame.value("path", "");
+                            // confine: relative, no ".."
+                            while (!rel.empty() && rel.front() == '/')
+                                rel.erase(rel.begin());
+                            if (rel.empty() ||
+                                rel.find("..") != std::string::npos) {
+                                fail("bad path"); syncs.erase(it);
+                            } else {
+                                auto dec = OmniNet::Crypto::base64Decode(
+                                    frame.value("data", ""));
+                                if (!dec) { fail("bad base64"); syncs.erase(it); }
+                                else {
+                                    const fs::path fp =
+                                        wbase / "skills" / sy.skill / rel;
+                                    std::error_code ec;
+                                    fs::create_directories(fp.parent_path(), ec);
+                                    std::ofstream out(fp, std::ios::binary |
+                                                          std::ios::app);
+                                    out.write((const char*)dec->data(),
+                                              (std::streamsize)dec->size());
+                                    sy.bytes += (int64_t)dec->size();
+                                    if (frame.value("eof", false)) sy.files++;
+                                    if (sy.bytes > 50ll*1024*1024) {
+                                        fail("skill too large");
+                                        syncs.erase(it);
+                                    }
+                                }
+                            }
+                        }
+                    } else if (op == "skill_abort") {
+                        std::lock_guard lk(sync_m);
+                        syncs.erase(id);   // partial files stay, harmless
+                    } else {   // skill_end
+                        SkillSync sy;
+                        {
+                            std::lock_guard lk(sync_m);
+                            auto it = syncs.find(id);
+                            if (it == syncs.end()) { fail("unknown sync id"); }
+                            else { sy = it->second; syncs.erase(it); }
+                        }
+                        if (!sy.skill.empty()) {
+                            // enable link in the agent's container home
+                            std::error_code ec;
+                            const fs::path linkdir = wbase /
+                                ("home-" + sy.agent) / ".agents/skills";
+                            fs::create_directories(linkdir, ec);
+                            const fs::path link = linkdir / sy.skill;
+                            fs::remove(link, ec);
+                            fs::create_symlink(
+                                fs::path("/skills") / sy.skill, link, ec);
+                            if (ec) { fail("symlink: " + ec.message()); }
+                            else {
+                                try {
+                                    send_frame({{"op","skill_ack"},
+                                        {"id",id},{"ok",true},
+                                        {"files",sy.files},
+                                        {"bytes",sy.bytes}});
+                                } catch (...) {}
+                                std::cerr << "[skills] synced " << sy.skill
+                                          << " for " << sy.agent << " ("
+                                          << sy.files << " files)\n";
+                            }
+                        }
+                    }
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

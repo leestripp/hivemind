@@ -93,15 +93,18 @@ void ensure_container(const std::string& agent) {
     fs::path base = worker_dir();
     fs::path ws = base / "workspace";
     fs::path home = base / ("home-" + agent);
+    fs::path skills = base / "skills";   // Phase 33: synced skill library
     std::error_code ec;
     fs::create_directories(ws, ec);
     fs::create_directories(home, ec);
+    fs::create_directories(skills, ec);
 
     std::string out;
     if (podman_simple({"create", "--name", cname, "--memory", "4g",
                        "--cpus", "2", "--userns=keep-id",
                        "-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
+                       "-v", skills.string() + ":/skills:ro",
                        "-w", "/workspace", kImage}, &out) != 0)
         throw std::runtime_error("podman create failed: " + out);
     if (podman_simple({"start", cname}, &out) != 0)
@@ -293,6 +296,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         fs::path base = worker_dir();
         fs::path ws = base / "workspace";   // shared per-worker (see ensure_container)
         fs::path home = base / ("home-" + agent);
+        fs::path skills = base / "skills";  // Phase 33
         std::error_code ec;
         fs::create_directories(ws, ec);
         fs::create_directories(home, ec);
@@ -301,6 +305,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                            "-p", "127.0.0.1::6080",
                            "-v", ws.string() + ":/workspace",
                            "-v", home.string() + "/:/home/hive:U",
+                           "-v", skills.string() + ":/skills:ro",
                            "-w", "/workspace", image}, &out) != 0) {
             r.error = "podman create (browser) failed: " + out;
             return r;

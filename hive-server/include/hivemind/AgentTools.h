@@ -3,8 +3,10 @@
 #include <daedalus.h>
 
 #include <string>
+#include <vector>
 
 class AgentStore;
+struct RosterAgent;
 class ThreadStore;
 class RoutineStore;
 class AgentRegistry;
@@ -16,6 +18,13 @@ namespace agent_tools {
 /// (list_workers / create_agent's worker param). Called once from main() next
 /// to WorkerRouter::install — same global-access pattern.
 void install_worker_access(WorkerStore* workers, WorkerChannel* channel);
+
+/// Phase 33: push an enabled global skill to the agent's worker rig
+/// (no-op for local agents / offline workers / missing skill).
+void push_skill_to_worker(const RosterAgent& agent, const std::string& skill);
+void remove_skill_on_worker(const RosterAgent& agent, const std::string& skill);
+/// Phase 33: global skills currently enabled for an agent (symlink scan).
+std::vector<std::string> list_enabled_skills(const std::string& agent_id);
 }  // namespace agent_tools
 
 /**
@@ -149,8 +158,8 @@ public:
 /// calling agent (symlink into ~/.agents/skills/).
 class InstallSkillTool final : public daedalus::BaseTool {
 public:
-    explicit InstallSkillTool(std::string agent_id)
-        : agent_id_(std::move(agent_id)) {}
+    InstallSkillTool(std::string agent_id, AgentStore& agents)
+        : agent_id_(std::move(agent_id)), agents_(agents) {}
     [[nodiscard]] std::string get_name() const override { return "install_skill"; }
     [[nodiscard]] std::string get_description() const override {
         return "Install a skill from the marketplace (pass its 'name' from "
@@ -164,6 +173,7 @@ public:
                            daedalus::HostToolContext& ctx) override;
 private:
     std::string agent_id_;
+    AgentStore& agents_;
 };
 
 

@@ -388,7 +388,7 @@ void AgentHost::ensure_agent() {
     agent_->register_tool(
         std::make_unique<hivemind::SearchSkillsTool>());   // marketplace
     agent_->register_tool(
-        std::make_unique<hivemind::InstallSkillTool>(info_.id));
+        std::make_unique<hivemind::InstallSkillTool>(info_.id, agents_));
     agent_->register_tool(
         std::make_unique<SaveRoutineTool>(info_.id, routines_, threads_));
     agent_->register_tool(
