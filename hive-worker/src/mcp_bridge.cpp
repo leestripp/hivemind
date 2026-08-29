@@ -74,7 +74,7 @@ bool spawn(Proc& p, const std::string& agent, const std::string& command,
         dup2(out_pipe[1], STDOUT_FILENO);
         close(in_pipe[0]); close(in_pipe[1]);
         close(out_pipe[0]); close(out_pipe[1]);
-        std::vector<std::string> a{"exec", "-i"};
+        std::vector<std::string> a{"podman", "exec", "-i"};  // argv[0]!
         if (env.is_object()) {
             for (auto& [k, v] : env.items()) {
                 if (!v.is_string()) continue;
