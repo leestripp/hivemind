@@ -116,3 +116,14 @@ approvals (seeded on first refresh — no startup storm).
   `Glib::Dispatcher` queue (`run_async`). Never block the main loop.
 - No WebSocket yet: polling covers messages, activity and approvals.
 - The client is pure UI: no containers, no credentials, no agent state.
+
+## Chat images (Phase 34)
+
+Image attachments (png/jpg/jpeg/gif/webp) render inline in the chat as a
+scaled preview (max 480px, click to open full-size in the default viewer)
+with the agent's caption below. Bytes are downloaded through the API on
+first view and cached in
+`~/.cache/hivemind-client/attachments/<thread_id>/` — re-opening a thread
+renders from cache with no network traffic. Non-image attachments keep
+the classic 📎 chip row. Agents attach images with their `show_image`
+tool; user uploads with image extensions also render inline.

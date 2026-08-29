@@ -401,3 +401,16 @@ SettingsStore (`~/.local/share/daedalus/daedalus.db`), managed by icarus.
 | GET | `/api/projects` | Known projects |
 | GET | `/api/projects/:name` | Project detail |
 | GET | `/api/fs/browse` | Filesystem browser for the web UI picker |
+
+## Images in chat (Phase 34)
+
+Agents can attach images to their replies with the `show_image` tool
+(`{path, caption?}` — a `/workspace`-relative png/jpg/jpeg/gif/webp, max
+10 MB). For worker agents the bytes are pulled from the rig over the
+worker channel (opt-in: only images the agent explicitly shows cross);
+the server writes them to `attachments/<thread_id>/` and the reply's
+`attachments[]` entries carry `{name, path, host_path, size, caption}`.
+
+Clients render inline by downloading
+`GET /api/files/download?path=attachments/<thread_id>/<name>` — image
+extensions get a real `Content-Type` and `Content-Disposition: inline`.
