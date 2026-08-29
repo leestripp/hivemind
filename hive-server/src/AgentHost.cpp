@@ -12,6 +12,8 @@
 #include "hivemind/LLMStore.h"
 #include "hivemind/McpBridge.h"
 #include "hivemind/ServerConfig.h"
+#include "tools/ToolHandler.h"
+#include "tools/ToolFactory.h"
 #include <sqlite3.h>
 
 using nlohmann::json;
@@ -1088,4 +1090,19 @@ void AgentHost::seed_mcp_servers() {
     std::fprintf(stderr, "[mcp] %s: seeded %zu server(s)%s\n",
                  info_.name.c_str(), keep.size(),
                  remote ? " (via worker bridge)" : " (in-container)");
+}
+
+nlohmann::json AgentHost::mcp_debug() {
+    json out;
+    out["configured_db"] = info_.mcp_servers;
+    if (!agent_) { out["brain"] = "not constructed"; return out; }
+    out["configured_servers"] = agent_->mcp_configured_servers();
+    auto factory = ToolHandler::get_tool_factory();
+    if (factory) {
+        json mcp_tools = json::array();
+        for (const auto& n : factory->get_tool_names())
+            if (n.rfind("mcp__", 0) == 0) mcp_tools.push_back(n);
+        out["factory_mcp_tools"] = mcp_tools;
+    }
+    return out;
 }

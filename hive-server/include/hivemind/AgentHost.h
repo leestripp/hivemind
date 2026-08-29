@@ -139,6 +139,10 @@ private:
     std::shared_ptr<ProxySink> proxy_sink_; // stable sink owned by the Agent
     McpBridge* mcp_bridge_ = nullptr;   // Phase 33 (nullptr = MCP disabled)
     void seed_mcp_servers();            // Phase 33: daedalus.db + bridge specs
+public:
+    /// Phase 33 debug: what daedalus actually loaded/registered for MCP.
+    nlohmann::json mcp_debug();
+private:
     std::unique_ptr<daedalus::Agent> agent_;
 
     // Phase 8 idle eviction state

@@ -76,6 +76,9 @@ target_link_libraries(hivemind_core PUBLIC
 
 if(HIVEMIND_USE_DAEDALUS)
     target_link_libraries(hivemind_core PUBLIC daedalus)
+    # Read-only access to daedalus' internal tool headers (ToolHandler) for
+    # the Phase 33 MCP debug route. daedalus itself is never patched.
+    target_include_directories(hivemind_core PRIVATE ${daedalus_SOURCE_DIR}/src)
 endif()
 
 add_executable(hive-server src/main.cpp)

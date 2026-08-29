@@ -218,6 +218,18 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     // ── GET/PATCH/DELETE /api/agents/:id ──────────────────────────────────
+    // ── GET /api/agents/:id/mcp-tools ─────────────────────────────────────
+    // Phase 33 debug: what daedalus actually loaded/registered for MCP.
+    server.get("/api/agents/:id/mcp-tools",
+        [&registry](const OmniNet::HTTP::Request& req,
+                    OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
+            auto* host = registry.find(seg[2]);
+            if (!host) { send_json(resp, json{{"brain", "not constructed"}}); return; }
+            send_json(resp, host->mcp_debug());
+        });
+
     server.get("/api/agents/:id",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());          // api agents :id
