@@ -6,7 +6,9 @@
       "description": "Read, extract, fill, and create PDF documents.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/pdf",
-      "tags": ["documents"],
+      "tags": [
+        "documents"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -14,7 +16,9 @@
       "description": "Create and edit Word documents with tracked structure.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/docx",
-      "tags": ["documents"],
+      "tags": [
+        "documents"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -22,7 +26,10 @@
       "description": "Spreadsheet analysis and Excel file generation.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/xlsx",
-      "tags": ["documents", "data"],
+      "tags": [
+        "documents",
+        "data"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -30,7 +37,10 @@
       "description": "Build and edit PowerPoint decks programmatically.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/pptx",
-      "tags": ["documents", "presentations"],
+      "tags": [
+        "documents",
+        "presentations"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -38,7 +48,9 @@
       "description": "Apply consistent brand styling to docs and artifacts.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/brand-guidelines",
-      "tags": ["design"],
+      "tags": [
+        "design"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -46,7 +58,9 @@
       "description": "Design posters and visual art as PNG/PDF canvases.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/canvas-design",
-      "tags": ["design"],
+      "tags": [
+        "design"
+      ],
       "source": "anthropics/skills"
     },
     {
@@ -54,8 +68,167 @@
       "description": "Generative art via p5.js with seeded randomness.",
       "git_url": "https://github.com/anthropics/skills.git",
       "path": "skills/algorithmic-art",
-      "tags": ["design", "code"],
+      "tags": [
+        "design",
+        "code"
+      ],
       "source": "anthropics/skills"
+    },
+    {
+      "name": "remotion-best-practices",
+      "description": "Router for all Remotion skills — start here for programmatic videos/animations in React.",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-best-practices",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-create",
+      "description": "Create a new Remotion video project (scaffold, dependencies, first composition).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-create",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-markup",
+      "description": "Content, animation and effects best practices for Remotion compositions.",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-markup",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-captions",
+      "description": "Transcribing, displaying and animating captions in Remotion videos.",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-captions",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-docs",
+      "description": "Search Remotion documentation.",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-docs",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-interactivity",
+      "description": "Structure Remotion markup for interactivity (player controls, dynamic content).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-interactivity",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-maps",
+      "description": "Remotion Map animation knowledge (animated map visualizations).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-maps",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-multimedia",
+      "description": "Audio/video embedding and manipulation in Remotion (Mediabunny).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-multimedia",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-render",
+      "description": "Export/render a Remotion video to .mp4 (CLI, Lambda, server-side).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-render",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-saas",
+      "description": "Build an app with Remotion (programmatic video generation service).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-saas",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-studio",
+      "description": "Preview a Remotion video (Remotion Studio dev server).",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-studio",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
+    },
+    {
+      "name": "remotion-upgrade",
+      "description": "Upgrade Remotion and related packages.",
+      "git_url": "https://github.com/remotion-dev/skills.git",
+      "path": "skills/remotion-upgrade",
+      "tags": [
+        "video",
+        "animation",
+        "remotion",
+        "mp4"
+      ],
+      "source": "remotion-dev/skills"
     }
   ]
 }

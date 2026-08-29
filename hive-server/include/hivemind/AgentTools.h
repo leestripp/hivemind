@@ -123,6 +123,52 @@ private:
     AgentStore& agents_;
 };
 
+namespace hivemind {
+
+/// search_skills — keyword search over the skill marketplace registry
+/// (web/dist/skills-registry.json). Agents should ALWAYS try this before
+/// web-searching for a capability.
+class SearchSkillsTool final : public daedalus::BaseTool {
+public:
+    SearchSkillsTool() = default;
+    [[nodiscard]] std::string get_name() const override { return "search_skills"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Search the skill marketplace for installable skills by keyword "
+               "(matches name, description, and tags). Returns each match's "
+               "name, description, tags, and whether it is already installed. "
+               "Use this FIRST when you need a new capability (e.g. 'remotion', "
+               "'video', 'pdf'), then call install_skill with the skill name.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+};
+
+/// install_skill — install a marketplace skill (by registry name, or an
+/// explicit git_url+path) into the global library AND enable it for the
+/// calling agent (symlink into ~/.agents/skills/).
+class InstallSkillTool final : public daedalus::BaseTool {
+public:
+    explicit InstallSkillTool(std::string agent_id)
+        : agent_id_(std::move(agent_id)) {}
+    [[nodiscard]] std::string get_name() const override { return "install_skill"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Install a skill from the marketplace (pass its 'name' from "
+               "search_skills) or from an explicit git_url (+ optional 'path' "
+               "subdir for monorepos). The skill lands in the shared library "
+               "and is enabled for YOU immediately. Fails if already installed "
+               "or if you have a same-named local skill.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+private:
+    std::string agent_id_;
+};
+
+
+}  // namespace hivemind
+
 /// list_workers — Phase 30: discover enrolled hive-worker rigs (name,
 /// online status, capabilities) so an orchestrator can decide where to
 /// place a new teammate with create_agent's worker param.

@@ -15,6 +15,9 @@
 #include "hivemind/Files.h"
 
 #include <cstdio>
+#include <cctype>
+#include <sstream>
+#include <system_error>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -462,4 +465,216 @@ json DeleteRoutineTool::execute(const json& args, daedalus::HostToolContext&) {
     const std::string id = r->id;
     if (!routines_.remove(id)) return error("delete failed");
     return ok({{"deleted", true}, {"name", r->name}});
+}
+
+// ─── skill marketplace tools ────────────────────────────────────────────────
+namespace {
+
+fs::path skills_registry_path() {
+    return fs::current_path() / "web" / "dist" / "skills-registry.json";
+}
+
+fs::path global_skills_root() {
+    return AgentStore::agents_base_dir().parent_path() / "skills";
+}
+
+fs::path agent_skills_root(const std::string& agent_id) {
+    return AgentStore::agents_base_dir() / agent_id / ".agents" / "skills";
+}
+
+std::string lower_str(std::string v) {
+    for (char& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return v;
+}
+
+// Registry is either a bare array or {"entries":[...]}.
+json load_registry() {
+    std::ifstream f{skills_registry_path()};
+    if (!f) return json::array();
+    try {
+        json d = json::parse(f);
+        if (d.is_array()) return d;
+        return d.value("entries", json::array());
+    } catch (...) { return json::array(); }
+}
+
+bool valid_skill_name(const std::string& n) {
+    if (n.empty() || n.size() > 64) return false;
+    for (char c : n) {
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// Minimal SKILL.md frontmatter reader (name/description/version).
+json skill_frontmatter(const fs::path& p) {
+    json fm = json::object();
+    std::ifstream f{p};
+    std::string line;
+    if (!std::getline(f, line) || line != "---") return fm;
+    while (std::getline(f, line)) {
+        if (line == "---") break;
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = line.substr(0, colon);
+        std::string val = line.substr(colon + 1);
+        while (!val.empty() && val.front() == ' ') val.erase(val.begin());
+        if (key == "name" || key == "description" || key == "version")
+            fm[key] = val;
+    }
+    return fm;
+}
+
+} // namespace
+
+json hivemind::SearchSkillsTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"query", {{"type", "string"},
+                  {"description", "Keyword(s) to match against skill name, description, and tags (e.g. 'remotion', 'video', 'pdf')."}}}}},
+            {"query"}));
+}
+
+json hivemind::SearchSkillsTool::execute(const json& args, daedalus::HostToolContext&) {
+    const std::string q = lower_str(args.value("query", ""));
+    if (q.empty()) return error("need 'query'");
+    const json entries = load_registry();
+    if (entries.empty())
+        return error("skill registry not found (web/dist/skills-registry.json)");
+    json matches = json::array();
+    for (const auto& e : entries) {
+        std::string hay = lower_str(e.value("name", "") + " " +
+                                    e.value("description", ""));
+        for (const auto& t : e.value("tags", json::array()))
+            if (t.is_string()) hay += " " + lower_str(t.get<std::string>());
+        bool match = true;   // every query word must appear
+        std::istringstream iss(q);
+        for (std::string w; iss >> w;)
+            if (hay.find(w) == std::string::npos) { match = false; break; }
+        if (!match) continue;
+        const std::string name = e.value("name", "");
+        std::error_code ec;
+        const bool installed =
+            fs::exists(global_skills_root() / name / "SKILL.md", ec);
+        matches.push_back({{"name", name},
+                           {"description", e.value("description", "")},
+                           {"tags", e.value("tags", json::array())},
+                           {"source", e.value("source", "")},
+                           {"installed", installed}});
+    }
+    return ok(json{{"matches", matches}, {"count", matches.size()}});
+}
+
+json hivemind::InstallSkillTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"name", {{"type", "string"},
+                  {"description", "Skill name from search_skills results (registry lookup)."}}}},
+             json{{"git_url", {{"type", "string"},
+                  {"description", "Explicit git URL (only if the skill is not in the registry)."}}}},
+             json{{"path", {{"type", "string"},
+                  {"description", "Subdirectory inside the repo containing SKILL.md (monorepos; the registry's 'path' field)."}}}}},
+            {}));
+}
+
+json hivemind::InstallSkillTool::execute(const json& args, daedalus::HostToolContext&) {
+    std::string name = args.value("name", "");
+    std::string url  = args.value("git_url", "");
+    std::string sub  = args.value("path", "");
+
+    if (!name.empty() && url.empty()) {
+        for (const auto& e : load_registry()) {
+            if (e.value("name", "") == name) {
+                url = e.value("git_url", "");
+                if (sub.empty()) sub = e.value("path", "");
+                break;
+            }
+        }
+        if (url.empty())
+            return error("skill '" + name +
+                         "' not in registry — run search_skills first, or "
+                         "pass git_url explicitly");
+    }
+    if (url.empty()) return error("need 'name' (registry) or 'git_url'");
+
+    // Same input hygiene as the /api/skills/install route.
+    auto safe = [](const std::string& v, size_t max) {
+        if (v.empty() || v.size() > max) return false;
+        for (unsigned char c : v) {
+            if (std::isalnum(c)) continue;
+            if (std::string(":/.-_@~%+").find(static_cast<char>(c)) !=
+                std::string::npos)
+                continue;
+            return false;
+        }
+        return true;
+    };
+    if (!safe(url, 300)) return error("bad git_url");
+    if (!sub.empty() && (!safe(sub, 120) || sub.find("..") != std::string::npos))
+        return error("bad path");
+
+    char tmpl[] = "/tmp/hive-skill-XXXXXX";
+    if (!mkdtemp(tmpl)) return error("tmp dir failed");
+    const fs::path tmp = tmpl;
+    struct Cleanup {
+        fs::path p;
+        ~Cleanup() {
+            std::error_code ec;
+            fs::remove_all(p, ec);
+            fs::remove(p.string() + ".log", ec);
+        }
+    } cleanup{tmp};
+
+    const std::string cmd = "timeout 90 git clone --depth 1 '" + url + "' '" +
+                            tmp.string() + "' >'" + tmp.string() + ".log' 2>&1";
+    if (std::system(cmd.c_str()) != 0) {
+        std::ifstream lf(tmp.string() + ".log");
+        std::string tail, line;
+        while (std::getline(lf, line)) tail = line;   // last line
+        return error("git clone failed: " + tail);
+    }
+
+    const fs::path src = sub.empty() ? tmp : tmp / sub;
+    std::error_code ec;
+    if (!fs::exists(src / "SKILL.md", ec))
+        return error("no SKILL.md at repo " +
+                     (sub.empty() ? std::string("root")
+                                  : "path '" + sub + "'"));
+    json fm = skill_frontmatter(src / "SKILL.md");
+    std::string sname = fm.value("name", "");
+    if (sname.empty()) sname = src.filename().string();
+    if (!valid_skill_name(sname))
+        return error("invalid skill name '" + sname + "'");
+
+    fs::create_directories(global_skills_root(), ec);
+    const fs::path dest = global_skills_root() / sname;
+    if (fs::exists(dest, ec))
+        return error("skill '" + sname + "' already installed in the shared "
+                     "library — ask the user to enable it for you in the web UI");
+    fs::copy(src, dest, fs::copy_options::recursive, ec);
+    if (ec) return error("copy failed: " + ec.message());
+
+    // Enable for the calling agent — same relative-link scheme as the
+    // /api/agents/:id/global-skills route.
+    const fs::path link = agent_skills_root(agent_id_) / sname;
+    if (fs::exists(link, ec) && !fs::is_symlink(link, ec))
+        return ok(json{{"installed", sname}, {"enabled", false},
+                       {"warning", "installed to the shared library but NOT "
+                                   "enabled: you have a local skill named '" +
+                                   sname + "'"}});
+    fs::create_directories(link.parent_path(), ec);
+    fs::remove(link, ec);   // refresh existing link
+    fs::create_symlink(fs::path("../../../../skills") / sname, link, ec);
+    if (ec)
+        return ok(json{{"installed", sname}, {"enabled", false},
+                       {"warning", "installed but enable-symlink failed: " +
+                                   ec.message()}});
+
+    return ok(json{{"installed", sname},
+                   {"description", fm.value("description", "")},
+                   {"version", fm.value("version", "")},
+                   {"enabled", true},
+                   {"note", "Skill is at ~/.agents/skills/" + sname +
+                            "/ — read its SKILL.md before using it."}});
 }

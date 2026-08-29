@@ -386,6 +386,10 @@ void AgentHost::ensure_agent() {
     agent_->register_tool(std::make_unique<CreateAgentTool>(agents_));
     agent_->register_tool(std::make_unique<ListWorkersTool>());   // Phase 30
     agent_->register_tool(
+        std::make_unique<hivemind::SearchSkillsTool>());   // marketplace
+    agent_->register_tool(
+        std::make_unique<hivemind::InstallSkillTool>(info_.id));
+    agent_->register_tool(
         std::make_unique<SaveRoutineTool>(info_.id, routines_, threads_));
     agent_->register_tool(
         std::make_unique<ListRoutinesTool>(info_.id, routines_));
