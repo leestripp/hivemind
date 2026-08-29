@@ -1450,12 +1450,24 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
         box->append(*text);
     }
 
-    // Phase 18: attachment chips — click opens the local copy (the
-    // workspace is a host folder; agents see it at /workspace).
+    // Phase 18 + 34: attachments. Images render inline (downloaded via
+    // the API into the client cache — host_path is the SERVER's path and
+    // is wrong cross-machine); other files keep the Phase 18 chips.
     if (attachments.is_array() && !attachments.empty()) {
         auto* chips = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+        bool any_chip = false;
         for (auto& a : attachments) {
             const std::string name = a.value("name", "file");
+            std::string ext = std::filesystem::path(name).extension().string();
+            for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+                ext == ".gif" || ext == ".webp") {
+                auto* holder = Gtk::make_managed<Gtk::Box>(
+                    Gtk::Orientation::VERTICAL, 4);
+                box->append(*holder);
+                load_image_attachment(holder, a);
+                continue;
+            }
             const std::string host = a.value("host_path", "");
             auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
             chip->add_css_class("flat");
@@ -1465,11 +1477,128 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
                     Gio::AppInfo::launch_default_for_uri("file://" + host);
                 });
             chips->append(*chip);
+            any_chip = true;
         }
-        box->append(*chips);
+        if (any_chip) box->append(*chips);
     }
     row->append(*box);
     messages_box_.append(*row);
+}
+
+// ── Phase 34: inline image attachments ──────────────────────────────────────
+
+void HiveWindow::show_image_picture(Gtk::Box* holder,
+                                    const std::string& file,
+                                    const std::string& caption) {
+    auto tex = Gdk::Texture::create_from_filename(file);
+    if (!tex) {
+        auto* err = Gtk::make_managed<Gtk::Label>(
+            "⚠ could not load image " + file);
+        err->add_css_class("hv-time");
+        holder->append(*err);
+        return;
+    }
+    // Scale to fit a 480px box, preserving aspect.
+    int w = tex->get_width(), h = tex->get_height();
+    const double scale =
+        std::min({1.0, 480.0 / std::max(1, w), 480.0 / std::max(1, h)});
+    w = (int)std::lround(w * scale);
+    h = (int)std::lround(h * scale);
+
+    auto* pic = Gtk::make_managed<Gtk::Picture>();
+    pic->set_paintable(tex);
+    pic->set_content_fit(Gtk::ContentFit::CONTAIN);
+    pic->set_size_request(w, h);
+    auto* btn = Gtk::make_managed<Gtk::Button>();
+    btn->set_child(*pic);
+    btn->add_css_class("flat");
+    btn->set_halign(Gtk::Align::START);
+    btn->set_tooltip_text(file);
+    btn->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
+    });
+    holder->append(*btn);
+    if (!caption.empty()) {
+        auto* cap = Gtk::make_managed<Gtk::Label>(caption);
+        cap->add_css_class("hv-time");
+        cap->set_halign(Gtk::Align::START);
+        cap->set_wrap(true);
+        cap->set_selectable(true);
+        holder->append(*cap);
+    }
+}
+
+void HiveWindow::load_image_attachment(Gtk::Box* holder,
+                                       const nlohmann::json& att) {
+    namespace fs = std::filesystem;
+    const std::string name    = att.value("name", "image");
+    const std::string caption = att.value("caption", "");
+    // Server-provided path is container-style "/workspace/<rel>"; the
+    // download endpoint wants the workspace-relative form.
+    std::string rel = att.value("path", "");
+    if (rel.rfind("/workspace/", 0) == 0) rel.erase(0, 11);
+    if (rel.empty())
+        rel = "attachments/" + current_thread_ + "/" + name;
+
+    const fs::path cache =
+        fs::path(Glib::get_user_cache_dir()) / "hivemind-client" /
+        "attachments" / current_thread_ / name;
+
+    // Cache hit → render immediately.
+    std::error_code ec;
+    if (fs::is_regular_file(cache, ec) && fs::file_size(cache, ec) > 0) {
+        show_image_picture(holder, cache.string(), caption);
+        return;
+    }
+
+    auto* ph = Gtk::make_managed<Gtk::Label>("⏳ " + name + " — loading…");
+    ph->add_css_class("hv-time");
+    ph->set_halign(Gtk::Align::START);
+    holder->append(*ph);
+
+    const std::string key = cache.string();
+    if (!image_downloads_.insert(key).second)
+        return;   // already downloading (re-render)
+
+    // Widget-lifetime guard: if the bubble is destroyed (thread switch,
+    // theme re-render) before the download lands, the completion no-ops.
+    auto weak = std::make_shared<Gtk::Box*>(holder);
+    holder->signal_destroy().connect([weak] { *weak = nullptr; });
+
+    const std::string tid = current_thread_;
+    run_async([this, rel, key, tid, caption, weak] {
+        std::string err;
+        try {
+            std::string bytes =
+                api_.download("/api/files/download?path=" +
+                              ApiClient::url_encode(rel));
+            std::error_code ecw;
+            fs::create_directories(fs::path(key).parent_path(), ecw);
+            std::ofstream out(key, std::ios::binary | std::ios::trunc);
+            out.write(bytes.data(), (std::streamsize)bytes.size());
+            out.close();
+            if (!out || bytes.empty()) err = "write failed";
+        } catch (const std::exception& e) {
+            err = e.what();
+        }
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, key, tid, caption, weak, err] {
+            image_downloads_.erase(key);
+            if (!alive_ || !*weak || tid != current_thread_) return;
+            // Swap the placeholder for the picture (or an error note).
+            while (auto* child = (*weak)->get_first_child())
+                (*weak)->remove(*child);
+            if (err.empty()) {
+                show_image_picture(*weak, key, caption);
+            } else {
+                auto* el = Gtk::make_managed<Gtk::Label>(
+                    "⚠ image unavailable: " + err);
+                el->add_css_class("hv-time");
+                el->set_halign(Gtk::Align::START);
+                (*weak)->append(*el);
+            }
+        });
+    });
 }
 
 // ── callbacks ───────────────────────────────────────────────────────────────

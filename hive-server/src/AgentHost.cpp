@@ -12,6 +12,7 @@
 #include "hivemind/LLMStore.h"
 #include "hivemind/McpBridge.h"
 #include "hivemind/ServerConfig.h"
+#include "hivemind/Files.h"
 #include "tools/ToolHandler.h"
 #include "tools/ToolFactory.h"
 #include <sqlite3.h>
@@ -418,6 +419,8 @@ void AgentHost::ensure_agent() {
         std::make_unique<MessageAgentTool>(info_.id, agents_, registry_));
     agent_->register_tool(
         std::make_unique<SendFileTool>(info_.id, agents_, registry_));  // Phase 31
+    agent_->register_tool(
+        std::make_unique<ShowImageTool>(info_.id, registry_));          // Phase 34
     agent_->register_tool(std::make_unique<CreateAgentTool>(agents_));
     agent_->register_tool(std::make_unique<ListWorkersTool>());   // Phase 30
     agent_->register_tool(
@@ -475,10 +478,23 @@ void AgentHost::driver_loop() {
     }
 }
 
+void AgentHost::stage_image(PendingImage img) {
+    pending_images_.push_back(std::move(img));
+}
+
+std::vector<AgentHost::PendingImage> AgentHost::take_pending_images() {
+    std::vector<PendingImage> out;
+    out.swap(pending_images_);
+    return out;
+}
+
 void AgentHost::run_one(PendingTurn& turn) {
     // turn_mtx_ serializes against shutdown()/evict(); the driver thread
     // already serializes turns against each other.
     std::lock_guard<std::mutex> turn_lk{turn_mtx_};
+
+    // Phase 34: drop any leftovers from a previous failed/cancelled turn.
+    pending_images_.clear();
 
     // Phase 8: in-flight for the whole turn; eviction skips busy hosts.
     in_flight_.fetch_add(1, std::memory_order_relaxed);
@@ -797,6 +813,57 @@ void ChatService::fan_in(const std::string& thread_id,
             if (!out.empty())
                 out += "\n\n*(turn ended with errors)*";
         }
+        // Phase 34: drain images staged by show_image during the turn and
+        // write them under attachments/<thread_id>/ so the reply can carry
+        // them. The host is guaranteed alive — this callback runs inside
+        // its own turn.
+        json attachments = json::array();
+        if (auto* h = registry_.find(agent_id)) {
+            auto imgs = h->take_pending_images();
+            if (!imgs.empty()) {
+                try {
+                    const fs::path root =
+                        ServerConfig::instance().workspace_root();
+                    const fs::path dir = root / "attachments" / thread_id;
+                    fs::create_directories(dir);
+                    // World-writable: containers write here too (subuid
+                    // mapping) — same rule as the upload endpoint.
+                    fs::permissions(dir, fs::perms::all,
+                                    fs::perm_options::replace);
+                    for (auto& img : imgs) {
+                        const fs::path dest =
+                            hm::files::unique_path(dir, img.name);
+                        std::ofstream f(dest,
+                                        std::ios::binary | std::ios::trunc);
+                        f.write(img.bytes.data(),
+                                (std::streamsize)img.bytes.size());
+                        f.close();
+                        if (!f) continue;
+                        const fs::path relf = fs::relative(dest, root);
+                        attachments.push_back(json{
+                            {"name", dest.filename().string()},
+                            {"path", (fs::path{"/workspace"} / relf)
+                                         .generic_string()},
+                            {"host_path", dest.string()},
+                            {"size", (int64_t)img.bytes.size()},
+                            {"caption", img.caption},
+                        });
+                    }
+                } catch (const std::exception& e) {
+                    std::fprintf(stderr,
+                        "[chat] ERROR staging show_image files for "
+                        "thread %.8s: %s\n", thread_id.c_str(), e.what());
+                }
+            }
+        }
+        // An image-only turn (agent called show_image and said nothing)
+        // still posts — the caption becomes the body.
+        if ((out.empty() || out == "(agent produced no output)") &&
+            !attachments.empty()) {
+            out = attachments[0].value("caption", "");
+            if (out.empty()) out = "(image)";
+        }
+
         // Post only substantive user-facing output; context-only turns that
         // produced nothing (the common agent→agent fan-in terminator) stay
         // silent instead of flooding the thread with acknowledgements.
@@ -806,7 +873,8 @@ void ChatService::fan_in(const std::string& thread_id,
             bool posted = false;
             for (int attempt = 0; attempt < 2 && !posted; ++attempt) {
                 try {
-                    threads_.add_message(thread_id, "agent", agent_id, out);
+                    threads_.add_message(thread_id, "agent", agent_id, out,
+                                         attachments.dump());
                     posted = true;
                 } catch (const std::exception& e) {
                     std::fprintf(stderr,

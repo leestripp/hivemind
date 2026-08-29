@@ -82,6 +82,23 @@ public:
     /// Queue a turn. Throws std::runtime_error if the host is dead/stopping.
     void enqueue(PendingTurn turn);
 
+    /// Phase 34: one image staged by the show_image tool during a turn.
+    /// Bytes are held in memory (10 MB cap enforced by the tool) until the
+    /// reply is posted, then written under attachments/<thread_id>/.
+    struct PendingImage {
+        std::string name;     // original filename (sanitized)
+        std::string caption;  // optional, from the tool call
+        std::string bytes;    // raw image data
+    };
+
+    /// Stage an image for the in-flight turn (show_image tool). Safe to
+    /// call only while a turn is running — turns are serialized per host,
+    /// and host tools execute inside the turn.
+    void stage_image(PendingImage img);
+
+    /// Drain staged images (called by run_one when posting the reply).
+    std::vector<PendingImage> take_pending_images();
+
     /// Cancel the in-flight turn (daedalus Agent::cancel — stop_token).
     /// Safe to call when idle.
     void cancel() noexcept;
@@ -144,6 +161,10 @@ public:
     nlohmann::json mcp_debug();
 private:
     std::unique_ptr<daedalus::Agent> agent_;
+
+    // Phase 34: images staged by show_image during the current turn.
+    // Turn-serialized (turn_mtx_) — no extra locking needed.
+    std::vector<PendingImage> pending_images_;
 
     // Phase 8 idle eviction state
     std::atomic<std::chrono::steady_clock::time_point> last_active_{

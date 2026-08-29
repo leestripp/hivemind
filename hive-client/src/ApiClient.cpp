@@ -3,6 +3,7 @@
 #include <OmniNet.h>
 
 #include <stdexcept>
+#include <cstdio>
 
 namespace hive {
 namespace {
@@ -286,6 +287,47 @@ void ApiClient::cancel_thread(const std::string& thread_id) {
 
 void ApiClient::delete_thread(const std::string& thread_id) {
     request("DELETE", "/api/threads/" + thread_id);
+}
+
+} // namespace hive
+
+namespace hive {
+
+std::string ApiClient::url_encode(const std::string& v) {
+    std::string out;
+    for (unsigned char c : v) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+            c == '.' || c == '/' )
+            out += (char)c;
+        else {
+            char buf[4];
+            std::snprintf(buf, sizeof buf, "%%%02X", c);
+            out += buf;
+        }
+    }
+    return out;
+}
+
+std::string ApiClient::download(const std::string& path) {
+    using namespace OmniNet::HTTP;
+    ClientConfig cfg;
+    cfg.connect_timeout = std::chrono::seconds(5);
+    cfg.request_timeout = std::chrono::seconds(60);   // images can be big
+
+    ClientRequest req;
+    req.method("GET").url(base_ + path);
+    if (!api_key_.empty())
+        req.header("Authorization", "Bearer " + api_key_);
+
+    auto result = Client::get_instance().send_blocking(req, cfg);
+    if (!result.has_value())
+        throw std::runtime_error(std::string{"download failed: "} +
+                                 clientErrorName(result.error()));
+    if (result->statusCode() >= 400)
+        throw std::runtime_error("download HTTP " +
+                                 std::to_string(result->statusCode()));
+    return result->bodyAsString();
 }
 
 } // namespace hive

@@ -101,6 +101,13 @@ public:
     nlohmann::json providers();                                      // GET /api/providers
     bool healthy();                                                  // GET /api/health
 
+    /// Raw-bytes GET (Phase 34: attachment/image download). Throws on
+    /// transport or HTTP error. Path may contain a query string.
+    std::string download(const std::string& path);
+
+    /// Minimal percent-encoding for query parameter values.
+    static std::string url_encode(const std::string& v);
+
 private:
     nlohmann::json request(const std::string& method, const std::string& path,
                            const nlohmann::json* body = nullptr);

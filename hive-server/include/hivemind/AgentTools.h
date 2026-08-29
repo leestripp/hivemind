@@ -114,6 +114,36 @@ private:
     AgentRegistry& registry_;
 };
 
+/// show_image — display an image from the agent's /workspace inline in
+/// the chat thread (Phase 34). Bytes are fetched like send_file (worker
+/// channel pull for rig agents, confined local read otherwise), staged on
+/// the AgentHost, and attached to the agent's reply message. Images only
+/// (.png/.jpg/.jpeg/.gif/.webp), 10 MB cap.
+class ShowImageTool final : public daedalus::BaseTool {
+public:
+    ShowImageTool(std::string sender_id, AgentRegistry& registry)
+        : sender_id_(std::move(sender_id)), registry_(registry) {}
+    [[nodiscard]] std::string get_name() const override { return "show_image"; }
+    [[nodiscard]] std::string get_description() const override {
+        return "Show an image from your /workspace inline in the current "
+               "chat thread. Use this to present visual results (renders, "
+               "screenshots, diagrams) to the user — the image appears "
+               "directly in the chat, attached to your reply. 'path' is the "
+               "image file in YOUR workspace (e.g. 'blender-render.png' or "
+               "'out/chart.png'), optional 'caption' is a one-line "
+               "description shown with it. Images only: .png .jpg .jpeg "
+               ".gif .webp, max 10 MB. The image is attached to THIS turn's "
+               "reply — call it while composing the reply that presents it.";
+    }
+    [[nodiscard]] nlohmann::json get_definition() const override;
+    nlohmann::json execute(const nlohmann::json& args,
+                           daedalus::HostToolContext& ctx) override;
+
+private:
+    std::string sender_id_;
+    AgentRegistry& registry_;
+};
+
 /// create_agent — spin up a new named teammate on the roster.
 class CreateAgentTool final : public daedalus::BaseTool {
 public:

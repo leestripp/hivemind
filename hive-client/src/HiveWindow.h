@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_set>
 #include <thread>
+#include <set>
 #include <vector>
 
 #include "ApiClient.h"
@@ -118,6 +119,11 @@ private:
                                const std::string& created_at = "",
                                const nlohmann::json& attachments
                                    = nlohmann::json::array());
+    /// Phase 34: render one image attachment inline (download + cache if
+    /// needed, then Gtk::Picture). holder is a vertical box in the bubble.
+    void load_image_attachment(Gtk::Box* holder, const nlohmann::json& att);
+    void show_image_picture(Gtk::Box* holder, const std::string& file,
+                            const std::string& caption);
     void set_status(const std::string& text);
 
     ApiClient api_;
@@ -146,6 +152,10 @@ private:
     Glib::Dispatcher dispatcher_;
     std::mutex queue_m_;
     std::vector<std::function<void()>> done_queue_;
+
+    // Phase 34: attachment image downloads in flight (cache-path keyed —
+    // one download per file, no duplicates across re-renders).
+    std::set<std::string> image_downloads_;
 
     // ── widgets ───────────────────────────────────────────────────────────
     Gtk::Box root_{Gtk::Orientation::VERTICAL};

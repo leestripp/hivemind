@@ -309,6 +309,73 @@ json SendFileTool::execute(const json& args, daedalus::HostToolContext&) {
     return ok(res);
 }
 
+// ─── ShowImageTool ──────────────────────────────────────────────────────
+
+json ShowImageTool::get_definition() const {
+    return fn_def(get_name(), get_description(),
+        params_object(
+            {json{{"path", {{"type", "string"},
+                  {"description", "Image file in YOUR /workspace (e.g. 'render.png' or '/workspace/out/chart.png'). .png .jpg .jpeg .gif .webp only."}}}},
+             json{{"caption", {{"type", "string"},
+                  {"description", "Optional one-line caption shown with the image."}}}}},
+            {"path"}));
+}
+
+json ShowImageTool::execute(const json& args, daedalus::HostToolContext&) {
+    std::string path    = args.value("path", "");
+    std::string caption = args.value("caption", "");
+    if (path.empty()) return error("need 'path'");
+
+    // Normalise to a /workspace-relative path (same rules as send_file).
+    std::string rel = path;
+    while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+    if (rel.rfind("workspace/", 0) == 0) rel.erase(0, 10);
+    if (rel.empty() || rel.find("..") != std::string::npos)
+        return error("path must be a file inside your /workspace");
+
+    // Extension gate — images only.
+    std::string ext = fs::path(rel).extension().string();
+    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    static const std::set<std::string> kImgExt{
+        ".png", ".jpg", ".jpeg", ".gif", ".webp"};
+    if (!kImgExt.count(ext))
+        return error("not an image (allowed: .png .jpg .jpeg .gif .webp)");
+
+    constexpr size_t kMaxBytes = 10u * 1024 * 1024;  // upload cap parity
+    const fs::path ws_root = ServerConfig::instance().workspace_root();
+
+    // ── fetch the bytes (same logic as send_file) ───────────────────
+    std::string bytes;
+    if (auto remote = WorkerRouter::fetch_file(sender_id_, rel)) {
+        if (!remote->ok) return error("fetch failed: " + remote->error);
+        if (remote->data.size() > kMaxBytes)
+            return error("image too large (10MB cap)");
+        bytes = std::move(remote->data);
+    } else {
+        auto src = hm::files::resolve_confined(ws_root, rel);
+        if (!src) return error("not found in workspace: " + rel);
+        std::error_code ec;
+        const auto sz = fs::file_size(*src, ec);
+        if (ec) return error("stat failed");
+        if (sz > kMaxBytes) return error("image too large (10MB cap)");
+        std::ifstream in(*src, std::ios::binary);
+        if (!in) return error("read failed");
+        bytes.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+    }
+    if (bytes.empty()) return error("empty file");
+
+    // ── stage on the host; run_one attaches it to the reply ─────────
+    auto* host = registry_.find(sender_id_);
+    if (!host) return error("agent host unavailable");
+    host->stage_image({hm::files::sanitize_filename(fs::path(rel).filename().string()),
+                       caption, std::move(bytes)});
+
+    return ok({{"staged", true},
+               {"note", "the image will be attached to your reply in this "
+                        "thread — no further action needed"}});
+}
+
 // ─── CreateAgentTool ────────────────────────────────────────────────────────
 
 json CreateAgentTool::get_definition() const {

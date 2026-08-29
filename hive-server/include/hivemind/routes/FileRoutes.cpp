@@ -10,6 +10,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
@@ -145,10 +146,28 @@ void register_file_routes(OmniNet::HTTP::Server& server,
             std::string data{std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>()};
             resp = OmniNet::HTTP::Response::ok();
-            resp.setContentType("application/octet-stream");
-            resp.setHeader("Content-Disposition",
-                           "attachment; filename=\"" +
-                           target->filename().string() + "\"");
+            // Phase 34: real MIME type for images so browsers/clients can
+            // render inline; everything else stays an octet-stream
+            // download.
+            std::string ext = target->extension().string();
+            for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+            static const std::unordered_map<std::string, std::string> kMime{
+                {".png", "image/png"},  {".jpg", "image/jpeg"},
+                {".jpeg", "image/jpeg"}, {".gif", "image/gif"},
+                {".webp", "image/webp"},
+            };
+            auto it = kMime.find(ext);
+            if (it != kMime.end()) {
+                resp.setContentType(it->second);
+                resp.setHeader("Content-Disposition",
+                               "inline; filename=\"" +
+                               target->filename().string() + "\"");
+            } else {
+                resp.setContentType("application/octet-stream");
+                resp.setHeader("Content-Disposition",
+                               "attachment; filename=\"" +
+                               target->filename().string() + "\"");
+            }
             resp.setBody(data);
             apply_cors(resp);
         });
