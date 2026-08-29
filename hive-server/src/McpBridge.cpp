@@ -44,7 +44,7 @@ McpBridge::McpBridge(WorkerChannel& channel, int port)
     cfg.logRequests = false;
     http_ = std::make_unique<OmniNet::HTTP::Server>(cfg);
 
-    http_->post("/mcp", [this](const Request& req, Response& resp) {
+    http_->post("/mcp/:agent/:server", [this](const Request& req, Response& resp) {
         const auto seg = path_segments(std::string(req.path()));
         if (seg.size() != 3 || seg[0] != "mcp") {
             send_json(resp, StatusCode::NOT_FOUND,
