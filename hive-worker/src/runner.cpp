@@ -86,9 +86,12 @@ void ensure_container(const std::string& agent) {
         return;
     }
 
-    // Per-agent workspace + home ON THE WORKER (no cross-machine share).
+    // Shared workspace ON THIS WORKER (2026-08-29): all agents on the rig
+    // see the same /workspace, mirroring the server's company-drive model.
+    // Per-agent remains only the home dir. (Was workspace-<agent> — agents
+    // on the same worker couldn't collaborate.)
     fs::path base = worker_dir();
-    fs::path ws = base / ("workspace-" + agent);
+    fs::path ws = base / "workspace";
     fs::path home = base / ("home-" + agent);
     std::error_code ec;
     fs::create_directories(ws, ec);
@@ -288,7 +291,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     if (recreate) {
         podman_simple({"rm", "-f", cname}, &out);
         fs::path base = worker_dir();
-        fs::path ws = base / ("workspace-" + agent);
+        fs::path ws = base / "workspace";   // shared per-worker (see ensure_container)
         fs::path home = base / ("home-" + agent);
         std::error_code ec;
         fs::create_directories(ws, ec);
