@@ -367,6 +367,14 @@ void AgentHost::ensure_agent() {
         }
     }
 
+    // Phase 33: per-agent daedalus SettingsStore. Without daedalus_home,
+    // daedalus reads the GLOBAL singleton store (~/.local/share/daedalus/)
+    // and the per-agent mcp_servers seed is never seen. The seeded db lives
+    // in the agent's own brain dir; memory/messages are unaffected (those
+    // come from project_root + agent_name, not daedalus_home).
+    cfg.daedalus_home = dir_ / ".daedalus" /
+                        ("daedalus-" + sanitize_agent_name(info_.name));
+
     seed_mcp_servers();   // Phase 33: per-agent MCP config + bridge specs
 
     bool containerized = containerized_;
