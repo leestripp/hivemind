@@ -43,7 +43,11 @@ migration phases.
 
 ### hive-agent — the brain (in-container)
 
-- Thin host around `daedalus::Agent` (icarus-style wiring).
+- Thin host around `daedalus::Agent` (icarus-style wiring), running with
+  project root = the worker's shared `/workspace` — every agent's
+  daedalus state lives side by side at `/workspace/.daedalus/`, and
+  `/workspace/.agents/skills/` is a shared project-local skills dir all
+  agents auto-scan.
 - stdio NDJSON task protocol in; delta/message/approval/image events out.
 - Full daedalus feature set: skills with scripts, MCP servers spawned as
   local child processes, persistent memory + conversation history on the

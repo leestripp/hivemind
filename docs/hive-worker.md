@@ -19,9 +19,11 @@ The worker owns a container per agent (`hive-<agent-name>`):
 - Image: `hive-agent` image (ubuntu base + hive-agent binary + common
   runtimes). Built locally from `hive-worker/Containerfile` or pulled
   from a registry the hub advertises.
-- Mounts: shared `/workspace` (all agents on this worker collaborate),
-  per-agent home volume (history/memory/daedalus.db), `/skills` read-only
-  (synced library at daedalus' global skills location).
+- Mounts: shared `/workspace` (all agents on this worker collaborate;
+  also each agent's daedalus PROJECT ROOT — state lives at
+  `/workspace/.daedalus/daedalus-<Name>/`), per-agent home volume
+  (dotfiles, browser profiles), `/skills` read-only (synced library at
+  daedalus' global skills location).
 - User namespace: `--userns=keep-id` so container writes land as the
   worker user on the host.
 - Liveness: heartbeat reports per-agent state; a crashed hive-agent is
@@ -35,7 +37,8 @@ hub ◀─events─ worker ◀─stdout── hive-agent
 ```
 
 The worker speaks NDJSON to hive-agent over the container's stdio
-(`podman exec -i` session or PID-1 pipe). Events: `delta` (streaming
+(`podman exec -i` session or PID-1 pipe; hive-agent starts with CWD
+/workspace). Events: `delta` (streaming
 text), `message` (final reply + attachment metadata), `approval_request`,
 `image` (show_image intent), `status` (agent state changes).
 

@@ -25,6 +25,10 @@ location inside every container.
 - Per-agent enable/disable is roster metadata; the hub passes each
   agent's enabled list at spawn (mount subset or env filter — daedalus
   `skills` config).
+- Additionally, `/workspace/.agents/skills/` (project-local) is scanned
+  automatically by every agent whose project root is the shared
+  /workspace — agents can create and share skills among themselves with
+  no hub involvement.
 
 ## Why this just works now
 
