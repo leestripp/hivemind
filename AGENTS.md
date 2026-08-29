@@ -76,7 +76,15 @@ orchestration model.
     `receive()/receiveText()` use per-call buffers — coalesced frames in
     one TCP segment are silently discarded; drive the socket with
     `readLoop()` + onText callbacks on BOTH ends.
-13. **FetchContent `GIT_TAG main` goes stale silently.** `FetchContent`
+13. **wss:// WebSockets died after ~2s of peer silence (fixed upstream
+    2026-08-29).** OmniNet's TLSSocket::recvAll() returns an EMPTY buffer
+    on its ~2s idle-select cap, and Connection::readLoop()/receive() read
+    that as "closed" — every TLS WebSocket died at the first quiet moment
+    (HiveMind's worker channel flapped every ~15s). Fixed in OmniNet
+    6e3d036 via Socket::hasPeerClosed() (SSL_peek probe); ws:// was never
+    affected. If wss connections drop "for no reason", check your vendored
+    OmniNet has that commit.
+14. **FetchContent `GIT_TAG main` goes stale silently.** `FetchContent`
     caches `_deps/<dep>-src` and does NOT re-fetch when the declared tag is
     unchanged. Our root CMake now runs `git fetch && reset --hard origin/main`
     at configure time for OmniNet (`OMNINET_AUTO_UPDATE`, default ON, skipped
