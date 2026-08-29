@@ -158,6 +158,7 @@ all roster agents get the collaboration/routine tools:
 | `browser_fill_secret` | Fill a form from the agent's encrypted secret store; approval-gated when `require_approval` is on. |
 | `list_agents` | Roster list (used for delegation). |
 | `message_agent` | Async delegation: posts to the pair thread; fan-in wakes the asker. Do NOT make this synchronous. |
+| `send_file` | Deliver a file from the agent's /workspace to the company workspace on the server (Phase 31). Confined dest (parent must exist), 50MB cap, `overwrite` opt-in, optional `notify` teammate. Remote agents: bytes ride the worker channel (`file_fetch` op). |
 | `create_agent` | Add a teammate; optional `worker` field places the container on an enrolled `hive-worker`. |
 | `list_workers` | Online/offline worker rigs. |
 | `save_routine` / `list_routines` / `update_routine` / `delete_routine` | Own-routines-only; `id` or name accepted. |

@@ -176,6 +176,7 @@ Every roster agent gets these host-registered tools:
 |---|---|
 | `list_agents` | Roster discovery (id, name, role) |
 | `message_agent` | Send a task/question to a teammate (async: posts to the pair thread; the reply fan-in wakes the asker) |
+| `send_file` | Deliver a file from the agent's /workspace into the company workspace on the hive-server (confined dest, 50 MB cap, opt-in overwrite, optional teammate notify) |
 | `create_agent` | Spin up a new teammate |
 | `container_exec` | (containerized agents) run commands in their sandbox |
 
