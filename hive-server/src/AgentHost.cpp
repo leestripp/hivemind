@@ -489,10 +489,14 @@ void AgentHost::run_one(PendingTurn& turn) {
             agent_->cancel();
     }).detach();
 
+    std::fprintf(stderr, "[chat] turn start: agent=%s prompt=%.60s\n",
+                 info_.name.c_str(), turn.prompt.c_str());
     agent_->submit_user_message(turn.prompt.empty() ? "(no input)"
                                                     : turn.prompt);
     agent_->run_one_turn();
     turn_done.store(true, std::memory_order_release);
+    std::fprintf(stderr, "[chat] turn llm-round done: agent=%s\n",
+                 info_.name.c_str());
 
     // daedalus warns submit/run_one_turn pairs must stay 1:1 — catch drift.
     if (agent_->pending_count() != 0)
@@ -514,8 +518,16 @@ void AgentHost::run_one(PendingTurn& turn) {
     }
     if (sink->errored())
         turn.on_done("", "agent reported errors (see output)");
-    else
+    else {
+        if (out.empty())
+            std::fprintf(stderr,
+                "[chat] turn done SILENT: agent=%s produced no user output\n",
+                info_.name.c_str());
+        else
+            std::fprintf(stderr, "[chat] turn done: agent=%s out=%zu chars\n",
+                         info_.name.c_str(), out.size());
         turn.on_done(out.empty() ? "" : out, "");
+    }
 }
 
 void AgentHost::cancel() noexcept {
@@ -749,8 +761,27 @@ void ChatService::fan_in(const std::string& thread_id,
         // produced nothing (the common agent→agent fan-in terminator) stay
         // silent instead of flooding the thread with acknowledgements.
         if (!out.empty() && out != "(agent produced no output)") {
-            try {
-                threads_.add_message(thread_id, "agent", agent_id, out);
+            // NEVER silently drop a reply: a thrown add_message (transient
+            // SQLITE_BUSY, etc.) must be loud and retried once.
+            bool posted = false;
+            for (int attempt = 0; attempt < 2 && !posted; ++attempt) {
+                try {
+                    threads_.add_message(thread_id, "agent", agent_id, out);
+                    posted = true;
+                } catch (const std::exception& e) {
+                    std::fprintf(stderr,
+                        "[chat] ERROR posting reply to thread %.8s "
+                        "(attempt %d): %s\n",
+                        thread_id.c_str(), attempt + 1, e.what());
+                    if (attempt == 0)
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(300));
+                }
+            }
+            if (!posted) {
+                live->error = "reply generated but could not be posted "
+                              "to the thread";
+            } else try {
                 // Agent→agent fan-in: peers hear the reply, generation-capped
                 // so two agents can't talk to each other forever.
                 if (generation < kMaxFanInGenerations) {
