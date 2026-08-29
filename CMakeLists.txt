@@ -40,7 +40,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wno-unused-command-line-argument)
 endif()
-set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local")
+# Default install prefix: the user's ~/.local (overridable with
+# -DCMAKE_INSTALL_PREFIX=...). CACHE+FORCE so every consumer
+# (GNUInstallDirs, configured .desktop files, cmake --install) agrees.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH
+        "Install prefix" FORCE)
+endif()
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
