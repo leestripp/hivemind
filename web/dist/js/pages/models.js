@@ -1,4 +1,4 @@
-// js/pages/models.js …â€”… v2: READ-ONLY model catalog.
+// js/pages/models.js  -  -  -  v2: READ-ONLY model catalog.
 // The hub owns no LLM config: models live in each worker's
 // ~/.local/share/hive-worker/models.json (credentials in secrets.json,
 // never leave the worker). GET /api/models returns the union of all
@@ -15,7 +15,7 @@ function render(models) {
   const tbody = $('models-tbody');
   if (!models.length) {
     tbody.innerHTML = '<tr><td colspan="3" class="muted">No models in the ' +
-      'catalog …â€”… connect a worker (models live in its ' +
+      'catalog  -  -  -  connect a worker (models live in its ' +
       '<code>~/.local/share/hive-worker/models.json</code>).</td></tr>';
     return;
   }
