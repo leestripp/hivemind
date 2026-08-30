@@ -24,12 +24,23 @@ constexpr std::size_t kMaxUpload = 10 * 1024 * 1024;  // OmniNet body cap
 // Phase H: pick the connected worker that owns /workspace. Phase 1
 // assumes a single worker; with several connected we take the first
 // (multi-worker ?worker= selection is deferred).
-std::optional<std::string> pick_worker(WorkerChannel* wchannel) {
+std::optional<std::string> pick_worker(WorkerChannel* wchannel,
+                                       AgentStore& agents) {
     if (!wchannel) return std::nullopt;
     auto ws = wchannel->connected_workers();
     if (ws.empty()) return std::nullopt;
-    std::sort(ws.begin(), ws.end());   // deterministic
-    return ws.front();
+    // Prefer the connected worker that hosts the most agents (the
+    // workspace lives beside its containers); tie-break alphabetical.
+    std::unordered_map<std::string, int> count;
+    for (auto& a : agents.list_agents()) count[a.worker]++;
+    std::sort(ws.begin(), ws.end());
+    std::string best;
+    int best_n = -1;
+    for (auto& w : ws) {
+        const int n = count[w];
+        if (n > best_n) { best_n = n; best = w; }
+    }
+    return best;
 }
 
 
@@ -42,7 +53,7 @@ void register_file_routes(OmniNet::HTTP::Server& server,
     // client sets ?name=). Saved into the shared workspace so containers
     // see it at /workspace/attachments/<thread_id>/<name>.
     server.post("/api/threads/:id/attachments",
-        [&threads, wchannel](const OmniNet::HTTP::Request& req,
+        [&threads, &agents, wchannel](const OmniNet::HTTP::Request& req,
                    OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());   // api threads :id attachments
             if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
@@ -62,7 +73,7 @@ void register_file_routes(OmniNet::HTTP::Server& server,
             // over the channel into attachments/<thread_id>/<name> on
             // the worker's workspace dir (agents see it at
             // /workspace/attachments/<thread_id>/<name>).
-            const auto worker = pick_worker(wchannel);
+            const auto worker = pick_worker(wchannel, agents);
             if (!worker) {
                 send_error(resp, 503, "no worker connected"); return;
             }
@@ -100,10 +111,10 @@ void register_file_routes(OmniNet::HTTP::Server& server,
 
     // ── GET /api/files?path=<rel> — list a workspace directory ────────
     server.get("/api/files",
-        [wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             // Phase H: listing comes from the WORKER's workspace dir
             // over the channel (the worker owns /workspace).
-            const auto worker = pick_worker(wchannel);
+            const auto worker = pick_worker(wchannel, agents);
             if (!worker) {
                 send_error(resp, 503, "no worker connected"); return;
             }
@@ -131,9 +142,9 @@ void register_file_routes(OmniNet::HTTP::Server& server,
         });
 
     server.get("/api/files/download",
-        [wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             // Phase H: fetch from the WORKER's workspace over the channel.
-            const auto worker = pick_worker(wchannel);
+            const auto worker = pick_worker(wchannel, agents);
             if (!worker) {
                 send_error(resp, 503, "no worker connected"); return;
             }
