@@ -2926,13 +2926,14 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
             all_workers.push_back({w.value("name", ""), w.value("online", false)});
     } catch (...) { /* server unreachable — worker row stays hidden */ }
     const std::string cur_worker =
-        existing ? existing->value("worker", "local") : "local";
+        existing ? existing->value("worker", "") : "";
     auto* worker_names = new std::vector<std::string>();  // dialog lifetime
     auto* worker = Gtk::make_managed<Gtk::DropDown>();
     {
         std::vector<Glib::ustring> items;
-        worker_names->push_back("local");
-        items.push_back("This server (local)");
+        // v2 fix (2026-08-30): no "local" entry -- the hub cannot run
+        // agents itself; only enrolled workers are valid placements.
+        // (Creating on "local" produced a zombie agent stuck at (init).)
         for (auto& w : all_workers) {
             if (!w.online && w.name != cur_worker) continue;
             worker_names->push_back(w.name);
@@ -2944,7 +2945,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
             if ((*worker_names)[i] == cur_worker) { sel = (guint)i; break; }
         worker->set_selected(sel);
     }
-    const bool show_worker_row = worker_names->size() > 1;
+    const bool show_worker_row = !worker_names->empty();
 
     // Host mode removed (2026-08-25): agents always run containerized.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
@@ -3047,6 +3048,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
     if (show_worker_row) add_row("Worker", worker, row_i++);
+    else if (!editing) {
+        // No worker online: creation is impossible (the hub rejects unknown
+        // workers) -- explain and disable OK.
+        auto* nowork = Gtk::make_managed<Gtk::Label>(
+            "No hive-worker online - enroll or connect one first");
+        nowork->add_css_class("dim-label");
+        nowork->set_hexpand(true);
+        add_row("Worker", nowork, row_i++);
+        dialog->set_response_sensitive((int)Gtk::ResponseType::OK, false);
+    }
     // (no Workspace row — always containerized)
     add_row("Avatar", avatar_grid, row_i++);
     grid->attach(*appr, 1, row_i);
@@ -3061,7 +3072,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 const auto msel = model->get_selected();
                 std::string m = msel < model_names->size() ? (*model_names)[msel] : "";
                 const auto wsel = worker->get_selected();
-                const std::string wk = wsel < worker_names->size() ? (*worker_names)[wsel] : "local";
+                const std::string wk = wsel < worker_names->size() ? (*worker_names)[wsel] : "";
                 const std::string av = *chosen_avatar;
                 delete chosen_avatar;
                 delete model_names;

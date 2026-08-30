@@ -80,7 +80,7 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar}};
-    if (!worker.empty()) body["worker"] = worker;   // Phase 30: "" = server default ("local")
+    if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
     return request("POST", "/api/agents", &body);
 }
 

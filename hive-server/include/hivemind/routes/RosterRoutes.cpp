@@ -13,6 +13,7 @@
 #include <iostream>
 #include "hivemind/RoutineStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/WorkerStore.h"
 
 #include <nlohmann/json.hpp>
 
@@ -67,12 +68,40 @@ json message_json(const ThreadMessage& m) {
 
 } // namespace
 
+// v2: an agent MUST be placed on an ENROLLED hive-worker. There is no
+// hub-local execution anymore -- "local" (or any never-enrolled name)
+// creates a zombie that never spawns and never errors (user hit this
+// via the client 2026-08-30). Enrolled-but-offline stays allowed:
+// reconcile spawns it when the worker connects.
+// NB: static free function, NOT a local lambda -- route handlers outlive
+// this function's scope, so captures of locals would dangle.
+static bool validate_worker(WorkerStore& workers, const std::string& w,
+                            std::string& err) {
+    if (workers.get(w)) return true;
+    std::string names;
+    for (auto& wi : workers.list()) {
+        if (!names.empty()) names += ", ";
+        names += wi.name;
+    }
+    err = "unknown worker '" + w + "' (enrolled workers: " +
+          (names.empty() ? std::string("none -- enroll one first") : names) + ")";
+    return false;
+}
+
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
                             HubRouter& hub,
                             ChatService& chat,
-                            RoutineStore& routines) {
+                            RoutineStore& routines,
+                            WorkerStore& workers) {
+
+    // v2: an agent MUST be placed on an ENROLLED hive-worker. There is no
+    // hub-local execution anymore -- "local" (or any never-enrolled name)
+    // creates a zombie that never spawns and never errors (user hit this
+    // via the client 2026-08-30). Enrolled-but-offline stays allowed:
+    // reconcile spawns it when the worker connects.
+
 
     // ── GET /api/templates — teammate templates (Phase 19) ─────────────
     // Static catalog: pre-filled personas for the first-run / new-agent
@@ -164,7 +193,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
 
     // ── POST /api/agents ──────────────────────────────────────────────────
     server.post("/api/agents",
-        [&agents, &hub](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, &hub, &workers](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             json body;
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
@@ -175,10 +204,14 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string ws = body.value("workspace_mode", "shared");
             if (ws == "host") ws = "shared";   // host mode removed (2026-08-25)
             bool req_appr = body.value("require_approval", false);
-            // Phase 30: "worker" = "local" (default) or an enrolled hive-worker
-            // name. Placement errors surface at exec time (worker offline), so
             // an unknown name is accepted here — same contract as the PATCH.
-            const std::string worker = body.value("worker", "local");
+            const std::string worker = body.value("worker", "");
+            {
+                std::string werr;
+                if (!validate_worker(workers, worker, werr)) {
+                    send_error(resp, 400, werr); return;
+                }
+            }
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
                                              body.value("avatar", ""), worker);
@@ -232,7 +265,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.patch("/api/agents/:id",
-        [&agents, &hub](const OmniNet::HTTP::Request& req,
+        [&agents, &hub, &workers](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -243,6 +276,15 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
+            {
+                const std::string pw = body.value("worker", "");
+                if (!pw.empty()) {
+                    std::string werr;
+                    if (!validate_worker(workers, pw, werr)) {
+                        send_error(resp, 400, werr); return;
+                    }
+                }
+            }
             try {
                 auto a = agents.update_agent(seg[2],
                     body.value("name", existing->name),

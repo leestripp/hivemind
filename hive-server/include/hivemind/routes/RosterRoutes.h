@@ -25,9 +25,12 @@
 class RoutineStore;
 class HubRouter;
 class ChatService;
+class WorkerStore;
+
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
                             HubRouter& hub,
                             ChatService& chat,
-                            RoutineStore& routines);
+                            RoutineStore& routines,
+                            WorkerStore& workers);

@@ -53,7 +53,7 @@ int main() {
     ThreadStore threads{tmp / "threads.db"};
     ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
-    WorkerStore wstore;
+    WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
     HubRouter hub{agents, threads, wchannel, approvals};
     ChatService chat{agents, threads, hub};
@@ -61,7 +61,7 @@ int main() {
     OmniNet::HTTP::Server::Config cfg;
     cfg.port = 0;                       // ephemeral
     OmniNet::HTTP::Server server{cfg};
-    register_roster_routes(server, agents, threads, hub, chat, routines);
+    register_roster_routes(server, agents, threads, hub, chat, routines, wstore);
     server.startAsync();
     // wait for bind (port() is the CONFIGURED port; boundPort() is actual)
     for (int i = 0; i < 50 && server.boundPort() == 0; ++i)
@@ -70,11 +70,23 @@ int main() {
     assert(port != 0);
 
     // ── setup: two roster agents ──────────────────────────────────────────
+    wstore.enroll("testrig");
+
+    // Regression (2026-08-30): unknown/absent worker must be REJECTED --
+    // a "local"/ghost worker creates a zombie agent that never spawns.
     auto r = request("POST", port, "/api/agents",
-                     {{"name", "Alpha"}, {"role", "coder"}});
+                     {{"name", "Zed"}, {"role", "coder"}});
+    assert(r.statusCode() == 400);
+    r = request("POST", port, "/api/agents",
+                {{"name", "Zed"}, {"role", "coder"}, {"worker", "local"}});
+    assert(r.statusCode() == 400);
+
+    r = request("POST", port, "/api/agents",
+                {{"name", "Alpha"}, {"role", "coder"}, {"worker", "testrig"}});
     assert(r.statusCode() == 201);
     const std::string a1 = json::parse(r.bodyAsString())["id"];
-    r = request("POST", port, "/api/agents", {{"name", "Beta"}, {"role", "reviewer"}});
+    r = request("POST", port, "/api/agents",
+                {{"name", "Beta"}, {"role", "reviewer"}, {"worker", "testrig"}});
     const std::string a2 = json::parse(r.bodyAsString())["id"];
 
     // ── thread create validation ──────────────────────────────────────────
