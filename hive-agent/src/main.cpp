@@ -172,6 +172,17 @@ public:
         }
     }
 
+    // Brain state machine -> roster presence. daedalus notifies every
+    // transition; terminal turn states map back to "ready" (the agent is
+    // idle and waiting for the next task, not "done" forever).
+    void on_state_change(int /*from*/, int to) noexcept override {
+        std::string st = daedalus::to_string(static_cast<daedalus::AgentState>(to));
+        for (auto& c : st) c = (char)tolower((unsigned char)c);
+        if (st == "done" || st == "cancelled") st = "ready";
+        if (st == "idle") return;   // constructed/reset noise; fleet already knows
+        emit({{"ev", "status"}, {"state", st}});
+    }
+
     void on_error(daedalus::ErrorKind /*kind*/, std::string_view msg,
                   bool will_retry) noexcept override {
         errored_ = true;

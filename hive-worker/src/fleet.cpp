@@ -252,6 +252,12 @@ void AgentProcess::reader_loop(int fd) {
                 set_state(m_, state_, "acting");
             } else if (kind == "message") {
                 set_state(m_, state_, "ready");
+            } else if (kind == "status") {
+                // Brain state machine (idle/understanding/acting/...) from
+                // hive-agent's on_state_change; lifecycle states
+                // (starting/restarting/down) remain monitor-owned.
+                const std::string st = ev.value("state", "");
+                if (!st.empty()) set_state(m_, state_, st.c_str());
             }
             if (on_event_) on_event_(spec_.id, ev);
         }

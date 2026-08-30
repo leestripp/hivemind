@@ -1210,8 +1210,14 @@ void HiveWindow::rebuild_roster() {
         // always, so "down" agents are visibly offline.
         std::string st_ = a.value("state", "down");
         for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
+        // Brain state machine (daedalus, via worker heartbeats):
+        // understanding/planning/acting/verifying/documenting/compressing
+        // are active phases; awaitingapproval parks on a human.
         const bool working = a.value("busy", false) ||
-            st_ == "acting" || st_ == "starting" || st_ == "restarting";
+            st_ == "acting" || st_ == "starting" || st_ == "restarting" ||
+            st_ == "understanding" || st_ == "planning" ||
+            st_ == "verifying" || st_ == "documenting" ||
+            st_ == "compressing";
         if (working) {
             auto* spin = Gtk::make_managed<Gtk::Spinner>();
             spin->start();
@@ -1220,11 +1226,16 @@ void HiveWindow::rebuild_roster() {
             row_box->append(*spin);
         }
         {
-            auto* tag = Gtk::make_managed<Gtk::Label>(st_);
-            tag->add_css_class(st_ == "ready"    ? "hv-state-ready" :
-                               st_ == "down"     ? "hv-state-down"  :
-                               working           ? "hv-state-tag"   :
-                                                   "hv-state-down");
+            std::string label = st_;
+            if (label == "awaitingapproval") label = "awaiting approval";
+            auto* tag = Gtk::make_managed<Gtk::Label>(label);
+            tag->add_css_class(
+                st_ == "ready" || st_ == "idle"   ? "hv-state-ready" :
+                st_ == "down"  || st_ == "error" ||
+                st_ == "cancelled"                ? "hv-state-down"  :
+                                                    "hv-state-tag");
+            if (st_ == "awaitingapproval")
+                tag->set_tooltip_text("Waiting on your approval");
             tag->set_valign(Gtk::Align::CENTER);
             row_box->append(*tag);
         }
