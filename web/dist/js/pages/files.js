@@ -15,8 +15,11 @@ function fmtSize(n) {
 function fmtTime(epoch) {
   if (!epoch) return '';
   const tz = getTimezone();   // Phase 19
-  return new Date(epoch * 1000).toLocaleString(undefined,
-    tz ? { timeZone: tz } : undefined);
+  // new Date(epoch*1000) overflows in some embedded webviews (large ms
+  // values render as 1969); setUTCSeconds takes seconds and is safe.
+  const d = new Date(0);
+  d.setUTCSeconds(epoch);
+  return d.toLocaleString(undefined, tz ? { timeZone: tz } : undefined);
 }
 
 async function load() {
