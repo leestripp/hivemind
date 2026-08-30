@@ -31,6 +31,14 @@ void register_worker_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"workers", list}});
         });
 
+    // v2: model catalog = union of connected workers' models.json
+    // (the hub holds no LLM config of its own; workers own credentials).
+    server.get("/api/models",
+        [&channel](const OmniNet::HTTP::Request&,
+                   OmniNet::HTTP::Response& resp) {
+            send_json(resp, json{{"models", channel.models_catalog()}});
+        });
+
     server.delete_("/api/workers/:name",
         [&workers](const OmniNet::HTTP::Request& req,
                    OmniNet::HTTP::Response& resp) {

@@ -2,6 +2,7 @@
 // See WorkerChannel.h for the model.
 
 #include "hivemind/WorkerChannel.h"
+#include <set>
 #include "hivemind/WorkerStore.h"
 #include "hivemind/AgentStore.h"
 
@@ -45,6 +46,26 @@ WorkerChannel::~WorkerChannel() { stop(); }
 void WorkerChannel::start() {
     ws_->start();
     std::cerr << "[workers] channel listening on :" << port_ << "\n";
+}
+
+json WorkerChannel::models_catalog() const {
+    // Aggregate hello catalogs across connected workers, dedup by name.
+    json out = json::array();
+    std::set<std::string> seen;
+    std::lock_guard lk(m_);
+    for (auto& [wname, cat] : models_) {
+        json arr;
+        try { arr = json::parse(cat); } catch (...) { continue; }
+        for (auto& e : arr) {
+            const std::string n = e.value("name", "");
+            if (n.empty() || seen.count(n)) continue;
+            seen.insert(n);
+            out.push_back({{"name", n},
+                           {"provider", e.value("provider", "")},
+                           {"worker", wname}});
+        }
+    }
+    return out;
 }
 
 void WorkerChannel::stop() {
@@ -124,6 +145,7 @@ void WorkerChannel::handle(Connection& ws) {
         bool authed = false;
         std::string name;
         std::string key;
+        std::string models;   // hello catalog: [{name, provider}]
     };
     auto st = std::make_shared<State>();
 
@@ -147,6 +169,12 @@ void WorkerChannel::handle(Connection& ws) {
             }
             st->name = frame.value("worker", "");
             st->key  = frame.value("key", "");
+            st->models = frame.contains("models") ? frame["models"].dump()
+                                                  : "[]";
+            {
+                std::lock_guard lk(m_);
+                models_[st->name] = st->models;
+            }
             const std::string caps =
                 frame.contains("caps") ? frame["caps"].dump() : "{}";
             auto worker = store_.validate(st->key, caps, kProto);
@@ -305,6 +333,7 @@ void WorkerChannel::handle(Connection& ws) {
     if (st->authed) {
         std::lock_guard lk(m_);
         conns_.erase(st->name);
+        models_.erase(st->name);
         // Fail every in-flight job for this worker — exec() callers wake
         // with an error instead of hanging until the outer timeout.
         for (auto& [id, job] : jobs_) {

@@ -48,6 +48,14 @@ void HubRouter::cancel_agent(const RosterAgent& agent,
                   {{"op", "cancel"}, {"agent_id", agent.id}});
 }
 
+void HubRouter::spawn_agent(const RosterAgent& agent) {
+    if (!channel_.send(agent.worker, spawn_frame(agent)))
+        throw std::runtime_error("worker '" + agent.worker +
+                                 "' is offline");
+    std::lock_guard<std::mutex> lk(m_);
+    states_[agent.id] = "starting";
+}
+
 void HubRouter::stop_agent(const RosterAgent& agent) {
     channel_.send(agent.worker,
                   {{"op", "agent_stop"}, {"agent_id", agent.id}});

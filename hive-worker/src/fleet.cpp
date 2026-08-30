@@ -45,6 +45,20 @@ std::string resolve_api_key(const std::string& provider) {
 ///   {"<name>": {"model_id","host","endpoint","provider",
 ///               "max_context","temperature"}}
 /// Fields missing from the entry keep the spec's own values.
+/// models.json -> [{name, provider}] for the hello catalog.
+json list_worker_models() {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    std::ifstream in(p);
+    json out = json::array();
+    if (!in) return out;
+    json j;
+    try { in >> j; } catch (...) { return out; }
+    for (auto& [name, e] : j.items())
+        out.push_back({{"name", name},
+                       {"provider", e.value("provider", "")}});
+    return out;
+}
+
 void resolve_model(AgentSpec& spec) {
     const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
     std::ifstream in(p);

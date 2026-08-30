@@ -61,6 +61,8 @@ public:
     /// Roster delete/reset: stop the agent on its owning worker (the
     /// container + brain volume persist; a later spawn resumes it).
     void stop_agent(const RosterAgent& agent);
+    /// Spawn one agent on its worker; throws if the worker is offline.
+    void spawn_agent(const RosterAgent& agent);
     /// Roster delete: worker destroys the container + local state too.
     void remove_agent(const RosterAgent& agent);
 

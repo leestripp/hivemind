@@ -142,6 +142,10 @@ public:
     /// main.cpp uses it to re-push enabled skills after worker downtime).
     std::function<void(const std::string& worker)> on_worker_online;
 
+    /// Aggregated model catalog across connected workers:
+    /// [{"name","provider","worker"}] deduped by name.
+    nlohmann::json models_catalog() const;
+
     /// Phase C: heartbeat frames carry per-agent states (v2 fleet). Fired
     /// with the worker name + the agents object {agent_id: state}.
     std::function<void(const std::string& worker,
@@ -163,6 +167,8 @@ private:
 
     mutable std::mutex m_;
     std::unordered_map<std::string, OmniNet::WebSocket::Connection*> conns_;
+    /// worker name -> hello models catalog (json string), erased on disconnect.
+    std::unordered_map<std::string, std::string> models_;
 
     // In-flight remote execs, keyed by job id (filled by exec_chunk /
     // exec_done frames in the receive loop).

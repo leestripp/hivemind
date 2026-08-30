@@ -2198,8 +2198,13 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
     box->append(*loading);
     run_async([this, box, dialog, loading, agent_id] {
         json st; std::string err;
-        try { st = api_.container_status(agent_id); }
-        catch (const std::exception& e) { err = e.what(); }
+            // v2: container lifecycle lives on the worker; the roster row
+            // carries the live brain state (heartbeat-fed).
+            try {
+                for (auto& a : api_.list_agents().value("agents", json::array()))
+                    if (a.value("id", "") == agent_id) { st = a; break; }
+                if (st.is_null()) err = "agent not found";
+            } catch (const std::exception& e) { err = e.what(); }
         {
             std::lock_guard<std::mutex> lk(queue_m_);
             done_queue_.push_back([this, box, dialog, loading, agent_id, st, err] {
@@ -2211,16 +2216,11 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                     box->append(*l);
                     return;
                 }
-                if (!st.value("podman_available", false)) {
-                    auto* l = Gtk::make_managed<Gtk::Label>("podman not available on the server");
-                    l->add_css_class("dim-label");
-                    box->append(*l);
-                    return;
-                }
-                const bool exists = st.value("exists", false);
-                const bool running = st.value("running", false);
+                const std::string state = st.value("state", "down");
+                const bool running = (state != "down" && state != "crashed"
+                                      && !state.empty());
                 auto* sl = Gtk::make_managed<Gtk::Label>(
-                    running ? "\u25CF running" : (exists ? "\u25CB stopped" : "not created yet"));
+                    running ? "\u25CF " + state : "\u25CB " + state);
                 sl->set_halign(Gtk::Align::START);
                 sl->add_css_class(running ? "hv-unread-dot" : "dim-label");
                 box->append(*sl);
@@ -2232,9 +2232,8 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                     l->set_selectable(true);
                     box->append(*l);
                 };
-                ck("container", st.value("container", ""));
-                ck("image", st.value("image", ""));
-                ck("workspace", st.value("workspace", ""));
+                ck("worker", st.value("worker", ""));
+                ck("model", st.value("model", ""));
                 auto* btns = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
                 auto act = [&](const char* label, bool sensitive, bool start) {
                     auto* b = Gtk::make_managed<Gtk::Button>(label);
@@ -2243,8 +2242,8 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                         while (auto* c = box->get_first_child()) box->remove(*c);
                         run_async([this, agent_id, start] {
                             std::string err;
-                            try { start ? (void)api_.container_start(agent_id)
-                                        : (void)api_.container_stop(agent_id); }
+                            try { start ? (void)api_.agent_start(agent_id)
+                                        : (void)api_.agent_stop(agent_id); }
                             catch (const std::exception& e) { err = e.what(); }
                             {
                                 std::lock_guard<std::mutex> lk(queue_m_);
@@ -2734,14 +2733,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     std::vector<ModelEntry>  model_entries;
     std::string default_model;
     try {
-        for (auto& p : api_.providers().value("providers", nlohmann::json::array()))
-            provider_names.push_back(p.value("name", ""));
-        for (auto& m : api_.models()) {
+        // v2: /api/models is the union of connected workers' models.json
+        // (the hub holds no LLM config; model ids never leave workers).
+        std::set<std::string> provs;
+        for (auto& m : api_.models().value("models", nlohmann::json::array())) {
             model_entries.push_back({m.value("name", ""), m.value("provider", ""),
-                                     m.value("name", "") + "  (" + m.value("model", "") + ")"});
-            if (m.value("is_default", false)) default_model = m.value("name", "");
+                                     m.value("name", "") + "  (" + m.value("provider", "") + ")"});
+            provs.insert(m.value("provider", ""));
         }
-    } catch (...) { /* server unreachable — dropdowns stay empty */ }
+        provider_names.assign(provs.begin(), provs.end());
+    } catch (...) { /* server unreachable - dropdowns stay empty */ }
 
     std::vector<Glib::ustring> prov_items(provider_names.begin(), provider_names.end());
     auto* provider = Gtk::make_managed<Gtk::DropDown>(

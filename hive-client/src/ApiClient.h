@@ -55,10 +55,9 @@ public:
     void delete_routine(const std::string& id);                        // DELETE /api/routines/:id
     void run_routine(const std::string& id);                           // POST /api/routines/:id/run
     void set_routine_enabled(const std::string& id, bool enabled);     // POST …/enabled
-    nlohmann::json container_status(const std::string& agent_id);    // GET …/container/status
-    nlohmann::json container_start(const std::string& agent_id);     // POST …/container/start
-    nlohmann::json container_stop(const std::string& agent_id);      // POST …/container/stop
-    nlohmann::json screen_start(const std::string& agent_id);        // POST …/screen/start
+    nlohmann::json screen_start(const std::string& agent_id);
+    nlohmann::json agent_start(const std::string& agent_id);       // POST .../start
+    nlohmann::json agent_stop(const std::string& agent_id);        // POST .../stop
     nlohmann::json exec_log(const std::string& agent_id,
                             int limit = 200);                        // GET …/exec-log
 
@@ -98,7 +97,6 @@ public:
 
     // ── misc ──────────────────────────────────────────────────────────────
     nlohmann::json models();                                         // GET /api/models
-    nlohmann::json providers();                                      // GET /api/providers
     bool healthy();                                                  // GET /api/health
 
     /// Raw-bytes GET (Phase 34: attachment/image download). Throws on

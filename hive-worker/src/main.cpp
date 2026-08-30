@@ -118,7 +118,8 @@ int main(int argc, char* argv[]) {
         try {
             Connection ws{url};
             ws.sendText(json{{"op","hello"},{"worker",name},{"key",key},
-                             {"caps",json::parse(caps)},{"proto",1}}.dump());
+                             {"caps",json::parse(caps)},{"proto",1},
+                             {"models",hwfleet::list_worker_models()}}.dump());
             auto reply = ws.receiveText();
             json r = reply ? json::parse(*reply) : json{};
             if (r.value("op","") != "welcome") {

@@ -274,6 +274,34 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     // Cascade delete: threads the agent was in are cleaned up (solo threads
     // deleted, group threads keep going without the agent), and its routines
     // are either deleted or moved to another agent via ?reassign_to=<id>.
+        // v2: explicit brain lifecycle on the owning worker (agent_stop is
+    // graceful; start = spawn on the owning worker; offline -> 503).
+    server.post("/api/agents/:id/start",
+        [&agents, &hub](const OmniNet::HTTP::Request& req,
+                        OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
+            auto a = agents.get_agent(seg[2]);
+            if (!a) { send_error(resp, 404, "agent not found"); return; }
+            try {
+                hub.spawn_agent(*a);
+                send_json(resp, json{{"started", true}});
+            } catch (const std::exception& e) {
+                send_error(resp, 503, e.what());
+            }
+        });
+
+    server.post("/api/agents/:id/stop",
+        [&agents, &hub](const OmniNet::HTTP::Request& req,
+                        OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
+            auto a = agents.get_agent(seg[2]);
+            if (!a) { send_error(resp, 404, "agent not found"); return; }
+            hub.stop_agent(*a);
+            send_json(resp, json{{"stopped", true}});
+        });
+
     server.delete_("/api/agents/:id",
         [&agents, &threads, &hub, &routines](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {

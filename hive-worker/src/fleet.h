@@ -118,4 +118,8 @@ private:
 /// Throws if the file or the provider entry is missing.
 std::string resolve_api_key(const std::string& provider);
 
+
+/// models.json -> [{name, provider}] for the hello catalog.
+nlohmann::json list_worker_models();
+
 } // namespace hwfleet

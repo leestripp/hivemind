@@ -152,16 +152,15 @@ nlohmann::json ApiClient::create_routine(const std::string& agent_id,
     return request("POST", "/api/routines", &body);
 }
 
-nlohmann::json ApiClient::container_status(const std::string& agent_id) {
-    return request("GET", "/api/agents/" + agent_id + "/container/status");
+
+
+
+nlohmann::json ApiClient::agent_start(const std::string& agent_id) {
+    return request("POST", "/api/agents/" + agent_id + "/start");
 }
 
-nlohmann::json ApiClient::container_start(const std::string& agent_id) {
-    return request("POST", "/api/agents/" + agent_id + "/container/start");
-}
-
-nlohmann::json ApiClient::container_stop(const std::string& agent_id) {
-    return request("POST", "/api/agents/" + agent_id + "/container/stop");
+nlohmann::json ApiClient::agent_stop(const std::string& agent_id) {
+    return request("POST", "/api/agents/" + agent_id + "/stop");
 }
 
 nlohmann::json ApiClient::screen_start(const std::string& agent_id) {
@@ -273,7 +272,6 @@ nlohmann::json ApiClient::resolve_approval(const std::string& id, bool approve) 
 // ── misc ────────────────────────────────────────────────────────────────────
 
 nlohmann::json ApiClient::models() { return request("GET", "/api/models"); }
-nlohmann::json ApiClient::providers() { return request("GET", "/api/providers"); }
 
 bool ApiClient::healthy() {
     try { return request("GET", "/api/health").value("status", "") == "ok"; }
