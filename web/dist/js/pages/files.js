@@ -5,6 +5,7 @@ import { $, esc, getTimezone } from '../util.js';
 
 let cwd = '';            // workspace-relative path, '' = root
 let entries = [];
+let worker = '';         // selected hive-worker ('' = server default)
 
 function fmtSize(n) {
   if (n === undefined || n === null) return '';
@@ -22,8 +23,38 @@ function fmtTime(epoch) {
   return d.toLocaleString(undefined, tz ? { timeZone: tz } : undefined);
 }
 
+// Populate the worker dropdown with ONLINE workers only - browsing a
+// dead worker's files is impossible (files live on the rig). Returns
+// false when nothing is connected.
+async function loadWorkers() {
+  const sel = $('files-worker');
+  let online = [];
+  try {
+    const d = await API.get('/api/workers');
+    online = (d.workers || []).filter(w => w.online);
+  } catch { /* fall through to empty state */ }
+  if (!online.length) {
+    sel.innerHTML = '<option value="">no workers connected</option>';
+    sel.disabled = true;
+    $('files-tbody').innerHTML = '<tr><td colspan="4" class="muted">' +
+      'No worker connected - start a hive-worker to browse its ' +
+      '/workspace.</td></tr>';
+    return false;
+  }
+  sel.disabled = false;
+  if (!online.some(w => w.name === worker))
+    worker = online[0].name;   // default: first connected
+  sel.innerHTML = online.map(w =>
+    `<option value="${esc(w.name)}"${w.name === worker ? ' selected' : ''}>` +
+    `${esc(w.name)}</option>`).join('');
+  return true;
+}
+
 async function load() {
-  const data = await API.get('/api/files?path=' + encodeURIComponent(cwd));
+  if (!worker && !(await loadWorkers())) return;
+  const q = '?path=' + encodeURIComponent(cwd) +
+            (worker ? '&worker=' + encodeURIComponent(worker) : '');
+  const data = await API.get(q.length ? '/api/files' + q : '/api/files');
   entries = data.entries || [];
   renderCrumbs();
   renderRows();
@@ -64,7 +95,8 @@ function renderRows() {
 async function download(rel, name) {
   // Authenticated fetch → blob → object-URL download (window.open would
   // lose the bearer header).
-  const r = await fetch('/api/files/download?path=' + encodeURIComponent(rel), {
+  const r = await fetch('/api/files/download?path=' + encodeURIComponent(rel) +
+    (worker ? '&worker=' + encodeURIComponent(worker) : ''), {
     headers: { 'Authorization': 'Bearer ' + API.getKey() },
   });
   if (!r.ok) throw new Error('download failed: HTTP ' + r.status);
@@ -77,12 +109,19 @@ async function download(rel, name) {
 }
 
 // ── page lifecycle ────────────────────────────────────────────────────
-export function enterFiles() { load().catch(e => {
+export function enterFiles() { loadWorkers().then(ok => {
+  if (ok) return load();
+}).catch(e => {
   $('files-tbody').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`;
 }); }
 
 export function initFiles() {
   $('files-refresh').addEventListener('click', () => load());
+  $('files-worker').addEventListener('change', (e) => {
+    worker = e.target.value;
+    cwd = '';          // different rig, different tree - back to root
+    load();
+  });
   $('files-crumbs').addEventListener('click', (e) => {
     const c = e.target.closest('[data-crumb]');
     if (!c) return;

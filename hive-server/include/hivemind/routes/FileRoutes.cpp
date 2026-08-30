@@ -25,8 +25,14 @@ constexpr std::size_t kMaxUpload = 10 * 1024 * 1024;  // OmniNet body cap
 // assumes a single worker; with several connected we take the first
 // (multi-worker ?worker= selection is deferred).
 std::optional<std::string> pick_worker(WorkerChannel* wchannel,
-                                       AgentStore& agents) {
+                                       AgentStore& agents,
+                                       const std::string& want = "") {
     if (!wchannel) return std::nullopt;
+    // Explicit selection (?worker=) wins; must be connected.
+    if (!want.empty()) {
+        if (wchannel->is_online(want)) return want;
+        return std::nullopt;
+    }
     auto ws = wchannel->connected_workers();
     if (ws.empty()) return std::nullopt;
     // Prefer the connected worker that hosts the most agents (the
@@ -73,9 +79,10 @@ void register_file_routes(OmniNet::HTTP::Server& server,
             // over the channel into attachments/<thread_id>/<name> on
             // the worker's workspace dir (agents see it at
             // /workspace/attachments/<thread_id>/<name>).
-            const auto worker = pick_worker(wchannel, agents);
+            const auto worker = pick_worker(wchannel, agents,
+                req.queryParameter("worker", ""));
             if (!worker) {
-                send_error(resp, 503, "no worker connected"); return;
+                send_error(resp, 503, "worker not connected"); return;
             }
             // Uniquify against the worker's current listing so repeated
             // same-name uploads do not clobber each other.
@@ -114,9 +121,10 @@ void register_file_routes(OmniNet::HTTP::Server& server,
         [&agents, wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             // Phase H: listing comes from the WORKER's workspace dir
             // over the channel (the worker owns /workspace).
-            const auto worker = pick_worker(wchannel, agents);
+            const auto worker = pick_worker(wchannel, agents,
+                req.queryParameter("worker", ""));
             if (!worker) {
-                send_error(resp, 503, "no worker connected"); return;
+                send_error(resp, 503, "worker not connected"); return;
             }
             const std::string rel = req.queryParameter("path", "");
             auto l = wchannel->list_files(*worker, rel);
@@ -144,9 +152,10 @@ void register_file_routes(OmniNet::HTTP::Server& server,
     server.get("/api/files/download",
         [&agents, wchannel](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             // Phase H: fetch from the WORKER's workspace over the channel.
-            const auto worker = pick_worker(wchannel, agents);
+            const auto worker = pick_worker(wchannel, agents,
+                req.queryParameter("worker", ""));
             if (!worker) {
-                send_error(resp, 503, "no worker connected"); return;
+                send_error(resp, 503, "worker not connected"); return;
             }
             const std::string rel = req.queryParameter("path", "");
             auto r = wchannel->fetch_file(*worker, "", rel);
