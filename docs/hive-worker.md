@@ -88,6 +88,12 @@ The worker owns a container per agent (`hive-<agent-id>`):
   for the operational gotchas.
 - Liveness: heartbeat reports per-agent state; desired state is replayed
   by the hub on every reconnect.
+- State semantics: fleet state is EVENT-driven (ready/acting/down from
+  the exec's NDJSON stream and the process monitor). A remembered state
+  can go stale if a transition is missed -- any completed turn resets it
+  to ready. Hub-side, an agent whose worker is OFFLINE always reports
+  "down" regardless of the remembered state (HubRouter::agent_state,
+  2026-08-31: Bob-on-dev-rig showed "ready" on a powered-off rig).
 
 ## Task routing (worker <-> hive-agent, NDJSON over exec stdio)
 
