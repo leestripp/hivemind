@@ -40,6 +40,42 @@ std::string resolve_api_key(const std::string& provider) {
     return key;
 }
 
+/// Resolve a model NAME to its full config from the worker-local
+/// models.json (~/.local/share/hive-worker/models.json, 0600):
+///   {"<name>": {"model_id","host","endpoint","provider",
+///               "max_context","temperature"}}
+/// Fields missing from the entry keep the spec's own values.
+void resolve_model(AgentSpec& spec) {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    std::ifstream in(p);
+    if (!in)
+        throw std::runtime_error("worker models missing: " + p.string() +
+            " (create 0600, {\"<name>\": {\"model_id\",\"host\",...}})");
+    json j;
+    try { in >> j; }
+    catch (...) { throw std::runtime_error("worker models: bad json"); }
+    if (!j.contains(spec.model))
+        throw std::runtime_error("worker models: no entry for model '" +
+                                 spec.model + "'");
+    const json& e = j[spec.model];
+    if (spec.model.empty()) throw std::runtime_error("empty model name");
+    const std::string mid = e.value("model_id", "");
+    if (!mid.empty()) spec.model = mid;        // name -> remote model id
+    if (spec.api_host.empty())
+        spec.api_host = e.value("host", "");
+    if (spec.chat_endpoint.empty())
+        spec.chat_endpoint = e.value("endpoint", "/v1/chat/completions");
+    if (spec.provider.empty())
+        spec.provider = e.value("provider", "");
+    if (spec.max_context <= 0)
+        spec.max_context = e.value("max_context", 0L);
+    if (spec.temperature < 0)
+        spec.temperature = e.value("temperature", -1.0);
+    if (spec.api_host.empty() || spec.provider.empty())
+        throw std::runtime_error("worker models: entry for '" + spec.model +
+                                 "' lacks host/provider");
+}
+
 // -- AgentProcess ----------------------------------------------------------
 
 AgentProcess::AgentProcess(AgentSpec spec, EventFn on_event)
@@ -128,6 +164,7 @@ void AgentProcess::start() {
         state_ = "starting";
     }
     stopping_ = false;
+    resolve_model(spec_);            // model/provider names -> full config
     hwrunner::ensure_container(spec_.id,
         spec_.image.empty() ? kImageV2 : spec_.image);
     spawn_exec();

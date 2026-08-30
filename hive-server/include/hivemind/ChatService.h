@@ -1,0 +1,90 @@
+#pragma once
+
+// ChatService (HiveMind 2.0 Phase C): glues threads to agents. v2: turns
+// run on WORKERS (hive-agent in containers) - this service is pure hub
+// bookkeeping: post user messages, dispatch tasks via HubRouter, track
+// live turn state until task_result arrives, fan agent replies into
+// peer participants (generation-capped).
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+class AgentStore;
+class ThreadStore;
+class HubRouter;
+struct RosterAgent;
+
+class ChatService {
+public:
+    ChatService(AgentStore& agents, ThreadStore& threads, HubRouter& hub)
+        : agents_(agents), threads_(threads), hub_(hub) {}
+
+    struct LiveTurn {
+        std::string task_id;
+        std::string thread_id;
+        std::string agent_id;
+        std::string agent_name;
+        int         generation = 0;   // agent->agent fan-in depth
+        std::string partial;          // streamed so far (task_delta)
+        std::string error;            // non-empty if the turn failed
+        bool done = false;
+        bool cancelling = false;
+    };
+
+    /// Record a user message and dispatch a task to every agent
+    /// participant of the thread. Returns the user message id.
+    /// Throws std::invalid_argument if the thread does not exist.
+    std::string post_user_message(const std::string& thread_id,
+                                  const std::string& body,
+                                  const std::string& attachments_json = "[]");
+
+    /// Agent->agent async message: find-or-create the pair thread, post
+    /// as sender_kind="agent", fan in to the target at generation 1.
+    std::string post_agent_message(const std::string& sender_id,
+                                   const std::string& target_id,
+                                   const std::string& body);
+
+    /// Proactive nudge (gap analysis): sender_kind="system", fanned in.
+    std::string post_nudge(const std::string& thread_id,
+                           const std::string& body);
+
+    // -- HubRouter callbacks (worker channel events) --------------------
+    void append_delta(const std::string& task_id, const std::string& text);
+    void complete_turn(const std::string& task_id, const std::string& body,
+                       const std::string& error,
+                       const std::string& attachments_json = "[]");
+
+    /// Snapshot of in-progress (and just-finished) turns for a thread.
+    std::vector<LiveTurn> activity(const std::string& thread_id);
+    /// True while any turn for this thread is still running.
+    bool busy(const std::string& thread_id);
+    /// Latest live turn per agent across ALL threads (roster status).
+    std::unordered_map<std::string, LiveTurn> agent_activity();
+
+    /// Shutdown: stop accepting new messages. (Turns are remote; the
+    /// workers outlive us or get their own shutdown path.)
+    void quiesce();
+
+    /// Cancel every live turn in a thread.
+    void cancel_thread(const std::string& thread_id);
+
+private:
+    void fan_in(const std::string& thread_id, const RosterAgent& agent,
+                const std::string& sender_label, const std::string& body,
+                int generation);
+
+    AgentStore& agents_;
+    ThreadStore& threads_;
+    HubRouter& hub_;
+
+    std::mutex m_;
+    std::unordered_map<std::string, std::vector<std::shared_ptr<LiveTurn>>> live_;
+    std::unordered_map<std::string, std::shared_ptr<LiveTurn>> by_task_;
+    std::atomic<bool> stopping_{false};
+    static constexpr std::size_t kMaxLivePerThread = 32;
+    static constexpr int kMaxFanInGenerations = 3;
+};

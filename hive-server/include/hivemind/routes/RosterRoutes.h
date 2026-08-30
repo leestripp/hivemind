@@ -4,7 +4,6 @@
 
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
-#include "hivemind/AgentHost.h"
 
 /**
  * Roster + chat routes (HiveMind 2.0, Plan.md Phase 1):
@@ -24,9 +23,11 @@
  *   GET    /api/threads/:id/activity      in-progress agent turns (streaming)
  */
 class RoutineStore;
+class HubRouter;
+class ChatService;
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
-                            AgentRegistry& registry,
+                            HubRouter& hub,
                             ChatService& chat,
                             RoutineStore& routines);

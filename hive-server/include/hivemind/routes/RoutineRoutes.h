@@ -5,7 +5,7 @@
 #include "hivemind/RoutineStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
-#include "hivemind/AgentHost.h"   // ChatService
+#include "hivemind/ChatService.h"
 
 /**
  * Routine + skill routes (HiveMind 2.0, Plan.md Phase 5):

@@ -3,7 +3,10 @@
 // Spins a real OmniNet server on an ephemeral port; no LLM (turns fail
 // fast in the background — queue semantics are what's under test).
 #include "hivemind/routes/RosterRoutes.h"
-#include "hivemind/LLMStore.h"
+#include "hivemind/ChatService.h"
+#include "hivemind/HubRouter.h"
+#include "hivemind/WorkerChannel.h"
+#include "hivemind/WorkerStore.h"
 #include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
 
@@ -49,15 +52,16 @@ int main() {
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
     ApprovalStore approvals{tmp / "approvals.db"};
-    LLMStore llm{tmp / "llm.db"};
     RoutineStore routines{tmp / "routines.db"};
-    AgentRegistry registry{agents, approvals, llm, routines, threads};
-    ChatService chat{agents, threads, registry};
+    WorkerStore wstore;
+    WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
+    HubRouter hub{agents, threads, wchannel, approvals};
+    ChatService chat{agents, threads, hub};
 
     OmniNet::HTTP::Server::Config cfg;
     cfg.port = 0;                       // ephemeral
     OmniNet::HTTP::Server server{cfg};
-    register_roster_routes(server, agents, threads, registry, chat, routines);
+    register_roster_routes(server, agents, threads, hub, chat, routines);
     server.startAsync();
     // wait for bind (port() is the CONFIGURED port; boundPort() is actual)
     for (int i = 0; i < 50 && server.boundPort() == 0; ++i)
@@ -144,25 +148,6 @@ int main() {
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
 
-    // ── Phase 8: idle eviction — fresh agent (never messaged = never busy) ─
-    {
-        auto r3 = request("POST", port, "/api/agents",
-                          {{"name", "Evictable"}, {"role", "test"}});
-        assert(r3.statusCode() == 201);
-        const std::string a3 = json::parse(r3.bodyAsString())["id"];
-        auto agent = agents.get_agent(a3);
-        assert(agent);
-        auto& host = registry.get_or_create(*agent);
-        assert(!host.busy());
-        registry.evict_idle(std::chrono::seconds(0));   // everything idle
-        auto& host2 = registry.get_or_create(*agent);   // fresh host
-        assert(&host2 != &host);
-        host2.touch();
-        registry.evict_idle(std::chrono::hours(24));    // nothing idle that long
-        assert(&registry.get_or_create(*agent) == &host2);
-    }
-
-    registry.shutdown_all();
 
     fs::remove_all(tmp);
     std::cout << "test_roster_routes OK\n";

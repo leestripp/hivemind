@@ -342,6 +342,46 @@ int main(int argc, char** argv) {
     auto sink = std::make_shared<NdjsonSink>(approvals);
 
     daedalus::Agent agent(cfg, sink);
+    // message_agent: async agent-to-agent via the hub (v1-validated
+    // design). The tool emits an NDJSON event; the worker relays it as
+    // agent_msg; the hub posts to the pair thread and the reply arrives
+    // later as a new task. NEVER a synchronous nested turn.
+    class MessageAgentTool final : public daedalus::BaseTool {
+    public:
+        std::string get_name() const override { return "message_agent"; }
+        std::string get_description() const override {
+            return "Send an async message to another agent (by name or id). "
+                   "The reply arrives later as a new task in your shared "
+                   "pair thread - do NOT wait for it inline; continue your "
+                   "own work.";
+        }
+        json get_definition() const override {
+            json target = {{"type","string"},
+                           {"description","Agent name or id"}};
+            json text   = {{"type","string"},
+                           {"description","Message body"}};
+            json params = {{"type","object"},
+                           {"properties",{{"target",target},{"text",text}}},
+                           {"required",{"target","text"}}};
+            return {{"type","function"},
+                    {"function",{{"name","message_agent"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, daedalus::HostToolContext&) override {
+            const std::string target = args.value("target","");
+            const std::string text   = args.value("text","");
+            if (target.empty() || text.empty())
+                return {{"status","error"},
+                        {"error","target and text required"}};
+            emit({{"ev","send_agent_message"},
+                  {"target",target},{"text",text}});
+            return {{"status","success"},
+                    {"note","posted to the pair thread; the reply arrives "
+                            "asynchronously as a new task"}};
+        }
+    };
+    agent.register_tool(std::make_unique<MessageAgentTool>());
     try {
         agent.initialize();
     } catch (const std::exception& e) {

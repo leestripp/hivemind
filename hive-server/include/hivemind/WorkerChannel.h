@@ -150,6 +150,11 @@ public:
     /// main.cpp uses it to re-push enabled skills after worker downtime).
     std::function<void(const std::string& worker)> on_worker_online;
 
+    /// Phase C: heartbeat frames carry per-agent states (v2 fleet). Fired
+    /// with the worker name + the agents object {agent_id: state}.
+    std::function<void(const std::string& worker,
+                       const nlohmann::json& agents)> on_heartbeat;
+
     /// Hook for frames that are not channel bookkeeping (30.3: exec_chunk,
     /// exec_done, status). Called with the worker name + parsed frame.
     std::function<void(const std::string& worker,

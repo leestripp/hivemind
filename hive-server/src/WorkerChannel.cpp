@@ -177,6 +177,11 @@ void WorkerChannel::handle(Connection& ws) {
         const std::string op = frame.value("op", "");
         if (op == "heartbeat") {
             store_.validate(st->key);   // touches last_seen
+            if (on_heartbeat) {
+                try { on_heartbeat(st->name, frame.value("agents",
+                                        nlohmann::json::object())); }
+                catch (...) {}
+            }
         } else if (op == "exec_chunk" || op == "exec_done") {
             std::shared_ptr<Job> job;
             {

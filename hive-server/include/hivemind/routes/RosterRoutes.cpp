@@ -7,7 +7,8 @@
 
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
-#include "hivemind/AgentHost.h"
+#include "hivemind/ChatService.h"
+#include "hivemind/HubRouter.h"
 #include "hivemind/ContainerManager.h"
 
 #include <iostream>
@@ -70,7 +71,7 @@ json message_json(const ThreadMessage& m) {
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             ThreadStore& threads,
-                            AgentRegistry& registry,
+                            HubRouter& hub,
                             ChatService& chat,
                             RoutineStore& routines) {
 
@@ -164,7 +165,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
 
     // ── POST /api/agents ──────────────────────────────────────────────────
     server.post("/api/agents",
-        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, &hub](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             json body;
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
@@ -182,6 +183,9 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
                                              body.value("avatar", ""), worker);
+                // Phase C: spawn the brain on its worker right away
+                // (idempotent; offline worker spawns on reconnect).
+                hub.reconcile_worker(a.worker);
                 send_json(resp, agent_json(a), 201);
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());
@@ -191,13 +195,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     // ── GET /api/agents ───────────────────────────────────────────────────
     // busy: agent has a live turn in any thread (Phase 14.1 roster dots).
     server.get("/api/agents",
-        [&agents, &chat, &registry](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+        [&agents, &chat, &hub](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             auto live = chat.agent_activity();
             json list = json::array();
             for (auto& a : agents.list_agents()) {
                 auto j = agent_json(a);
                 j["busy"] = live.count(a.id) > 0;
-                j["state"] = registry.agent_state(a.id);
+                j["state"] = hub.agent_state(a.id);
                 list.push_back(std::move(j));
             }
             send_json(resp, json{{"agents", list}});
@@ -218,17 +222,6 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     // ── GET/PATCH/DELETE /api/agents/:id ──────────────────────────────────
-    // ── GET /api/agents/:id/mcp-tools ─────────────────────────────────────
-    // Phase 33 debug: what daedalus actually loaded/registered for MCP.
-    server.get("/api/agents/:id/mcp-tools",
-        [&registry](const OmniNet::HTTP::Request& req,
-                    OmniNet::HTTP::Response& resp) {
-            auto seg = path_segments(req.path());
-            if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
-            auto* host = registry.find(seg[2]);
-            if (!host) { send_json(resp, json{{"brain", "not constructed"}}); return; }
-            send_json(resp, host->mcp_debug());
-        });
 
     server.get("/api/agents/:id",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
@@ -240,7 +233,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.patch("/api/agents/:id",
-        [&agents, &registry](const OmniNet::HTTP::Request& req,
+        [&agents, &hub](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -266,23 +259,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                                ? body["mcp_servers"].dump()
                                : body.value("mcp_servers", ""))
                         : "");
-                // Name/model changes must not leak into a live host.
-                registry.evict(a.id);
-                // Phase 10 fix: renaming an agent must carry its daedalus
-                // namespace (messages/memory) along — the dir is keyed by
-                // the sanitized agent name.
-                if (a.name != existing->name) {
-                    try {
-                        namespace fs = std::filesystem;
-                        fs::path base = AgentStore::agents_base_dir() / a.id
-                                      / ".daedalus";
-                        fs::path oldns = base / ("daedalus-" + sanitize_agent_name(existing->name));
-                        fs::path newns = base / ("daedalus-" + sanitize_agent_name(a.name));
-                        std::error_code ec;
-                        if (fs::exists(oldns, ec) && !fs::exists(newns, ec))
-                            fs::rename(oldns, newns, ec);
-                    } catch (...) { /* best effort — old dir remains */ }
-                }
+                // Name/model changes must not leak into a live brain:
+                // stop, then respawn with the new config (worker dedups).
+                hub.stop_agent(a);
+                hub.reconcile_worker(a.worker);
+                // v2: the brain namespace lives on the worker's volume,
+                // keyed by name; a rename starts a fresh brain on the next
+                // spawn (old history stays orphaned on the volume).
                 send_json(resp, agent_json(a));
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());
@@ -293,7 +276,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     // deleted, group threads keep going without the agent), and its routines
     // are either deleted or moved to another agent via ?reassign_to=<id>.
     server.delete_("/api/agents/:id",
-        [&agents, &threads, &registry, &routines](const OmniNet::HTTP::Request& req,
+        [&agents, &threads, &hub, &routines](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -345,7 +328,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             //    its podman container — best-effort, the row is gone
             //    either way).
             agents.delete_agent(id);
-            registry.evict(id);
+            { auto a2 = agents.get_agent(id); if (a2) hub.stop_agent(*a2); }
             try { container_manager().remove(id); }
             catch (const std::exception& e) {
                 std::cerr << "[roster] container teardown for " << id

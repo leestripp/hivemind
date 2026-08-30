@@ -1,11 +1,10 @@
 # ============================================================================
 # hive-server — HiveMind 2.0 server
-# C++23 + OmniNet HTTP/WS API, daedalus agent runtime, graph runner, scheduler.
-# Deps (OmniNet, daedalus, nlohmann_json) are fetched by the root superbuild.
+# C++23 + OmniNet HTTP/WS API hub: roster, threads, workers, scheduler.
+# Deps (OmniNet, nlohmann_json) are fetched by the root superbuild.
 # ============================================================================
 
 set(CORE_SOURCES
-    src/McpBridge.cpp
     src/Schedule.cpp
     src/SystemMonitor.cpp
     src/Files.cpp
@@ -17,15 +16,13 @@ set(CORE_SOURCES
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp
-    src/AgentHost.cpp
     src/ContainerManager.cpp
     src/ExecAuditStore.cpp
-    src/ContainerTools.cpp
-    src/BrowserTools.cpp
     src/ApprovalStore.cpp
     src/AgentTools.cpp
+    src/ChatService.cpp
+    src/HubRouter.cpp
     src/RoutineStore.cpp
-    src/LLMStore.cpp
     src/AuthStore.cpp
     src/SecretStore.cpp
     src/ServerConfig.cpp
@@ -37,9 +34,7 @@ set(EXECUTOR_SOURCES
 set(ROUTE_SOURCES
     include/hivemind/routes/StaticRoutes.cpp
     include/hivemind/routes/SystemRoutes.cpp
-    include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/ProjectRoutes.cpp
-    include/hivemind/routes/AgentRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
     include/hivemind/routes/FileRoutes.cpp
     include/hivemind/routes/ConnectorRoutes.cpp
@@ -75,10 +70,8 @@ target_link_libraries(hivemind_core PUBLIC
 )
 
 if(HIVEMIND_USE_DAEDALUS)
-    target_link_libraries(hivemind_core PUBLIC daedalus)
-    # Read-only access to daedalus' internal tool headers (ToolHandler) for
-    # the Phase 33 MCP debug route. daedalus itself is never patched.
-    target_include_directories(hivemind_core PRIVATE ${daedalus_SOURCE_DIR}/src)
+    # Phase C: daedalus linkage REMOVED - brains run on workers
+    # (hive-agent). The server is a pure hub: OmniNet + SQLite only.
 endif()
 
 add_executable(hive-server src/main.cpp)

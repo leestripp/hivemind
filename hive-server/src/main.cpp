@@ -25,9 +25,7 @@
 #include "hivemind/routes/StaticRoutes.h"
 #include "hivemind/routes/SystemRoutes.h"
 #include "hivemind/SystemMonitor.h"
-#include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/routes/ProjectRoutes.h"
-#include "hivemind/routes/AgentRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/routes/FileRoutes.h"
 #include "hivemind/routes/ConnectorRoutes.h"
@@ -46,16 +44,15 @@
 #include "hivemind/AuthStore.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/WorkerChannel.h"
-#include "hivemind/McpBridge.h"
 #include "hivemind/WorkerRouter.h"
 #include "hivemind/AgentTools.h"
 #include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
-#include "hivemind/LLMStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
-#include "hivemind/AgentHost.h"
+#include "hivemind/ChatService.h"
+#include "hivemind/HubRouter.h"
 #include "hivemind/ApprovalStore.h"
 
 #include <OmniNet.h>
@@ -131,21 +128,33 @@ int main(int argc, char* argv[]) {
     ThreadStore thread_store;
     ApprovalStore approval_store;
     RoutineStore routine_store;
-    LLMStore llm_store;
     AuthStore auth_store;
     WorkerStore worker_store;
     WorkerChannel worker_channel{worker_store,
                                  ServerConfig::instance().worker_ws_port(),
                                  ServerConfig::instance().worker_ws_bind()};
-    McpBridge mcp_bridge{worker_channel,
-                         ServerConfig::instance().mcp_bridge_port()};  // 33
     WorkerRouter::install(&agent_store, &worker_channel);   // Phase 30.3
     // Phase 30: let the collaboration tools see the worker registry too
     // (list_workers tool + create_agent's worker placement param).
     agent_tools::install_worker_access(&worker_store, &worker_channel);
+    // Phase C: pure hub. Turns run on workers (hive-agent); the HubRouter
+    // dispatches task ops over the worker channel and feeds results back.
+    HubRouter hub{agent_store, thread_store, worker_channel, approval_store};
+    ChatService chat_service{agent_store, thread_store, hub};
+    hub.set_chat_service(&chat_service);
+    worker_channel.on_frame =
+        [&hub](const std::string& w, const nlohmann::json& f) {
+            hub.on_worker_frame(w, f);
+        };
+    worker_channel.on_heartbeat =
+        [&hub](const std::string& w, const nlohmann::json& agents) {
+            hub.on_heartbeat(w, agents);
+        };
     // Phase 33: on worker (re)connect, re-push every enabled global skill
     // for each agent homed on that rig (self-heals after worker downtime).
-    worker_channel.on_worker_online = [&agent_store](const std::string& wname) {
+    worker_channel.on_worker_online = [&agent_store, &hub](const std::string& wname) {
+        // Phase C: spawn roster agents homed here (idempotent).
+        hub.reconcile_worker(wname);
         for (const auto& a : agent_store.list_agents()) {
             if (a.worker != wname) continue;
             for (const auto& sk : agent_tools::list_enabled_skills(a.id))
@@ -154,10 +163,6 @@ int main(int argc, char* argv[]) {
     };
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
-    AgentRegistry agent_registry{agent_store, approval_store, llm_store,
-                                 routine_store, thread_store, &mcp_bridge};
-    ChatService chat_service{agent_store, thread_store, agent_registry};
-    agent_registry.set_chat_service(&chat_service);  // message_agent tool
 
     // ─── Auth (Phase 9) ─────────────────────────────────────────────
     // First run prints the master key once; every /api/* route except
@@ -246,18 +251,16 @@ int main(int argc, char* argv[]) {
     });
 
     // 2. Domain routes (all registered before the static catch-all).
-    register_model_routes(server, llm_store);
     register_project_routes(server);
-    register_agent_routes(server);
     // Phase 12: graph/workflow/trigger/run routes REMOVED — workflow engine
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,
-                           agent_registry, chat_service, routine_store);
+                           hub, chat_service, routine_store);
     register_file_routes(server, thread_store, agent_store,
                          &worker_channel);
     register_connector_routes(server, connector_store, secret_store);
     register_container_routes(server, agent_store);
-    register_approval_routes(server, approval_store, agent_store);
+    register_approval_routes(server, hub, approval_store, agent_store);
     register_key_routes(server, auth_store);
     register_worker_routes(server, worker_store, worker_channel);
     register_config_routes(server);
@@ -283,7 +286,6 @@ int main(int argc, char* argv[]) {
         worker_channel.start();   // Phase 30.2: hive-worker WS channel
     }};
     std::jthread server_thread{[&server]() { server.start(); }};
-    mcp_bridge.start();   // Phase 33: loopback MCP tunnel (own jthread)
 
     std::cout << "HiveMind listening on http://" << settings.address
               << ":" << settings.port << "\n";
@@ -291,31 +293,6 @@ int main(int argc, char* argv[]) {
               << settings.port << "/api/health\n";
     std::cout << "Web UI:     http://" << settings.address << ":"
               << settings.port << "/\n";
-    // ─── Phase 28: container warm-up ────────────────────────────────
-    // Pre-start every agent's container at boot so the first turn isn't
-    // a cold start (~seconds of podman create+start). One background
-    // thread, staggered, best-effort: failures are logged and the lazy
-    // path in ensure_agent() still covers them. Toggle: server.json
-    // "warm_containers": false.
-    std::jthread warmup{[&agent_store](std::stop_token st) {
-        if (!ServerConfig::instance().warm_containers()) return;
-        // Give the HTTP server a moment to bind before hammering podman.
-        for (int i = 0; i < 20 && !st.stop_requested(); ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        for (const auto& a : agent_store.list_agents()) {
-            if (st.stop_requested()) break;
-            try {
-                container_manager().ensure_running(a.id);
-                std::cout << "[warmup] container up: " << a.name << "\n";
-            } catch (const std::exception& e) {
-                std::cerr << "[warmup] " << a.name << " failed: "
-                          << e.what() << "\n";
-            }
-            // Stagger so a big roster doesn't stampede podman.
-            for (int i = 0; i < 10 && !st.stop_requested(); ++i)
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }};
 
     // ─── Scheduled-trigger engine ─────────────────────────────────
     // Every 30s: fire enabled schedule triggers whose next_fire_at <= now
@@ -323,15 +300,11 @@ int main(int argc, char* argv[]) {
     // disable themselves after firing. The actual run goes through the
     // same start_graph_run() path as the REST Run button and webhooks.
     std::jthread scheduler{[&routine_store, &chat_service,
-                            &agent_registry, &thread_store](std::stop_token st) {
+                            &thread_store](std::stop_token st) {
         while (!st.stop_requested()) {
             for (int i = 0; i < 30 && !st.stop_requested(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             if (st.stop_requested()) break;
-            // ── Phase 8: evict agent hosts idle > 30 min (history is
-            // persisted on evict; the host lazily re-creates on next use).
-            try { agent_registry.evict_idle(std::chrono::minutes(30)); }
-            catch (...) {}
             // ── Agent routines (Phase 5): fire due routine prompts into
             // their threads. Per-routine guard mirrors the trigger policy.
             try {
@@ -412,9 +385,8 @@ int main(int argc, char* argv[]) {
     // Stop chat first: no new turns, and in-flight turn threads finish
     // their final message writes before the stores go away (Phase 10).
     chat_service.quiesce();
-    // Persist roster-agent conversation history (daedalus only saves on
-    // Agent::shutdown — its destructor doesn't).
-    agent_registry.shutdown_all();
+    // Agents live on workers in v2: history persists in their containers;
+    // no server-side shutdown persistence.
     worker_channel.stop();
     server.stop();
     OmniNet::cleanup();

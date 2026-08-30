@@ -70,9 +70,9 @@ void ensure_container(const std::string& agent, const std::string& image) {
                 "(run hive-worker from the repository root)");
         // Context = repo root (v2 Containerfile COPYs the hive-agent
         // binary from build/hive-agent/).
-        if (podman_simple({"build", "-t", image, "-f",
+        if (podman_simple({"build", "-t", image,
                            "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
-                           "hive-server/data/Containerfile.hive-agent",
+                           "-f", "hive-server/data/Containerfile.hive-agent",
                            "."}, &img) != 0)
             throw std::runtime_error("podman build failed: " + img);
     }
@@ -263,9 +263,9 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                       "(run hive-worker from the repository root)";
             return r;
         }
-        if (podman_simple({"build", "-t", image, "-f",
+        if (podman_simple({"build", "-t", image,
                            "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
-                           "hive-server/data/Containerfile.hive-agent-browser",
+                           "-f", "hive-server/data/Containerfile.hive-agent-browser",
                            "hive-server/data"}, &out) != 0) {
             r.error = "podman build (browser) failed: " + out;
             return r;

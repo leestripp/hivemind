@@ -17,6 +17,8 @@
  *                                        globs; action "allow"|"deny"
  */
 class AgentStore;
+class HubRouter;
 void register_approval_routes(OmniNet::HTTP::Server& server,
+                              HubRouter& hub,
                               ApprovalStore& approvals,
                               AgentStore& agents);

@@ -1,5 +1,6 @@
 // include/hivemind/routes/ApprovalRoutes.cpp — approval queue REST API.
 #include "hivemind/routes/RouteUtil.h"
+#include "hivemind/HubRouter.h"
 #include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/AgentStore.h"
 
@@ -31,6 +32,7 @@ json approval_json(const Approval& a) {
 } // namespace
 
 void register_approval_routes(OmniNet::HTTP::Server& server,
+                              HubRouter& hub,
                               ApprovalStore& approvals,
                               AgentStore& agents) {
 
@@ -43,11 +45,15 @@ void register_approval_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"approvals", list}});
         });
 
-    auto resolve = [&approvals](const OmniNet::HTTP::Request& req,
+    auto resolve = [&approvals, &hub](const OmniNet::HTTP::Request& req,
                                 OmniNet::HTTP::Response& resp, bool approved) {
         auto seg = path_segments(req.path());   // api approvals :id approve
         if (seg.size() < 4) { send_json(resp, json{{"error", "bad path"}}, 400); return; }
-        if (!approvals.resolve(seg[2], approved)) {
+        // Phase C: hub-owned approvals relay approval_resp to the worker
+        // (hub.resolve_approval resolves the store row too). Plain store
+        // resolve remains as the fallback for non-worker rows.
+        if (!hub.resolve_approval(seg[2], approved) &&
+            !approvals.resolve(seg[2], approved)) {
             send_json(resp, json{{"error", "not found or already resolved"}}, 404);
             return;
         }

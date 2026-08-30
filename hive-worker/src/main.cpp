@@ -100,6 +100,10 @@ int main(int argc, char* argv[]) {
                 f = {{"op","approval_req"},{"agent",agent_id},
                      {"id",ev.value("id","")},
                      {"command",ev.value("command","")}};
+            else if (kind == "send_agent_message")
+                f = {{"op","agent_msg"},{"agent",agent_id},
+                     {"target",ev.value("target","")},
+                     {"text",ev.value("text","")}};
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},
@@ -216,6 +220,8 @@ int main(int argc, char* argv[]) {
                             spec.image         = specj.value("image","");
                             g_fleet->spawn(spec);
                         } catch (const std::exception& e) {
+                            std::cerr << "worker: agent_spawn " << aid
+                                      << " FAILED: " << e.what() << "\n";
                             try {
                                 g_send_frame({{"op","agent_status"},
                                               {"agent",aid},
