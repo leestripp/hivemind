@@ -104,7 +104,21 @@ async function refresh() {
     grid.innerHTML = '';
     for (const a of agents) {
       const st = live[a.id];
-      const status = st ? (st.cancelling ? 'cancelling' : 'busy') : 'idle';
+      // Real brain/fleet state from /api/agents (daedalus AgentState via
+      // worker heartbeats); the live-map only adds the cancelling nuance.
+      const brain = (a.state || '').toLowerCase();
+      const ACTIVE = ['understanding','planning','acting','verifying',
+                      'documenting','compressing','starting','restarting'];
+      const status = st && st.cancelling ? 'cancelling'
+                   : ACTIVE.includes(brain) ? 'busy'
+                   : (brain === 'ready' || brain === 'idle' || !brain) ? 'idle'
+                   : brain === 'awaitingapproval' ? 'cancelling'
+                   : 'down';
+      const label = st && st.cancelling ? '\u25cc cancelling'
+                  : status === 'busy' ? '\u25cf ' + (ACTIVE.includes(brain) ? brain : 'busy')
+                  : brain === 'awaitingapproval' ? 'awaiting approval'
+                  : brain === 'down' || brain === 'error' || brain === 'cancelled' ? brain
+                  : 'idle';
       const card = document.createElement('div');
       card.className = 'agent-card status-' + status;
       card.innerHTML = `
@@ -114,7 +128,7 @@ async function refresh() {
             <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>
           </div>
-          <span class="badge st-${status}">${status === 'busy' ? '● busy' : status === 'cancelling' ? '◌ cancelling' : 'idle'}</span>
+          <span class="badge st-${status}" title="state: ${esc(brain || 'idle')}">${label}</span>
         </div>
         <div class="agent-meta">
           <div><span>Model</span>${esc(a.model || 'default')}</div>

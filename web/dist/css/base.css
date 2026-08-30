@@ -276,6 +276,7 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .badge.st-idle   { color: #8b93a1; }
 .badge.st-busy   { color: #a3be8c; border-color: #3a4a35; background: rgba(163,190,140,.10); }
 .badge.st-cancelling { color: #ebcb8b; border-color: #55492e; background: rgba(235,203,139,.10); }
+.badge.st-down  { color: #d08770; border-color: #553535; background: rgba(208,135,112,.10); }
 
 /* ── Phase 13: models page ─────────────────────────────────────────── */
 .section-head {
