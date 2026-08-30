@@ -33,6 +33,18 @@ async function loadWorkers() {
     const d = await API.get('/api/workers');
     online = (d.workers || []).filter(w => w.online);
   } catch { /* fall through to empty state */ }
+  // Default to the worker hosting the most agents (same rule the server
+  // uses when no ?worker= is given).
+  if (online.length > 1) {
+    try {
+      const r = await API.get('/api/agents');
+      const count = {};
+      for (const a of (r.agents || r || []))
+        count[a.worker] = (count[a.worker] || 0) + 1;
+      online.sort((a, b) => (count[b.name] || 0) - (count[a.name] || 0) ||
+                            a.name.localeCompare(b.name));
+    } catch { /* keep API order */ }
+  }
   if (!online.length) {
     sel.innerHTML = '<option value="">no workers connected</option>';
     sel.disabled = true;
