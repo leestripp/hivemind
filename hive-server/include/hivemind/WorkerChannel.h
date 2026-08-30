@@ -17,6 +17,7 @@
 #include "net/Socket.h"   // ChannelSocket inherits OmniNet::Socket
 
 namespace OmniNet::WebSocket { class Server; class Connection; }
+struct WorkerConn;   // per-connection outbound queue (defined in .cpp)
 
 class WorkerStore;
 
@@ -180,7 +181,7 @@ private:
     std::unique_ptr<OmniNet::WebSocket::Server> ws_;
 
     mutable std::mutex m_;
-    std::unordered_map<std::string, OmniNet::WebSocket::Connection*> conns_;
+    std::unordered_map<std::string, std::shared_ptr<WorkerConn>> conns_;
     /// worker name -> hello models catalog (json string), erased on disconnect.
     std::unordered_map<std::string, std::string> models_;
 

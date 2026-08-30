@@ -1,6 +1,8 @@
 // src/WorkerChannel.cpp — Phase 30.2: hive-worker WebSocket channel.
 // See WorkerChannel.h for the model.
 
+#include <condition_variable>
+#include <deque>
 #include "hivemind/WorkerChannel.h"
 #include <set>
 #include "hivemind/WorkerStore.h"
@@ -48,6 +50,40 @@ void WorkerChannel::start() {
     std::cerr << "[workers] channel listening on :" << port_ << "\n";
 }
 
+// Per-connection state: an outbound queue drained by a dedicated writer
+// thread. send() NEVER touches the socket -- a blocking sendText to a
+// dead-but-undetected peer (NAT drop, kill -9: TCP retransmit stalls for
+// minutes) must not hold the channel mutex, or every other worker's
+// connect/send wedges behind it (dev-rig incident, 2026-08-30).
+struct WorkerConn {
+    OmniNet::WebSocket::Connection* ws = nullptr;   // owned by handler scope
+    std::mutex qm;
+    std::condition_variable qcv;
+    std::deque<std::string> queue;
+    bool dead = false;                              // under qm
+    std::thread writer;
+};
+
+static void worker_writer(std::shared_ptr<WorkerConn> wc) {
+    std::unique_lock lk(wc->qm);
+    for (;;) {
+        wc->qcv.wait(lk, [&] { return wc->dead || !wc->queue.empty(); });
+        while (!wc->queue.empty()) {
+            std::string msg = std::move(wc->queue.front());
+            wc->queue.pop_front();
+            lk.unlock();
+            try { wc->ws->sendText(msg); }
+            catch (...) {
+                lk.lock();
+                wc->dead = true;
+                return;
+            }
+            lk.lock();
+        }
+        if (wc->dead) return;
+    }
+}
+
 json WorkerChannel::models_catalog() const {
     // Aggregate hello catalogs across connected workers, dedup by name.
     json out = json::array();
@@ -86,15 +122,20 @@ bool WorkerChannel::is_online(const std::string& name) const {
 }
 
 bool WorkerChannel::send(const std::string& name, const json& frame) {
-    std::lock_guard lk(m_);
-    auto it = conns_.find(name);
-    if (it == conns_.end()) return false;
-    try {
-        it->second->sendText(frame.dump());
-        return true;
-    } catch (...) {
-        return false;   // receive loop will unregister on close
+    std::shared_ptr<WorkerConn> wc;
+    {
+        std::lock_guard lk(m_);
+        auto it = conns_.find(name);
+        if (it == conns_.end()) return false;
+        wc = it->second;   // shared_ptr keeps it alive past unlock
     }
+    {
+        std::lock_guard qlk(wc->qm);
+        if (wc->dead) return false;
+        wc->queue.push_back(frame.dump());
+    }
+    wc->qcv.notify_one();
+    return true;
 }
 
 std::optional<WorkerChannel::RemoteResult> WorkerChannel::exec(
@@ -154,6 +195,7 @@ void WorkerChannel::handle(Connection& ws) {
         std::string name;
         std::string key;
         std::string models;   // hello catalog: [{name, provider}]
+        std::shared_ptr<WorkerConn> conn;
     };
     auto st = std::make_shared<State>();
 
@@ -192,13 +234,17 @@ void WorkerChannel::handle(Connection& ws) {
                 return;
             }
             st->authed = true;
+            st->conn = std::make_shared<WorkerConn>();
+            st->conn->ws = &ws;
             {
                 std::lock_guard lk(m_);
-                conns_[st->name] = &ws;
+                conns_[st->name] = st->conn;   // replaces any stale conn
             }
             std::cerr << "[workers] " << st->name << " connected\n";
+            // welcome goes out BEFORE the writer starts (single-writer rule)
             ws.sendText(json{{"op","welcome"},{"worker",st->name},
                              {"proto",kProto}}.dump());
+            st->conn->writer = std::thread(worker_writer, st->conn);
             if (on_worker_online) {
                 // Reconcile off the handler thread — pushes block on acks.
                 const std::string wname = st->name;
@@ -343,9 +389,21 @@ void WorkerChannel::handle(Connection& ws) {
     ws.readLoop();
 
     if (st->authed) {
+        if (st->conn) {
+            {
+                std::lock_guard qlk(st->conn->qm);
+                st->conn->dead = true;
+            }
+            st->conn->qcv.notify_one();
+            try { ws.close(); } catch (...) {}   // unblocks a stuck sendText
+            if (st->conn->writer.joinable()) st->conn->writer.join();
+        }
         std::lock_guard lk(m_);
-        conns_.erase(st->name);
-        models_.erase(st->name);
+        auto it = conns_.find(st->name);
+        if (it != conns_.end() && it->second == st->conn) {
+            conns_.erase(it);
+            models_.erase(st->name);
+        }
         // Fail every in-flight job for this worker — exec() callers wake
         // with an error instead of hanging until the outer timeout.
         for (auto& [id, job] : jobs_) {
