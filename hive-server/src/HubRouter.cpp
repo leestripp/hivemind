@@ -190,6 +190,14 @@ bool HubRouter::resolve_approval(const std::string& id, bool allow) {
 }
 
 std::string HubRouter::agent_state(const std::string& agent_id) const {
+    // A remembered state is only meaningful while the agent's worker is
+    // connected. states_ survives restarts and disconnects (persisted
+    // heartbeats), so without this check an agent on an offline rig shows
+    // its last state ("ready") forever -- Bob on a powered-off dev-rig
+    // looked ready (2026-08-31). Offline worker = down, period; when the
+    // rig reconnects, heartbeats refresh states_ with ground truth.
+    auto agent = agents_.get_agent(agent_id);
+    if (agent && !channel_.is_online(agent->worker)) return "down";
     std::lock_guard<std::mutex> lk(m_);
     auto it = states_.find(agent_id);
     return it != states_.end() ? it->second : "";
