@@ -156,7 +156,7 @@
         </details>
       </section>
       <section class="settings-section"><h3>Models (daedalus SettingsStore)</h3><div id="set-models" class="kv"></div></section>
-      <section class="settings-section"><h3>Agent engine</h3><div id="set-agent" class="kv"></div></section>
+      <section class="settings-section"><h3>Agent runtime</h3><div id="set-agent" class="kv"></div></section>
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>
     </div>
   </div>
@@ -206,30 +206,19 @@
     <div class="page-body page-wide">
       <div class="page-head">
         <div>
-          <h2>🧠 Models</h2>
+          <h2>Model Catalog</h2>
           <p class="muted">
-            LLM providers and models — the configuration agents are created
-            with. Keys are stored server-side and never shown here.
+            Models available to agents, aggregated from connected workers.
+            Configuration lives on each worker
+            (<code>~/.local/share/hive-worker/models.json</code> +
+            <code>secrets.json</code>) - credentials never live on the hub.
           </p>
         </div>
       </div>
 
-      <div class="section-head">
-        <h3>Providers</h3>
-        <button id="providers-add" class="btn">+ Add Provider</button>
-      </div>
       <table class="kv-table">
-        <thead><tr><th>Name</th><th>Host</th><th>Key</th><th>Timeout</th><th></th></tr></thead>
-        <tbody id="providers-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
-      </table>
-
-      <div class="section-head">
-        <h3>Models</h3>
-        <button id="models-add" class="btn">+ Add Model</button>
-      </div>
-      <table class="kv-table">
-        <thead><tr><th></th><th>Name</th><th>Provider</th><th>Model ID</th><th>Context</th><th>Temp</th><th></th></tr></thead>
-        <tbody id="models-tbody"><tr><td colspan="7" class="muted">loading…</td></tr></tbody>
+        <thead><tr><th>Name</th><th>Provider</th><th>Worker</th></tr></thead>
+        <tbody id="models-tbody"><tr><td colspan="3" class="muted">loading...</td></tr></tbody>
       </table>
     </div>
   </div>

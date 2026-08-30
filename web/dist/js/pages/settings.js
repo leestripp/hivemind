@@ -112,21 +112,29 @@ async function loadSettingsPage() {
       ['address', '<code>' + location.host + '</code>']]);
   } catch { rows('set-server', [['status', 'offline']]); }
   try {
-    const models = await API.get('/api/models');
+    // v2: read-only catalog from connected workers ({name, provider, worker}).
+    const d = await API.get('/api/models');
+    const models = d.models || [];
     rows('set-models', models.length
-      ? models.map(m => [m.name + (m.is_default ? ' ★' : ''),
-          `<code>${esc(m.provider || '')}</code> ${esc(m.model || '')}`])
-      : [['models', 'none configured — add via icarus CLI']]);
+      ? models.map(m => [m.name,
+          `<code>${esc(m.provider || '')}</code> via ${esc(m.worker || '?')}`])
+      : [['models', 'none - connect a worker (models.json lives worker-side)']]);
   } catch { rows('set-models', [['models', 'unavailable']]); }
   try {
-    const a = await API.get('/api/agent/status');
-    rows('set-agent', [['engine', '<code>daedalus</code> (libdaedalus.a)'],
-      ['tools', String(a.tool_count ?? a.tools?.length ?? '?')],
-      ['stats', `<code>${JSON.stringify(a.stats || {})}</code>`]]);
-  } catch { rows('set-agent', [['engine', 'unavailable']]); }
+    // v2: brains are daedalus agents in containers on workers.
+    const w = await API.get('/api/workers');
+    const workers = w.workers || [];
+    const online = workers.filter(x => x.online);
+    rows('set-agent', [
+      ['engine', '<code>daedalus</code> brains in podman containers'],
+      ['workers', workers.length
+        ? workers.map(x => esc(x.name) + (x.online ? ' (online)' : ' (offline)')).join(', ')
+        : 'none enrolled'],
+      ['online', String(online.length)]]);
+  } catch { rows('set-agent', [['workers', 'unavailable']]); }
   rows('set-storage', [
-    ['workflows', '<code>~/.local/share/hivemind/hivemind.db</code>'],
-    ['models/providers', '<code>~/.local/share/daedalus/daedalus.db</code>'],
+    ['hub data', '<code>~/.local/share/hivemind/</code> (threads, roster, keys)'],
+    ['models/keys', 'worker-side: <code>~/.local/share/hive-worker/</code>'],
     ['theme', 'dark (only theme)']]);
 }
 
