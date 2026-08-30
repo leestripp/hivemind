@@ -222,21 +222,6 @@ void WorkerChannel::handle(Connection& ws) {
                     fj->cv.notify_all();
                 }
             }
-        } else if (op == "mcp_rpc_reply") {
-            std::shared_ptr<McpJob> mj;
-            {
-                std::lock_guard lk(m_);
-                auto it = mcp_jobs_.find(frame.value("id", ""));
-                if (it != mcp_jobs_.end()) mj = it->second;
-            }
-            if (mj) {
-                std::lock_guard jl(mj->m);
-                mj->result.ok = frame.value("ok", false);
-                mj->result.payload = frame.value("payload", "");
-                mj->result.error = frame.value("error", "");
-                mj->done = true;
-                mj->cv.notify_all();
-            }
         } else if (op == "skill_ack" || op == "file_push_ack") {
             std::shared_ptr<SkillJob> sj;
             {
@@ -724,40 +709,6 @@ WorkerChannel::remove_skill(const std::string& worker, const std::string& agent,
     return res;
 }
 
-std::optional<WorkerChannel::McpResult>
-WorkerChannel::mcp_rpc(const std::string& worker, const std::string& agent,
-                       const std::string& server, const std::string& command,
-                       const std::vector<std::string>& args,
-                       const json& env, const std::string& payload,
-                       int timeout_s) {
-    auto job = std::make_shared<McpJob>();
-    std::string id;
-    {
-        std::lock_guard lk(m_);
-        if (!conns_.count(worker)) return std::nullopt;
-        id = "m" + std::to_string(next_job_++);
-        mcp_jobs_[id] = job;
-    }
-    struct JobGuard {
-        WorkerChannel* ch; std::string id;
-        ~JobGuard() { std::lock_guard lk(ch->m_); ch->mcp_jobs_.erase(id); }
-    } guard{this, id};
-
-    if (!send(worker, json{{"op","mcp_rpc"},{"id",id},{"agent",agent},
-                           {"server",server},{"command",command},
-                           {"args",args},{"env",env},
-                           {"payload",payload}})) {
-        McpResult r; r.error = "worker offline mid-send";
-        return r;
-    }
-    std::unique_lock lk(job->m);
-    const bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
-                                       [&] { return job->done; });
-    McpResult r = job->result;
-    lk.unlock();
-    if (!done) { r.ok = false; r.error = "mcp rpc timed out"; }
-    return r;
-}
 
 std::optional<WorkerChannel::PushResult>
 WorkerChannel::push_file(const std::string& worker, const std::string& rel_path,

@@ -30,7 +30,7 @@ class AuthStore;
  * container's :6080 is published on 127.0.0.1 only, so hive-server is the
  * single entry point — safe behind Caddy/TLS (docs/deploy.md).
  */
-/// `port_resolver` overrides ContainerManager::screen_port (tests point it
+/// `port_resolver` overrides the channel lookup (tests point it
 /// at a dummy upstream instead of podman).
 void register_screen_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,

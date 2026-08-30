@@ -13,7 +13,6 @@
 #include "OmniNet.h"
 #include "runner.h"
 #include "fleet.h"
-#include "mcp_bridge.h"
 
 #include <nlohmann/json.hpp>
 
@@ -153,7 +152,6 @@ int main(int argc, char* argv[]) {
                                     {"agents", g_fleet
                                         ? g_fleet->statuses()
                                         : json::object()}});
-                        hwbridge::reap_idle();
                     } catch (...) { dead = true; }
                 }
             });
@@ -302,6 +300,16 @@ int main(int argc, char* argv[]) {
                         std::cerr << "worker: exec " << id << " done, exit="
                                   << done["exit_code"].get<int>() << "\n";
                     }).detach();
+                } else if (op == "agent_remove") {
+                    // roster deleted: brain + container + local state gone.
+                    const std::string aid = frame.value("agent_id", "");
+                    try {
+                        g_fleet->remove(aid);
+                        std::cerr << "fleet: removed " << aid << "\n";
+                    } catch (const std::exception& e) {
+                        std::cerr << "fleet: remove " << aid
+                                  << " failed: " << e.what() << "\n";
+                    }
                 } else if (op == "file_fetch") {
                     // Phase 31: read a file from THIS rig's shared
                     // workspace and stream it back as base64 chunks.
@@ -445,91 +453,16 @@ int main(int argc, char* argv[]) {
                             else { sy = it->second; syncs.erase(it); }
                         }
                         if (!sy.skill.empty()) {
-                            // enable link in the agent's container home
-                            std::error_code ec;
-                            const fs::path linkdir = wbase /
-                                ("home-" + sy.agent) / ".agents/skills";
-                            fs::create_directories(linkdir, ec);
-                            const fs::path link = linkdir / sy.skill;
-                            fs::remove(link, ec);
-                            fs::create_symlink(
-                                fs::path("/skills") / sy.skill, link, ec);
-                            if (ec) { fail("symlink: " + ec.message()); }
-                            else {
-                                try {
-                                    send_frame({{"op","skill_ack"},
-                                        {"id",id},{"ok",true},
-                                        {"files",sy.files},
-                                        {"bytes",sy.bytes}});
-                                } catch (...) {}
-                                std::cerr << "[skills] synced " << sy.skill
-                                          << " for " << sy.agent << " ("
-                                          << sy.files << " files)\n";
-                            }
+                            // v2: brains read the canonical /skills mount directly
+                            // (HIVEMIND_SKILLS_DIR) - no per-agent home symlinks.
+                            try {
+                                send_frame({{"op","skill_ack"},{"id",id},{"ok",true},
+                                            {"files",sy.files},{"bytes",sy.bytes}});
+                            } catch (...) {}
+                            std::cerr << "[skills] synced " << sy.skill << " ("
+                                      << sy.files << " files)\n";
                         }
-                    }
-                } else if (op == "file_push") {
-                    // Phase 33 D: server → worker file into the shared
-                    // workspace. Chunks carry first/eof flags.
-                    const std::string id = frame.value("id", "");
-                    std::string rel = frame.value("path", "");
-                    while (!rel.empty() && rel.front() == '/')
-                        rel.erase(rel.begin());
-                    if (rel.empty() || rel.find("..") != std::string::npos) {
-                        try { send_frame({{"op","file_push_ack"},{"id",id},
-                                          {"ok",false},{"error","bad path"}}); }
-                        catch (...) {}
-                    } else {
-                        auto dec = OmniNet::Crypto::base64Decode(
-                            frame.value("data", ""));
-                        const fs::path fp =
-                            fs::path{std::getenv("HOME")} /
-                            ".local/share/hive-worker/workspace" / rel;
-                        std::error_code ec;
-                        fs::create_directories(fp.parent_path(), ec);
-                        const bool first = frame.value("first", false);
-                        std::ofstream out(fp, std::ios::binary |
-                            (first ? std::ios::trunc : std::ios::app));
-                        if (dec)
-                            out.write((const char*)dec->data(),
-                                      (std::streamsize)dec->size());
-                        out.close();
-                        if (frame.value("eof", false)) {
-                            const auto sz = fs::file_size(fp, ec);
-                            try { send_frame({{"op","file_push_ack"},
-                                    {"id",id},{"ok",(bool)dec},
-                                    {"bytes",(int64_t)(ec?0:sz)},
-                                    {"error", dec ? "" : "bad base64"}}); }
-                            catch (...) {}
-                            std::cerr << "[files] pushed " << rel << " ("
-                                      << (ec?0:sz) << " B)\n";
-                        }
-                    }
-                } else if (op == "mcp_rpc") {
-                    // Phase 33: tunnel a JSON-RPC call to an MCP server
-                    // running inside the agent's container.
-                    const std::string id = frame.value("id", "");
-                    const std::string agent = frame.value("agent", "");
-                    const std::string server = frame.value("server", "");
-                    const std::string command = frame.value("command", "");
-                    const std::vector<std::string> args =
-                        frame.value("args", std::vector<std::string>{});
-                    const json env = frame.value("env", json::object());
-                    const std::string payload = frame.value("payload", "");
-                    std::thread([=]() mutable {
-                        std::string err;
-                        std::string reply = hwbridge::rpc(
-                            agent, server, command, args, env, payload,
-                            120, err);
-                        try {
-                            if (reply.empty())
-                                send_frame({{"op","mcp_rpc_reply"},{"id",id},
-                                            {"ok",false},{"error",err}});
-                            else
-                                send_frame({{"op","mcp_rpc_reply"},{"id",id},
-                                            {"ok",true},{"payload",reply}});
-                        } catch (...) {}
-                    }).detach();
+                        }   // skill_end
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

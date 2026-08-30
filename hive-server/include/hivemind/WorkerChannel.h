@@ -137,14 +137,6 @@ public:
     /// request text; reply payload = the response line. nullopt offline.
     struct McpResult { bool ok = false; std::string payload;
                        std::string error; };
-    std::optional<McpResult> mcp_rpc(const std::string& worker,
-                                     const std::string& agent,
-                                     const std::string& server,
-                                     const std::string& command,
-                                     const std::vector<std::string>& args,
-                                     const nlohmann::json& env,
-                                     const std::string& payload,
-                                     int timeout_s = 120);
 
     /// Phase 33: fired after a worker's hello is accepted (reconcile hook —
     /// main.cpp uses it to re-push enabled skills after worker downtime).
@@ -186,13 +178,6 @@ private:
     uint64_t next_job_ = 1;
 
     // 33: in-flight MCP rpcs (id → reply slot)
-    struct McpJob {
-        std::mutex m;
-        std::condition_variable cv;
-        bool done = false;
-        McpResult result;
-    };
-    std::unordered_map<std::string, std::shared_ptr<McpJob>> mcp_jobs_;
 
     // 33: in-flight skill pushes (id → ack slot)
     struct SkillJob {

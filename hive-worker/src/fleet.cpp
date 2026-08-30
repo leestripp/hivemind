@@ -364,6 +364,20 @@ void Fleet::stop(const std::string& agent_id) {
     proc->stop();                        // outside the map lock
 }
 
+void Fleet::remove(const std::string& agent_id) {
+    stop(agent_id);                       // brain down, if it was up
+    // -t 0: the container's PID 1 (sleep infinity) ignores SIGTERM -
+    // without this rm -f stalls the full 10s stop timeout.
+    std::string out;
+    hwrunner::podman_simple(
+        {"rm", "-f", "-t", "0", hwrunner::container_name(agent_id)}, &out);
+    std::error_code ec;
+    fs::remove(fs::path(hwrunner::worker_dir()) / "env"
+               / (agent_id + ".env"), ec);
+    fs::remove_all(fs::path(hwrunner::worker_dir())
+                   / ("home-" + agent_id), ec);
+}
+
 bool Fleet::has(const std::string& agent_id) const {
     std::lock_guard<std::mutex> lk(m_);
     return agents_.count(agent_id) > 0;

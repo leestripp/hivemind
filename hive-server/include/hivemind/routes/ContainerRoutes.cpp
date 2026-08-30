@@ -1,17 +1,20 @@
 // include/hivemind/routes/ContainerRoutes.cpp
 // -----------------------------------------------------------------------------
-// Container lifecycle REST API (HiveMind 2.0, Plan.md Phase 2).
+// Container REST API (v2): workers own podman. Container lifecycle is implicit
+// (agent_spawn / agent_remove) - the only admin surface kept is a channel-routed
+// exec for debugging, plus the exec audit trail.
 // Multi-param path segments parsed manually (OmniNet pathParam caveat).
 // -----------------------------------------------------------------------------
 
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/ContainerRoutes.h"
-#include "hivemind/ContainerManager.h"
+#include "hivemind/ContainerManager.h"   // exec_audit() static
 #include "hivemind/WorkerRouter.h"
 #include "hivemind/ExecAuditStore.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -21,57 +24,12 @@ namespace {
 using hivemind::routes::path_segments;
 using hivemind::routes::send_json;
 using hivemind::routes::send_error;
-
-
-
-
-
-
-
-
 } // namespace
 
 void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents) {
 
-    // /api/agents/:id/container/{status,start,stop,exec}
-    // segments: api(0) agents(1) :id(2) container(3) action(4)
-
-    server.get("/api/agents/:id/container/status",
-        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
-            auto seg = path_segments(req.path());
-            if (seg.size() < 5) { send_error(resp, 400, "bad path"); return; }
-            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
-            auto st = container_manager().status(seg[2]);
-            send_json(resp, json{
-                {"exists", st.exists}, {"running", st.running},
-                {"container", st.container}, {"image", st.image},
-                {"workspace", st.workspace},
-                {"podman_available", ContainerManager::podman_available()},
-            });
-        });
-
-    server.post("/api/agents/:id/container/start",
-        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
-            auto seg = path_segments(req.path());
-            if (seg.size() < 5) { send_error(resp, 400, "bad path"); return; }
-            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
-            try {
-                std::string cname = container_manager().ensure_running(seg[2]);
-                send_json(resp, json{{"container", cname}, {"running", true}});
-            } catch (const std::exception& e) {
-                send_error(resp, 500, e.what());
-            }
-        });
-
-    server.post("/api/agents/:id/container/stop",
-        [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
-            auto seg = path_segments(req.path());
-            if (seg.size() < 5) { send_error(resp, 400, "bad path"); return; }
-            if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
-            bool ok = container_manager().stop(seg[2]);
-            send_json(resp, json{{"stopped", ok}}, ok ? 200 : 500);
-        });
-
+    // /api/agents/:id/container/exec - admin shell via the owning worker.
+    // segments: api(0) agents(1) :id(2) container(3) exec(4)
     server.post("/api/agents/:id/container/exec",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
@@ -85,20 +43,17 @@ void register_container_routes(OmniNet::HTTP::Server& server, AgentStore& agents
             int timeout = body.value("timeout", 120);
             try {
                 auto remote = WorkerRouter::exec(seg[2], command, timeout);
-                auto res = remote ? std::move(*remote)
-                                  : container_manager().exec(seg[2], command, timeout);
+                if (!remote) { send_error(resp, 503, "agent's worker is offline"); return; }
                 send_json(resp, json{
-                    {"exit_code", res.exit_code}, {"output", res.output},
-                    {"timed_out", res.timed_out},
+                    {"exit_code", remote->exit_code}, {"output", remote->output},
+                    {"timed_out", remote->timed_out},
                 });
             } catch (const std::exception& e) {
-                // Phase 30.3: worker offline etc. — fail fast, clean 503.
                 send_error(resp, 503, e.what());
             }
         });
 
-    // Phase 8: exec audit trail — every container_exec/browser_* command
-    // an agent ran, with exit code + duration (newest first).
+    // exec audit trail - newest first.
     server.get("/api/agents/:id/exec-log",
         [&agents](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());

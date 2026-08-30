@@ -15,7 +15,6 @@ endmacro()
 
 hivemind_test(test_agent_store)
 hivemind_test(test_thread_store)
-hivemind_test(test_container_manager)
 hivemind_test(test_approval_store)
 hivemind_test(test_routine_store)
 hivemind_test(test_files)

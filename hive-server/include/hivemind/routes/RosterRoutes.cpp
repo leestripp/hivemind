@@ -9,7 +9,6 @@
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/ChatService.h"
 #include "hivemind/HubRouter.h"
-#include "hivemind/ContainerManager.h"
 
 #include <iostream>
 #include "hivemind/RoutineStore.h"
@@ -327,13 +326,17 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             //    container (Phase 28: deleting an agent must not orphan
             //    its podman container — best-effort, the row is gone
             //    either way).
-            agents.delete_agent(id);
-            { auto a2 = agents.get_agent(id); if (a2) hub.stop_agent(*a2); }
-            try { container_manager().remove(id); }
-            catch (const std::exception& e) {
-                std::cerr << "[roster] container teardown for " << id
-                          << " failed: " << e.what() << "\n";
+            // 3b. Tell the owning worker to tear the container down
+            //     (v2: the worker owns podman; the row delete is
+            //     authoritative either way - removal is best-effort).
+            if (existing) {
+                try { hub.remove_agent(*existing); }
+                catch (const std::exception& e) {
+                    std::cerr << "[roster] container teardown for " << id
+                              << " failed: " << e.what() << "\n";
+                }
             }
+            agents.delete_agent(id);
             send_json(resp, json{
                 {"deleted", true},
                 {"threads_deleted", threads_deleted},

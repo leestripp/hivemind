@@ -55,6 +55,13 @@ void HubRouter::stop_agent(const RosterAgent& agent) {
     states_[agent.id] = "down";
 }
 
+void HubRouter::remove_agent(const RosterAgent& agent) {
+    channel_.send(agent.worker,
+                  {{"op", "agent_remove"}, {"agent_id", agent.id}});
+    std::lock_guard<std::mutex> lk(m_);
+    states_.erase(agent.id);
+}
+
 json HubRouter::spawn_frame(const RosterAgent& agent) const {
     json mcp;
     try { mcp = json::parse(agent.mcp_servers); }

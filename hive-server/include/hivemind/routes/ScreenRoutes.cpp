@@ -3,7 +3,6 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/AuthStore.h"
-#include "hivemind/ContainerManager.h"
 #include "hivemind/WorkerRouter.h"
 
 #include <nlohmann/json.hpp>
@@ -191,7 +190,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 return (r->error.empty() && r->running) ? r->port
                                                         : uint16_t{0};
         } catch (...) { return 0; }   // worker offline → screen down
-        return container_manager().screen_port(id);
+        return 0;   // v2: no worker -> no screen
     };
     // 30.4: remote screen password (rides in the redirect URL).
     auto password_of = [](const std::string& id) -> std::string {
@@ -199,7 +198,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             if (auto r = WorkerRouter::screen_ctl(id, "status"))
                 return r->password;
         } catch (...) {}
-        return container_manager().screen_password(id);
+        return {};   // v2: no worker -> no password
     };
     // ── GET /api/agents/:id/screen — status ─────────────────────────────
     server.get("/api/agents/:id/screen",
@@ -208,18 +207,13 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             if (id.empty() || !agents.get_agent(id)) {
                 routes::send_error(resp, 404, "agent not found"); return;
             }
-            auto& cm = container_manager();
             const uint16_t port = resolve(id);
-            // 30.4: for worker agents the podman/image facts live on the
-            // WORKER — report true when the channel says it's running
-            // rather than the (irrelevant) local state.
+            // v2: podman/image facts live on the WORKER - the channel is
+            // the only source of truth; no worker -> screen stack down.
             auto remote = WorkerRouter::screen_ctl(id, "status");
-            const bool is_remote = remote.has_value();
             routes::send_json(resp, json{
-                {"podman", is_remote ? true
-                                     : ContainerManager::podman_available()},
-                {"browser_image", is_remote ? (remote->error.empty())
-                                            : cm.browser_image_present()},
+                {"podman", remote.has_value()},
+                {"browser_image", remote.has_value() && remote->error.empty()},
                 {"running", port != 0},
                 {"port", port},
                 {"url", port ? "/screen/" + id + "/" : ""},
@@ -244,10 +238,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                                                  {"url", "/screen/" + id + "/"}});
                     return;
                 }
-                const uint16_t port = container_manager().ensure_screen(id);
-                routes::send_json(resp, json{{"running", true},
-                                             {"port", port},
-                                             {"url", "/screen/" + id + "/"}});
+                routes::send_error(resp, 503, "agent's worker is offline");
             } catch (const std::exception& e) {
                 routes::send_error(resp, 502, e.what());
             }
@@ -270,8 +261,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             } catch (const std::exception& e) {
                 routes::send_error(resp, 502, e.what()); return;
             }
-            const bool stopped = container_manager().stop_screen(id);
-            routes::send_json(resp, json{{"running", false}, {"stopped", stopped}});
+            routes::send_error(resp, 503, "agent's worker is offline");
         });
 
     // ── GET /screen/* — noVNC asset proxy (own auth) ────────────────────

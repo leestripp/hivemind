@@ -61,6 +61,8 @@ public:
     /// Roster delete/reset: stop the agent on its owning worker (the
     /// container + brain volume persist; a later spawn resumes it).
     void stop_agent(const RosterAgent& agent);
+    /// Roster delete: worker destroys the container + local state too.
+    void remove_agent(const RosterAgent& agent);
 
     /// Build the agent_spawn op for a roster agent.
     nlohmann::json spawn_frame(const RosterAgent& agent) const;
