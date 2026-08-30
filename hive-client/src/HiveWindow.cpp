@@ -93,6 +93,10 @@ const char* kCss = R"(
 .hv-unread-dot { color: @accent_color; font-weight: bold; }
 .hv-state-tag { font-size: 10px; padding: 1px 8px; border-radius: 8px;
                 background: alpha(@accent_color, 0.15); color: @accent_color; }
+.hv-state-ready { font-size: 10px; padding: 1px 8px; border-radius: 8px;
+  background: alpha(@success_color, 0.18); color: @success_color; }
+.hv-state-down { font-size: 10px; padding: 1px 8px; border-radius: 8px;
+  background: alpha(@window_fg_color, 0.08); color: alpha(@window_fg_color, 0.5); }
 )";
 
 std::string agent_name_of(const json& agents, const std::string& id) {
@@ -1201,30 +1205,28 @@ void HiveWindow::rebuild_roster() {
         auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
         name->set_halign(Gtk::Align::START);
         name->add_css_class("heading");
-        // Busy indicators: spinner + daedalus state tag (Phase 27).
-        // The roster is visible even when the agent's chat isn't — the
-        // spinner catches the eye; the tag says what it's doing
-        // ("acting", "planning", "verifying", …).
-        // The daedalus state is authoritative (straight from the Agent);
-        // the LiveTurn 'busy' flag misses some turn paths — OR them.
-        std::string st_ = a.value("state", "");
+        // v2 presence: fleet heartbeat states are down / starting / ready /
+        // acting / restarting. Spinner when busy, a colored state tag
+        // always, so "down" agents are visibly offline.
+        std::string st_ = a.value("state", "down");
         for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
         const bool working = a.value("busy", false) ||
-            (!st_.empty() && st_ != "idle" && st_ != "done" &&
-             st_ != "cancelled" && st_ != "error");
+            st_ == "acting" || st_ == "starting" || st_ == "restarting";
         if (working) {
             auto* spin = Gtk::make_managed<Gtk::Spinner>();
             spin->start();
             spin->set_valign(Gtk::Align::CENTER);
-            spin->set_tooltip_text("Working…");
+            spin->set_tooltip_text("Working...");
             row_box->append(*spin);
-            const std::string state = a.value("state", "");
-            if (!state.empty() && state != "idle") {
-                auto* tag = Gtk::make_managed<Gtk::Label>(state);
-                tag->add_css_class("hv-state-tag");
-                tag->set_valign(Gtk::Align::CENTER);
-                row_box->append(*tag);
-            }
+        }
+        {
+            auto* tag = Gtk::make_managed<Gtk::Label>(st_);
+            tag->add_css_class(st_ == "ready"    ? "hv-state-ready" :
+                               st_ == "down"     ? "hv-state-down"  :
+                               working           ? "hv-state-tag"   :
+                                                   "hv-state-down");
+            tag->set_valign(Gtk::Align::CENTER);
+            row_box->append(*tag);
         }
         auto* role = Gtk::make_managed<Gtk::Label>(a.value("role", ""));
         role->set_halign(Gtk::Align::START);
@@ -1468,6 +1470,14 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
                 load_image_attachment(holder, a);
                 continue;
             }
+            if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" ||
+                ext == ".mov" || ext == ".avi" || ext == ".m4v") {
+                auto* holder = Gtk::make_managed<Gtk::Box>(
+                    Gtk::Orientation::VERTICAL, 4);
+                box->append(*holder);
+                load_video_attachment(holder, a);
+                continue;
+            }
             const std::string host = a.value("host_path", "");
             auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
             chip->add_css_class("flat");
@@ -1598,6 +1608,123 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
                 (*weak)->append(*el);
             }
         });
+    });
+}
+
+// -- Phase E: inline video attachments -----------------------------------
+// Same download/cache pattern as images. The paused Gtk::Video doubles as
+// the thumbnail (first frame); click toggles play/pause; a small button
+// opens the cached copy in the system player. On media error (no gstreamer
+// backend etc.) the card falls back to a plain attachment chip.
+
+void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
+                                   const std::string& name) {
+    auto media = Gtk::MediaFile::create_for_filename(file);
+    auto* video = Gtk::make_managed<Gtk::Video>();
+    video->set_media_stream(media);
+    video->set_autoplay(false);
+    video->set_size_request(320, 180);
+    video->set_tooltip_text(name + "  -  click to play/pause");
+
+    // Click toggles play/pause.
+    auto click = Gtk::GestureClick::create();
+    click->signal_pressed().connect([media](int, double, double) {
+        if (media->get_playing()) media->pause(); else media->play();
+    });
+    video->add_controller(click);
+
+    // Media error -> swap the video for a plain chip (widget may be gone
+    // by then; removing a destroyed child is avoided by the box still
+    // owning the widget tree - GTK no-ops a remove of an already-removed
+    // child only if parented, so guard via get_parent()).
+    auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
+    chip->add_css_class("flat");
+    chip->set_halign(Gtk::Align::START);
+    chip->set_visible(false);
+    chip->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
+    });
+    media->property_error().signal_changed().connect([video, chip] {
+        if (video->get_parent()) {
+            video->unparent();   // make_managed + unparent drops it safely
+        }
+        chip->set_visible(true);
+    });
+
+    holder->append(*video);
+    holder->append(*chip);
+
+    auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
+    open_btn->add_css_class("flat");
+    open_btn->set_halign(Gtk::Align::START);
+    open_btn->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
+    });
+    holder->append(*open_btn);
+}
+
+void HiveWindow::load_video_attachment(Gtk::Box* holder,
+                                       const nlohmann::json& att) {
+    namespace fs = std::filesystem;
+    const std::string name = att.value("name", "video");
+    std::string rel = att.value("path", "");
+    if (rel.rfind("/workspace/", 0) == 0) rel.erase(0, 11);
+    if (rel.empty())
+        rel = "attachments/" + current_thread_ + "/" + name;
+
+    const fs::path cache =
+        fs::path(Glib::get_user_cache_dir()) / "hivemind-client" /
+        "attachments" / current_thread_ / name;
+
+    std::error_code ec;
+    if (fs::is_regular_file(cache, ec) && fs::file_size(cache, ec) > 0) {
+        show_video_widget(holder, cache.string(), name);
+        return;
+    }
+
+    auto* ph = Gtk::make_managed<Gtk::Label>("loading video: " + name);
+    ph->add_css_class("hv-time");
+    ph->set_halign(Gtk::Align::START);
+    holder->append(*ph);
+
+    const std::string key = cache.string();
+    if (!image_downloads_.insert(key).second)
+        return;   // already downloading (re-render)
+
+    auto weak = std::make_shared<Gtk::Box*>(holder);
+    holder->signal_destroy().connect([weak] { *weak = nullptr; });
+
+    const std::string tid = current_thread_;
+    run_async([this, rel, key, tid, name, weak] {
+        std::string err;
+        try {
+            std::string bytes =
+                api_.download("/api/files/download?path=" +
+                              ApiClient::url_encode(rel));
+            std::error_code ecw;
+            fs::create_directories(fs::path(key).parent_path(), ecw);
+            std::ofstream out(key, std::ios::binary | std::ios::trunc);
+            out.write(bytes.data(), (std::streamsize)bytes.size());
+        } catch (const std::exception& e) {
+            err = e.what();
+        }
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, key, tid, name, weak, err] {
+            image_downloads_.erase(key);
+            if (!alive_ || !*weak || tid != current_thread_) return;
+            while (auto* child = (*weak)->get_first_child())
+                (*weak)->remove(*child);
+            if (err.empty()) {
+                show_video_widget(*weak, key, name);
+            } else {
+                auto* el = Gtk::make_managed<Gtk::Label>(
+                    "video unavailable: " + err);
+                el->add_css_class("hv-time");
+                el->set_halign(Gtk::Align::START);
+                (*weak)->append(*el);
+            }
+        });
+        dispatcher_.emit();
     });
 }
 

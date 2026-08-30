@@ -124,6 +124,10 @@ private:
     void load_image_attachment(Gtk::Box* holder, const nlohmann::json& att);
     void show_image_picture(Gtk::Box* holder, const std::string& file,
                             const std::string& caption);
+    // Phase E: video attachments (thumbnail + click-to-play + external open)
+    void load_video_attachment(Gtk::Box* holder, const nlohmann::json& att);
+    void show_video_widget(Gtk::Box* holder, const std::string& file,
+                           const std::string& name);
     void set_status(const std::string& text);
 
     ApiClient api_;
