@@ -33,13 +33,29 @@ worker-local so cross-worker moves start fresh unless migrated manually).
 
 | Endpoint | Notes |
 |----------|-------|
-| `POST /api/workers/enroll` | issue a worker key |
-| `GET /api/workers` | list with online status + per-agent liveness |
-| `DELETE /api/workers/:id` | decommission |
+| `GET /api/workers` | list with online status + last_seen |
+| `DELETE /api/workers/:name` | decommission |
 
-Worker channel: `wss://…/ws/worker` — ops: task / task_delta /
-task_result / approval_req / approval_resp / agent_status / file_fetch /
-file_push / skill_sync / agent_spawn / agent_stop / heartbeat.
+Worker enrollment is **CLI-only** (admin runs it on the hub host):
+`hive-server enroll-worker <name>` prints the raw `hmwk_` key ONCE
+(SHA-256 hashed in workers.db). The worker then dials OUT:
+
+```
+hive-worker --server wss://<server>:8423 --key hmwk_... --name <name>
+```
+
+Worker channel: **dedicated WebSocket port** (`worker_ws_port`, default
+8423), path `/api/workers/channel`. See `docs/hive-worker.md` for the
+full op inventory.
+
+## Models & credentials
+
+The hub holds NO LLM config. Each worker owns its local store
+(`~/.local/share/hive-worker/models.json` + `secrets.json`, 0600);
+credentials are env-injected into agents at spawn (`HIVEMIND_*`).
+`GET /api/models` returns the union of connected workers' catalogs
+(advertised in their `hello` frames) -- used by the client's New Agent
+dialog.
 
 ## Skills
 
@@ -55,9 +71,3 @@ Approvals originate INSIDE agents now (daedalus approval hooks) and relay
 through the hub: `GET /api/approvals?status=pending`,
 `POST /api/approvals/:id/resolve`. The hub holds no tool proxy of its
 own.
-
-## Models & credentials
-
-Gone from the hub in v2. Model/provider config lives on each WORKER
-(local LLM store) — the client edits it via the hub relaying to the
-worker (`/api/workers/:id/models` …) or directly on the worker host.

@@ -36,24 +36,26 @@ orchestration model.
    in our code until proven otherwise. If OmniNet lacks a capability,
    extend OmniNet upstream — never reintroduce curl (no libcurl, no HTTP
    shell-outs anywhere; `OmniNet::HTTP::Client` only).
-2. **LLMStore owns LLM config** (`~/.local/share/hivemind/llm.db`) — Phase
-   13 superseded the old "no LLM settings" rule. Providers/models/creds
-   are managed via /api/providers + /api/models (web Models page);
-   AgentHost INJECTS them into daedalus AgentConfig explicit fields at
-   spawn. daedalus' own SettingsStore is NOT consulted.
+2. **LLM config is WORKER-owned.** Each hive-worker keeps
+   `~/.local/share/hive-worker/models.json` + `secrets.json` (0600) and
+   injects credentials into agents as spawn env (`HIVEMIND_*`). The hub
+   holds NO LLM keys (LLMStore was deleted); `GET /api/models` is the
+   union of connected workers' hello catalogs. A fresh worker without
+   models.json spawns agents that fail at initialize.
 3. **Agents never execute on the host.** Containers are mandatory — the
    old `workspace_mode:"host"` escape hatch was REMOVED (2026-08-25);
    legacy rows normalize to `shared` on load. Commands go through
    `container_exec` → podman — locally, or over the worker channel when
    the agent's `worker` field names an enrolled worker.
-4. **daedalus history persists ONLY via `Agent::shutdown()`** — `~Agent`
-   does not save, and turn-loop mutations bypass auto-flush. Server signal
-   path calls `AgentRegistry::shutdown_all()`. Never `kill -9` the server
-   when you care about history (SIGINT stops it gracefully; SIGTERM's flag
-   path has been seen to hang).
-5. **Serialize all daedalus Agent lifecycles** with `agent_exec_mutex()`
-   (recursive — nested delegation turns are same-thread). daedalus 0.9.6
-   shares global state; parallel agents crash it.
+4. **daedalus history persists ONLY via `Agent::shutdown()`.**
+   In v2 that means hive-agent's `shutdown` op (sent by the worker on
+   agent_stop / before container reaps). Killing the container or the
+   worker loses unsaved turns; a clean `podman stop` lets the exec drain.
+5. **One daedalus Agent per process.** hive-agent hosts exactly one
+   Agent inside its container, so the old hub-side serialization
+   machinery (agent_exec_mutex, AgentRegistry) is gone. daedalus still
+   shares global state internally -- never run two Agents in one
+   hive-agent process.
 6. **OmniNet `pathParam(i)` is unreliable for multi-param routes** — parse
    `req.path()` with a local `path_segments()` helper (see any *Routes.cpp).
 7. **Register API routes BEFORE `register_static_routes`** (first-match-wins;
@@ -65,13 +67,13 @@ orchestration model.
 10. Run server AND worker from the **repo root** (web/dist, Containerfile
     paths are cwd-relative — and `systemd-run` does NOT preserve your cd;
     use `--working-directory=` or `bash -c 'cd … && exec …'`).
-11. **Ownership rule (no refcount band-aids):** the AgentRegistry is the
-    SOLE owner of AgentHosts (`unique_ptr`). Hosts are never destroyed
-    mid-process — `evict()` marks dead, saves history (shutdown()), and
-    retires to the graveyard; destruction happens once, in
-    `shutdown_all()`, after `ChatService::quiesce()` has drained all turns.
-    References from `get_or_create()` are valid for the process lifetime.
-    Do NOT reintroduce shared_ptr here.
+11. **WorkerChannel::send() never touches a socket under the channel
+    mutex.** Each worker connection has an outbound queue + dedicated
+    writer thread (2026-08-30: a blocking sendText to a NAT-dead worker
+    held m_ for minutes and wedged every other worker's connect).
+    Disconnect cleanup closes the socket to unblock a stuck writer and
+    erases conns_ only if the entry is still that connection (same-name
+    reconnect race).
 12. **Worker-channel WS gotchas (Phase 30):** `Config.keepAliveTimeout`
     must be **0** on the worker channel (it's applied as SO_RCVTIMEO and
     inherited by upgraded WS sockets — 5s of worker silence during
@@ -104,11 +106,12 @@ orchestration model.
 ## 3. Layout map
 
 ```
-hive-server/src/            AgentHost (+Registry, ChatService), stores:
-                            Agent/Thread/Approval/Routine/Auth/Secret/
-                            LLM/Connector/ExecAudit/WorkerStore,
-                            ContainerManager, WorkerChannel, WorkerRouter,
-                            BrowserTools, Files, Schedule, Vault
+hive-server/src/            ChatService (threads/fan-in/live turns),
+                            HubRouter (task dispatch), WorkerChannel (WS),
+                            WorkerStore; stores: Agent/Thread/Approval/
+                            Routine/Auth/Secret/Connector/ExecAudit;
+                            Files, Schedule, Vault. NO AgentHost/LLMStore --
+                            brains and LLM creds live on workers.
 hive-server/include/hivemind/routes/   REST registrars (h+cpp side by side)
 hive-server/data/           Containerfile.hive-agent (+browser variant),
                             hive-screen.sh, hive-server.service
@@ -119,12 +122,13 @@ tests/                      one binary per store/subsystem (20 tests)
 ```
 
 State at runtime (`~/.local/share/hivemind/`): `agents.db`, `threads.db`,
-`approvals.db`, `routines.db`, `auth.db`, `llm.db`, `secrets.db`,
+`approvals.db`, `routines.db`, `auth.db`, `secrets.db`,
 `connectors.db`, `exec_audit.db`, `workers.db`, `skills/` (global library),
-`agents/<id>/` (per-agent daedalus dir + container home), `workspace/`
-(shared company volume). Worker rigs keep their state at
+`workspace/` (shared company volume). Worker rigs keep their state at
 `~/.local/share/hive-worker/`: `workspace/` (ONE shared mount for all
-containers on that rig, Phase 31), `home-<agentid>/` (per-agent homes).
+containers on that rig), `home-<agentid>/` (per-agent homes),
+`models.json` + `secrets.json` (LLM config, 0600), `env/<agentid>.env`
+(rendered spawn env), `skills/` (synced library).
 
 ## 4. Common tasks
 
@@ -139,8 +143,8 @@ hive-server enroll-worker <name>             # mint hmwk_ key (shown once)
 **Add a store:** copy `AgentStore` (own .db, fresh sqlite conn per op, path
 ctor for tests). **Add routes:** `routes/FooRoutes.{h,cpp}` + register in
 `main.cpp` before static routes. **Add an agent tool:** subclass
-`daedalus::BaseTool`, register in `AgentHost::ensure_agent()` with a unique
-name. **Add a test:** `tests/test_foo.cpp` + `hivemind_test(test_foo)`.
+`daedalus::BaseTool`, register in `hive-agent/src/main.cpp` (alongside
+MessageAgentTool) with a unique name, bump the hive-agent image. **Add a test:** `tests/test_foo.cpp` + `hivemind_test(test_foo)`.
 **Add a web page:** `web/dist/js/pages/foo.js` + page div + sidebar button
 in `index.html` + wire `main.js` (copy `workers.js` — the newest).
 
@@ -154,73 +158,74 @@ in `index.html` + wire `main.js` (copy `workers.js` — the newest).
 - Rig deployment: dev-rig runs hive-server + hive-worker as systemd USER
   units (`hivemind-dev`, `hive-worker-dev-rig`), CWD = repo root.
 
-## 6. Agent runtime details (what every AgentHost gets)
+## 6. Agent runtime details (hive-agent, in-container)
 
 These are implementation facts that change rarely but trip up new work:
 
-### Tools registered in `AgentHost::ensure_agent()`
+### Process model
 
-Containerized agents get `container_exec` plus the browser suite;
-all roster agents get the collaboration/routine tools:
+- Each agent = ONE podman container on its worker (`hive-<agentid>`),
+  ONE `podman exec -i` session running `hive-agent /workspace`, ONE
+  daedalus Agent. The worker's fleet layer owns the stdio pipes.
+- NDJSON protocol on stdio -- ops in (`task`, `approval_resp`, `cancel`,
+  `shutdown`), events out (`ready`, `delta`, `message`,
+  `approval_request`, `send_agent_message`, `status`, `log`). The exact
+  ev -> channel-op mapping table is in `docs/hive-worker.md`.
+- Config arrives as env (HIVEMIND_API_HOST / HIVEMIND_API_KEY /
+  HIVEMIND_CHAT_ENDPOINT / HIVEMIND_MODEL / HIVEMIND_MAX_CONTEXT /
+  HIVEMIND_TEMPERATURE / HIVEMIND_AUTO_APPROVE / HIVEMIND_MCP_SERVERS),
+  rendered by the worker from its own models.json + secrets.json.
 
-| Tool | Purpose |
-|---|---|
-| `container_exec` | Bash in the agent's podman container (`/workspace`, user `hive`, sudo). Host `execute_bash` is DISABLED; the replacement must be named something else (see rule 8). |
-| `browser_navigate/click/type/press/read/screenshot/eval/tabs/back/reload` | Headless Chromium over CDP inside the container; visible via the web **Computer** tab. |
-| `browser_fill_secret` | Fill a form from the agent's encrypted secret store; approval-gated when `require_approval` is on. |
-| `list_agents` | Roster list (used for delegation). |
-| `message_agent` | Async delegation: posts to the pair thread; fan-in wakes the asker. Do NOT make this synchronous. |
-| `send_file` | Deliver a file from the agent's /workspace to the company workspace on the server (Phase 31). Confined dest (parent must exist), 50MB cap, `overwrite` opt-in, optional `notify` teammate. Remote agents: bytes ride the worker channel (`file_fetch` op). |
-| `create_agent` | Add a teammate; optional `worker` field places the container on an enrolled `hive-worker`. |
-| `list_workers` | Online/offline worker rigs. |
-| `search_skills` / `install_skill` | Skill marketplace discovery: keyword-search the registry (`web/dist/skills-registry.json`), then git-install into the shared library + auto-enable for the caller. Agents should search here FIRST before web-searching for a capability. |
-| `save_routine` / `list_routines` / `update_routine` / `delete_routine` | Own-routines-only; `id` or name accepted. |
+### Tools
 
-### Routine schedules (UTC only)
+- daedalus built-ins (shell, file, web tools) run IN the container --
+  the agent's sandbox is real, no host tunneling.
+- Custom: `message_agent` (async delegation: posts to the auto-created
+  pair thread; fan-in wakes the asker. Do NOT make this synchronous).
+- MCP servers from the spawn frame are seeded into the agent's
+  daedalus.db at startup and spawned by daedalus as local child
+  processes in the container.
 
-Supported `schedule.type`: `once`, `interval`, `daily`, `weekly`. Time strings
-are always `"HH:MM"` UTC; weekly uses `days: [0..6]` with 0=Sunday.
-`Schedule::validate_schedule()` and `compute_next_fire()` are the source of
-truth. The 30-second scheduler runs from `AgentHost`/main.cpp.
+### Approvals
 
-### Approvals & watchdog
-
-- Approval requests wait **600 s** (`AgentHost::request_approval()` →
-  `ApprovalStore::wait(id, 600)`); auto-review rules short-circuit this.
-- A single agent turn is capped at **240 s** (`HIVEMIND_TURN_TIMEOUT_S`,
-  default 240). A hung LLM call is aborted so the agent's queue unblocks.
-- `require_approval: true` gates `container_exec` and browser actions.
+- With `auto_approve` off, daedalus' approval sink hook blocks the turn
+  until an `approval_resp` arrives on stdin (10-minute safety timeout
+  denies). The request rides the channel as `approval_req`; the user
+  resolves it in the client (or web) via the hub's approvals API.
 
 ### Thread/context model
 
-- Threads fix participants at creation; there is no "add agent to existing
-  thread" flow.
-- Conversation history lives in daedalus' `messages.json`, restored on every
-  AgentHost reconstruction. `ChatService::fan_in` sends ONLY the new message;
-  do not prepend backlogs.
-- Deleting an agent cascades: solo threads deleted, group threads keep going
-  with a system note, routines deleted or reassigned via `?reassign_to=`.
-  The on-disk agent dir is kept; the podman container is removed best-effort.
+- Threads fix participants at creation; there is no "add agent to
+  existing thread" flow.
+- Conversation history lives in daedalus' messages.json on the shared
+  /workspace volume (`.daedalus/daedalus-<Name>/`), restored on every
+  hive-agent start. ChatService fan-in sends ONLY the new message; do
+  not prepend backlogs.
+- Deleting an agent cascades: solo threads deleted, group threads keep
+  going with a system note; the worker reaps the container
+  (`agent_remove`) and its home dir.
 
 ### Skills
 
-- **Global skills** (`~/.local/share/hivemind/skills/`) are shared; enabling
-  one symlinks it into the agent's `~/.agents/skills/`.
-- **Local skills** are per-agent, learned per-agent, owned per-agent.
-- Format is Anthropic SKILL.md. See `docs/skills.md` for the enable flow.
+- The hub streams its canonical library to workers (skill_begin /
+  skill_file / skill_end / skill_remove); the worker bind-mounts it
+  read-only at daedalus' global skills dir in every container.
+- `/workspace/.agents/skills/` is project-local and shared by every
+  agent on the worker (auto-scanned, zero mounts).
+- Local skills are per-agent, learned per-agent, owned per-agent.
 
-## 7. Current status (0.5.3, 2026-08-29)
+## 7. Current status (0.5.3+, 2026-08-31)
 
-Phases 0–31 done and user-verified (see Plan.md). Workers now connect over
-**wss://** through nginx (30.5 TLS effectively live; the OmniNet
-idle-close bug it exposed is fixed upstream, rule 13). Phase 31: shared
-per-rig workspaces + the `send_file` tool (worker → company workspace,
-confined, 50 MB cap). Also this cycle: container network self-heal (dead
-pasta detection via /proc/net/route), client roster selection persistence
-fix, app icon + .desktop launcher (install-prefix pitfall = rule 15).
-Open: screen cold-start readiness race, packaging follow-ups (first real
-Flatpak build).
+Phases 0-31 done and user-verified (see Plan.md). Workers connect over
+**wss://** through nginx (the OmniNet idle-close bug it exposed is fixed
+upstream, rule 13). LLM config is worker-owned (rule 2). WorkerChannel
+has per-connection outbound writer queues (rule 11).
 
-**Auth:** all `/api/*` calls need `Authorization: Bearer <key>`; the master
-key prints once at first start. Worker channel auth: `hmwk_` keys from
-`enroll-worker` (SHA-256 hashed in workers.db).
+Known operational trap (2026-08-30, docs/containers.md): if the worker's
+pasta process dies, ALL container networking dies -- agents look ready
+but every LLM call retries forever. `pgrep pasta` as the worker user;
+recovery = stop ALL containers, then start them.
+
+**Auth:** all `/api/*` calls need `Authorization: Bearer <key>`; the
+master key prints once at first start. Worker channel auth: `hmwk_` keys
+from `enroll-worker` (SHA-256 hashed in workers.db).

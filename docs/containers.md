@@ -39,8 +39,9 @@ The container's main process is hive-agent, a thin daedalus host:
   state lands in `/workspace/.daedalus/daedalus-<Name>/`.
 - Reads its identity + model credentials from env (injected by the worker
   at spawn; credentials live on the worker host only).
-- Speaks NDJSON on stdio: tasks in, events out (delta / message /
-  approval / image / status).
+- Speaks NDJSON on stdio: `task` ops in, events out (ready / delta /
+  message / approval_request / send_agent_message / status / log).
+  Full mapping table: `docs/hive-worker.md`.
 - Skills load from `/skills` (global mount) AND `/workspace/.agents/
   skills/` (project-local, shared) automatically; helper scripts execute
   locally — same machine as the brain, no sync tricks.
@@ -55,6 +56,14 @@ an agent is deleted from the roster. The hub never talks to podman.
 
 ## Networking
 
-Containers share the worker host's network namespace by default (simple,
-matches v1 behavior). Agents that need isolation can be moved to a slirp
-netns later — the agent doesn't know the difference either way.
+Containers on a worker share ONE rootless network namespace managed by
+podman + pasta (DNS forwarder 169.254.1.1). It is created when the first
+container starts.
+
+OPERATIONAL GOTCHA (hit 2026-08-30): if the pasta process dies, ALL
+container networking dies with it -- agents stay "running" but every LLM
+call fails with daedalus "Network error" retries while `getent hosts` in
+the container returns nothing. Diagnosis: `pgrep pasta` as the worker
+user. Recovery: `podman stop` ALL containers on the worker, then start
+them again -- restarting just one while others still run REATTACHES it
+to the dead netns instead of recreating it.

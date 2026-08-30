@@ -79,13 +79,12 @@ automatically.
 
 ### Models
 
-Providers and models live in HiveMind's own store
-(`~/.local/share/hivemind/llm.db`) — manage them on the web **Models** page
-(`http://localhost:8421/#/models`) or via `/api/providers` + `/api/models`.
-On first run with an empty store, existing entries are imported one-way
-from the daedalus SettingsStore. Pass the model name when creating an agent
-(blank = store default); credentials resolve at spawn time — daedalus never
-reads the DB and is never patched.
+LLM config is **worker-owned** in v2: each hive-worker keeps its own
+`~/.local/share/hive-worker/models.json` (catalog) + `secrets.json`
+(credentials, 0600) and injects them into agents as spawn env. The hub
+holds no keys; `GET /api/models` returns the union of connected workers'
+catalogs, which is what the client's New Agent dialog offers. Blank model
+= the worker's default.
 
 ## Layout
 
@@ -126,8 +125,7 @@ GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 GET/DELETE            /api/workers[/:name]                   worker registry
 GET/POST              /api/agents/:id/screen/{status,start,stop,password}
 GET                   /screen/:agentid/…  + /screen/:agentid/ws   noVNC proxy
-GET/POST/DELETE       /api/providers[/:name]  GET …/:name/discover
-GET/POST/DELETE       /api/models[/:name]     POST …/:name/default
+GET                   /api/models           union of connected workers' catalogs
 ```
 
 ## Documentation

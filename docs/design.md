@@ -61,6 +61,29 @@ migration phases.
 - Connects to the hub only; knows nothing about containers or workers
   beyond presence display.
 
+## Comms flow at a glance
+
+```
+hive-client --REST :8421 (Bearer)--> hive-server
+                                      |  threads, roster, approvals,
+                                      |  routines, files; no LLM keys
+hive-worker --WS :8423 /api/workers/channel--> hive-server
+   hello+hmwk_ key in; welcome back; then:
+   hub->worker: task, cancel, approval_resp, agent_spawn/stop/remove,
+                exec, file_*, skill_*, screen_ctl, stream_*
+   worker->hub: heartbeat, agent_status, task_delta, task_result,
+                approval_req, agent_msg, agent_log, exec_*, file_*,
+                skill_ack, screen_result, stream_*
+hive-worker --podman exec -i (NDJSON stdio)--> hive-agent (in container)
+   stdin:  task, approval_resp, cancel, shutdown
+   stdout: ready, delta, message, approval_request,
+           send_agent_message, status, log
+```
+
+Full op tables and the load-bearing transport rules (readLoop only,
+keepAliveTimeout=0, per-connection writer queues) are in
+`docs/hive-worker.md`.
+
 ## Data flow: a user message
 
 1. Client POSTs the message to the hub's thread API.
