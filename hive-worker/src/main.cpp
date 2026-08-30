@@ -51,6 +51,8 @@ struct SkillSync {
 };
 static std::mutex sync_m;
 static std::unordered_map<std::string, SkillSync> syncs;
+// Phase H: in-flight workspace file pushes (id -> accumulated bytes)
+static std::unordered_map<std::string, std::string> pushes;
 
 // Phase B (v2): the fleet. Events from in-container hive-agent processes
 // are forwarded to the server; set once the channel is up (see below).
@@ -365,6 +367,133 @@ int main(int argc, char* argv[]) {
                                         {"size",(int64_t)size}});
                         } catch (...) {}
                     }).detach();
+                } else if (op == "file_list") {
+                    // Phase H: list a dir in THIS rig's shared workspace.
+                    const std::string id = frame.value("id", "");
+                    const std::string path = frame.value("path", "");
+                    auto fail = [&](const std::string& err) {
+                        try { send_frame({{"op","file_error"},
+                                          {"id",id},{"error",err}}); }
+                        catch (...) {}
+                    };
+                    // Same confinement as file_fetch: relative, no "..".
+                    std::string rel = path;
+                    while (!rel.empty() && rel.front() == '/')
+                        rel.erase(rel.begin());
+                    if (rel.rfind("workspace/", 0) == 0)
+                        rel.erase(0, 10);
+                    if (rel.find("..") != std::string::npos) {
+                        fail("bad path");
+                        return;
+                    }
+                    const fs::path dpath =
+                        fs::path{std::getenv("HOME")} /
+                        ".local/share/hive-worker/workspace" / rel;
+                    std::error_code ec;
+                    if (!rel.empty() && !fs::is_directory(dpath, ec)) {
+                        fail("not a dir: /workspace/" + rel);
+                        return;
+                    }
+                    json entries = json::array();
+                    for (auto& e : fs::directory_iterator(dpath, ec)) {
+                        if (ec) break;
+                        const std::string nm = e.path().filename().string();
+                        if (!nm.empty() && nm.front() == '.') continue;
+                        json j = {{"name", nm},
+                                  {"path", rel.empty() ? nm
+                                       : rel + "/" + nm},
+                                  {"kind", e.is_directory(ec) ? "dir"
+                                                              : "file"}};
+                        if (!e.is_directory(ec)) {
+                            std::error_code ec2;
+                            j["size"] = (int64_t)e.file_size(ec2);
+                        }
+                        std::error_code ec3;
+                        const auto mt = e.last_write_time(ec3);
+                        if (!ec3) {
+                            const auto sys = std::chrono::time_point_cast<
+                                std::chrono::system_clock::duration>(
+                                mt - fs::file_time_type::clock::now() +
+                                std::chrono::system_clock::now());
+                            j["mtime"] = (int64_t)
+                                std::chrono::system_clock::to_time_t(sys);
+                        }
+                        entries.push_back(std::move(j));
+                    }
+                    try { send_frame({{"op","file_list_result"},
+                                      {"id",id},{"entries",entries}}); }
+                    catch (...) {}
+                } else if (op == "file_push") {
+                    // Phase H: push a file into THIS rig's shared
+                    // workspace (server->worker). Chunked frames
+                    // {id, path, first, eof, data:base64}; acked with
+                    // file_push_ack on the eof frame (or on error).
+                    const std::string id = frame.value("id", "");
+                    auto fail = [&](const std::string& err) {
+                        try { send_frame({{"op","file_push_ack"},{"id",id},
+                                          {"ok",false},{"error",err}}); }
+                        catch (...) {}
+                        std::lock_guard lk(sync_m);
+                        pushes.erase(id);
+                    };
+                    std::string rel = frame.value("path", "");
+                    while (!rel.empty() && rel.front() == '/')
+                        rel.erase(rel.begin());
+                    if (rel.rfind("workspace/", 0) == 0)
+                        rel.erase(0, 10);   // strip agent-visible prefix
+                    if (rel.empty() ||
+                        rel.find("..") != std::string::npos) {
+                        fail("bad path");
+                        return;
+                    }
+                    auto dec = OmniNet::Crypto::base64Decode(
+                        frame.value("data", ""));
+                    if (!dec) { fail("bad base64"); return; }
+                    {
+                        std::lock_guard lk(sync_m);
+                        if (frame.value("first", false)) pushes[id] = {};
+                        auto it = pushes.find(id);
+                        if (it == pushes.end()) {   // mid-stream, unknown id
+                            fail("unknown push id");
+                            return;
+                        }
+                        it->second.append((const char*)dec->data(),
+                                          dec->size());
+                        if (it->second.size() > 50u * 1024 * 1024) {
+                            fail("file too large (50MB cap)");
+                            return;
+                        }
+                    }
+                    if (frame.value("eof", false)) {
+                        std::string data;
+                        {
+                            std::lock_guard lk(sync_m);
+                            auto it = pushes.find(id);
+                            if (it == pushes.end()) { fail("lost push"); return; }
+                            data = std::move(it->second);
+                            pushes.erase(it);
+                        }
+                        const fs::path fpath =
+                            fs::path{std::getenv("HOME")} /
+                            ".local/share/hive-worker/workspace" / rel;
+                        std::error_code ec;
+                        fs::create_directories(fpath.parent_path(), ec);
+                        // World-writable: agent containers (rootless
+                        // subuid mapping) must read/write alongside.
+                        fs::permissions(fpath.parent_path(),
+                                        fs::perms::all,
+                                        fs::perm_options::replace, ec);
+                        std::ofstream out(fpath, std::ios::binary |
+                                                 std::ios::trunc);
+                        out.write(data.data(), (std::streamsize)data.size());
+                        out.close();
+                        if (!out) { fail("write failed"); return; }
+                        try {
+                            send_frame({{"op","file_push_ack"},{"id",id},
+                                        {"ok",true},
+                                        {"bytes",(int64_t)data.size()}});
+                        } catch (...) {}
+                    }
                 } else if (op == "skill_begin" || op == "skill_file" ||
                            op == "skill_end" || op == "skill_abort" ||
                            op == "skill_remove") {

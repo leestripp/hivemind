@@ -45,6 +45,10 @@ public:
 
     bool is_online(const std::string& name) const;
 
+    /// Names of all currently connected workers (Phase H: FileRoutes
+    /// picks the single connected worker for workspace file ops).
+    std::vector<std::string> connected_workers() const;
+
     /// Phase 30.3: synchronous remote exec. Sends an exec frame
     /// (argv = ["bash","-lc",command]; env_content is the RENDERED env-file
     /// text, resolved server-side — secrets never persist on the worker),
@@ -75,6 +79,16 @@ public:
                                          const std::string& agent,
                                          const std::string& path,
                                          int timeout_s = 120);
+
+    /// Phase H: synchronous directory listing of a worker's shared
+    /// workspace. Sends file_list {path} (workspace-relative); the
+    /// worker replies file_list_result {entries:[{name,is_dir,size,
+    /// mtime}]} or file_error. nullopt when the worker is offline.
+    struct ListResult { bool ok = false; nlohmann::json entries;
+                        std::string error; };
+    std::optional<ListResult> list_files(const std::string& worker,
+                                         const std::string& path,
+                                         int timeout_s = 30);
 
     /// Phase 30.4: synchronous screen control on the worker (the worker
     /// runs the podman steps ContainerManager runs locally). image +
@@ -208,7 +222,8 @@ private:
         std::mutex m;
         std::condition_variable cv;
         bool done = false;
-        std::string b64;        // accumulated base64 chunks
+        std::string b64;        // accumulated base64 chunks (file_fetch)
+        nlohmann::json entries; // directory entries (file_list)
         std::string error;
         int64_t size = 0;
     };

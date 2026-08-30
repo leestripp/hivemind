@@ -72,6 +72,14 @@ void WorkerChannel::stop() {
     if (ws_ && ws_->isRunning()) ws_->stop();
 }
 
+std::vector<std::string> WorkerChannel::connected_workers() const {
+    std::lock_guard lk(m_);
+    std::vector<std::string> out;
+    out.reserve(conns_.size());
+    for (auto& [n, c] : conns_) out.push_back(n);
+    return out;
+}
+
 bool WorkerChannel::is_online(const std::string& name) const {
     std::lock_guard lk(m_);
     return conns_.count(name) != 0;
@@ -229,7 +237,7 @@ void WorkerChannel::handle(Connection& ws) {
                 }
             }
         } else if (op == "file_chunk" || op == "file_done" ||
-                   op == "file_error") {
+                   op == "file_error" || op == "file_list_result") {
             std::shared_ptr<FileJob> fj;
             {
                 std::lock_guard lk(m_);
@@ -240,6 +248,10 @@ void WorkerChannel::handle(Connection& ws) {
                 std::lock_guard jl(fj->m);
                 if (op == "file_chunk") {
                     fj->b64 += frame.value("data", "");
+                } else if (op == "file_list_result") {
+                    fj->entries = frame.value("entries", json::array());
+                    fj->done = true;
+                    fj->cv.notify_all();
                 } else if (op == "file_error") {
                     fj->error = frame.value("error", "unknown");
                     fj->done = true;
@@ -390,6 +402,47 @@ WorkerChannel::fetch_file(const std::string& worker, const std::string& agent,
     auto dec = OmniNet::Crypto::base64Decode(b64);
     if (!dec) { r.ok = false; r.error = "base64 decode failed"; return r; }
     r.data.assign(dec->begin(), dec->end());
+    r.ok = true;
+    return r;
+}
+
+// Phase H: workspace directory listing (worker to server)
+std::optional<WorkerChannel::ListResult>
+WorkerChannel::list_files(const std::string& worker, const std::string& path,
+                          int timeout_s) {
+    auto job = std::make_shared<FileJob>();
+    std::string id;
+    {
+        std::lock_guard lk(m_);
+        if (!conns_.count(worker)) return std::nullopt;   // offline
+        id = "l" + std::to_string(next_job_++);
+        file_jobs_[id] = job;
+    }
+    bool sent = send(worker, json{{"op","file_list"},{"id",id},
+                                  {"path",path}});
+    if (!sent) {
+        std::lock_guard lk(m_);
+        file_jobs_.erase(id);
+        return std::nullopt;
+    }
+
+    std::unique_lock lk(job->m);
+    bool done = job->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                                 [&] { return job->done; });
+    ListResult r;
+    r.error = job->error;
+    r.entries = std::move(job->entries);
+    lk.unlock();
+    {
+        std::lock_guard g(m_);
+        file_jobs_.erase(id);
+    }
+    if (!done) {
+        r.ok = false;
+        if (r.error.empty()) r.error = "worker file list timed out";
+        return r;
+    }
+    if (!r.error.empty()) { r.ok = false; return r; }
     r.ok = true;
     return r;
 }
