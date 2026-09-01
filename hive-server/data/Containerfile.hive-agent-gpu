@@ -14,13 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ROCm HIP runtime for Blender Cycles. gfx1201 (RX 9070, RDNA4) is
-# officially supported by ROCm 10 (AMD compatibility matrix, 2026-08-14);
-# Ubuntu's archive ROCm lags RDNA4, so use AMD's repo, major-version pinned.
-ARG ROCM_APT_VER=10.0
+# officially supported since ROCm 6.4.1 (matrix lists it in 10.0.0, 2026-08).
+# AMD's apt repo tops out at 7.2.4 (latest/ -> 7.2.4, May 2026) and only
+# has jammy/noble dists — noble HIP runtime libs run fine on resolute.
+ARG ROCM_APT_VER=latest
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
-    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_APT_VER} ubuntu main" \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_APT_VER} noble main" \
         > /etc/apt/sources.list.d/rocm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         rocm-hip-runtime rocminfo \
