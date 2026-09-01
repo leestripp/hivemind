@@ -21,6 +21,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libamdhip64-7 rocminfo \
     && rm -rf /var/lib/apt/lists/*
 
+# Blender: official tarball, NOT the Ubuntu deb — Ubuntu's build compiles
+# Cycles without HIP (verified 2026-09-01: repo blender 5.0.1 rendered
+# CPU-only; official 5.0.1 sees the RX 9070 XT as a HIP device).
+ARG BLENDER_VER=5.0.1
+RUN curl -fsSL -o /tmp/blender.tar.xz \
+        https://download.blender.org/release/Blender${BLENDER_VER%.*}/blender-${BLENDER_VER}-linux-x64.tar.xz \
+    && tar -C /opt -xf /tmp/blender.tar.xz \
+    && ln -s /opt/blender-${BLENDER_VER}-linux-x64/blender /usr/local/bin/blender \
+    && rm /tmp/blender.tar.xz
+
 # Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
 # — no PATH/LD_LIBRARY_PATH fiddling needed.
 
