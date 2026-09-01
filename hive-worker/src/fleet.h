@@ -133,4 +133,10 @@ std::string resolve_api_key(const std::string& provider);
 /// models.json -> [{name, provider}] for the hello catalog.
 nlohmann::json list_worker_models();
 
+/// Resolve a model NAME to its full config from the worker-local
+/// models.json. "" means "worker default": a top-level "default" key
+/// naming another entry wins; absent that, the alphabetically-first
+/// entry (nlohmann objects are ordered). Throws when unresolvable.
+void resolve_model(AgentSpec& spec);
+
 } // namespace hwfleet

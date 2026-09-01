@@ -54,8 +54,9 @@ json list_worker_models() {
     json j;
     try { in >> j; } catch (...) { return out; }
     for (auto& [name, e] : j.items())
-        out.push_back({{"name", name},
-                       {"provider", e.value("provider", "")}});
+        if (e.is_object())   // skip the "default" string convention key
+            out.push_back({{"name", name},
+                           {"provider", e.value("provider", "")}});
     return out;
 }
 
@@ -68,11 +69,24 @@ void resolve_model(AgentSpec& spec) {
     json j;
     try { in >> j; }
     catch (...) { throw std::runtime_error("worker models: bad json"); }
+    // "" = worker default. Convention: a top-level "default" key names
+    // the entry to use; without one, the alphabetically-first entry wins
+    // (nlohmann objects are ordered maps). Previously "" always threw,
+    // so UI "worker default" selections could never spawn.
+    if (spec.model.empty()) {
+        if (j.contains("default") && j["default"].is_string() &&
+            j.contains(j["default"].get<std::string>()))
+            spec.model = j["default"].get<std::string>();
+        else
+            for (auto& [name, e2] : j.items())
+                if (e2.is_object()) { spec.model = name; break; }
+        if (spec.model.empty())
+            throw std::runtime_error("worker models: no usable entries");
+    }
     if (!j.contains(spec.model))
         throw std::runtime_error("worker models: no entry for model '" +
                                  spec.model + "'");
     const json& e = j[spec.model];
-    if (spec.model.empty()) throw std::runtime_error("empty model name");
     const std::string mid = e.value("model_id", "");
     if (!mid.empty()) spec.model = mid;        // name -> remote model id
     if (spec.api_host.empty())

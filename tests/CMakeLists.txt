@@ -29,3 +29,17 @@ hivemind_test(test_thread_nudges)
 hivemind_test(test_exec_audit)
 hivemind_test(test_server_config)
 hivemind_test(test_worker_channel)
+
+# tests/v2/test_fleet.cpp — Phase B standalone harness, now wired in so the
+# PURE pre-gate tests (resolved_image mapping, resolve_model default
+# resolution) run under ctest like everything else. Container spawning
+# only happens when HIVE_TEST_API_KEY is set; without it the harness
+# early-returns after the pure block. Links the worker sources directly
+# (no hivemind_core — the worker must not drag the hub in).
+add_executable(test_fleet v2/test_fleet.cpp
+    ${CMAKE_SOURCE_DIR}/hive-worker/src/fleet.cpp
+    ${CMAKE_SOURCE_DIR}/hive-worker/src/runner.cpp)
+target_link_libraries(test_fleet PRIVATE OmniNet nlohmann_json::nlohmann_json)
+target_compile_options(test_fleet PRIVATE -UNDEBUG)   # keep assert() live
+add_test(NAME test_fleet COMMAND test_fleet)
+set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
