@@ -13,23 +13,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         vulkan-tools mesa-utils gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# ROCm HIP runtime for Blender Cycles. gfx1201 (RX 9070, RDNA4) is
-# officially supported since ROCm 6.4.1 (matrix lists it in 10.0.0, 2026-08).
-# AMD's apt repo tops out at 7.2.4 (latest/ -> 7.2.4, May 2026) and only
-# has jammy/noble dists — noble HIP runtime libs run fine on resolute.
-ARG ROCM_APT_VER=latest
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
-    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_APT_VER} noble main" \
-        > /etc/apt/sources.list.d/rocm.list \
-    && apt-get update && apt-get install -y --no-install-recommends \
-        rocm-hip-runtime rocminfo \
+# ROCm HIP runtime for Blender Cycles — straight from the Ubuntu resolute
+# archive (ROCm 7.1.1 in universe: libamdhip64-7 + rocminfo). gfx1201
+# (RX 9070, RDNA4) is officially supported since ROCm 6.4.1, so 7.1.1
+# covers it. No external repo, no key management.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libamdhip64-7 rocminfo \
     && rm -rf /var/lib/apt/lists/*
 
-# ROCm installs under /opt/rocm — expose it to the hive user.
-ENV PATH="/opt/rocm/bin:${PATH}" \
-    LD_LIBRARY_PATH="/opt/rocm/lib"
+# Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
+# — no PATH/LD_LIBRARY_PATH fiddling needed.
 
 USER hive
 WORKDIR /workspace
