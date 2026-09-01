@@ -68,7 +68,7 @@ async function refresh() {
       // Phase 19 first-run: one-click teammate templates.
       const tpl = await API.get('/api/templates');
       const templates = tpl.templates || [];
-      grid.innerHTML = '<p class="muted" style="grid-column:1/-1">No agents yet — start your team with a template (or use + Agent in the client for a blank one):</p>';
+      grid.innerHTML = '<p class="muted" style="grid-column:1/-1">No agents yet — start your team with a template below, or the <b>+ Agent</b> button above for a blank one:</p>';
       for (const t of templates) {
         const card = document.createElement('div');
         card.className = 'agent-card';
@@ -85,19 +85,12 @@ async function refresh() {
           </div>`;
         grid.appendChild(card);
       }
-      grid.onclick = async (e) => {
+      grid.onclick = (e) => {
         const b = e.target.closest('[data-tpl]');
         if (!b) return;
         const t = templates.find(x => x.id === b.dataset.tpl);
         if (!t) return;
-        b.disabled = true;
-        try {
-          await API.post('/api/agents', {
-            name: t.name, role: t.role, avatar: t.avatar,
-            require_approval: !!t.require_approval,
-          });
-          refresh();
-        } catch (err) { alert(err.message); b.disabled = false; }
+        openAgentModal(null, t);   // worker + type selection happens there
       };
       return;
     }
@@ -141,9 +134,12 @@ async function refresh() {
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
         </div>
         <div class="agent-actions">
+          <button class="btn btn-sm" data-edit="${esc(a.id)}" title="Edit agent (worker, type, model…)">✎ Edit</button>
           <button class="btn btn-sm" data-screen="${esc(a.id)}" title="Live container desktop (Phase 6)">🖥 Computer</button>
           <button class="btn btn-sm" data-rules="${esc(a.id)}" title="Auto-review rules for approvals (Phase 16)">⚖ Rules</button>
         </div>`;
+      card.querySelector('[data-edit]').addEventListener('click',
+        () => openAgentModal(a));
       card.querySelector('[data-screen]').addEventListener('click',
         () => openScreen(a.id, a.name));
       card.querySelector('[data-rules]').addEventListener('click',
@@ -304,6 +300,159 @@ async function saveRules() {
   }
 }
 
+// ── Phase 35: agent editor (create + edit) — worker- and type-aware ────
+// The hub REQUIRES a valid enrolled worker on create (400 otherwise) and
+// validates type against the selected worker's advertised caps. The Type
+// row mirrors the GTK client: GPU workhorse is only selectable when the
+// selected worker says {"gpu": …} in its hello caps; hub enforces anyway.
+let agentModal = null;
+
+function ensureAgentModal() {
+  if (agentModal) return agentModal;
+  agentModal = document.createElement('div');
+  agentModal.className = 'modal-overlay hidden';
+  agentModal.innerHTML = `
+    <div class="modal-panel" style="width:min(480px,94vw)">
+      <div class="modal-head">
+        <strong id="am-title">New agent</strong>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" id="am-cancel">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="am-save">Create</button>
+      </div>
+      <div class="form-row"><label>Name</label>
+        <input id="am-name" placeholder="e.g. Nova"></div>
+      <div class="form-row"><label>Role</label>
+        <input id="am-role" placeholder="e.g. research assistant"></div>
+      <div class="form-row"><label>Worker</label>
+        <select id="am-worker"></select>
+        <p class="muted" id="am-worker-warn" style="margin:4px 0 0;display:none">
+          No hive-worker online — enroll or connect one first (see the
+          Workers page).</p></div>
+      <div class="form-row"><label>Type</label>
+        <select id="am-type">
+          <option value="">Standard</option>
+          <option value="gpu">GPU workhorse (render/compute)</option>
+        </select></div>
+      <div class="form-row"><label>Provider</label>
+        <select id="am-provider"></select></div>
+      <div class="form-row"><label>Model</label>
+        <select id="am-model"></select></div>
+      <div class="form-row">
+        <label style="flex-direction:row;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="am-appr" style="width:auto">
+          Require my approval for commands</label></div>
+    </div>`;
+  document.body.appendChild(agentModal);
+  agentModal.querySelector('#am-cancel').addEventListener('click', () =>
+    agentModal.classList.add('hidden'));
+  return agentModal;
+}
+
+// existing = roster agent (edit) | prefill = template (create) | neither.
+async function openAgentModal(existing = null, prefill = null) {
+  ensureAgentModal();
+  const editing = !!existing;
+  $('am-title').textContent = editing ? 'Edit agent' : 'New agent';
+  $('am-save').textContent = editing ? 'Save' : 'Create';
+  $('am-name').value = existing?.name ?? prefill?.name ?? '';
+  $('am-role').value = existing?.role ?? prefill?.role ?? '';
+  $('am-appr').checked = existing ? !!existing.require_approval
+                                  : !!prefill?.require_approval;
+  const avatar = existing?.avatar ?? prefill?.avatar ?? '';
+
+  // Worker dropdown: online workers only; when editing, keep the current
+  // placement visible even if that rig has gone offline (flagged).
+  let workers = [];
+  try { workers = (await API.get('/api/workers')).workers || []; }
+  catch { /* hub unreachable — dropdown stays empty, save disabled */ }
+  const curWorker = existing?.worker || '';
+  const wsel = $('am-worker');
+  wsel.innerHTML = '';
+  const eligible = workers.filter(w => w.online || w.name === curWorker);
+  for (const w of eligible) {
+    const o = document.createElement('option');
+    o.value = w.name;
+    o.textContent = w.online ? w.name : w.name + ' (offline)';
+    wsel.appendChild(o);
+  }
+  if (curWorker) wsel.value = curWorker;
+  const noWorker = !eligible.length;
+  $('am-worker-warn').style.display = noWorker ? '' : 'none';
+  $('am-save').disabled = noWorker;
+
+  // Type dropdown: GPU only when the SELECTED worker advertises the cap.
+  const tsel = $('am-type');
+  const curType = existing?.type || '';
+  const refreshType = () => {
+    const w = workers.find(x => x.name === wsel.value);
+    const ok = !!(w && w.caps && typeof w.caps === 'object' &&
+                  'gpu' in w.caps);
+    tsel.disabled = !ok;
+    if (!ok) tsel.value = '';            // pinned to Standard
+  };
+  tsel.value = curType === 'gpu' ? 'gpu' : '';
+  wsel.onchange = refreshType;
+  refreshType();
+
+  // Provider/model from the union catalog (workers' models.json files).
+  let models = [];
+  try { models = (await API.get('/api/models')).models || []; } catch {}
+  const psel = $('am-provider'), msel = $('am-model');
+  psel.innerHTML = '';
+  for (const p of [...new Set(models.map(m => m.provider))].sort()) {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    psel.appendChild(o);
+  }
+  const refillModels = () => {
+    msel.innerHTML = '';
+    const d = document.createElement('option');
+    d.value = ''; d.textContent = '(worker default)';
+    msel.appendChild(d);
+    for (const m of models.filter(x => x.provider === psel.value)) {
+      const o = document.createElement('option');
+      o.value = m.name; o.textContent = m.name;
+      msel.appendChild(o);
+    }
+  };
+  psel.onchange = refillModels;
+  refillModels();
+  const curModel = existing?.model || '';
+  if (curModel) {
+    const pm = models.find(m => m.name === curModel);
+    if (pm) { psel.value = pm.provider; refillModels(); msel.value = curModel; }
+  }
+
+  $('am-save').onclick = async () => {
+    const name = $('am-name').value.trim();
+    if (!name) { alert('Name is required.'); return; }
+    if (!wsel.value) { alert('Pick a worker to run on.'); return; }
+    const body = {
+      name,
+      role: $('am-role').value.trim(),
+      model: msel.value,
+      worker: wsel.value,
+      require_approval: $('am-appr').checked,
+      avatar,
+    };
+    // Type semantics: enabled row → "gpu" sets, Standard + previously-typed
+    // sends "default" (explicit clear); disabled row → omit (keep as-is).
+    if (!tsel.disabled)
+      body.type = tsel.value === 'gpu' ? 'gpu' : (curType ? 'default' : '');
+    $('am-save').disabled = true;
+    try {
+      if (editing) await API.req('PATCH', '/api/agents/' + existing.id, body);
+      else         await API.post('/api/agents', body);
+      agentModal.classList.add('hidden');
+      refresh();
+    } catch (e) {
+      alert((editing ? 'Save' : 'Create') + ' failed — ' + e.message);
+      $('am-save').disabled = false;
+    }
+  };
+  agentModal.classList.remove('hidden');
+}
+
 export function enterAgents() {
   refresh();
   if (!pollTimer) pollTimer = setInterval(refresh, 2000);
@@ -314,4 +463,6 @@ export function leaveAgents() {
   pollTimer = null;
 }
 
-export function initAgents() {}
+export function initAgents() {
+  $('agent-add').addEventListener('click', () => openAgentModal());
+}

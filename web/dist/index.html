@@ -166,10 +166,12 @@
         <div>
           <h2>🐝 Agents</h2>
           <p class="muted">
-            The roster — every agent created from the hive-client. Status
-            refreshes every 2&nbsp;s while this page is open.
+            The roster — every agent in your fleet, placed on a hive-worker.
+            Status refreshes every 2&nbsp;s while this page is open.
           </p>
         </div>
+        <span style="flex:1"></span>
+        <button class="btn btn-primary" id="agent-add" title="Create a new agent">+ Agent</button>
       </div>
       <div id="agents-grid" class="agents-grid">
         <p class="muted">loading…</p>
@@ -569,7 +571,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260901a"></script>
+<script type="module" src="js/main.js?v=20260901b"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>
