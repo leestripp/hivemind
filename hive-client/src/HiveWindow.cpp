@@ -2930,11 +2930,12 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     // Exception: when editing an agent that already lives on a worker that
     // has since gone offline, that worker is shown flagged "(offline)" so
     // the agent can be moved back to the server.
-    struct WorkerEntry { std::string name; bool online; };
+    struct WorkerEntry { std::string name; bool online; std::string caps; };
     std::vector<WorkerEntry> all_workers;
     try {
         for (auto& w : api_.list_workers().value("workers", nlohmann::json::array()))
-            all_workers.push_back({w.value("name", ""), w.value("online", false)});
+            all_workers.push_back({w.value("name", ""), w.value("online", false),
+                                   w.value("caps", "{}")});
     } catch (...) { /* server unreachable — worker row stays hidden */ }
     const std::string cur_worker =
         existing ? existing->value("worker", "") : "";
@@ -2957,6 +2958,33 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         worker->set_selected(sel);
     }
     const bool show_worker_row = !worker_names->empty();
+
+    // Phase 35: agent type. "GPU workhorse" is only selectable when the
+    // SELECTED worker advertises a gpu cap (hello frame); otherwise the
+    // dropdown is disabled and pinned to Standard. Hub enforces too (400).
+    auto worker_has_gpu = [all_workers](const std::string& wname) {
+        for (auto& w : all_workers) {
+            if (w.name != wname) continue;
+            try {
+                auto c = nlohmann::json::parse(w.caps);
+                return c.is_object() && c.contains("gpu");
+            } catch (...) { return false; }
+        }
+        return false;
+    };
+    auto* type_dd = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create({"Standard", "GPU workhorse (render/compute)"}));
+    const std::string cur_type = editing ? existing->value("type", "") : "";
+    if (cur_type == "gpu") type_dd->set_selected(1);
+    auto refresh_type = [type_dd, worker, worker_names, worker_has_gpu] {
+        const auto sel = worker->get_selected();
+        const bool ok = sel < worker_names->size() &&
+                        worker_has_gpu((*worker_names)[sel]);
+        type_dd->set_sensitive(ok);
+        if (!ok) type_dd->set_selected(0);   // pin to Standard
+    };
+    worker->property_selected().signal_changed().connect(refresh_type);
+    refresh_type();   // initial state for the preselected worker
 
     // Host mode removed (2026-08-25): agents always run containerized.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
@@ -3058,7 +3086,10 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
-    if (show_worker_row) add_row("Worker", worker, row_i++);
+    if (show_worker_row) {
+        add_row("Worker", worker, row_i++);
+        add_row("Type", type_dd, row_i++);
+    }
     else if (!editing) {
         // No worker online: creation is impossible (the hub rejects unknown
         // workers) -- explain and disable OK.
@@ -3075,7 +3106,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -3085,18 +3116,24 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 const auto wsel = worker->get_selected();
                 const std::string wk = wsel < worker_names->size() ? (*worker_names)[wsel] : "";
                 const std::string av = *chosen_avatar;
+                // Phase 35: insensitive row = don't touch; gpu picked = "gpu";
+                // switched back to Standard on an edit = "default" (clears).
+                const std::string ty =
+                    !type_dd->get_sensitive() ? "" :
+                    type_dd->get_selected() == 1 ? "gpu"
+                    : (!cur_type.empty() ? "default" : "");
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
                 delete templates_json;
                 delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
-                           m, ws, av, wk, edit_id,
+                           m, ws, av, wk, ty, edit_id,
                            ap = appr->get_active()] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av, wk);
+                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk);
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });

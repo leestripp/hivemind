@@ -75,12 +75,14 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& workspace_mode,
                                        bool require_approval,
                                        const std::string& avatar,
-                                       const std::string& worker) {
+                                       const std::string& worker,
+                                       const std::string& type) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar}};
     if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
+    if (!type.empty())   body["type"]   = type;     // Phase 35
     return request("POST", "/api/agents", &body);
 }
 
@@ -91,12 +93,14 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& workspace_mode,
                                        bool require_approval,
                                        const std::string& avatar,
-                                       const std::string& worker) {
+                                       const std::string& worker,
+                                       const std::string& type) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar},
                         {"worker", worker}};   // server: "" = keep current
+    if (!type.empty()) body["type"] = type;    // Phase 35: "" keep, "default" clears
     return request("PATCH", "/api/agents/" + id, &body);
 }
 

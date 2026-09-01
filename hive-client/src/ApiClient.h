@@ -32,14 +32,16 @@ public:
                                 const std::string& workspace_mode,
                                 bool require_approval,
                                 const std::string& avatar = "",
-                                const std::string& worker = "");       // POST /api/agents
+                                const std::string& worker = "",
+                                const std::string& type = "");         // POST /api/agents (Phase 35)
     nlohmann::json update_agent(const std::string& id,
                                 const std::string& name, const std::string& role,
                                 const std::string& model,
                                 const std::string& workspace_mode,
                                 bool require_approval,
                                 const std::string& avatar,
-                                const std::string& worker = "");       // PATCH /api/agents/:id ("" = keep current)
+                                const std::string& worker = "",
+                                const std::string& type = "");         // PATCH ("" keep, "default" clear, Phase 35)
     nlohmann::json list_workers();                                   // GET /api/workers (Phase 30)
     nlohmann::json delete_agent(const std::string& id,
                                 const std::string& reassign_to = "");  // DELETE /api/agents/:id[?reassign_to=]

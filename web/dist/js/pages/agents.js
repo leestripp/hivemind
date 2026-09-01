@@ -136,6 +136,7 @@ async function refresh() {
           <div><span>Runs on</span>${a.worker && a.worker !== 'local'
                 ? '🖥 ' + esc(a.worker)
                 : 'this server'}</div>
+          ${a.type ? `<div><span>Type</span>⚡ ${esc(a.type)}</div>` : ''}
           <div><span>Approvals</span>${a.require_approval ? 'required' : 'auto'}</div>
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
         </div>
