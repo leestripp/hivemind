@@ -31,6 +31,40 @@ RUN curl -fsSL -o /tmp/blender.tar.xz \
     && ln -s /opt/blender-${BLENDER_VER}-linux-x64/blender /usr/local/bin/blender \
     && rm /tmp/blender.tar.xz
 
+# ── Blender MCP: agents drive Blender interactively ─────────────────────
+# Two halves: (1) the blender-mcp MCP bridge (stdio; daedalus spawns it as
+# a child of hive-agent), (2) the Blender addon whose socket server it
+# talks to (localhost:9876). uv per the official installer; blender-mcp
+# baked via `uv tool install` so no runtime downloads.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+    && UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
+       uv tool install blender-mcp
+
+# The addon hard-imports `requests`, which Blender's bundled python lacks.
+RUN BLPY=$(echo /opt/blender-${BLENDER_VER}-linux-x64/5.0/python/bin/python3*) \
+    && "$BLPY" -m ensurepip \
+    && "$BLPY" -m pip install --no-cache-dir requests
+
+# Install the addon FROM THE INSTALLED PACKAGE (not a GitHub fetch) so the
+# addon protocol version always matches the bridge. Blender's system
+# addons dir — the hive user's ~/.config is a per-agent mounted volume,
+# so image-baked files must live in /opt.
+RUN ADDON=$(find /opt/uv-tools/blender-mcp -name "addon.py" | head -1) \
+    && test -n "$ADDON" || { echo "blender-mcp addon.py not found in package"; exit 1; } \
+    && cp "$ADDON" /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons/blender_mcp.py
+
+# Auto-enable + auto-start on every Blender launch (register() starts the
+# socket server; blendermcp_auto_start_server defaults True).
+COPY hive-server/data/blender-mcp-autostart.py /tmp/blender-mcp-autostart.py
+RUN cp /tmp/blender-mcp-autostart.py \
+        /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/startup/blender_mcp_autostart.py \
+    && rm /tmp/blender-mcp-autostart.py
+
+# NOTE: the MCP command queue is pumped by Blender's UI event loop —
+# launch Blender ON THE XVFB DESKTOP (DISPLAY=:0, e.g. `blender &`), not
+# `blender -b`, for interactive MCP control. Headless -b remains the
+# right path for batch renders.
+
 # Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
 # — no PATH/LD_LIBRARY_PATH fiddling needed.
 
