@@ -46,13 +46,13 @@ RUN BLPY=$(echo /opt/blender-${BLENDER_VER}-linux-x64/5.0/python/bin/python3*) \
     && "$BLPY" -m pip install --no-cache-dir requests
 
 # Install the addon FROM THE INSTALLED PACKAGE (not a GitHub fetch) so the
-# addon protocol version always matches the bridge. Blender's system
-# addons dir — the hive user's ~/.config is a per-agent mounted volume,
-# so image-baked files must live in /opt.
+# addon protocol version always matches the bridge. Target addons_core:
+# Blender 5.0 dropped scripts/addons from the default scan (verified —
+# addon_utils.paths() returns only addons_core); the hive user's ~/.config
+# is a per-agent mounted volume, so image-baked files must live in /opt.
 RUN ADDON=$(find /opt/uv-tools/blender-mcp -name "addon.py" | head -1) \
     && test -n "$ADDON" || { echo "blender-mcp addon.py not found in package"; exit 1; } \
-    && mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons \
-    && cp "$ADDON" /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons/blender_mcp.py
+    && cp "$ADDON" /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons_core/blender_mcp.py
 
 # Auto-enable + auto-start on every Blender launch (register() starts the
 # socket server; blendermcp_auto_start_server defaults True).
