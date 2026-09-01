@@ -51,12 +51,14 @@ RUN BLPY=$(echo /opt/blender-${BLENDER_VER}-linux-x64/5.0/python/bin/python3*) \
 # so image-baked files must live in /opt.
 RUN ADDON=$(find /opt/uv-tools/blender-mcp -name "addon.py" | head -1) \
     && test -n "$ADDON" || { echo "blender-mcp addon.py not found in package"; exit 1; } \
+    && mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons \
     && cp "$ADDON" /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons/blender_mcp.py
 
 # Auto-enable + auto-start on every Blender launch (register() starts the
 # socket server; blendermcp_auto_start_server defaults True).
 COPY hive-server/data/blender-mcp-autostart.py /tmp/blender-mcp-autostart.py
-RUN cp /tmp/blender-mcp-autostart.py \
+RUN mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/startup \
+    && cp /tmp/blender-mcp-autostart.py \
         /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/startup/blender_mcp_autostart.py \
     && rm /tmp/blender-mcp-autostart.py
 
