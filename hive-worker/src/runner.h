@@ -20,8 +20,11 @@ int podman_simple(const std::vector<std::string>& args, std::string* out);
 
 /// Ensure the agent's container exists + runs on THIS worker.
 /// image defaults to the v1 image; the v2 fleet passes its own tag.
+/// gpu (Phase 35): pass --device /dev/kfd --device /dev/dri
+/// --group-add keep-groups so HIP/Vulkan see the host GPU.
 void ensure_container(const std::string& agent,
-                      const std::string& image = "localhost/hive-agent:latest");
+                      const std::string& image = "localhost/hive-agent:latest",
+                      bool gpu = false);
 
 
 struct ExecOutcome {

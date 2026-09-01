@@ -82,7 +82,8 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"system_prompt", agent.role},
             {"auto_approve", !agent.require_approval},
             {"mcp_servers", mcp},
-            {"image", ""}};                  // "" = worker default (v2)
+            {"image", ""},                  // "" = worker default (v2)
+            {"type", agent.type}};            // Phase 35: "" / "gpu"
 }
 
 void HubRouter::reconcile_worker(const std::string& worker) {

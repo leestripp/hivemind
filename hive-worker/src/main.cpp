@@ -74,6 +74,16 @@ int main(int argc, char* argv[]) {
                      "--key hmwk_... --name <worker> [--caps '{...}']\n";
         return 2;
     }
+    // Phase 35: advertise GPU capability. /dev/kfd is the AMD kernel
+    // compute driver node — its presence means HIP workloads can run.
+    // An explicit --caps gpu entry always wins.
+    {
+        auto c = json::parse(caps, nullptr, false);
+        if (!c.is_object()) c = json::object();
+        if (!c.contains("gpu") && fs::exists("/dev/kfd"))
+            c["gpu"] = "amd";
+        caps = c.dump();
+    }
     const std::string url = server + "/api/workers/channel";
 
     // Phase B (v2): the fleet lives OUTSIDE the reconnect loop - agents
@@ -219,6 +229,7 @@ int main(int argc, char* argv[]) {
                             spec.mcp_servers   = specj.value("mcp_servers",
                                                              json::array());
                             spec.image         = specj.value("image","");
+                            spec.type          = specj.value("type","");   // Phase 35
                             g_fleet->spawn(spec);
                         } catch (const std::exception& e) {
                             std::cerr << "worker: agent_spawn " << aid

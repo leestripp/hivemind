@@ -9,6 +9,8 @@
 
 #include <sys/stat.h>
 
+#include <cassert>
+
 #include <condition_variable>
 #include <cstdlib>
 #include <iostream>
@@ -17,6 +19,18 @@
 using nlohmann::json;
 
 int main() {
+    // Phase 35: type -> image mapping (pure; runs without any API key or
+    // containers so it always executes, even in the early-return path).
+    {
+        hwfleet::AgentSpec s;
+        assert(hwfleet::resolved_image(s) == hwfleet::kImageV2);
+        s.type = "gpu";
+        assert(hwfleet::resolved_image(s) == hwfleet::kImageGpu);
+        s.image = "localhost/custom:tag";       // explicit override wins
+        assert(hwfleet::resolved_image(s) == "localhost/custom:tag");
+        std::cout << "test_fleet: resolved_image mapping OK\n";
+    }
+
     const char* key = std::getenv("HIVE_TEST_API_KEY");
     if (!key || !*key) { std::cerr << "HIVE_TEST_API_KEY required\n"; return 2; }
 

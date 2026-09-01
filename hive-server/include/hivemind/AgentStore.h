@@ -26,6 +26,7 @@ struct RosterAgent {
     std::string avatar;         // dept avatar name e.g. "engineering-female"; "" = auto (name hash)
     std::string worker = "local"; // Phase 30: "local" = server's podman, else hive-worker name
     std::string mcp_servers = "[]"; // Phase 33: JSON array [{name,command,args[],env{}}] — MCP servers for this agent
+    std::string type;           // Phase 35: "" = standard, "gpu" = GPU workhorse (image+devices chosen by the worker)
     bool require_approval = false; // Phase 3: gate shell commands for human review
     std::string created_at;
     std::string updated_at;
@@ -46,7 +47,8 @@ public:
                              const std::string& workspace_mode = "shared",
                              bool require_approval = false,
                              const std::string& avatar = "",
-                             const std::string& worker = "");
+                             const std::string& worker = "",
+                             const std::string& type = "");   // Phase 35: "gpu" = workhorse
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);
@@ -62,7 +64,8 @@ public:
                              bool require_approval,
                              const std::string& avatar = "",
                              const std::string& worker = "",   // "" = keep current
-                             const std::string& mcp_servers = ""); // "" = keep current (Phase 33)
+                             const std::string& mcp_servers = "", // "" = keep current (Phase 33)
+                             const std::string& type = "");       // "" = keep, "default" = clear (Phase 35)
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

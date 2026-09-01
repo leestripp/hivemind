@@ -70,7 +70,7 @@ int main() {
     assert(port != 0);
 
     // ── setup: two roster agents ──────────────────────────────────────────
-    wstore.enroll("testrig");
+    const std::string wkey = wstore.enroll("testrig");
 
     // Regression (2026-08-30): unknown/absent worker must be REJECTED --
     // a "local"/ghost worker creates a zombie agent that never spawns.
@@ -88,6 +88,34 @@ int main() {
     r = request("POST", port, "/api/agents",
                 {{"name", "Beta"}, {"role", "reviewer"}, {"worker", "testrig"}});
     const std::string a2 = json::parse(r.bodyAsString())["id"];
+
+    // ── Phase 35: agent type validation ───────────────────────────────────
+    // type=gpu on a worker with no gpu cap -> 400
+    r = request("POST", port, "/api/agents",
+                {{"name", "Forge"}, {"role", "render"}, {"worker", "testrig"},
+                 {"type", "gpu"}});
+    assert(r.statusCode() == 400);
+
+    // testrig advertises gpu -> accepted, and type round-trips
+    wstore.validate(wkey, R"({"arch":"x86_64","gpu":"amd"})");
+    r = request("POST", port, "/api/agents",
+                {{"name", "Forge"}, {"role", "render"}, {"worker", "testrig"},
+                 {"type", "gpu"}});
+    assert(r.statusCode() == 201);
+    const std::string a3 = json::parse(r.bodyAsString())["id"];
+    assert(json::parse(r.bodyAsString())["type"] == "gpu");
+    assert(jget(port, "/api/agents/" + a3)["type"] == "gpu");   // persisted
+
+    // moving the gpu agent onto a gpu-less worker -> 400 (effective type)
+    wstore.enroll("plainrig");
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"worker", "plainrig"}});
+    assert(r.statusCode() == 400);
+
+    // PATCH type=default clears back to standard
+    r = request("PATCH", port, "/api/agents/" + a3, {{"type", "default"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a3)["type"] == "");
 
     // ── thread create validation ──────────────────────────────────────────
     r = request("POST", port, "/api/threads", {{"agent_ids", json::array()}});

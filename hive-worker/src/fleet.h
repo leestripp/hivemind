@@ -28,6 +28,8 @@
 namespace hwfleet {
 
 inline constexpr const char* kImageV2 = "localhost/hive-agent:v2";
+// Phase 35: GPU workhorse image (Containerfile.hive-agent-gpu)
+inline constexpr const char* kImageGpu = "localhost/hive-agent:gpu";
 
 struct AgentSpec {
     std::string id;            // server roster id (container hive-<id>)
@@ -41,8 +43,17 @@ struct AgentSpec {
     bool    auto_approve = false;
     std::string system_prompt; // written to the shared volume, passed by path
     nlohmann::json mcp_servers = nlohmann::json::array();
-    std::string image;         // "" -> kImageV2
+    std::string image;         // "" -> kImageV2 (verbatim override wins)
+    std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
 };
+
+// Phase 35: explicit image wins; otherwise type selects the image.
+// Inline here (not static in fleet.cpp) so tests/v2/test_fleet can
+// verify the type -> image mapping without spawning anything.
+inline std::string resolved_image(const AgentSpec& s) {
+    if (!s.image.empty()) return s.image;
+    return s.type == "gpu" ? kImageGpu : kImageV2;
+}
 
 /// One running (or restarting) hive-agent session.
 class AgentProcess {

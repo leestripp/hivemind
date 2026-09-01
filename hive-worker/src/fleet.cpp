@@ -179,8 +179,9 @@ void AgentProcess::start() {
     }
     stopping_ = false;
     resolve_model(spec_);            // model/provider names -> full config
-    hwrunner::ensure_container(spec_.id,
-        spec_.image.empty() ? kImageV2 : spec_.image);
+    // Phase 35: type "gpu" -> gpu image + device passthrough flags
+    hwrunner::ensure_container(spec_.id, resolved_image(spec_),
+                               spec_.type == "gpu");
     spawn_exec();
     monitor_ = std::thread(&AgentProcess::monitor_loop, this);
 }
@@ -301,8 +302,8 @@ void AgentProcess::monitor_loop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         if (stopping_) { set_state(m_, state_, "down"); return; }
         try {
-            hwrunner::ensure_container(spec_.id,
-                spec_.image.empty() ? kImageV2 : spec_.image);
+            hwrunner::ensure_container(spec_.id, resolved_image(spec_),
+                                       spec_.type == "gpu");
             spawn_exec();                // creates a fresh reader_ thread
         } catch (const std::exception& e) {
             std::cerr << "fleet: respawn failed for " << spec_.id << ": "

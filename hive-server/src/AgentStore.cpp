@@ -51,13 +51,14 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     if (a.worker.empty()) a.worker = "local";
     a.mcp_servers    = col(11);
     if (a.mcp_servers.empty()) a.mcp_servers = "[]";
+    a.type           = col(12);   // Phase 35
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
     "       created_at, updated_at, require_approval, avatar, worker,"
-"       mcp_servers FROM agents";
+"       mcp_servers, type FROM agents";
 
 } // namespace
 
@@ -118,6 +119,11 @@ void AgentStore::ensure_schema() {
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN worker"
                      " TEXT NOT NULL DEFAULT 'local'",
                  nullptr, nullptr, nullptr);
+    // Phase 35 (2026-09-01): agent type — "" = standard, "gpu" = GPU
+    // workhorse. The worker maps type -> image + device flags.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN type"
+                     " TEXT NOT NULL DEFAULT ''",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 }
 
@@ -127,7 +133,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& workspace_mode,
                                      bool require_approval,
                                      const std::string& avatar,
-                                     const std::string& worker) {
+                                     const std::string& worker,
+                                     const std::string& type) {
     if (name.empty())
         throw std::invalid_argument("agent name must not be empty");
     if (get_agent_by_name(name))
@@ -143,6 +150,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.require_approval = require_approval;
     a.avatar         = avatar;
     a.worker         = worker.empty() ? "local" : worker;   // Phase 30
+    a.type           = type;                                    // Phase 35
     a.created_at     = iso_now();
     a.updated_at     = a.created_at;
 
@@ -151,8 +159,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     const char* sql =
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
         "                   container_id, created_at, updated_at, require_approval,"
-        "                   avatar, worker)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?,?)";
+        "                   avatar, worker, type)"
+        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -168,6 +176,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     sqlite3_bind_int(st, 8, a.require_approval ? 1 : 0);
     bind_text(st, 9, a.avatar);
     bind_text(st, 10, a.worker);
+    bind_text(st, 11, a.type);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -224,7 +233,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      bool require_approval,
                                      const std::string& avatar,
                                      const std::string& worker,
-                                     const std::string& mcp_servers) {
+                                     const std::string& mcp_servers,
+                                     const std::string& type) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -240,7 +250,9 @@ RosterAgent AgentStore::update_agent(const std::string& id,
         "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?,"
         " updated_at=?, require_approval=?, avatar=?,"
         " worker = CASE WHEN ? = '' THEN worker ELSE ? END,"
-        " mcp_servers = CASE WHEN ? = '' THEN mcp_servers ELSE ? END"
+        " mcp_servers = CASE WHEN ? = '' THEN mcp_servers ELSE ? END,"
+        // Phase 35: "" = keep current, "default" = explicit clear to standard
+        " type = CASE WHEN ? = '' THEN type WHEN ? = 'default' THEN '' ELSE ? END"
         " WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
@@ -259,7 +271,10 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 9, worker);
     bind_text(st, 10, mcp_servers);
     bind_text(st, 11, mcp_servers);
-    bind_text(st, 12, id);
+    bind_text(st, 12, type);
+    bind_text(st, 13, type);
+    bind_text(st, 14, type);
+    bind_text(st, 15, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

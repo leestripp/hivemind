@@ -58,24 +58,38 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
     return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
 }
 
-void ensure_container(const std::string& agent, const std::string& image) {
+// Phase 35: build any missing image in the chain. Base + gpu build from
+// the repo ROOT (they COPY build/hive-agent/hive-agent); the browser
+// variant builds from hive-server/data (it COPYs hive-screen.sh).
+// :gpu FROMs :browser FROMs :latest — recurse so a bare rig self-heals.
+static void ensure_image_built(const std::string& image) {
+    if (podman_simple({"image", "exists", image}, nullptr) == 0) return;
+    if (!fs::exists("hive-server/data/Containerfile.hive-agent"))
+        throw std::runtime_error(
+            "image missing and Containerfile not found "
+            "(run hive-worker from the repository root)");
+
+    const bool is_browser = image == "localhost/hive-agent:browser";
+    const bool is_gpu     = image == "localhost/hive-agent:gpu";
+    if (is_gpu)     ensure_image_built("localhost/hive-agent:browser");
+    if (is_browser) ensure_image_built("localhost/hive-agent:latest");
+
+    const std::string cf  = is_gpu ? "hive-server/data/Containerfile.hive-agent-gpu"
+                        : is_browser ? "hive-server/data/Containerfile.hive-agent-browser"
+                                     : "hive-server/data/Containerfile.hive-agent";
+    const std::string ctx = is_browser ? "hive-server/data" : ".";
+    std::string img;
+    if (podman_simple({"build", "-t", image,
+                       "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
+                       "-f", cf, ctx}, &img) != 0)
+        throw std::runtime_error("podman build failed: " + img);
+}
+
+void ensure_container(const std::string& agent, const std::string& image,
+                      bool gpu) {
     const std::string cname = container_name(agent);
 
-    std::string img;
-    if (podman_simple({"image", "exists", image}, nullptr) != 0) {
-        // Same convention as the server: run from the repo root.
-        if (!fs::exists("hive-server/data/Containerfile.hive-agent"))
-            throw std::runtime_error(
-                "image missing and Containerfile not found "
-                "(run hive-worker from the repository root)");
-        // Context = repo root (v2 Containerfile COPYs the hive-agent
-        // binary from build/hive-agent/).
-        if (podman_simple({"build", "-t", image,
-                           "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
-                           "-f", "hive-server/data/Containerfile.hive-agent",
-                           "."}, &img) != 0)
-            throw std::runtime_error("podman build failed: " + img);
-    }
+    ensure_image_built(image);
 
     std::string state;
     if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
@@ -99,13 +113,22 @@ void ensure_container(const std::string& agent, const std::string& image) {
     fs::create_directories(home, ec);
     fs::create_directories(skills, ec);
 
-    std::string out;
-    if (podman_simple({"create", "--name", cname, "--memory", "4g",
-                       "--cpus", "2", "--userns=keep-id",
-                       "-v", ws.string() + ":/workspace",
+    std::vector<std::string> args{"create", "--name", cname, "--memory", "4g",
+                       "--cpus", "2", "--userns=keep-id"};
+    if (gpu) {
+        // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
+        // without it rocminfo sees nothing), /dev/dri = GL/Vulkan render
+        // nodes. keep-groups carries the host `render` group membership in.
+        args.insert(args.end(), {"--device", "/dev/kfd",
+                                 "--device", "/dev/dri",
+                                 "--group-add", "keep-groups"});
+    }
+    args.insert(args.end(), {"-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
                        "-v", skills.string() + ":/skills:ro",
-                       "-w", "/workspace", image}, &out) != 0)
+                       "-w", "/workspace", image});
+    std::string out;
+    if (podman_simple(args, &out) != 0)
         throw std::runtime_error("podman create failed: " + out);
     if (podman_simple({"start", cname}, &out) != 0)
         throw std::runtime_error("podman start failed: " + out);

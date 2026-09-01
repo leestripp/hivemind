@@ -88,10 +88,28 @@ int main() {
         assert(again && again->role == "ops lead");
     }
 
+    // ── type (Phase 35) ───────────────────────────────────────────────────
+    auto g = store.create_agent("Forge", "3d artist", "", "shared", false, "",
+                                "", "gpu");
+    assert(g.type == "gpu");
+    assert(store.get_agent(g.id)->type == "gpu");    // persisted
+    assert(store.get_agent(a.id)->type.empty());     // default: standard
+    // update with "" keeps the current type
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false);
+    assert(store.get_agent(g.id)->type == "gpu");
+    // "default" explicitly clears back to standard
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false, "",
+                       "", "", "default");
+    assert(store.get_agent(g.id)->type.empty());
+    // ...and can be set again
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false, "",
+                       "", "", "gpu");
+    assert(store.get_agent(g.id)->type == "gpu");
+
     // ── delete ────────────────────────────────────────────────────────────
     assert(store.delete_agent(b.id));
     assert(!store.delete_agent(b.id));  // already gone
-    assert(store.list_agents().size() == 2);
+    assert(store.list_agents().size() == 3);
 
     fs::remove_all(tmp);
     std::cout << "test_agent_store: OK\n";

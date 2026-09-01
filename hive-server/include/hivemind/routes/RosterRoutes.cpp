@@ -40,7 +40,7 @@ json agent_json(const RosterAgent& a) {
         {"model", a.model}, {"workspace_mode", a.workspace_mode},
         {"container_id", a.container_id},
         {"require_approval", a.require_approval}, {"avatar", a.avatar},
-        {"worker", a.worker},
+        {"worker", a.worker}, {"type", a.type},                   // Phase 35
         {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
@@ -85,6 +85,20 @@ static bool validate_worker(WorkerStore& workers, const std::string& w,
     }
     err = "unknown worker '" + w + "' (enrolled workers: " +
           (names.empty() ? std::string("none -- enroll one first") : names) + ")";
+    return false;
+}
+
+// Phase 35: agent type must be backed by the target worker's advertised
+// caps (hello frame). "" / "default" always valid; "gpu" needs caps.gpu.
+static bool validate_type(WorkerStore& workers, const std::string& w,
+                          const std::string& type, std::string& err) {
+    if (type.empty() || type == "default") return true;
+    auto wi = workers.get(w);
+    json caps;
+    if (wi) { try { caps = json::parse(wi->caps); } catch (...) {} }
+    if (caps.is_object() && caps.contains(type)) return true;
+    err = "worker '" + w + "' has no '" + type + "' capability"
+          " (its caps: " + (caps.is_object() ? caps.dump() : "{}") + ")";
     return false;
 }
 
@@ -206,15 +220,20 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             bool req_appr = body.value("require_approval", false);
             // an unknown name is accepted here — same contract as the PATCH.
             const std::string worker = body.value("worker", "");
+            const std::string type = body.value("type", "");   // Phase 35
             {
                 std::string werr;
                 if (!validate_worker(workers, worker, werr)) {
                     send_error(resp, 400, werr); return;
                 }
+                if (!validate_type(workers, worker, type, werr)) {
+                    send_error(resp, 400, werr); return;
+                }
             }
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
-                                             body.value("avatar", ""), worker);
+                                             body.value("avatar", ""), worker,
+                                             type);
                 // Phase C: spawn the brain on its worker right away
                 // (idempotent; offline worker spawns on reconnect).
                 hub.reconcile_worker(a.worker);
@@ -276,11 +295,24 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
+            const std::string ptype = body.value("type", "");  // Phase 35
             {
                 const std::string pw = body.value("worker", "");
                 if (!pw.empty()) {
                     std::string werr;
                     if (!validate_worker(workers, pw, werr)) {
+                        send_error(resp, 400, werr); return;
+                    }
+                }
+                // validate the EFFECTIVE type against the worker it would
+                // run on — covers both a type change AND moving an existing
+                // gpu agent onto a gpu-less worker (ptype empty, pw set).
+                const std::string eff_type = ptype == "default" ? ""
+                    : ptype.empty() ? existing->type : ptype;
+                if (!eff_type.empty()) {
+                    std::string werr;
+                    const std::string eff = pw.empty() ? existing->worker : pw;
+                    if (!validate_type(workers, eff, eff_type, werr)) {
                         send_error(resp, 400, werr); return;
                     }
                 }
@@ -299,7 +331,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                         ? (body["mcp_servers"].is_array()
                                ? body["mcp_servers"].dump()
                                : body.value("mcp_servers", ""))
-                        : "");
+                        : "",
+                    ptype);   // "" = keep, "default" = clear
                 // Name/model changes must not leak into a live brain:
                 // stop, then respawn with the new config (worker dedups).
                 hub.stop_agent(a);
