@@ -43,6 +43,10 @@ int main() {
     assert(w->caps.find("gpu") != std::string::npos);
     assert(w->proto == 1);
 
+    // heartbeat validate (no caps) must NOT clobber the hello caps
+    w = ws.validate(raw);
+    assert(w && w->caps.find("gpu") != std::string::npos);
+
     // wrong key → nullopt
     assert(!ws.validate("hmwk_wrongwrongwrong"));
 

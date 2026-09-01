@@ -124,15 +124,22 @@ std::optional<WorkerInfo> WorkerStore::validate(const std::string& raw_key,
         sqlite3_finalize(st);
     }
     if (!name.empty()) {
-        // Refresh liveness (+ hello payload) in the same shot.
+        // Refresh liveness (+ hello payload) in the same shot. caps only
+        // updates when the caller actually has a fresh hello payload —
+        // heartbeats call validate(key) with no caps and must NOT clobber
+        // what the hello stored (regression: every beat wiped caps to {}).
         sqlite3_stmt* up = nullptr;
         const char* sql =
-            "UPDATE workers SET last_seen=?, caps=?, proto=? WHERE name=?";
+            "UPDATE workers SET last_seen=?,"
+            " caps = CASE WHEN ? = '' OR ? = '{}' THEN caps ELSE ? END,"
+            " proto=? WHERE name=?";
         if (sqlite3_prepare_v2(db, sql, -1, &up, nullptr) == SQLITE_OK) {
             bind_text(up, 1, now);
-            bind_text(up, 2, caps.empty() ? "{}" : caps);
-            bind_text(up, 3, std::to_string(proto));
-            bind_text(up, 4, name);
+            bind_text(up, 2, caps);
+            bind_text(up, 3, caps);
+            bind_text(up, 4, caps.empty() ? "{}" : caps);
+            bind_text(up, 5, std::to_string(proto));
+            bind_text(up, 6, name);
             sqlite3_step(up);
             sqlite3_finalize(up);
         }
