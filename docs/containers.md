@@ -67,3 +67,21 @@ the container returns nothing. Diagnosis: `pgrep pasta` as the worker
 user. Recovery: `podman stop` ALL containers on the worker, then start
 them again -- restarting just one while others still run REATTACHES it
 to the dead netns instead of recreating it.
+
+Since Phase 38 the worker self-heals single-container DNS wedges: its
+60s tick probes `getent hosts github.com` (timeout-wrapped) in every
+hive-* container; after 3 consecutive failures it `podman restart`s the
+container when the agent is idle (busy agents log a journal warning and
+are recycled once idle). The full-netns procedure above is only needed
+when EVERY container fails at once.
+
+## On-demand desktop (Phase 36)
+
+The desktop stack (Xvfb + x11vnc + websockify/noVNC + Chromium under
+openbox) is NOT always running. Every container publishes loopback 6080
+at create time, so `hive-screen.sh start` (via `screen_ctl`) is a pure
+`podman exec` — the agent brain survives. `hive-screen.sh stop` kills
+the x11vnc watchdog first (pidfile) then the stack. The worker's idle
+watcher counts ESTABLISHED :5900 connections and stops the screen after
+HIVEMIND_SCREEN_IDLE_MIN (default 15) viewerless minutes — measured
+reclaim ~350–700 MB per idle agent.

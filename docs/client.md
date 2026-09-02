@@ -12,7 +12,14 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   inline, scaled to 480px, click for full-size; downloaded via the hub
   into `~/.cache/hivemind-client/attachments/<thread_id>/` (cached — a
   thread re-open is offline-fast). Agents attach with their `show_image`
-  tool; user uploads with image extensions render too.
+  tool; user uploads with image extensions render too. Phase 35 added
+  `attach_file`: any workspace artifact (videos included) arrives as a
+  chat attachment — worker-routed downloads pass `?worker=<name>`.
+- **Theming** — no in-app Dark/Light switch: the client follows the
+  GNOME system style live (Phase 37). Ubuntu drives dark via
+  `gtk-theme='Yaru-dark'` while `color-scheme` stays 'default', so BOTH
+  `org.gnome.desktop.interface` keys are watched. Non-GNOME desktops
+  keep GTK's default.
 - **Video** (Phase 34 follow-up): video attachments show a thumbnail +
   play/download affordance (stream from the hub or fetch and play
   locally).

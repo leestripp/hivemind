@@ -79,10 +79,6 @@ Same as the Send button: fills the composer entry and fires `on_send()`
 (posts to the selected thread, async agent turns). `400` if no thread is
 selected or body empty.
 
-### POST /ui/action/theme
-→ `{"dark_mode": true|false}`. Same as the header moon/sun button: toggles
-the theme, retints all icons in place, persists to config.json.
-
 ### POST /ui/action/stop
 → `{"cancel_requested": true}`. Same as the Stop button: `POST
 /api/threads/:id/cancel` on the selected thread (cancels live agent turns
@@ -131,6 +127,9 @@ curl -s http://127.0.0.1:8481/ui/messages    # poll until the reply renders
 - **DM dedup is caller-scoped**: server-side `POST /api/threads` reuses an
   existing 1:1 thread only when the request has `"reuse_dm": true`
   (sent by the roster click, NOT by New Thread or this API's new-thread).
+
+(The `/ui/action/theme` endpoint was removed in Phase 37 — the client
+now follows the GNOME system style and has no in-app toggle.)
 
 ## v2 note
 

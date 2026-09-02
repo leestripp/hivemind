@@ -1,9 +1,18 @@
 # Computer use (v2)
 
 Agents that need a real browser (logins, JS-heavy sites, captchas a human
-must pass) get one on their WORKER: a browser container running
-Chromium + a VCD/noVNC-style stream, managed by the worker's fleet layer
-like any other container.
+must pass) get one on their WORKER: an on-demand desktop stack in the
+agent's own container (Xvfb + x11vnc + websockify/noVNC + Chromium under
+openbox), started via `screen_ctl start` → in-container
+`hive-screen.sh`.
+
+Phase 36 made desktops on-demand: every container publishes loopback
+6080 at create time, so starting the screen is a pure `podman exec` (no
+container recreate — the agent brain survives). When no viewer is
+connected for HIVEMIND_SCREEN_IDLE_MIN (default 15) minutes, the
+worker's idle watcher tears the stack down, reclaiming ~350–700 MB of
+RAM per idle agent. `hive-screen.sh stop` kills the x11vnc watchdog
+first (pidfile) so it can't revive the stack mid-teardown.
 
 - The browser profile persists per agent (on its home volume), so
   sessions survive restarts.

@@ -31,21 +31,28 @@ and only come back when they need your approval.
   files to each other across machines with `send_file` — an agent on a
   remote rig drops finished work straight into the company workspace.
   A chief-of-staff agent can run the whole team.
+- **Agents send files to chat** — the `attach_file` tool copies any
+  workspace artifact into the thread's attachment store and it lands as
+  a normal chat attachment (images/videos render inline).
 - **Approvals** — flip `require_approval` on an agent and its commands park
   in an approval queue until you approve/deny them.
 - **Distributed workers** (`hive-worker`) — enroll any Linux machine and
   assign agents to it: their containers, exec and screen sessions run on
   that machine over a persistent, auto-reconnecting WebSocket channel.
   Enroll with `hive-server enroll-worker <name>` (key shown once), run
-  `hive-worker --server ws://<server>:8423 --key hmwk_… --name <name>`
-  on the remote host, then set the agent's `worker` field. Live status on
+  `hive-worker --server wss://<server> --key hmwk_… --name <name>`
+  on the remote host (TLS via the nginx proxy; `ws://<server>:8423`
+  direct also works on a trusted LAN), then set the agent's `worker`
+  field. Live status on
   the web **Workers** page. Agents on the same rig share one `/workspace`
   (per-rig company drive), so they can collaborate on the same project
   files; `send_file` moves files between rigs and the server.
-- **Live screen share** — every agent's container runs a full desktop
-  (Xvfb + x11vnc + noVNC + Chromium); watch or take over from the client's
-  **Computer** button — works for local *and* worker-hosted agents
-  (tunneled through the worker channel).
+- **On-demand desktops** — click the client's **Computer** button and the
+  agent's container spins up a full desktop (Xvfb + x11vnc + noVNC +
+  Chromium) in seconds; walk away and it auto-sleeps after
+  `HIVEMIND_SCREEN_IDLE_MIN` (default 15) viewer-less minutes, reclaiming
+  ~350–700 MB of RAM per idle agent. Works for local *and* worker-hosted
+  agents (tunneled through the worker channel).
 - **Routines & skills** — scheduled prompts ("watch this, ping me daily")
   fired by a 30 s scheduler tick, and a **global skill library**
   (Anthropic SKILL.md format) shared across agents via per-agent enable
@@ -114,6 +121,7 @@ hivemindctl    build/start/stop/status/logs/client/test
 ```
 POST/GET/PATCH/DELETE /api/agents[/:id]
 POST/GET/DELETE       /api/threads[/:id]      GET/POST …/messages
+POST                  /api/threads/:id/attachments      user/agent file attachments
 GET  /api/threads/:id/activity                live turn state
 GET  /api/approvals?status=pending            POST …/:id/approve|deny
 POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
@@ -125,6 +133,7 @@ GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 GET/DELETE            /api/workers[/:name]                   worker registry
 GET/POST              /api/agents/:id/screen/{status,start,stop,password}
 GET                   /screen/:agentid/…  + /screen/:agentid/ws   noVNC proxy
+GET                   /api/files/download?path=[&worker=]           attachment/file download
 GET                   /api/models           union of connected workers' catalogs
 ```
 
@@ -144,6 +153,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `docs/design.md` | Architecture deep-dive |
 | `Plan.md` | Roadmap & phase status |
 
-See `docs/api.md` and `Plan.md` (roadmap, phases 0–30) for details.
+See `docs/api.md` and `Plan.md` (roadmap, phases 0–38) for details.
 
-Current release: **0.5.0** — distributed workers milestone.
+Current release line: **0.6.x** — on-demand desktops, chat attachments,
+GNOME-adaptive client.

@@ -37,6 +37,12 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
   per-agent home volumes, model/provider credentials (local LLM store —
   credentials never live on the hub).
 - The worker dials OUT to the hub; rigs behind NAT need nothing else.
+  Preferred URL is TLS through the hub's reverse proxy:
+  `--server wss://<server>` (nginx proxies `/api/workers/channel` →
+  8423 with Upgrade headers and 24h timeouts). A worker co-hosted with
+  the hub uses `ws://127.0.0.1:8423` — loopback plaintext is fine.
+  With all remote workers on wss, port 8423/tcp can be closed in the
+  firewall (`sudo ufw delete allow 8423/tcp`).
 
 ## Co-hosted worker (always-online agents)
 

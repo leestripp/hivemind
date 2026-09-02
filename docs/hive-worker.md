@@ -9,8 +9,10 @@ containers, the agents inside them, and the files they produce.
 One OUTBOUND WebSocket to the hub's dedicated worker port:
 
 ```
-hive-worker --server wss://<server>:8423 --key hmwk_... --name <name>
-# dials  wss://<server>:8423/api/workers/channel
+hive-worker --server wss://<server> --key hmwk_... --name <name>
+# dials  wss://<server>/api/workers/channel  (TLS via the nginx proxy;
+# direct ws://<server>:8423 still works on a trusted LAN, and a
+# co-hosted worker uses ws://127.0.0.1:8423 — loopback needs no TLS)
 ```
 
 - Enrollment is CLI-only on the hub host: `hive-server enroll-worker
@@ -50,7 +52,7 @@ Worker -> hub:
 | `hello`, `heartbeat` | handshake; liveness + per-agent state |
 | `agent_status` | ready / error / down per agent |
 | `task_delta` | streamed reply text while a turn runs |
-| `task_result` | final reply body (or error) for a task |
+| `task_result` | final reply body (or error) + any attachment records for a task |
 | `approval_req` | agent asks for human approval (tool call) |
 | `agent_msg` | agent->agent message (fan-in at the hub) |
 | `agent_log` | anything else the agent emits |
@@ -74,10 +76,13 @@ Transport rules that are LOAD-BEARING (both ends):
 
 The worker owns a container per agent (`hive-<agent-id>`):
 
-- Image: `localhost/hive-agent:v2`, built on the worker from
-  `hive-server/data/Containerfile.hive-agent` (checkout-relative; run the
-  worker from the repo root) with `--build-arg HIVE_UID=$(geteuid)` so
-  the container user matches the host uid.
+- Image chain: `localhost/hive-agent:latest` (base) → `:gpu` (AMD ROCm
+  layer) → `:browser` (screen-stack layer: Xvfb/x11vnc/websockify/
+  Chromium + `hive-screen.sh`). `:latest` and `:gpu` build from the repo
+  ROOT (they COPY `build/hive-agent/hive-agent`); `:browser` builds from
+  `hive-server/data` (it COPYs `hive-screen.sh`). Built on the worker
+  with `--build-arg HIVE_UID=$(geteuid)` so the container user matches
+  the host uid.
 - Mounts: shared `/workspace` (all agents on this worker collaborate;
   also each agent's daedalus PROJECT ROOT -- state lives at
   `/workspace/.daedalus/daedalus-<Name>/`), per-agent home volume
@@ -88,6 +93,18 @@ The worker owns a container per agent (`hive-<agent-id>`):
   for the operational gotchas.
 - Liveness: heartbeat reports per-agent state; desired state is replayed
   by the hub on every reconnect.
+- Idle watcher (60s tick, worker-side, channel-independent):
+  * **Screen auto-sleep** — counts ESTABLISHED :5900 conns per container
+    (parsed from /proc/net/tcp{,6}, zombie-proof since zombies hold no
+    sockets) and runs `hive-screen.sh stop` after
+    HIVEMIND_SCREEN_IDLE_MIN (default 15) viewerless minutes.
+  * **DNS wedge health check** — probes `timeout 8 getent hosts
+    github.com` per container; after 3 consecutive failures, restarts
+    the container (fresh netns) when the agent is idle (state "ready" /
+    not in fleet). Busy agents get a journal warning and are recycled
+    once idle — a busy agent may be doing legit offline work.
+  * Gotcha behind both: popen pipes must ALWAYS be drained
+    (`podman_simple` does) or the child dies with SIGPIPE (rc 141).
 - State semantics: fleet state is EVENT-driven (ready/acting/down from
   the exec's NDJSON stream and the process monitor). A remembered state
   can go stale if a transition is missed -- any completed turn resets it
@@ -137,6 +154,13 @@ them as local child processes inside the container. No tunnels.
 - `file_fetch` / `file_push` / `file_list` ops move bytes between the hub
   and the worker's workspace on explicit request only (file locality).
 - Agent artifacts stay on the worker until someone asks for them.
+- **Agent → chat attachments** (Phase 35): the agent's `attach_file`
+  tool copies a workspace file into
+  `/workspace/attachments/<thread_id>/outgoing/`; at turn end the worker
+  moves those into the canonical `attachments/<thread_id>/` dir and
+  attaches records to `task_result`. The hub injects the worker name
+  into each record; clients download with
+  `GET /api/files/download?path=…&worker=<name>`.
 
 ## Skills
 

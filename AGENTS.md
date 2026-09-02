@@ -41,7 +41,7 @@ Current release line: **0.6.x** (distributed workers milestone was 0.5.0).
 | JSON | **nlohmann_json** |
 | Native client | **GTK4 / gtkmm-4.0** (+ optional WebKitGTK 6.0 for embedded noVNC) |
 | Web dashboard | Vanilla JS + CSS in `web/dist/` (no framework, no bundler) |
-| Agent sandbox | Rootless **podman**, Xvfb + x11vnc + noVNC + Chromium per container |
+| Agent sandbox | Rootless **podman**; on-demand desktop (Xvfb + x11vnc + noVNC + Chromium) per container — starts on demand, auto-sleeps when viewerless |
 | Crypto/misc | OpenSSL, libpng, poppler-cpp (daedalus deps) |
 
 ## Build & Test Commands
@@ -91,7 +91,10 @@ Install: `cmake --install build` (default prefix `~/.local`).
 Runtime: server API on **:8421**, worker WebSocket channel on **:8423**,
 MCP bridge on **:8424** (loopback only). Enroll a worker with
 `hive-server enroll-worker <name>`; connect with
-`hive-worker --server ws://<server>:8423 --key hmwk_… --name <name>`.
+`hive-worker --server wss://<server> --key hmwk_… --name <name>`
+(TLS via the nginx proxy at `/api/workers/channel`; a co-hosted worker
+on the hub machine uses plain `ws://127.0.0.1:8423` — loopback, no TLS
+needed).
 
 > Note: the README references a `hivemindctl` helper script and `Plan.md`;
 > neither is currently committed to this repo. Use the raw cmake/ctest
@@ -200,3 +203,10 @@ Key architectural mapping:
 5. Don't reintroduce libcurl or a second HTTP stack; use OmniNet.
 6. `.daedalus/` and `build/` are gitignored local state — never commit
    or delete them as "cleanup."
+7. **popen pipes must always be drained** (`podman_simple` pattern) — an
+   undrained pipe SIGPIPEs the child (rc 141) once it writes.
+8. In agent containers, `pgrep` matches ZOMBIES (PID 1 `sleep` never
+   reaps) — check socket state in `/proc/net/tcp` for liveness instead.
+9. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
+   ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
+   keys (see `HiveWindow::follow_system_theme`).

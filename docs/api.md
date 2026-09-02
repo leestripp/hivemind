@@ -13,7 +13,12 @@ except `/api/health`.
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
 | `POST /api/threads/:id/attachments` | user upload into the shared attachment store |
-| `GET /api/files/download?path=` | attachment/file download (image MIME inline — Phase 34) |
+| `GET /api/files/download?path=[&worker=]` | attachment/file download (image MIME inline — Phase 34); `worker` routes to a worker-hosted store (Phase 35 agent attachments) |
+
+Message records carry an `attachments` array. Two origins: user uploads
+(above) and agent `attach_file` tool calls — the worker sweeps
+`/workspace/attachments/<thread>/outgoing/` at turn end and the hub
+stores the records with the reply message (injecting the worker name).
 
 ## Roster
 
@@ -41,7 +46,7 @@ Worker enrollment is **CLI-only** (admin runs it on the hub host):
 (SHA-256 hashed in workers.db). The worker then dials OUT:
 
 ```
-hive-worker --server wss://<server>:8423 --key hmwk_... --name <name>
+hive-worker --server wss://<server> --key hmwk_... --name <name>
 ```
 
 Worker channel: **dedicated WebSocket port** (`worker_ws_port`, default

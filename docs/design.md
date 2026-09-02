@@ -35,6 +35,12 @@ migration phases.
 - One per machine (including the server's own host for always-online
   agents).
 - Spawns/owns podman containers; each container runs **hive-agent**.
+- Desktops are on-demand: `screen_ctl start` execs the in-container
+  `hive-screen.sh` (no container recreate — loopback 6080 is published
+  at create time); a 60s idle watcher tears the stack down after
+  `HIVEMIND_SCREEN_IDLE_MIN` (default 15) viewerless minutes, and
+  health-checks container DNS (auto-restart after 3 wedged probes when
+  the agent is idle).
 - Shared `/workspace` mount per worker so its agents collaborate on the
   same files; per-agent home volumes for history/memory.
 - Synced skills library mounted read-only into every container at
@@ -92,7 +98,11 @@ keepAliveTimeout=0, per-connection writer queues) are in
 4. Worker writes the task to the agent container's hive-agent stdin.
 5. hive-agent runs the turn (skills/MCP/shell all local to the container),
    streaming `delta` events; the final `message` event carries the reply
-   plus any attachment metadata (e.g. images to show).
+   plus any attachment metadata (e.g. images to show). Files the agent
+   explicitly attaches (`attach_file` tool →
+   `/workspace/attachments/<thread>/outgoing/`) are swept up by the
+   worker at turn end and arrive as attachment records on `task_result`
+   (the hub injects the worker name so clients can route downloads).
 6. Worker relays events up the channel; hub stores the reply as a
    message; the client's poll picks it up and renders (images download
    through the hub's file endpoint).
