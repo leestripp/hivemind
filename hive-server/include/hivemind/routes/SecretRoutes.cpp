@@ -27,6 +27,9 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
                         granted.push_back({{"id", a->id}, {"name", a->name}});
                 list.push_back({{"name", s.name},
                                 {"created_at", s.created_at},
+                                {"type", s.type},
+                                {"username", s.username},  // login only
+                                {"url", s.url},            // login only
                                 {"source", s.source},   // Phase 22: vault ref
                                 {"agents", granted}});
             }
@@ -42,6 +45,7 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
             const std::string name = body.value("name", "");
             const std::string value = body.value("value", "");
             const std::string source = body.value("source", "");
+            const std::string type = body.value("type", "api_key");
             if (!hivemind::SecretStore::valid_name(name)) {
                 send_error(resp, 400,
                     "name must be [A-Za-z0-9_], start with a letter/underscore, ≤64 chars");
@@ -63,16 +67,44 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
                 send_json(resp, json{{"created", name}, {"source", source}}, 201);
                 return;
             }
-            if (value.find('\n') != std::string::npos ||
-                value.find('\r') != std::string::npos) {
-                send_error(resp, 400, "multiline values not supported yet");
+            if (!hivemind::SecretStore::valid_type(type)) {
+                send_error(resp, 400, "type must be api_key | login | note");
                 return;
             }
-            if (!secrets.put(name, value)) {
-                send_error(resp, 409, "secret exists (delete first to rotate)");
+            json payload;
+            if (type == "login") {
+                payload = {{"username", body.value("username", "")},
+                           {"password", body.value("password", "")},
+                           {"url",      body.value("url", "")}};
+                if (payload["password"].get<std::string>().empty()) {
+                    send_error(resp, 400, "login requires a password");
+                    return;
+                }
+            } else if (type == "note") {
+                payload = {{"text", body.value("text", "")}};
+                if (payload["text"].get<std::string>().empty()) {
+                    send_error(resp, 400, "note requires text");
+                    return;
+                }
+            } else {
+                if (value.find('\n') != std::string::npos ||
+                    value.find('\r') != std::string::npos) {
+                    send_error(resp, 400, "multiline api keys not supported"
+                                          " (use type=note)");
+                    return;
+                }
+                payload = {{"value", value}};
+                if (value.empty()) {
+                    send_error(resp, 400, "value required");
+                    return;
+                }
+            }
+            if (!secrets.put_payload(name, type, payload)) {
+                send_error(resp, 409, "secret exists (delete first to rotate)"
+                                      " or payload invalid");
                 return;
             }
-            send_json(resp, json{{"created", name}}, 201);
+            send_json(resp, json{{"created", name}, {"type", type}}, 201);
         });
 
     // ── DELETE /api/secrets/:name — remove + cascade grants ───────────────

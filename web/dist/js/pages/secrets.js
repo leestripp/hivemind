@@ -1,7 +1,8 @@
-// js/pages/secrets.js — Phase 15 secret broker management.
-// Values are WRITE-ONLY: the API never returns them. Granted secrets reach
-// agents as HIVE_SECRET_<NAME> env vars at container-exec time (and, later,
-// via the browser fill_secret tool) — never through the LLM context.
+// js/pages/secrets.js — Phase 15 secret broker management, typed secrets.
+// Types: api_key (HIVE_SECRET_<NAME>), login (_USER/_PASS/_URL env vars),
+// note (multiline text, newlines escaped in env). Values are WRITE-ONLY:
+// the API never returns them. Granted secrets reach agents as env vars at
+// container-exec time — never through the LLM context.
 import { API } from '../api.js';
 import { $, esc } from '../util.js';
 
@@ -17,6 +18,36 @@ async function loadAll() {
   secrets = s.secrets || [];
   agents = a.agents || [];
   renderSecrets();
+}
+
+// ── presentation helpers ──────────────────────────────────────────────
+const TYPE_BADGE = {
+  api_key: '🔑 api key',
+  login:   '👤 login',
+  note:    '📝 note',
+};
+
+function deliveryHint(s) {
+  const env = 'HIVE_SECRET_' + s.name.toUpperCase();
+  if (s.source) return esc(s.source);
+  if (s.type === 'login') {
+    const bits = [env + '_USER', env + '_PASS'];
+    if (s.url) bits.push(env + '_URL');
+    return esc(bits.join(' · '));
+  }
+  return esc(env);
+}
+
+function metaLine(s) {
+  if (s.type === 'login') {
+    const parts = [];
+    if (s.username) parts.push('user: ' + s.username);
+    if (s.url) parts.push(s.url);
+    return parts.length ? `<br><span class="muted" style="font-size:11px">${esc(parts.join(' — '))}</span>` : '';
+  }
+  if (s.type === 'note')
+    return '<br><span class="muted" style="font-size:11px">multiline note (newlines escaped in env)</span>';
+  return '';
 }
 
 // ── table ─────────────────────────────────────────────────────────────
@@ -36,8 +67,11 @@ function renderSecrets() {
                 data-act="toggle" data-secret="${esc(s.name)}" data-agent="${esc(a.id)}"
                 title="${on ? 'Revoke from' : 'Grant to'} ${esc(a.name)}">${esc(a.name)}</button>`;
     }).join(' ');
+    const badge = s.source
+      ? ' <span class="badge" title="External vault reference — value fetched at use, never stored">↗ vault</span>'
+      : ` <span class="badge">${TYPE_BADGE[s.type] || '🔑 api key'}</span>`;
     tr.innerHTML = `
-      <td><strong>${esc(s.name)}</strong>${s.source ? ' <span class="badge" title="External vault reference — value fetched at use, never stored">↗ vault</span>' : ''}<br><span class="muted" style="font-size:11px">${s.source ? esc(s.source) : 'HIVE_SECRET_' + esc(s.name.toUpperCase())}</span></td>
+      <td><strong>${esc(s.name)}</strong>${badge}${metaLine(s)}<br><span class="muted" style="font-size:11px">${deliveryHint(s)}</span></td>
       <td class="muted">${esc(s.created_at || '—')}</td>
       <td>${chips || '<span class="muted">no agents</span>'}</td>
       <td class="row-actions">
@@ -52,30 +86,53 @@ function renderSecrets() {
 function openModal(id)  { $(id).classList.remove('hidden'); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 
+function syncSecretFormRows() {
+  const ext = $('secret-kind').value === 'external';
+  const type = $('secret-type').value;
+  $('secret-type-row').classList.toggle('hidden', ext);
+  $('secret-value-row').classList.toggle('hidden', ext || type !== 'api_key');
+  $('secret-username-row').classList.toggle('hidden', ext || type !== 'login');
+  $('secret-password-row').classList.toggle('hidden', ext || type !== 'login');
+  $('secret-url-row').classList.toggle('hidden', ext || type !== 'login');
+  $('secret-text-row').classList.toggle('hidden', ext || type !== 'note');
+  $('secret-source-row').classList.toggle('hidden', !ext);
+  const f = $('secret-form');
+  f.value.required = !ext && type === 'api_key';
+  f.password.required = !ext && type === 'login';
+  f.text.required = !ext && type === 'note';
+  f.source.required = ext;
+}
+
 // ── events ────────────────────────────────────────────────────────────
 export function initSecrets() {
   $('secrets-add').addEventListener('click', () => {
     $('secret-form').reset();
-    $('secret-kind').dispatchEvent(new Event('change'));
+    syncSecretFormRows();
     openModal('secret-modal');
   });
 
-  // Phase 22: stored value XOR external vault reference.
-  $('secret-kind').addEventListener('change', () => {
-    const ext = $('secret-kind').value === 'external';
-    $('secret-value-row').classList.toggle('hidden', ext);
-    $('secret-source-row').classList.toggle('hidden', !ext);
-    $('secret-form').value.required = !ext;
-    $('secret-form').source.required = ext;
-  });
+  $('secret-kind').addEventListener('change', syncSecretFormRows);
+  $('secret-type').addEventListener('change', syncSecretFormRows);
 
   $('secret-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
       const body = { name: f.name.value.trim() };
-      if ($('secret-kind').value === 'external') body.source = f.source.value.trim();
-      else body.value = f.value.value;
+      if ($('secret-kind').value === 'external') {
+        body.source = f.source.value.trim();
+      } else {
+        body.type = $('secret-type').value;
+        if (body.type === 'login') {
+          body.username = f.username.value.trim();
+          body.password = f.password.value;
+          body.url = f.url.value.trim();
+        } else if (body.type === 'note') {
+          body.text = f.text.value;
+        } else {
+          body.value = f.value.value;
+        }
+      }
       await API.post('/api/secrets', body);
       closeModal('secret-modal');
       await loadAll();

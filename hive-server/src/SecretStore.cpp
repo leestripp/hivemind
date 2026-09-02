@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 
 using namespace hivemind::db;
+using nlohmann::json;
 namespace fs = std::filesystem;
 
 namespace hivemind {
@@ -182,6 +183,21 @@ void SecretStore::ensure_schema(sqlite3* db) {
         exec_sql(db,
             "ALTER TABLE secrets ADD COLUMN source TEXT NOT NULL DEFAULT ''",
             "SecretStore source migration");
+    // Typed-secrets migration: api_key | login | note.
+    bool has_type = false;
+    st = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(secrets)",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* n = col_text(st, 1);
+            if (n && std::string_view{n} == "type") { has_type = true; break; }
+        }
+        sqlite3_finalize(st);
+    }
+    if (!has_type)
+        exec_sql(db,
+            "ALTER TABLE secrets ADD COLUMN type TEXT NOT NULL DEFAULT 'api_key'",
+            "SecretStore type migration");
 }
 
 bool SecretStore::put(const std::string& name, const std::string& value) {
@@ -201,13 +217,51 @@ bool SecretStore::put(const std::string& name, const std::string& value) {
         sqlite3_finalize(st);
         if (dup) { sqlite3_close(db); return false; }
     }
-    const std::string blob = encrypt_gcm(master_key(), value);
+    return put_payload(name, "api_key", json{{"value", value}});
+}
+
+bool SecretStore::valid_type(const std::string& t) {
+    return t == "api_key" || t == "login" || t == "note";
+}
+
+bool SecretStore::put_payload(const std::string& name, const std::string& type,
+                              const json& payload) {
+    if (!valid_name(name) || !valid_type(type)) return false;
+    // Per-type validation. env-file delivery is line-based, so only the
+    // note type may carry newlines (escaped at render time).
+    const auto single_line = [](const std::string& v) {
+        return !v.empty() &&
+               v.find('\n') == std::string::npos &&
+               v.find('\r') == std::string::npos;
+    };
+    if (type == "api_key") {
+        if (!single_line(payload.value("value", ""))) return false;
+    } else if (type == "login") {
+        if (!single_line(payload.value("password", ""))) return false;
+        if (!payload.value("username", "").empty() &&
+            !single_line(payload.value("username", ""))) return false;
+        if (!payload.value("url", "").empty() &&
+            !single_line(payload.value("url", ""))) return false;
+    } else {  // note
+        if (payload.value("text", "").empty()) return false;
+    }
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM secrets WHERE name=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, name);
+        const bool dup = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+        if (dup) { sqlite3_close(db); return false; }
+    }
+    const std::string blob = encrypt_gcm(master_key(), payload.dump());
     if (sqlite3_prepare_v2(db,
-            "INSERT INTO secrets (name, blob, created_at) VALUES (?,?,?)",
-            -1, &st, nullptr) == SQLITE_OK) {
+            "INSERT INTO secrets (name, blob, created_at, type)"
+            " VALUES (?,?,?,?)", -1, &st, nullptr) == SQLITE_OK) {
         bind_text(st, 1, name);
         sqlite3_bind_blob(st, 2, blob.data(), (int)blob.size(), SQLITE_TRANSIENT);
         bind_text(st, 3, iso_now());
+        bind_text(st, 4, type);
         const bool ok = sqlite3_step(st) == SQLITE_DONE;
         sqlite3_finalize(st);
         sqlite3_close(db);
@@ -247,32 +301,55 @@ bool SecretStore::put_external(const std::string& name,
     return false;
 }
 
-std::optional<std::string> SecretStore::get(const std::string& name) {
+std::optional<json> SecretStore::payload_of(const std::string& name) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;
     std::optional<std::string> blob;
-    std::string source;
-    if (sqlite3_prepare_v2(db, "SELECT blob, source FROM secrets WHERE name=?",
-                           -1, &st, nullptr) == SQLITE_OK) {
+    std::string source, type;
+    if (sqlite3_prepare_v2(db,
+            "SELECT blob, source, type FROM secrets WHERE name=?",
+            -1, &st, nullptr) == SQLITE_OK) {
         bind_text(st, 1, name);
         if (sqlite3_step(st) == SQLITE_ROW) {
             const void* p = sqlite3_column_blob(st, 0);
             blob = std::string(static_cast<const char*>(p),
                                (size_t)sqlite3_column_bytes(st, 0));
             source = col_text(st, 1);
+            type = col_text(st, 2);
         }
         sqlite3_finalize(st);
     }
     sqlite3_close(db);
+    if (type.empty()) type = "api_key";
     // Phase 22: externally-sourced secrets fetch at delivery time — the
     // value never touches the DB. Vault fetch happens AFTER close for the
     // same lock-hygiene reason as decrypt below.
-    if (!source.empty()) return hm::vault::fetch(source);
+    if (!source.empty()) {
+        auto v = hm::vault::fetch(source);
+        if (!v) return std::nullopt;
+        return json{{"type", "api_key"}, {"value", *v}};
+    }
+    if (!blob) return std::nullopt;
     // Decrypt AFTER the connection is closed: a crypto throw (wrong key,
     // tampered blob) must not leak a connection holding a shared lock —
     // that silently SQLITE_BUSY-blocks later writes from other connections.
-    if (blob) return decrypt_gcm(master_key(), *blob);
-    return std::nullopt;
+    const std::string plain = decrypt_gcm(master_key(), *blob);
+    json payload = json::parse(plain, nullptr, false);
+    if (payload.is_discarded() || !payload.is_object())
+        payload = json{{"value", plain}};   // legacy raw-string blob
+    payload["type"] = type;                 // injected, not stored
+    return payload;
+}
+
+std::optional<std::string> SecretStore::get(const std::string& name) {
+    auto p = payload_of(name);
+    if (!p) return std::nullopt;
+    const std::string type = p->value("type", "api_key");
+    const char* key = type == "login" ? "password"
+                    : type == "note"  ? "text" : "value";
+    const std::string v = p->value(key, "");
+    if (v.empty()) return std::nullopt;
+    return v;
 }
 
 std::vector<SecretEntry> SecretStore::list() {
@@ -280,17 +357,34 @@ std::vector<SecretEntry> SecretStore::list() {
     std::vector<SecretEntry> out;
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db,
-            "SELECT name, created_at, source FROM secrets ORDER BY name",
+            "SELECT name, created_at, source, type FROM secrets ORDER BY name",
             -1, &st, nullptr) == SQLITE_OK) {
         while (sqlite3_step(st) == SQLITE_ROW) {
             SecretEntry e;
             e.name = col_text(st, 0);
             e.created_at = col_text(st, 1);
             e.source = col_text(st, 2);
+            e.type = col_text(st, 3);
+            if (e.type.empty()) e.type = "api_key";
             out.push_back(std::move(e));
         }
         sqlite3_finalize(st);
     }
+    sqlite3_close(db);
+    // Login metadata (username/url) is display-safe but lives inside the
+    // encrypted blob — decrypt just to extract it. Crypto failures (bad
+    // key, tampered row) must not break listing: metadata stays empty.
+    for (auto& e : out) {
+        if (e.type != "login" || !e.source.empty()) continue;
+        try {
+            auto p = payload_of(e.name);
+            if (p) {
+                e.username = p->value("username", "");
+                e.url = p->value("url", "");
+            }
+        } catch (...) {}
+    }
+    db = open_conn();
     for (auto& e : out) {
         if (sqlite3_prepare_v2(db,
                 "SELECT agent_id FROM grants WHERE secret_name=?",
@@ -394,11 +488,35 @@ std::vector<std::pair<std::string, std::string>>
 SecretStore::env_for_agent(const std::string& agent_id) {
     std::vector<std::pair<std::string, std::string>> out;
     for (auto& name : grants_for_agent(agent_id)) {
-        auto v = get(name);
-        if (v) {
-            std::string upper = name;
-            for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
-            out.emplace_back("HIVE_SECRET_" + upper, *v);
+        auto p = payload_of(name);
+        if (!p) continue;
+        std::string upper = name;
+        for (auto& c : upper) c = (char)std::toupper((unsigned char)c);
+        const std::string base = "HIVE_SECRET_" + upper;
+        const std::string type = p->value("type", "api_key");
+        const auto push = [&](const char* suffix, const std::string& v) {
+            if (!v.empty()) out.emplace_back(base + suffix, v);
+        };
+        if (type == "login") {
+            // Computer-use agents read all three; the browser fill tool
+            // uses _USER + _PASS.
+            push("_USER", p->value("username", ""));
+            push("_PASS", p->value("password", ""));
+            push("_URL",  p->value("url", ""));
+        } else if (type == "note") {
+            // env-file is line-based — escape newlines (agents read the
+            // \n escapes fine). True file-mount delivery is a future
+            // channel (see put() comment).
+            std::string text = p->value("text", "");
+            std::string esc;
+            esc.reserve(text.size());
+            for (char c : text) {
+                if (c == '\n') esc += "\\n";
+                else if (c != '\r') esc += c;
+            }
+            push("", esc);
+        } else {
+            push("", p->value("value", ""));
         }
     }
     return out;

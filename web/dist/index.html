@@ -349,8 +349,27 @@
             <option value="external">External vault (fetched at use)</option>
           </select>
         </label>
+        <label id="secret-type-row">Type
+          <select name="stype" id="secret-type">
+            <option value="api_key">🔑 API key / token</option>
+            <option value="login">👤 Login (username + password)</option>
+            <option value="note">📝 Secure note</option>
+          </select>
+        </label>
         <label id="secret-value-row">Value (write-only — never shown again)
           <input name="value" type="password" autocomplete="off">
+        </label>
+        <label id="secret-username-row" class="hidden">Username / email
+          <input name="username" autocomplete="off" spellcheck="false">
+        </label>
+        <label id="secret-password-row" class="hidden">Password (write-only — never shown again)
+          <input name="password" type="password" autocomplete="off">
+        </label>
+        <label id="secret-url-row" class="hidden">Website URL <span class="muted">(optional — helps the agent pick the right login)</span>
+          <input name="url" placeholder="https://github.com/login" autocomplete="off" spellcheck="false">
+        </label>
+        <label id="secret-text-row" class="hidden">Note text (write-only — never shown again)
+          <textarea name="text" rows="4" placeholder="Multiline OK — delivered to granted agents as HIVE_SECRET_&lt;NAME&gt; (newlines escaped)"></textarea>
         </label>
         <label id="secret-source-row" class="hidden">Vault reference
           <input name="source" placeholder="pass:work/token  or  op://Vault/Item/field"

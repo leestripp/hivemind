@@ -100,6 +100,85 @@ int main() {
     assert(store.grants_for_agent("agent-a").empty());
     assert(!store.remove("OPENAI_KEY"));          // already gone
 
+    // ── typed secrets: login ──────────────────────────────────────────────
+    assert(SecretStore::valid_type("api_key"));
+    assert(SecretStore::valid_type("login"));
+    assert(SecretStore::valid_type("note"));
+    assert(!SecretStore::valid_type("password"));
+
+    assert(store.put_payload("GH_LOGIN", "login",
+        {{"username", "alice@example.com"},
+         {"password", "hunter2"},
+         {"url", "https://github.com/login"}}));
+    assert(!store.put_payload("GH_LOGIN", "login",
+        {{"password", "dupe"}}));                       // duplicate name
+    auto gh = store.get("GH_LOGIN");
+    assert(gh && *gh == "hunter2");                     // primary = password
+    auto ghp = store.payload_of("GH_LOGIN");
+    assert(ghp && (*ghp)["type"] == "login");
+    assert((*ghp)["username"] == "alice@example.com");
+    assert((*ghp)["url"] == "https://github.com/login");
+    // list() exposes type + display-safe metadata, never the password
+    bool saw_gh = false;
+    for (auto& e : store.list())
+        if (e.name == "GH_LOGIN") {
+            saw_gh = true;
+            assert(e.type == "login");
+            assert(e.username == "alice@example.com");
+            assert(e.url == "https://github.com/login");
+        }
+    assert(saw_gh);
+    // login validation: password required, fields single-line
+    assert(!store.put_payload("NO_PASS", "login", {{"username", "x"}}));
+    assert(!store.put_payload("ML_PASS", "login",
+        {{"password", "a\nb"}}));
+    assert(!store.put_payload("BAD_TYPE", "token", {{"value", "x"}}));
+
+    // login env: _USER/_PASS/_URL triple
+    assert(store.grant("GH_LOGIN", "agent-c"));
+    auto env_c = store.env_for_agent("agent-c");
+    assert(env_c.size() == 3);
+    bool su = false, sp = false, sl = false;
+    for (auto& [k, val] : env_c) {
+        if (k == "HIVE_SECRET_GH_LOGIN_USER") { su = true; assert(val == "alice@example.com"); }
+        if (k == "HIVE_SECRET_GH_LOGIN_PASS") { sp = true; assert(val == "hunter2"); }
+        if (k == "HIVE_SECRET_GH_LOGIN_URL")  { sl = true; assert(val == "https://github.com/login"); }
+    }
+    assert(su && sp && sl);
+
+    // login without optional fields → only _PASS emitted
+    assert(store.put_payload("MINIMAL", "login", {{"password", "p"}}));
+    assert(store.grant("MINIMAL", "agent-c"));
+    env_c = store.env_for_agent("agent-c");
+    bool saw_min = false;
+    for (auto& [k, val] : env_c)
+        if (k == "HIVE_SECRET_MINIMAL_PASS") { saw_min = true; assert(val == "p"); }
+        else assert(k.rfind("HIVE_SECRET_MINIMAL", 0) != 0);  // no _USER/_URL
+    assert(saw_min);
+
+    // ── typed secrets: note (multiline, escaped in env) ───────────────────
+    assert(store.put_payload("WIFI_NOTES", "note",
+        {{"text", "ssid: HomeNet\npass: correct horse\nrouter: 10.0.0.1"}}));
+    auto nt = store.get("WIFI_NOTES");
+    assert(nt && nt->find('\n') != std::string::npos);  // stored verbatim
+    assert(!store.put_payload("EMPTY_NOTE", "note", {{"text", ""}}));
+    assert(store.grant("WIFI_NOTES", "agent-c"));
+    env_c = store.env_for_agent("agent-c");
+    bool saw_note = false;
+    for (auto& [k, val] : env_c)
+        if (k == "HIVE_SECRET_WIFI_NOTES") {
+            saw_note = true;
+            assert(val.find('\n') == std::string::npos);      // no real newlines
+            assert(val.find("\\n") != std::string::npos);    // escaped instead
+            assert(val.find("ssid: HomeNet") == 0);
+        }
+    assert(saw_note);
+
+    // legacy put() row reads back through payload_of as api_key value
+    assert(store.put("LEGACY_RAW", "raw-value-1"));
+    auto lp = store.payload_of("LEGACY_RAW");
+    assert(lp && (*lp)["type"] == "api_key" && (*lp)["value"] == "raw-value-1");
+
     fs::remove_all(tmp);
     fs::remove_all(fs::temp_directory_path() / "hivemind_test_secret_wrong");
     std::cout << "test_secret_store OK\n";

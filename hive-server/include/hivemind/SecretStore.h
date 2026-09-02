@@ -18,6 +18,8 @@
  * Per-agent grants follow the skills-toggle model: a (secret, agent) row
  * in the grants table means "this agent may receive this secret".
  */
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <sqlite3.h>
 #include <optional>
@@ -30,8 +32,12 @@ namespace hivemind {
 struct SecretEntry {
     std::string name;        // [A-Za-z0-9_], 1-64 chars
     std::string created_at;
+    std::string type;        // api_key | login | note ("" on old DBs = api_key)
     std::string source;      // "" = local value; "pass:…"/"op://…" = Phase 22
                              // external vault reference (fetched at delivery)
+    // Display-safe metadata (never the secret material):
+    std::string username;    // login only
+    std::string url;         // login only
     std::vector<std::string> agent_ids;  // granted agents (joined)
 };
 
@@ -49,7 +55,20 @@ public:
     /// must pass hm::vault::validate_source. Returns false on bad
     /// name/source or duplicate.
     bool put_external(const std::string& name, const std::string& source);
+    /// Typed secret (Phase 15 follow-up): payload shape depends on type —
+    ///   api_key: {"value": …}        login: {"username","password","url"}
+    ///   note:    {"text": …}         (multiline allowed; env render escapes)
+    /// The payload is validated (required keys, name/type sanity) and stored
+    /// as the encrypted blob. Returns false on bad input or duplicate name.
+    bool put_payload(const std::string& name, const std::string& type,
+                     const nlohmann::json& payload);
+    static bool valid_type(const std::string& t);
+    /// Decrypted structured payload (broker delivery paths only). Legacy
+    /// rows (pre-type raw-string blobs) wrap as {"value": raw}. External
+    /// rows fetch at call time and wrap as {"value": fetched}.
+    std::optional<nlohmann::json> payload_of(const std::string& name);
     /// Decrypt a secret (broker delivery paths only — never expose via API).
+    /// For typed rows returns the PRIMARY material: value / password / text.
     std::optional<std::string> get(const std::string& name);
     /// List names/metadata ONLY — values never leave this class through it.
     std::vector<SecretEntry> list();
