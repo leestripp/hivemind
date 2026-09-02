@@ -180,8 +180,13 @@ void ChatService::complete_turn(const std::string& task_id,
     }
 
     // Post only substantive output; silent context-only turns (the common
-    // agent->agent fan-in terminator) don't flood the thread.
-    if (!out.empty() && out != "(agent produced no output)") {
+    // agent->agent fan-in terminator) don't flood the thread. Phase 35:
+    // a turn whose only output is an ATTACHMENT still posts — otherwise
+    // the file the agent attached would silently vanish.
+    const bool has_atts = !attachments_json.empty() &&
+                          attachments_json != "[]";
+    if (out.empty() && has_atts) out = "*(attached a file)*";
+    if ((!out.empty() && out != "(agent produced no output)") || has_atts) {
         bool posted = false;
         for (int attempt = 0; attempt < 2 && !posted; ++attempt) {
             try {
