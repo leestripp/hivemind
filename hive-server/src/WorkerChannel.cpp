@@ -508,7 +508,7 @@ WorkerChannel::list_files(const std::string& worker, const std::string& path,
 // ── 30.4: screen control ────────────────────────────────────────────────
 std::optional<WorkerChannel::ScreenResult>
 WorkerChannel::screen_ctl(const std::string& worker, const std::string& agent,
-                          const std::string& action, const std::string& image,
+                          const std::string& action, const std::string& type,
                           const std::string& resolution, int timeout_s) {
     if (!is_online(worker)) return std::nullopt;
     const std::string id = "sc-" + std::to_string(next_job_++);
@@ -518,7 +518,7 @@ WorkerChannel::screen_ctl(const std::string& worker, const std::string& agent,
         screen_jobs_[id] = sj;
     }
     if (!send(worker, {{"op","screen_ctl"},{"id",id},{"agent",agent},
-                       {"action",action},{"image",image},
+                       {"action",action},{"type",type},
                        {"resolution",resolution}})) {
         std::lock_guard lk(m_);
         screen_jobs_.erase(id);

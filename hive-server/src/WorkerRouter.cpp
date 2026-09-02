@@ -90,8 +90,12 @@ std::optional<WorkerChannel::ScreenResult> WorkerRouter::screen_ctl(
     const std::string& wname = agent->worker;
     if (!g_channel->is_online(wname))
         throw std::runtime_error("worker '" + wname + "' is offline");
+    // Phase 35 follow-up: send the agent TYPE, not a hardcoded image —
+    // the worker maps type→image (:gpu for gpu agents, :browser
+    // otherwise). Passing :browser verbatim made screen_ctl recreate GPU
+    // containers from the browser image, silently dropping /dev/kfd+dri.
     auto r = g_channel->screen_ctl(wname, agent_id, action,
-        ContainerManager::browser_image_name(),
+        agent->type,
         ServerConfig::instance().screen_resolution(),
         /*timeout_s=*/ action == "start" ? 180 : 30);
     if (!r)

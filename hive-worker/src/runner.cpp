@@ -256,9 +256,16 @@ std::string screen_password_of(const std::string& agent) {
 }
 
 ScreenResult screen_ctl(const std::string& agent, const std::string& action,
-                        const std::string& image, const std::string& resolution) {
+                        const std::string& type, const std::string& resolution) {
     ScreenResult r;
     const std::string cname = container_name(agent);
+    const bool gpu = (type == "gpu");
+    // Screen needs the desktop stack: standard agents get recreated from
+    // :browser; gpu agents from :gpu (which is FROM :browser). Recreating
+    // a gpu container from :browser would silently drop the GPU devices —
+    // that bug clobbered Forge's container twice (2026-09-02).
+    const std::string image =
+        gpu ? "localhost/hive-agent:gpu" : "localhost/hive-agent:browser";
 
     if (action == "status") {
         r.port = screen_port_of(agent);
@@ -281,16 +288,19 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     // ── start ──────────────────────────────────────────────────────────
     std::string out;
     if (podman_simple({"image", "exists", image}, nullptr) != 0) {
-        if (!fs::exists("hive-server/data/Containerfile.hive-agent-browser")) {
-            r.error = "browser image missing and Containerfile not found "
+        // gpu Containerfile builds from repo root; browser from data/.
+        const char* cf = gpu ? "hive-server/data/Containerfile.hive-agent-gpu"
+                             : "hive-server/data/Containerfile.hive-agent-browser";
+        const char* ctx = gpu ? "." : "hive-server/data";
+        if (!fs::exists(cf)) {
+            r.error = std::string("image missing and ") + cf + " not found "
                       "(run hive-worker from the repository root)";
             return r;
         }
         if (podman_simple({"build", "-t", image,
                            "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),
-                           "-f", "hive-server/data/Containerfile.hive-agent-browser",
-                           "hive-server/data"}, &out) != 0) {
-            r.error = "podman build (browser) failed: " + out;
+                           "-f", cf, ctx}, &out) != 0) {
+            r.error = "podman build (screen image) failed: " + out;
             return r;
         }
     }
@@ -319,14 +329,20 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         std::error_code ec;
         fs::create_directories(ws, ec);
         fs::create_directories(home, ec);
-        if (podman_simple({"create", "--name", cname, "--memory", "4g",
-                           "--cpus", "2", "--shm-size", "1g",
-                           "-p", "127.0.0.1::6080",
+        std::vector<std::string> cargs{"create", "--name", cname,
+                           "--memory", "4g", "--cpus", "2", "--shm-size", "1g",
+                           "-p", "127.0.0.1::6080"};
+        if (gpu)   // same passthrough contract as ensure_container
+            cargs.insert(cargs.end(), {"--device", "/dev/kfd",
+                                       "--device", "/dev/dri",
+                                       "--group-add", "keep-groups"});
+        cargs.insert(cargs.end(), {
                            "-v", ws.string() + ":/workspace",
                            "-v", home.string() + "/:/home/hive:U",
                            "-v", skills.string() + ":/skills:ro",
-                           "-w", "/workspace", image}, &out) != 0) {
-            r.error = "podman create (browser) failed: " + out;
+                           "-w", "/workspace", image});
+        if (podman_simple(cargs, &out) != 0) {
+            r.error = "podman create (screen image) failed: " + out;
             return r;
         }
     }

@@ -60,7 +60,10 @@ struct ScreenResult {
 /// published (websockify), then hive-screen.sh brings up the display
 /// stack. image + resolution come from the server (it owns the config).
 /// action: "status" | "start" | "stop".
+/// `type` is the agent type ("" standard / "gpu") — the worker maps it to
+/// the screen-capable image (:browser or :gpu), mirroring fleet's
+/// resolved_image. The hub stays hardware-dumb.
 ScreenResult screen_ctl(const std::string& agent, const std::string& action,
-                        const std::string& image, const std::string& resolution);
+                        const std::string& type, const std::string& resolution);
 
 } // namespace hwrunner

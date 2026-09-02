@@ -609,7 +609,7 @@ int main(int argc, char* argv[]) {
                     const std::string id = frame.value("id", "");
                     auto r = hwrunner::screen_ctl(
                         frame.value("agent", ""), frame.value("action", ""),
-                        frame.value("image", ""),
+                        frame.value("type", ""),
                         frame.value("resolution", "1280x800"));
                     json resp{{"op","screen_result"},{"id",id},
                               {"running",r.running},{"port",r.port},
