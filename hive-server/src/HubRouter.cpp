@@ -124,7 +124,14 @@ void HubRouter::on_worker_frame(const std::string& worker,
         // Phase 35: worker ships attachment records minus the worker
         // field (it doesn't know its hub-side name) — inject it here so
         // clients can fetch via /api/files/download?worker&path.
-        std::string atts = frame.value("attachments", "[]");
+        // NOTE: the worker sends a JSON ARRAY (legacy peers send a
+        // string) — value("attachments","[]") would throw type_error on
+        // an array and silently drop the whole task_result.
+        std::string atts = "[]";
+        if (frame.contains("attachments")) {
+            const auto& a = frame["attachments"];
+            atts = a.is_string() ? a.get<std::string>() : a.dump();
+        }
         {
             auto arr = json::parse(atts, nullptr, false);
             if (!arr.is_discarded() && arr.is_array() && !arr.empty()) {
