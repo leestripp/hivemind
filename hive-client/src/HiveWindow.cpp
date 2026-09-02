@@ -419,9 +419,21 @@ void HiveWindow::on_theme_toggle() {
 }
 
 void HiveWindow::apply_theme() {
-    Gtk::Settings::get_default()
-        ->property_gtk_application_prefer_dark_theme()
+    auto settings = Gtk::Settings::get_default();
+    settings->property_gtk_application_prefer_dark_theme()
         .set_value(dark_mode_);
+    // Ubuntu's Yaru ships dark as a SEPARATE theme name (gtk-theme-name =
+    // "Yaru-dark" when GNOME Appearance = Dark). prefer-dark=false alone
+    // cannot reach light from there — the dark theme has no light variant.
+    // Going light: strip a "-dark" suffix so the base theme loads.
+    // GtkSettings is process-local; no other app is affected.
+    if (!dark_mode_) {
+        std::string theme = settings->property_gtk_theme_name().get_value();
+        if (theme.size() > 5 && theme.compare(theme.size() - 5, 5, "-dark") == 0) {
+            theme.resize(theme.size() - 5);
+            settings->property_gtk_theme_name().set_value(theme);
+        }
+    }
     refresh_themed_icons();
 }
 
