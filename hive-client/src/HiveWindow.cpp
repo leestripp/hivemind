@@ -1994,10 +1994,17 @@ void HiveWindow::show_exec_log(const nlohmann::json& agent) {
     win->present();
 
     auto buf = view->get_buffer();
-    auto tag_ok  = buf->create_tag("ok");   tag_ok->property_foreground() = "#8aadf4";
-    auto tag_bad = buf->create_tag("bad");  tag_bad->property_foreground() = "#ed8796";
-    auto tag_to  = buf->create_tag("to");   tag_to->property_foreground() = "#eed49f";
-    auto tag_dim = buf->create_tag("dim");  tag_dim->property_foreground() = "#6e738d";
+    // Theme-aware palettes: Catppuccin Macchiato in dark mode, Latte in
+    // light — the dark palette's pale yellow/blue are unreadable on white.
+    const bool dm = dark_mode_;
+    auto tag_ok  = buf->create_tag("ok");
+    tag_ok->property_foreground()  = dm ? "#8aadf4" : "#1e66f5";
+    auto tag_bad = buf->create_tag("bad");
+    tag_bad->property_foreground() = dm ? "#ed8796" : "#d20f39";
+    auto tag_to  = buf->create_tag("to");
+    tag_to->property_foreground()  = dm ? "#eed49f" : "#df8e1d";
+    auto tag_dim = buf->create_tag("dim");
+    tag_dim->property_foreground() = dm ? "#6e738d" : "#6c6f85";
 
     run_async([this, id, name, buf, status, tag_ok, tag_bad, tag_to, tag_dim] {
         std::string err;
