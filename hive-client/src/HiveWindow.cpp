@@ -405,17 +405,40 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
     });
 }
 
-nlohmann::json HiveWindow::ui_toggle_theme() {
-    return invoke_on_ui([this] {
-        on_theme_toggle();
-        return json{{"dark_mode", dark_mode_}};
-    });
-}
-
-void HiveWindow::on_theme_toggle() {
-    dark_mode_ = !dark_mode_;
-    apply_theme();
-    save_config();
+// Phase 37: the client runs on the HOST desktop now (not in a podman
+// container), so the in-app Dark/Light switch is gone — appearance
+// follows GNOME's system style. Ubuntu drives dark via TWO keys, so
+// read BOTH: color-scheme == 'prefer-dark' (GNOME standard) OR
+// gtk-theme ending in '-dark' (Ubuntu's Appearance panel flips
+// 'Yaru' ↔ 'Yaru-dark' and leaves color-scheme at 'default').
+// Non-GNOME desktops without the schema keep GTK's default.
+void HiveWindow::follow_system_theme() {
+    auto src = Gio::SettingsSchemaSource::get_default();
+    const std::string kIfaceSchema = "org.gnome.desktop.interface";
+    if (!src || !src->lookup(kIfaceSchema, true)) return;
+    iface_settings_ = Gio::Settings::create(kIfaceSchema);
+    auto apply_from_gnome = [this] {
+        const bool cs_dark =
+            iface_settings_->get_string("color-scheme") == "prefer-dark";
+        std::string gt = iface_settings_->get_string("gtk-theme");
+        for (auto& c : gt) c = (char)std::tolower((unsigned char)c);
+        const bool theme_dark =
+            gt.size() > 5 && gt.compare(gt.size() - 5, 5, "-dark") == 0;
+        const bool dark = cs_dark || theme_dark;
+        if (dark != dark_mode_) {
+            dark_mode_ = dark;
+            apply_theme();
+        }
+    };
+    iface_settings_->signal_changed("color-scheme")
+        .connect([this, apply_from_gnome](const Glib::ustring&) {
+            apply_from_gnome();
+        });
+    iface_settings_->signal_changed("gtk-theme")
+        .connect([this, apply_from_gnome](const Glib::ustring&) {
+            apply_from_gnome();
+        });
+    apply_from_gnome();   // initial state
 }
 
 void HiveWindow::apply_theme() {
@@ -427,12 +450,16 @@ void HiveWindow::apply_theme() {
     // cannot reach light from there — the dark theme has no light variant.
     // Going light: strip a "-dark" suffix so the base theme loads.
     // GtkSettings is process-local; no other app is affected.
-    if (!dark_mode_) {
-        std::string theme = settings->property_gtk_theme_name().get_value();
-        if (theme.size() > 5 && theme.compare(theme.size() - 5, 5, "-dark") == 0) {
-            theme.resize(theme.size() - 5);
-            settings->property_gtk_theme_name().set_value(theme);
-        }
+    std::string theme = settings->property_gtk_theme_name().get_value();
+    const bool has_dark_suffix =
+        theme.size() > 5 && theme.compare(theme.size() - 5, 5, "-dark") == 0;
+    if (!dark_mode_ && has_dark_suffix) {
+        // Going light: strip "-dark" so the base (light-capable) theme loads.
+        theme.resize(theme.size() - 5);
+        settings->property_gtk_theme_name().set_value(theme);
+    } else if (dark_mode_ && !has_dark_suffix && theme == "Yaru") {
+        // Going dark: Yaru ships dark as a separate theme name.
+        settings->property_gtk_theme_name().set_value("Yaru-dark");
     }
     refresh_themed_icons();
 }
@@ -512,22 +539,16 @@ void HiveWindow::on_settings() {
     iface->set_row_spacing(14);
     iface->set_column_spacing(12);
 
-    auto* dark_lbl = Gtk::make_managed<Gtk::Label>("Dark mode");
+    // Phase 37: no in-app theme switch — the app follows the GNOME
+    // system style (Settings → Appearance). Note only.
+    auto* dark_lbl = Gtk::make_managed<Gtk::Label>("Appearance");
     dark_lbl->set_halign(Gtk::Align::END);
-    auto* dark_sw = Gtk::make_managed<Gtk::Switch>();
-    dark_sw->set_halign(Gtk::Align::START);
-    dark_sw->set_active(dark_mode_);
-    // gtkmm 4.20: signal_state_set() rejects plain lambdas — watch the
-    // property instead. set_active above happens before connect, so no
-    // programmatic re-entry is possible.
-    dark_sw->property_active().signal_changed().connect(
-        [this, dark_sw] {
-            dark_mode_ = dark_sw->get_active();
-            apply_theme();
-            save_config();
-        });
+    auto* dark_note = Gtk::make_managed<Gtk::Label>(
+        "Follows the GNOME system style (Settings → Appearance)");
+    dark_note->set_halign(Gtk::Align::START);
+    dark_note->add_css_class("hv-time");
     iface->attach(*dark_lbl, 0, 0);
-    iface->attach(*dark_sw, 1, 0);
+    iface->attach(*dark_note, 1, 0);
 
     auto* fs_lbl = Gtk::make_managed<Gtk::Label>("Font scale");
     fs_lbl->set_halign(Gtk::Align::END);
@@ -838,6 +859,7 @@ HiveWindow::HiveWindow() {
     }, 1500);
 
     load_config();
+    follow_system_theme();   // Phase 37: track GNOME Dark/Light
     setup_icons();   // persistent icon structure, once
     apply_theme();   // dark/light + initial pixbuf tint
     apply_font_scale();
@@ -866,7 +888,6 @@ void HiveWindow::load_config() {
         server_url_ = j.value("server", server_url_);
         api_.set_base_url(server_url_);
         api_.set_api_key(j.value("api_key", ""));
-        dark_mode_ = j.value("dark_mode", false);
         display_name_ = j.value("display_name", "");
         user_avatar_  = j.value("user_avatar", "");
         font_scale_   = j.value("font_scale", 1.0);
@@ -883,7 +904,7 @@ void HiveWindow::save_config() {
     fs::path file = dir / "config.json";
     std::ofstream f{file, std::ios::trunc};
     f << json{{"server", server_url_}, {"api_key", api_.api_key()},
-              {"dark_mode", dark_mode_}, {"display_name", display_name_},
+{"display_name", display_name_},
               {"user_avatar", user_avatar_}, {"font_scale", font_scale_},
               {"sidebar_split", sidebar_split_}}.dump(2);
     f.close();

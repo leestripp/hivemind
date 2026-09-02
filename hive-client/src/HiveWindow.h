@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gtkmm.h>
+#include <giomm/settings.h>
 #include <nlohmann/json.hpp>
 
 #include <memory>
@@ -37,7 +38,6 @@ public:
                                     const std::vector<std::string>& ids);
     nlohmann::json ui_select_thread(const std::string& id);
     nlohmann::json ui_send(const std::string& body);
-    nlohmann::json ui_toggle_theme();                // POST /ui/action/theme
     /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
     void connect_with_credentials(const std::string& url, const std::string& key,
                                   std::function<void(std::string)> done);
@@ -52,9 +52,12 @@ private:
     void load_config();          // ~/.config/hivemind/config.json
     void save_config();
     void apply_theme();        // push dark_mode_ into Gtk::Settings + retint icons
+    // Phase 37: follow the GNOME system style (host-run client) — reads
+    // org.gnome.desktop.interface color-scheme and tracks it live.
+    void follow_system_theme();
+    Glib::RefPtr<Gio::Settings> iface_settings_;   // kept alive for watch
     void apply_font_scale();   // font_scale_ → gtk-xft-dpi (1.0 = system auto)
     void scroll_chat_to_bottom();  // sticky-bottom auto-scroll
-    void on_theme_toggle();
     void on_settings();         // user profile: display name + avatar
     void refresh_themed_icons();  // re-tints pixbufs in place (no reparenting!)
     void set_button_icon(Gtk::Button& btn, const std::string& icon,

@@ -103,11 +103,6 @@ void UiApi::start() {
                 body_json(req).value("name", "")));
         });
 
-    server_->post("/ui/action/theme",
-        [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
-            send_json(resp, w.ui_toggle_theme());
-        });
-
     // Drive the real connect flow headlessly (regression for the Connect
     // dialog): blocks until the probe finishes, reports the actual error.
     server_->post("/ui/action/connect",
