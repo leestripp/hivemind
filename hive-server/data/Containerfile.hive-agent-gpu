@@ -52,8 +52,10 @@ RUN git clone --depth 1 https://projects.blender.org/lab/blender_mcp.git \
 # outside it. BLENDER_SYSTEM_EXTENSIONS makes Blender scan this dir as the
 # "system" repository on every launch (module name bl_ext.system.mcp).
 ENV BLENDER_SYSTEM_EXTENSIONS=/opt/blender-extensions
-RUN mkdir -p /opt/blender-extensions \
-    && cp -r /opt/blender-mcp-src/addon/blender_mcp_addon /opt/blender-extensions/mcp
+# Layout is <dir>/<repo-id>/<pkg-id> — the "system" level is REQUIRED
+# (verified: /opt/blender-extensions/mcp invisible, .../system/mcp works).
+RUN mkdir -p /opt/blender-extensions/system \
+    && cp -r /opt/blender-mcp-src/addon/blender_mcp_addon /opt/blender-extensions/system/mcp
 
 # Blender's Wayland probe CRASHES when XDG_RUNTIME_DIR is unset (verified
 # on 5.0.1: wl_display_connect segfault instead of graceful fallback) —
