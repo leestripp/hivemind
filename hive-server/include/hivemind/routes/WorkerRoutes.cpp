@@ -39,6 +39,28 @@ void register_worker_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"models", channel.models_catalog()}});
         });
 
+    // v2 follow-up: set a worker's default model (writes its models.json
+    // "default" key via the channel). Agents with model "" resolve to it.
+    server.post("/api/workers/:name/default-model",
+        [&channel](const OmniNet::HTTP::Request& req,
+                   OmniNet::HTTP::Response& resp) {
+            auto segs = path_segments(req.path());
+            if (segs.size() < 3) { send_error(resp, 400, "bad path"); return; }
+            json body = json::parse(req.body(), nullptr, false);
+            if (body.is_discarded()) { send_error(resp, 400, "bad json"); return; }
+            const std::string model = body.value("model", "");
+            if (model.empty()) { send_error(resp, 400, "model required"); return; }
+            try {
+                auto r = channel.set_default_model(segs[2], model);
+                if (!r) { send_error(resp, 503, "worker offline"); return; }
+                if (!r->error.empty()) { send_error(resp, 502, r->error); return; }
+                send_json(resp, json{{"ok", true}, {"worker", segs[2]},
+                                     {"default_model", model}});
+            } catch (const std::exception& e) {
+                send_error(resp, 502, e.what());
+            }
+        });
+
     server.delete_("/api/workers/:name",
         [&workers](const OmniNet::HTTP::Request& req,
                    OmniNet::HTTP::Response& resp) {

@@ -104,6 +104,17 @@ public:
                                            const std::string& resolution,
                                            int timeout_s = 60);
 
+    /// v2 models: the worker's default model name as reported in hello
+    /// ("" when unknown / worker has no usable models.json entries).
+    std::string default_model(const std::string& worker) const;
+
+    /// Ask a worker to set its default model (writes its models.json).
+    /// nullopt when the worker is offline; error field set on failure.
+    struct ModelResult { bool ok = false; std::string error; };
+    std::optional<ModelResult> set_default_model(const std::string& worker,
+                                                 const std::string& model,
+                                                 int timeout_s = 30);
+
     /// Phase 30.4: TCP stream over the channel. open_stream blocks until
     /// the worker acknowledges (stream_opened) or fails (stream_error /
     /// offline → ""). stream_send/stream_close drive it; inbound bytes
@@ -217,6 +228,18 @@ private:
         ScreenResult result;
     };
     std::unordered_map<std::string, std::shared_ptr<ScreenJob>> screen_jobs_;
+
+    // worker → default model name (from hello "default_model")
+    std::unordered_map<std::string, std::string> defaults_;
+
+    // in-flight model_ctl requests (id → result slot)
+    struct ModelJob {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        ModelResult result;
+    };
+    std::unordered_map<std::string, std::shared_ptr<ModelJob>> model_jobs_;
 
     // 31: file_fetch jobs (id → waiter)
     struct FileJob {

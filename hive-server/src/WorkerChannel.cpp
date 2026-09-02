@@ -85,23 +85,64 @@ static void worker_writer(std::shared_ptr<WorkerConn> wc) {
 }
 
 json WorkerChannel::models_catalog() const {
-    // Aggregate hello catalogs across connected workers, dedup by name.
+    // Per-worker catalogs — models live in each worker's models.json, so
+    // the UI groups by worker (the old deduped union hid which workers
+    // offered a model and attributed shared names to one worker only).
     json out = json::array();
-    std::set<std::string> seen;
     std::lock_guard lk(m_);
     for (auto& [wname, cat] : models_) {
         json arr;
         try { arr = json::parse(cat); } catch (...) { continue; }
+        json models = json::array();
         for (auto& e : arr) {
             const std::string n = e.value("name", "");
-            if (n.empty() || seen.count(n)) continue;
-            seen.insert(n);
-            out.push_back({{"name", n},
-                           {"provider", e.value("provider", "")},
-                           {"worker", wname}});
+            if (n.empty()) continue;
+            models.push_back({{"name", n},
+                              {"provider", e.value("provider", "")}});
         }
+        auto it = defaults_.find(wname);
+        out.push_back({{"worker", wname},
+                       {"default_model",
+                        it != defaults_.end() ? it->second : ""},
+                       {"models", models}});
     }
     return out;
+}
+
+std::string WorkerChannel::default_model(const std::string& worker) const {
+    std::lock_guard lk(m_);
+    auto it = defaults_.find(worker);
+    return it != defaults_.end() ? it->second : "";
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::set_default_model(const std::string& worker,
+                                 const std::string& model, int timeout_s) {
+    if (!is_online(worker)) return std::nullopt;
+    const std::string id = "mc-" + std::to_string(next_job_++);
+    auto mj = std::make_shared<ModelJob>();
+    {
+        std::lock_guard lk(m_);
+        model_jobs_[id] = mj;
+    }
+    if (!send(worker, {{"op","model_ctl"},{"id",id},{"model",model}})) {
+        std::lock_guard lk(m_);
+        model_jobs_.erase(id);
+        return std::nullopt;
+    }
+    std::unique_lock lk(mj->m);
+    if (!mj->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                         [&]{ return mj->done; })) {
+        std::lock_guard g(m_);
+        model_jobs_.erase(id);
+        throw std::runtime_error("worker model_ctl timed out");
+    }
+    {
+        std::lock_guard g(m_);
+        model_jobs_.erase(id);
+        if (mj->result.ok) defaults_[worker] = model;
+    }
+    return mj->result;
 }
 
 void WorkerChannel::stop() {
@@ -224,6 +265,7 @@ void WorkerChannel::handle(Connection& ws) {
             {
                 std::lock_guard lk(m_);
                 models_[st->name] = st->models;
+                defaults_[st->name] = frame.value("default_model", "");
             }
             const std::string caps =
                 frame.contains("caps") ? frame["caps"].dump() : "{}";
@@ -340,6 +382,20 @@ void WorkerChannel::handle(Connection& ws) {
                 sj->done = true;
                 sj->cv.notify_all();
             }
+        } else if (op == "model_result") {
+            std::shared_ptr<ModelJob> mj;
+            {
+                std::lock_guard lk(m_);
+                auto it = model_jobs_.find(frame.value("id", ""));
+                if (it != model_jobs_.end()) mj = it->second;
+            }
+            if (mj) {
+                std::lock_guard jl(mj->m);
+                mj->result.ok = frame.value("error", "").empty();
+                mj->result.error = frame.value("error", "");
+                mj->done = true;
+                mj->cv.notify_all();
+            }
         } else if (op == "stream_opened" || op == "stream_error") {
             // open_stream waits on this via a ScreenJob-shaped slot? no —
             // streams have their own ack slot:
@@ -403,6 +459,7 @@ void WorkerChannel::handle(Connection& ws) {
         if (it != conns_.end() && it->second == st->conn) {
             conns_.erase(it);
             models_.erase(st->name);
+            defaults_.erase(st->name);
         }
         // Fail every in-flight job for this worker — exec() callers wake
         // with an error instead of hanging until the outer timeout.

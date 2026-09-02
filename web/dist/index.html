@@ -210,18 +210,16 @@
         <div>
           <h2>Model Catalog</h2>
           <p class="muted">
-            Models available to agents, aggregated from connected workers.
-            Configuration lives on each worker
+            Models are defined per worker
             (<code>~/.local/share/hive-worker/models.json</code> +
-            <code>secrets.json</code>) - credentials never live on the hub.
+            <code>secrets.json</code>) — credentials never live on the hub.
+            Each worker has a <strong>default model</strong> that agents
+            spawn with when their model is set to “worker default”.
           </p>
         </div>
       </div>
 
-      <table class="kv-table">
-        <thead><tr><th>Name</th><th>Provider</th><th>Worker</th></tr></thead>
-        <tbody id="models-tbody"><tr><td colspan="3" class="muted">loading...</td></tr></tbody>
-      </table>
+      <div id="models-workers"><p class="muted">loading...</p></div>
     </div>
   </div>
 

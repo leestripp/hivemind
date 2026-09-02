@@ -60,6 +60,35 @@ json list_worker_models() {
     return out;
 }
 
+std::string worker_default_model() {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    std::ifstream in(p);
+    if (!in) return "";
+    json j;
+    try { in >> j; } catch (...) { return ""; }
+    if (j.contains("default") && j["default"].is_string() &&
+        j.contains(j["default"].get<std::string>()))
+        return j["default"].get<std::string>();
+    for (auto& [name, e] : j.items())
+        if (e.is_object()) return name;
+    return "";
+}
+
+std::string set_default_model(const std::string& name) {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    std::ifstream in(p);
+    if (!in) return "models.json missing on worker";
+    json j;
+    try { in >> j; } catch (...) { return "models.json: bad json"; }
+    auto it = j.find(name);
+    if (it == j.end() || !it->is_object()) return "unknown model: " + name;
+    j["default"] = name;
+    std::ofstream out(p, std::ios::trunc);
+    if (!out) return "models.json: write failed";
+    out << j.dump(2) << "\n";
+    return "";
+}
+
 void resolve_model(AgentSpec& spec) {
     const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
     std::ifstream in(p);

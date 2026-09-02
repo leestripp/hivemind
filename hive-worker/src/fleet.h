@@ -133,6 +133,16 @@ std::string resolve_api_key(const std::string& provider);
 /// models.json -> [{name, provider}] for the hello catalog.
 nlohmann::json list_worker_models();
 
+/// The model an empty agent spec resolves to: the top-level "default"
+/// string key when it names a real entry, else the alphabetically-first
+/// object entry (same rule as resolve_model). "" when models.json has no
+/// usable entries.
+std::string worker_default_model();
+
+/// Write the "default" key in models.json. Returns "" on success, else a
+/// human-readable error (unknown model / io failure).
+std::string set_default_model(const std::string& name);
+
 /// Resolve a model NAME to its full config from the worker-local
 /// models.json. "" means "worker default": a top-level "default" key
 /// naming another entry wins; absent that, the alphabetically-first

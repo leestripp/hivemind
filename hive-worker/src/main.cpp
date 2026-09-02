@@ -131,7 +131,8 @@ int main(int argc, char* argv[]) {
             Connection ws{url};
             ws.sendText(json{{"op","hello"},{"worker",name},{"key",key},
                              {"caps",json::parse(caps)},{"proto",1},
-                             {"models",hwfleet::list_worker_models()}}.dump());
+                             {"models",hwfleet::list_worker_models()},
+                             {"default_model",hwfleet::worker_default_model()}}.dump());
             auto reply = ws.receiveText();
             json r = reply ? json::parse(*reply) : json{};
             if (r.value("op","") != "welcome") {
@@ -604,6 +605,16 @@ int main(int argc, char* argv[]) {
                                       << sy.files << " files)\n";
                         }
                         }   // skill_end
+                } else if (op == "model_ctl") {
+                    // Hub → worker: set the default model (writes
+                    // models.json "default" key). Synchronous reply.
+                    const std::string id = frame.value("id", "");
+                    const std::string model = frame.value("model", "");
+                    json resp{{"op","model_result"},{"id",id}};
+                    std::string err = hwfleet::set_default_model(model);
+                    if (!err.empty()) resp["error"] = err;
+                    else resp["default_model"] = model;
+                    try { send_frame(resp); } catch (...) {}
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");
