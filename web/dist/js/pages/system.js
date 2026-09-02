@@ -39,7 +39,7 @@ function renderCards(d) {
 }
 
 // Minimal canvas line chart: series = [{t, v}] scaled 0..maxY.
-function drawChart(canvas, series, maxY, color) {
+function drawChart(canvas, series, maxY, color, windowMinutes) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return;
@@ -60,7 +60,12 @@ function drawChart(canvas, series, maxY, color) {
     ctx.fillText('collecting samples…', w / 2, h / 2);
     return;
   }
-  const t0 = series[0].t, t1 = series[series.length - 1].t, span = Math.max(1, t1 - t0);
+  // Axis spans the REQUESTED window (now − minutes … now), not the sample
+  // range — otherwise 1h/6h/24h render identically while history is short
+  // (in-memory monitor history resets on hub restart).
+  const t1 = Math.floor(Date.now() / 1000);
+  const t0 = t1 - (windowMinutes || 60) * 60;
+  const span = Math.max(1, t1 - t0);
   ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath();
   series.forEach((p, i) => {
     const x = (p.t - t0) / span * w;
@@ -78,10 +83,11 @@ function drawChart(canvas, series, maxY, color) {
 
 function drawGraphs() {
   if (!lastHist) return;
-  const s = lastHist.samples || [];
+  const cutoff = Math.floor(Date.now() / 1000) - histMinutes * 60;
+  const s = (lastHist.samples || []).filter(p => p.t >= cutoff);
   const css = getComputedStyle(document.documentElement);
-  drawChart($('sys-mem-graph'), s.map(p => ({ t: p.t, v: p.mem })), 100, css.getPropertyValue('--accent') || '#88c0d0');
-  drawChart($('sys-cpu-graph'), s.map(p => ({ t: p.t, v: p.cpu })), 100, '#a3be8c');
+  drawChart($('sys-mem-graph'), s.map(p => ({ t: p.t, v: p.mem })), 100, css.getPropertyValue('--accent') || '#88c0d0', histMinutes);
+  drawChart($('sys-cpu-graph'), s.map(p => ({ t: p.t, v: p.cpu })), 100, '#a3be8c', histMinutes);
 }
 
 function renderAgents(d) {
