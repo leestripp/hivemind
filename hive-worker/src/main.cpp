@@ -101,12 +101,46 @@ int main(int argc, char* argv[]) {
                 f = {{"op","task_delta"},{"agent",agent_id},
                      {"task",ev.value("task","")},
                      {"text",ev.value("text","")}};
-            else if (kind == "message")
+            else if (kind == "message") {
+                // Phase 35: agent → chat attachments. attach_file dropped
+                // files into attachments/<tid>/outgoing/ in the workspace;
+                // promote them to the canonical attachments/<tid>/ and
+                // include records in task_result (hub adds "worker").
+                json atts = json::array();
+                const std::string tid = ev.value("thread_id", "");
+                if (!tid.empty() && std::getenv("HOME")) {
+                    const fs::path ws = fs::path{std::getenv("HOME")} /
+                        ".local/share/hive-worker/workspace";
+                    const fs::path outdir = ws / "attachments" / tid / "outgoing";
+                    const fs::path canon  = ws / "attachments" / tid;
+                    std::error_code ec;
+                    if (fs::is_directory(outdir, ec)) {
+                        for (const auto& e : fs::directory_iterator(outdir, ec)) {
+                            if (!e.is_regular_file(ec)) continue;
+                            const std::string fname =
+                                e.path().filename().string();
+                            fs::rename(e.path(), canon / fname, ec);
+                            if (ec) { ec.clear(); continue; }
+                            const auto sz = fs::file_size(canon / fname, ec);
+                            atts.push_back({
+                                {"name", fname},
+                                {"rel_path", "attachments/" + tid + "/" + fname},
+                                {"path", "/workspace/attachments/" + tid +
+                                             "/" + fname},
+                                {"size", ec ? 0 : (long long)sz},
+                            });
+                            ec.clear();
+                        }
+                        fs::remove(outdir, ec);   // emptied by the moves
+                    }
+                }
                 f = {{"op","task_result"},{"agent",agent_id},
                      {"task",ev.value("task","")},
-                     {"thread_id",ev.value("thread_id","")},
+                     {"thread_id",tid},
                      {"body",ev.value("body","")},
-                     {"error",ev.value("error","")}};
+                     {"error",ev.value("error","")},
+                     {"attachments", std::move(atts)}};
+            }
             else if (kind == "approval_request")
                 f = {{"op","approval_req"},{"agent",agent_id},
                      {"id",ev.value("id","")},

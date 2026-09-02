@@ -1566,6 +1566,9 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
     namespace fs = std::filesystem;
     const std::string name    = att.value("name", "image");
     const std::string caption = att.value("caption", "");
+    // Phase 35: agent-originated records carry the producing worker —
+    // without it pick_worker guesses (breaks multi-worker downloads).
+    const std::string worker  = att.value("worker", "");
     // Server-provided path is container-style "/workspace/<rel>"; the
     // download endpoint wants the workspace-relative form.
     std::string rel = att.value("path", "");
@@ -1599,12 +1602,14 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
     holder->signal_destroy().connect([weak] { *weak = nullptr; });
 
     const std::string tid = current_thread_;
-    run_async([this, rel, key, tid, caption, weak] {
+    run_async([this, rel, worker, key, tid, caption, weak] {
         std::string err;
         try {
             std::string bytes =
                 api_.download("/api/files/download?path=" +
-                              ApiClient::url_encode(rel));
+                              ApiClient::url_encode(rel) +
+                              (worker.empty() ? "" :
+                               "&worker=" + ApiClient::url_encode(worker)));
             std::error_code ecw;
             fs::create_directories(fs::path(key).parent_path(), ecw);
             std::ofstream out(key, std::ios::binary | std::ios::trunc);
@@ -1690,6 +1695,8 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
                                        const nlohmann::json& att) {
     namespace fs = std::filesystem;
     const std::string name = att.value("name", "video");
+    // Phase 35: carry the producing worker through to the download.
+    const std::string worker = att.value("worker", "");
     std::string rel = att.value("path", "");
     if (rel.rfind("/workspace/", 0) == 0) rel.erase(0, 11);
     if (rel.empty())
@@ -1718,12 +1725,14 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
     holder->signal_destroy().connect([weak] { *weak = nullptr; });
 
     const std::string tid = current_thread_;
-    run_async([this, rel, key, tid, name, weak] {
+    run_async([this, rel, worker, key, tid, name, weak] {
         std::string err;
         try {
             std::string bytes =
                 api_.download("/api/files/download?path=" +
-                              ApiClient::url_encode(rel));
+                              ApiClient::url_encode(rel) +
+                              (worker.empty() ? "" :
+                               "&worker=" + ApiClient::url_encode(worker)));
             std::error_code ecw;
             fs::create_directories(fs::path(key).parent_path(), ecw);
             std::ofstream out(key, std::ios::binary | std::ios::trunc);

@@ -274,6 +274,10 @@ void seed_mcp_servers(const fs::path& home, const json& servers) {
 
 } // namespace
 
+// Phase 35: current turn's thread id — set by the turn thread before
+// each turn, read by AttachFileTool. Single turn thread → no locking.
+static std::string g_thread_id;
+
 int main(int argc, char** argv) {
     // -- config ----------------------------------------------------------
     const fs::path project_root =
@@ -340,6 +344,16 @@ int main(int argc, char** argv) {
                                  std::istreambuf_iterator<char>());
     }
 
+    // Phase 35: every agent learns attach_file regardless of role prompt
+    // (SystemPromptBuilder composes the remaining sections regardless).
+    cfg.system_prompt +=
+        "\n\n## Sharing files in chat\n"
+        "To show the user a file (a rendered video, image, archive - any "
+        "deliverable), call attach_file with its /workspace path. It "
+        "attaches the file to your reply: images and video render inline "
+        "in the chat, other files appear as a download. Prefer this over "
+        "only mentioning the file path.";
+
     // MCP specs arrive as JSON; seed before Agent construction.
     if (auto mcp = env_or("HIVEMIND_MCP_SERVERS"); !mcp.empty()) {
         try { seed_mcp_servers(cfg.daedalus_home, json::parse(mcp)); }
@@ -393,6 +407,68 @@ int main(int argc, char** argv) {
         }
     };
     agent.register_tool(std::make_unique<MessageAgentTool>());
+
+    // attach_file (Phase 35): agent → chat attachments. Copies a
+    // workspace file into the thread's outgoing dir; the worker ships it
+    // with task_result and clients render it inline (images/video).
+    class AttachFileTool final : public daedalus::BaseTool {
+    public:
+        std::string get_name() const override { return "attach_file"; }
+        std::string get_description() const override {
+            return "Attach a file from /workspace to your reply so the user "
+                   "sees it in the chat (images and video render inline; "
+                   "other files appear as a download). Use it for "
+                   "deliverables (rendered videos, images, archives) "
+                   "instead of only mentioning the file path.";
+        }
+        json get_definition() const override {
+            json path = {{"type","string"},
+                         {"description","File to attach: absolute "
+                          "/workspace/... path or workspace-relative"}};
+            json params = {{"type","object"},
+                           {"properties",{{"path",path}}},
+                           {"required",{"path"}}};
+            return {{"type","function"},
+                    {"function",{{"name","attach_file"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, daedalus::HostToolContext&) override {
+            std::string p = args.value("path","");
+            if (p.empty())
+                return {{"status","error"},{"error","path required"}};
+            if (g_thread_id.empty())
+                return {{"status","error"},{"error","no active thread"}};
+            if (p.rfind("/workspace/", 0) == 0) p = p.substr(11);
+            std::error_code ec;
+            const fs::path rel = fs::path(p).lexically_normal();
+            bool traversal = rel.empty() || rel.is_absolute();
+            for (const auto& c : rel) if (c == "..") traversal = true;
+            if (traversal)
+                return {{"status","error"},
+                        {"error","path must stay under /workspace"}};
+            const fs::path src = fs::path("/workspace") / rel;
+            if (!fs::is_regular_file(src, ec))
+                return {{"status","error"},
+                        {"error","not a file: /workspace/" +
+                         rel.generic_string()}};
+            const fs::path outdir = fs::path("/workspace/attachments") /
+                                    g_thread_id / "outgoing";
+            fs::create_directories(outdir, ec);
+            if (ec) return {{"status","error"},{"error",ec.message()}};
+            std::string fname = src.filename().string();
+            const std::string stem = src.stem().string();
+            const std::string ext  = src.extension().string();
+            for (int i = 2; fs::exists(outdir / fname); i++)
+                fname = stem + "-" + std::to_string(i) + ext;
+            fs::copy_file(src, outdir / fname, ec);
+            if (ec) return {{"status","error"},{"error",ec.message()}};
+            return {{"status","success"},
+                    {"attached", fname},
+                    {"note","attached to your reply when this turn ends"}};
+        }
+    };
+    agent.register_tool(std::make_unique<AttachFileTool>());
     try {
         agent.initialize();
     } catch (const std::exception& e) {
@@ -421,6 +497,7 @@ int main(int argc, char** argv) {
                 t = std::move(queue.front());
                 queue.pop_front();
             }
+            g_thread_id = t.thread_id;
             sink->begin_task(t.id);
             std::string err;
             try {

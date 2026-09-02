@@ -121,9 +121,19 @@ void HubRouter::on_worker_frame(const std::string& worker,
             std::lock_guard<std::mutex> lk(m_);
             tasks_.erase(task);
         }
+        // Phase 35: worker ships attachment records minus the worker
+        // field (it doesn't know its hub-side name) — inject it here so
+        // clients can fetch via /api/files/download?worker&path.
+        std::string atts = frame.value("attachments", "[]");
+        {
+            auto arr = json::parse(atts, nullptr, false);
+            if (!arr.is_discarded() && arr.is_array() && !arr.empty()) {
+                for (auto& a : arr) a["worker"] = worker;
+                atts = arr.dump();
+            }
+        }
         if (chat_) chat_->complete_turn(task, frame.value("body", ""),
-                                        frame.value("error", ""),
-                                        frame.value("attachments", "[]"));
+                                        frame.value("error", ""), atts);
         return;
     }
     if (op == "approval_req") {
