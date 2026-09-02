@@ -104,10 +104,28 @@ function syncSecretFormRows() {
 }
 
 // ── events ────────────────────────────────────────────────────────────
+function renderGrantChips() {
+  const host = $('secret-grant-chips');
+  host.innerHTML = agents.length
+    ? ''
+    : '<span class="muted">no agents yet — grant later from the table</span>';
+  for (const a of agents) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'skill-chip';
+    b.textContent = a.name;
+    b.dataset.agent = a.id;
+    b.title = 'Click to grant';
+    b.onclick = () => b.classList.toggle('skill-chip-on');
+    host.appendChild(b);
+  }
+}
+
 export function initSecrets() {
   $('secrets-add').addEventListener('click', () => {
     $('secret-form').reset();
     syncSecretFormRows();
+    renderGrantChips();
     openModal('secret-modal');
   });
 
@@ -134,6 +152,11 @@ export function initSecrets() {
         }
       }
       await API.post('/api/secrets', body);
+      // Grant to agents selected in the modal (one call per agent).
+      for (const b of document.querySelectorAll('#secret-grant-chips .skill-chip-on')) {
+        await API.post('/api/agents/' + b.dataset.agent + '/secrets',
+          { name: body.name, granted: true });
+      }
       closeModal('secret-modal');
       await loadAll();
     } catch (err) { alert(err.message); }
