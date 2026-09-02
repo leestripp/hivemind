@@ -47,13 +47,14 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
         for (char c : a) { if (c == '\'') cmd += "'\\''"; else cmd += c; }
         cmd += "'";
     }
-    if (out) cmd += " 2>&1";
+    cmd += " 2>&1";
     FILE* p = popen(cmd.c_str(), "r");
     if (!p) return -1;
-    if (out) {
-        char buf[512];
-        while (fgets(buf, sizeof buf, p)) *out += buf;
-    }
+    // ALWAYS drain the pipe, even when the caller discards output: an
+    // undrained popen pipe SIGPIPEs the child (rc 141) once it writes —
+    // this silently broke the Phase 36 screen idle watcher's pgrep probe.
+    char buf[512];
+    while (fgets(buf, sizeof buf, p)) { if (out) *out += buf; }
     int rc = pclose(p);
     return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
 }

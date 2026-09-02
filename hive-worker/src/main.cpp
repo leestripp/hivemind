@@ -169,30 +169,31 @@ int main(int argc, char* argv[]) {
         int idle_limit = (env && *env) ? std::atoi(env) : 15;
         if (idle_limit < 1) idle_limit = 15;
         std::unordered_map<std::string, int> idle_min;   // cname -> streak
+        std::cerr << "worker: screen idle watcher up (limit "
+                  << idle_limit << "min)\n";
         while (!g_stop) {
             std::this_thread::sleep_for(std::chrono::seconds(60));
             if (g_stop) break;
             std::string names;
             if (hwrunner::podman_simple({"ps", "--format", "{{.Names}}"},
-                                        &names) != 0)
+                                        &names) != 0) {
+                std::cerr << "worker: idle watcher podman ps failed\n";
                 continue;
+            }
             std::istringstream in(names);
             std::string cname;
             while (std::getline(in, cname)) {
                 if (cname.rfind("hive-", 0) != 0) continue;
-                // Screen up at all? (x11vnc is the stack's keystone)
-                if (hwrunner::podman_simple({"exec", cname, "pgrep", "-x",
-                                             "x11vnc"}, nullptr) != 0) {
-                    idle_min.erase(cname);
-                    continue;
-                }
-                // Active viewers = ESTABLISHED conns to x11vnc :5900.
-                // Parse /proc/net/tcp{,6} — iproute2 isn't in the image.
-                // Local port 170C hex = 5900; st 01 = ESTABLISHED.
+                // Screen state from /proc/net/tcp{,6} on :5900 (170C hex).
+                // One exec, and zombie-proof: PID 1 (sleep) never reaps,
+                // so pgrep matches defunct x11vnc forever — but zombies
+                // hold NO sockets. No LISTEN ⇒ stack down; ESTABLISHED
+                // conns = live viewers. (iproute2 isn't in the image.)
                 std::string tcp;
                 hwrunner::podman_simple({"exec", cname, "bash", "-c",
                                          "cat /proc/net/tcp /proc/net/tcp6"},
                                         &tcp);
+                bool listening = false;
                 int viewers = 0;
                 std::istringstream ts(tcp);
                 std::string line;
@@ -200,10 +201,13 @@ int main(int argc, char* argv[]) {
                     std::istringstream ls(line);
                     std::string sl, local, remote, st;
                     if (!(ls >> sl >> local >> remote >> st)) continue;
-                    if (st == "01" && local.size() >= 5 &&
-                        local.substr(local.size() - 4) == "170C")
-                        viewers++;
+                    if (local.size() < 5 ||
+                        local.substr(local.size() - 4) != "170C")
+                        continue;
+                    if (st == "0A") listening = true;         // LISTEN
+                    else if (st == "01") viewers++;           // ESTABLISHED
                 }
+                if (!listening) { idle_min.erase(cname); continue; }
                 if (viewers > 0) { idle_min[cname] = 0; continue; }
                 const int streak = ++idle_min[cname];
                 if (streak >= idle_limit) {
