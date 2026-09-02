@@ -36,7 +36,7 @@ Current release line: **0.6.x** (distributed workers milestone was 0.5.0).
 | Language | **C++23** (required), C |
 | Build | **CMake ≥ 3.28**, Ninja generator, `enable_testing()` + ctest |
 | HTTP/WebSocket | **OmniNet** (first-party, fetched from gitlab.com/leestripp/omninet) — the *only* HTTP stack; **no libcurl** |
-| Agent engine | **daedalus** (first-party, fetched, pinned tag `0.9.6`) |
+| Agent engine | **daedalus** (first-party, fetched, tracks `main` with configure-time auto-update; pin via `-DDAEDALUS_TAG=`) |
 | Persistence | **SQLite3** (raw C API via `DbUtil.h` helpers) |
 | JSON | **nlohmann_json** |
 | Native client | **GTK4 / gtkmm-4.0** (+ optional WebKitGTK 6.0 for embedded noVNC) |

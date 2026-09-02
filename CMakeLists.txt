@@ -59,6 +59,7 @@ include(FetchContent)
 # daedalus — Agent engine (gitlab.com/leestripp/daedalus)
 #   -DHIVEMIND_USE_DAEDALUS=OFF         skip daedalus entirely
 #   -DDAEDALUS_TAG=0.9.6               pin a different tag / branch / SHA
+#                                      (default: main, auto-updated like OmniNet)
 #   -DDAEDALUS_LOCAL=/path/to/daedalus use a local checkout instead of fetching
 # Required system packages: libssl-dev libpng-dev libpoppler-cpp-dev
 # ============================================================================
@@ -69,7 +70,7 @@ if(HIVEMIND_USE_DAEDALUS)
     pkg_check_modules(PNG     REQUIRED libpng)
     pkg_check_modules(POPPLER REQUIRED poppler-cpp)
 
-    set(DAEDALUS_TAG "0.9.6" CACHE STRING "Git tag / branch / SHA for daedalus")
+    set(DAEDALUS_TAG "main" CACHE STRING "Git tag / branch / SHA for daedalus")
 
     if(DEFINED DAEDALUS_LOCAL AND EXISTS "${DAEDALUS_LOCAL}/CMakeLists.txt")
         message(STATUS "[hivemind] Using local daedalus at ${DAEDALUS_LOCAL}")
@@ -83,6 +84,39 @@ if(HIVEMIND_USE_DAEDALUS)
             GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(daedalus)
+
+        # Same stale-branch hazard as OmniNet (see below): FetchContent does
+        # NOT re-fetch when GIT_TAG names an unchanged branch, so "main"
+        # would silently freeze at first-fetch time. Fetch + fast-forward
+        # at configure time unless the checkout has local edits.
+        option(DAEDALUS_AUTO_UPDATE "Fetch+ff the vendored daedalus checkout at configure time" ON)
+        if(DAEDALUS_AUTO_UPDATE AND DAEDALUS_TAG STREQUAL "main"
+                AND EXISTS "${daedalus_SOURCE_DIR}/.git")
+            execute_process(
+                COMMAND git status --porcelain
+                WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
+                OUTPUT_VARIABLE _daedalus_dirty OUTPUT_STRIP_TRAILING_WHITESPACE)
+            if(_daedalus_dirty STREQUAL "")
+                execute_process(
+                    COMMAND git fetch origin
+                    WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
+                    RESULT_VARIABLE _dfetch_rc OUTPUT_QUIET ERROR_QUIET)
+                if(_dfetch_rc EQUAL 0)
+                    execute_process(
+                        COMMAND git reset --hard origin/main
+                        WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
+                        OUTPUT_QUIET ERROR_QUIET)
+                    execute_process(
+                        COMMAND git describe --tags
+                        WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
+                        OUTPUT_VARIABLE _daedalus_ver OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET)
+                    message(STATUS "[hivemind] daedalus updated to ${_daedalus_ver} (origin/main)")
+                endif()
+            else()
+                message(WARNING "[hivemind] daedalus checkout has local edits — skipping auto-update")
+            endif()
+        endif()
     endif()
 
     get_target_property(_daedalus_inc daedalus INCLUDE_DIRECTORIES)
