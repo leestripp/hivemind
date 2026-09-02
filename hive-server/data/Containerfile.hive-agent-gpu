@@ -84,8 +84,9 @@ RUN mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/${BLENDER_VER%.*}/scripts/sta
 ARG NODE_VER=22.22.1
 RUN curl -fsSL https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-x64.tar.xz \
       | tar -xJ -C /tmp \
+    && mkdir -p /usr/local/lib/node_modules \
     && cp -r /tmp/node-v${NODE_VER}-linux-x64/lib/node_modules/npm \
-        /usr/local/lib/node_modules/ \
+        /usr/local/lib/node_modules/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && rm -rf /tmp/node-v${NODE_VER}-linux-x64
