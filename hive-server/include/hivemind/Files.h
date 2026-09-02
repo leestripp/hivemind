@@ -9,7 +9,7 @@
  * artifacts browser).
  *
  * Every agent container bind-mounts the company workspace at /workspace,
- * so a file saved under <workspace_root>/attachments/<thread_id>/ is
+ * so a file saved under the per-worker workspace attachments/<thread_id>/ is
  * immediately readable by agents via their ordinary file tools — no
  * per-container copy step.
  *

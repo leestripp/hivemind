@@ -3,7 +3,7 @@ import { $, esc, log, getTheme, setTheme, getTimezone, setTimezone } from '../ut
 import { S } from '../state.js';
 
 
-export function enterSettings() { loadSettingsPage(); loadWorkspace(); loadConnectors(); }
+export function enterSettings() { loadSettingsPage(); loadConnectors(); }
 
 // ── Phase 23: OAuth connectors ────────────────────────────────────────
 async function loadConnectors() {
@@ -45,13 +45,8 @@ async function loadConnectors() {
   } catch (e) { host.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
 }
 
-// ─── Company workspace (PUT /api/config — admin scope) ─────────────────
-async function loadWorkspace() {
-  try {
-    const c = await API.get('/api/config');
-    $('set-workspace').value = c.workspace_root || '';
-  } catch { /* leave placeholder */ }
-}
+// Workspaces are per-worker (v2) — the old hub "host folder" setting was
+// dead config; the Settings page now just documents the worker path.
 
 export function initSettings() {
   $('connector-form').addEventListener('submit', async (e) => {
@@ -87,17 +82,6 @@ export function initSettings() {
       : tzSel.value);
   });
 
-  $('set-workspace-save').addEventListener('click', async () => {
-    const msg = $('set-workspace-msg');
-    msg.textContent = '';
-    try {
-      const r = await API.req('PUT', '/api/config',
-                              { workspace_root: $('set-workspace').value.trim() });
-      msg.textContent = '✓ workspace set to ' + r.workspace_root;
-    } catch (e) {
-      msg.textContent = '✗ ' + e.message;
-    }
-  });
 }
 
 // ─── Settings page ──────────────────────────────────────────────────────

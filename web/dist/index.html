@@ -89,19 +89,12 @@
       <section class="settings-section"><h3>Server</h3><div id="set-server" class="kv"></div></section>
       <section class="settings-section">
         <h3>Company workspace</h3>
-        <p class="muted">Host folder bind-mounted at <code>/workspace</code> in every agent
-        container — this is how teammates share files. Applies to containers created
-        after the change (remove old containers to remount).</p>
-        <div class="trig-form-row">
-          <label>Host folder</label>
-          <input type="text" id="set-workspace" class="btn" style="min-width:320px"
-                 placeholder="~/projects" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="trig-form-row">
-          <label></label>
-          <button class="btn primary" id="set-workspace-save">Save</button>
-        </div>
-        <div class="insp-help" id="set-workspace-msg"></div>
+        <p class="muted">Workspaces are <strong>per worker</strong> in v2 — each worker
+        bind-mounts its own shared folder at <code>/workspace</code> in every container
+        it runs:<br>
+        <code>~/.local/share/hive-worker/workspace</code> (on the worker machine)<br>
+        All agents on the same worker see the same /workspace — that's how teammates
+        on a rig share files. There is no hub-side host folder anymore.</p>
       </section>
       <section class="settings-section">
         <h3>Appearance</h3>

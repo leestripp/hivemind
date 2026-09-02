@@ -29,9 +29,9 @@ void register_config_routes(OmniNet::HTTP::Server& server) {
             send_json(resp, json{
                 {"workspace_root", cfg.workspace_root()},
                 {"screen_resolution", cfg.screen_resolution()},
-                {"note", "workspace_root is bind-mounted at /workspace in "
-                         "every agent container; changes apply to containers "
-                         "created after the change"},
+                {"note", "workspace_root is DEPRECATED/unused in v2: "
+                         "workspaces are per-worker — each worker bind-mounts "
+                         "~/.local/share/hive-worker/workspace at /workspace"},
             });
         });
 
