@@ -76,6 +76,25 @@ RUN mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/${BLENDER_VER%.*}/scripts/sta
 # `blender &`), not `blender -b`, for interactive MCP control. Headless
 # -b remains the right path for batch renders.
 
+# ── Remotion runtime (remotion-dev/skills agents) ───────────────────────
+# npm: Ubuntu resolute's nodejs deb ships node but NO npm (no apt
+# candidate — verified 2026-09-02). Lift npm/npx from the matching
+# official Node tarball. ARG pins the node version baked into the base
+# image — bump both together if the base moves.
+ARG NODE_VER=22.22.1
+RUN curl -fsSL https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-x64.tar.xz \
+      | tar -xJ -C /tmp \
+    && cp -r /tmp/node-v${NODE_VER}-linux-x64/lib/node_modules/npm \
+        /usr/local/lib/node_modules/ \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && rm -rf /tmp/node-v${NODE_VER}-linux-x64
+# ffmpeg for media probing/assembly. Rendering uses the baked-in Google
+# Chrome (--browser-executable=/usr/bin/google-chrome) or Remotion's
+# auto-downloaded chrome-headless-shell (first render, per-agent cache).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
 # — no PATH/LD_LIBRARY_PATH fiddling needed.
 
