@@ -22,50 +22,57 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Blender: official tarball, NOT the Ubuntu deb — Ubuntu's build compiles
-# Cycles without HIP (verified 2026-09-01: repo blender 5.0.1 rendered
-# CPU-only; official 5.0.1 sees the RX 9070 XT as a HIP device).
-ARG BLENDER_VER=5.0.1
+# Cycles without HIP (verified 2026-09-01: repo blender rendered CPU-only;
+# official tarball sees the RX 9070 XT as a HIP device). 5.1+ is REQUIRED
+# by the official Blender MCP extension (blender_version_min = "5.1.0").
+ARG BLENDER_VER=5.1.2
 RUN curl -fsSL -o /tmp/blender.tar.xz \
         https://download.blender.org/release/Blender${BLENDER_VER%.*}/blender-${BLENDER_VER}-linux-x64.tar.xz \
     && tar -C /opt -xf /tmp/blender.tar.xz \
     && ln -s /opt/blender-${BLENDER_VER}-linux-x64/blender /usr/local/bin/blender \
     && rm /tmp/blender.tar.xz
 
-# ── Blender MCP: agents drive Blender interactively ─────────────────────
-# Two halves: (1) the blender-mcp MCP bridge (stdio; daedalus spawns it as
-# a child of hive-agent), (2) the Blender addon whose socket server it
-# talks to (localhost:9876). uv per the official installer; blender-mcp
-# baked via `uv tool install` so no runtime downloads.
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+# ── Official Blender MCP (projects.blender.org/lab/blender_mcp) ─────────
+# Two halves from ONE repo snapshot so protocol versions always match:
+# (1) the blender-mcp MCP bridge (stdio entry point; daedalus spawns it as
+# a child of hive-agent), (2) the Blender 5.1 extension whose TCP socket
+# server it relays to (localhost:9876; extension autostart pref defaults
+# True once enabled). uv per the official tooling; baked at build time.
+RUN curl -fsSL -o /tmp/blmcp.tar.gz \
+        https://projects.blender.org/lab/blender_mcp/archive/main.tar.gz \
+    && mkdir -p /opt/blender-mcp-src \
+    && tar -C /opt/blender-mcp-src --strip-components=1 -xzf /tmp/blmcp.tar.gz \
+    && rm /tmp/blmcp.tar.gz \
+    && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
-       uv tool install blender-mcp
+       uv tool install /opt/blender-mcp-src/mcp
 
-# The addon hard-imports `requests`, which Blender's bundled python lacks.
-RUN BLPY=$(echo /opt/blender-${BLENDER_VER}-linux-x64/5.0/python/bin/python3*) \
-    && "$BLPY" -m ensurepip \
-    && "$BLPY" -m pip install --no-cache-dir requests
+# Install the extension into a system extensions repo: the hive user's
+# ~/.config is a per-agent mounted volume, so image-baked files must live
+# outside it. BLENDER_SYSTEM_EXTENSIONS makes Blender scan this dir as the
+# "system" repository on every launch (module name bl_ext.system.mcp).
+ENV BLENDER_SYSTEM_EXTENSIONS=/opt/blender-extensions
+RUN mkdir -p /opt/blender-extensions \
+    && cp -r /opt/blender-mcp-src/addon/blender_mcp_addon /opt/blender-extensions/mcp
 
-# Install the addon FROM THE INSTALLED PACKAGE (not a GitHub fetch) so the
-# addon protocol version always matches the bridge. Target addons_core:
-# Blender 5.0 dropped scripts/addons from the default scan (verified —
-# addon_utils.paths() returns only addons_core); the hive user's ~/.config
-# is a per-agent mounted volume, so image-baked files must live in /opt.
-RUN ADDON=$(find /opt/uv-tools/blender-mcp -name "addon.py" | head -1) \
-    && test -n "$ADDON" || { echo "blender-mcp addon.py not found in package"; exit 1; } \
-    && cp "$ADDON" /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/addons_core/blender_mcp.py
+# Blender's Wayland probe CRASHES when XDG_RUNTIME_DIR is unset (verified
+# on 5.0.1: wl_display_connect segfault instead of graceful fallback) —
+# give it a real dir so GHOST falls back to X11 (Xvfb) cleanly.
+ENV XDG_RUNTIME_DIR=/tmp/xdg-runtime-hive
+RUN mkdir -p /tmp/xdg-runtime-hive && chmod 1777 /tmp/xdg-runtime-hive
 
-# Auto-enable + auto-start on every Blender launch (register() starts the
-# socket server; blendermcp_auto_start_server defaults True).
+# Auto-enable the extension on every Blender UI launch (deferred — see
+# the script's comment for the 5.x _RestrictContext reason).
 COPY hive-server/data/blender-mcp-autostart.py /tmp/blender-mcp-autostart.py
-RUN mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/startup \
+RUN mkdir -p /opt/blender-${BLENDER_VER}-linux-x64/${BLENDER_VER%.*}/scripts/startup \
     && cp /tmp/blender-mcp-autostart.py \
-        /opt/blender-${BLENDER_VER}-linux-x64/5.0/scripts/startup/blender_mcp_autostart.py \
+        /opt/blender-${BLENDER_VER}-linux-x64/${BLENDER_VER%.*}/scripts/startup/blender_mcp_autostart.py \
     && rm /tmp/blender-mcp-autostart.py
 
 # NOTE: the MCP command queue is pumped by Blender's UI event loop —
-# launch Blender ON THE XVFB DESKTOP (DISPLAY=:0, e.g. `blender &`), not
-# `blender -b`, for interactive MCP control. Headless -b remains the
-# right path for batch renders.
+# launch Blender ON THE XVFB DESKTOP (DISPLAY=:99 via hive-screen.sh, e.g.
+# `blender &`), not `blender -b`, for interactive MCP control. Headless
+# -b remains the right path for batch renders.
 
 # Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
 # — no PATH/LD_LIBRARY_PATH fiddling needed.
