@@ -30,6 +30,7 @@
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
+#include <sstream>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -158,6 +159,62 @@ int main(int argc, char* argv[]) {
                      {"event",ev}};
             try { g_send_frame(f); } catch (...) {}
         });
+
+    // Phase 36: screen idle watcher — independent of the channel. Every
+    // 60s: find hive-* containers with a live x11vnc, count established
+    // VNC clients (TCP :5900), and after HIVEMIND_SCREEN_IDLE_MIN idle
+    // minutes (default 15) tear the screen down via screen_ctl stop.
+    std::thread([] {
+        const char* env = std::getenv("HIVEMIND_SCREEN_IDLE_MIN");
+        int idle_limit = (env && *env) ? std::atoi(env) : 15;
+        if (idle_limit < 1) idle_limit = 15;
+        std::unordered_map<std::string, int> idle_min;   // cname -> streak
+        while (!g_stop) {
+            std::this_thread::sleep_for(std::chrono::seconds(60));
+            if (g_stop) break;
+            std::string names;
+            if (hwrunner::podman_simple({"ps", "--format", "{{.Names}}"},
+                                        &names) != 0)
+                continue;
+            std::istringstream in(names);
+            std::string cname;
+            while (std::getline(in, cname)) {
+                if (cname.rfind("hive-", 0) != 0) continue;
+                // Screen up at all? (x11vnc is the stack's keystone)
+                if (hwrunner::podman_simple({"exec", cname, "pgrep", "-x",
+                                             "x11vnc"}, nullptr) != 0) {
+                    idle_min.erase(cname);
+                    continue;
+                }
+                // Active viewers = ESTABLISHED conns to x11vnc :5900.
+                // Parse /proc/net/tcp{,6} — iproute2 isn't in the image.
+                // Local port 170C hex = 5900; st 01 = ESTABLISHED.
+                std::string tcp;
+                hwrunner::podman_simple({"exec", cname, "bash", "-c",
+                                         "cat /proc/net/tcp /proc/net/tcp6"},
+                                        &tcp);
+                int viewers = 0;
+                std::istringstream ts(tcp);
+                std::string line;
+                while (std::getline(ts, line)) {
+                    std::istringstream ls(line);
+                    std::string sl, local, remote, st;
+                    if (!(ls >> sl >> local >> remote >> st)) continue;
+                    if (st == "01" && local.size() >= 5 &&
+                        local.substr(local.size() - 4) == "170C")
+                        viewers++;
+                }
+                if (viewers > 0) { idle_min[cname] = 0; continue; }
+                const int streak = ++idle_min[cname];
+                if (streak >= idle_limit) {
+                    std::cerr << "worker: screen idle " << streak
+                              << "min — stopping " << cname << "\n";
+                    hwrunner::screen_ctl(cname.substr(5), "stop", "", "");
+                    idle_min.erase(cname);
+                }
+            }
+        }
+    }).detach();
 
     int backoff = 1;
     while (!g_stop) {

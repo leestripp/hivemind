@@ -14,6 +14,26 @@ set -u
 
 export DISPLAY=:99
 
+# Phase 36: stop mode — tear down the whole display stack (idle timeout
+# / manual screen-off). Order matters: the x11vnc WATCHDOG dies first,
+# else it revives x11vnc within 5s and the screen never goes dark.
+if [ "${1:-}" = "stop" ]; then
+    if [  /tmp/hive-screen.watchdog.pid ]; then
+        kill "$(cat /tmp/hive-screen.watchdog.pid)" 2>/dev/null || true
+        rm  /tmp/hive-screen.watchdog.pid
+    fi
+    # Fallback for a watchdog that lost its pidfile (matches its loop).
+    pkill  'pgrep -x x11vnc' 2>/dev/null || true
+    pkill -x x11vnc 2>/dev/null || true
+    pkill websockify 2>/dev/null || true
+    # The shared Chromium (CDP :9222) lives on this X display — the
+    # biggest RAM consumer, and dead anyway once Xvfb goes.
+    pkill  'remote-debugging-port=9222' 2>/dev/null || true
+    pkill -x openbox 2>/dev/null || true
+    pkill -x Xvfb 2>/dev/null || true
+    exit 0
+fi
+
 # Per-agent VNC password (8 chars — RFB limit), in the home mount.
 PW_FILE="/home/hive/.vnc-password"
 _pw="$(cat "$PW_FILE" 2>/dev/null || true)"
@@ -45,6 +65,7 @@ if ! alive x11vnc; then
             >>/tmp/x11vnc.log 2>&1
         sleep 5
     done' >/dev/null 2>&1 &
+    echo $! > /tmp/hive-screen.watchdog.pid   # Phase 36: stop kills it first
 fi
 
 alive websockify || \

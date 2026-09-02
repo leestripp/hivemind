@@ -113,8 +113,12 @@ void ensure_container(const std::string& agent, const std::string& image,
     fs::create_directories(home, ec);
     fs::create_directories(skills, ec);
 
+    // Phase 36: ALWAYS publish loopback 6080 (dynamic host port) — the
+    // screen stack then starts by pure exec, with NO container recreate
+    // (recreating to add the port killed the running agent mid-turn).
     std::vector<std::string> args{"create", "--name", cname, "--memory", "4g",
-                       "--cpus", "2", "--userns=keep-id"};
+                       "--cpus", "2", "--userns=keep-id",
+                       "-p", "127.0.0.1::6080"};
     if (gpu) {
         // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
         // without it rocminfo sees nothing), /dev/dri = GL/Vulkan render
@@ -275,10 +279,10 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     }
 
     if (action == "stop") {
+        // Phase 36: the script knows its own watchdog/pidfile — pkill
+        // trios here let the watchdog revive x11vnc (stop never stuck).
         std::string out;
-        podman_simple({"exec", cname, "bash", "-lc",
-                       "pkill websockify; pkill -x x11vnc; pkill -x Xvfb; true"},
-                      &out);
+        podman_simple({"exec", cname, "hive-screen.sh", "stop"}, &out);
         r.running = false;
         return r;
     }
@@ -305,9 +309,10 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         }
     }
 
-    // Recreate when the container is missing, has no published 6080, or
-    // runs a stale/different image. Home + workspace are bind mounts —
-    // they survive recreation.
+    // Phase 36: ensure_container always publishes 6080 now, so recreate
+    // is only a LEGACY fallback (pre-Phase-36 containers without the
+    // port) or for a stale/different image. Home + workspace are bind
+    // mounts — they survive recreation.
     std::string state;
     const bool exists =
         podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
