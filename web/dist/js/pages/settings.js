@@ -1,5 +1,5 @@
 import { API } from '../api.js';
-import { $, esc, log, getTheme, setTheme, getTimezone, setTimezone } from '../util.js';
+import { $, esc, getTheme, setTheme, getTimezone, setTimezone } from '../util.js';
 import { S } from '../state.js';
 
 

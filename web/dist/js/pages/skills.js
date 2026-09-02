@@ -171,6 +171,6 @@ async function loadRegistry() {
 }
 
 export function enterSkills() {
-  loadAll().catch(e => log?.(e.message));
+  loadAll().catch(e => alert(e.message));
   loadRegistry();
 }

@@ -63,12 +63,6 @@ export function fmtTimeTZ(iso) {
   }).replace(',', '');
 }
 
-export function log(msg) {
-  const el = $('output-log');
-  el.textContent += msg + '\n';
-  el.scrollTop = el.scrollHeight;
-}
-
 // ─── Real backend integration ─────────────────────────────────────────
 // The canvas state (S.nodes / S.edges) is mirrored to the backend:
 //   1. ensure a graph row exists (S.graphId), replacing nodes+edges
