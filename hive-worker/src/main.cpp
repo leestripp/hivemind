@@ -169,6 +169,7 @@ int main(int argc, char* argv[]) {
         int idle_limit = (env && *env) ? std::atoi(env) : 15;
         if (idle_limit < 1) idle_limit = 15;
         std::unordered_map<std::string, int> idle_min;   // cname -> streak
+        std::unordered_map<std::string, int> dns_fail;   // cname -> streak
         std::cerr << "worker: screen idle watcher up (limit "
                   << idle_limit << "min)\n";
         while (!g_stop) {
@@ -184,6 +185,46 @@ int main(int argc, char* argv[]) {
             std::string cname;
             while (std::getline(in, cname)) {
                 if (cname.rfind("hive-", 0) != 0) continue;
+
+                // Phase 38: DNS wedge health check. Container DNS dies
+                // when the pasta/aardvark plumbing wedges (observed on
+                // Forge 2026-09-02: LLM calls then silently retry with
+                // backoff). Probe getent (timeout-wrapped — a wedged
+                // lookup can hang). After 3 consecutive failures,
+                // `podman restart` re-creates the netns — but ONLY when
+                // the agent is idle (state "ready" / not in the fleet):
+                // a busy agent may be doing legit offline work (renders,
+                // compiles). Busy agents get a loud warning; their
+                // retrying LLM call eventually fails, the turn ends, and
+                // the next tick recycles once idle.
+                if (hwrunner::podman_simple(
+                        {"exec", cname, "timeout", "8", "getent", "hosts",
+                         "github.com"}, nullptr) == 0) {
+                    dns_fail.erase(cname);
+                } else {
+                    const int streak = ++dns_fail[cname];
+                    if (streak >= 3) {
+                        const std::string aid = cname.substr(5);
+                        std::string st;
+                        if (g_fleet) {
+                            auto sts = g_fleet->statuses();
+                            st = sts.value(aid, "");
+                        }
+                        if (st.empty() || st == "ready") {
+                            std::cerr << "worker: DNS wedged in " << cname
+                                      << " (agent idle) — restarting"
+                                         " container\n";
+                            hwrunner::podman_simple({"restart", cname},
+                                                    nullptr);
+                            dns_fail.erase(cname);
+                        } else if (streak == 3) {
+                            std::cerr << "worker: DNS wedged in " << cname
+                                      << " but agent is " << st
+                                      << " — will recycle when idle\n";
+                        }
+                    }
+                }
+
                 // Screen state from /proc/net/tcp{,6} on :5900 (170C hex).
                 // One exec, and zombie-proof: PID 1 (sleep) never reaps,
                 // so pgrep matches defunct x11vnc forever — but zombies
