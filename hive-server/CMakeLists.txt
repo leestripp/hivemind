@@ -34,7 +34,6 @@ set(EXECUTOR_SOURCES
 set(ROUTE_SOURCES
     include/hivemind/routes/StaticRoutes.cpp
     include/hivemind/routes/SystemRoutes.cpp
-    include/hivemind/routes/ProjectRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
     include/hivemind/routes/FileRoutes.cpp
     include/hivemind/routes/ConnectorRoutes.cpp

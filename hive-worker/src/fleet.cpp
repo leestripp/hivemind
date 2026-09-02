@@ -442,11 +442,6 @@ void Fleet::remove(const std::string& agent_id) {
                    / ("home-" + agent_id), ec);
 }
 
-bool Fleet::has(const std::string& agent_id) const {
-    std::lock_guard<std::mutex> lk(m_);
-    return agents_.count(agent_id) > 0;
-}
-
 bool Fleet::send_to(const std::string& agent_id, const json& op) {
     std::lock_guard<std::mutex> lk(m_);
     auto it = agents_.find(agent_id);
@@ -455,15 +450,6 @@ bool Fleet::send_to(const std::string& agent_id, const json& op) {
     return true;
 }
 
-void Fleet::stop_all() {
-    std::unordered_map<std::string, std::unique_ptr<AgentProcess>> drain;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        drain = std::move(agents_);
-        agents_.clear();
-    }
-    for (auto& kv : drain) kv.second->stop();
-}
 
 json Fleet::statuses() const {
     json out = json::object();

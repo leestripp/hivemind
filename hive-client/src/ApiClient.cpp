@@ -277,10 +277,6 @@ nlohmann::json ApiClient::resolve_approval(const std::string& id, bool approve) 
 
 nlohmann::json ApiClient::models() { return request("GET", "/api/models"); }
 
-bool ApiClient::healthy() {
-    try { return request("GET", "/api/health").value("status", "") == "ok"; }
-    catch (...) { return false; }
-}
 
 
 void ApiClient::cancel_thread(const std::string& thread_id) {

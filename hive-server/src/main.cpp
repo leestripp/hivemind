@@ -25,7 +25,6 @@
 #include "hivemind/routes/StaticRoutes.h"
 #include "hivemind/routes/SystemRoutes.h"
 #include "hivemind/SystemMonitor.h"
-#include "hivemind/routes/ProjectRoutes.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/routes/FileRoutes.h"
 #include "hivemind/routes/ConnectorRoutes.h"
@@ -250,7 +249,6 @@ int main(int argc, char* argv[]) {
     });
 
     // 2. Domain routes (all registered before the static catch-all).
-    register_project_routes(server);
     // Phase 12: graph/workflow/trigger/run routes REMOVED — workflow engine
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,

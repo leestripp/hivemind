@@ -110,11 +110,9 @@ public:
     /// Roster delete: stop the brain AND destroy its container + env file
     /// + home dir (best-effort; agent row is already gone server-side).
     void remove(const std::string& agent_id);
-    bool has(const std::string& agent_id) const;
     /// Route an op (task / approval_resp / cancel) to an agent.
     /// Returns false if the agent is not running here.
     bool send_to(const std::string& agent_id, const nlohmann::json& op);
-    void stop_all();
 
     /// {agent_id: state} for heartbeats.
     nlohmann::json statuses() const;

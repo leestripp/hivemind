@@ -88,8 +88,9 @@ cmake --build build --target lint-fix   # auto-fix
 
 Install: `cmake --install build` (default prefix `~/.local`).
 
-Runtime: server API on **:8421**, worker WebSocket channel on **:8423**,
-MCP bridge on **:8424** (loopback only). Enroll a worker with
+Runtime: server API on **:8421**, worker WebSocket channel on **:8423**
+(MCP servers run in-container in v2 — there is no hub-side bridge).
+Enroll a worker with
 `hive-server enroll-worker <name>`; connect with
 `hive-worker --server wss://<server> --key hmwk_… --name <name>`
 (TLS via the nginx proxy at `/api/workers/channel`; a co-hosted worker

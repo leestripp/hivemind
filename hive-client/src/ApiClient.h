@@ -99,7 +99,6 @@ public:
 
     // ── misc ──────────────────────────────────────────────────────────────
     nlohmann::json models();                                         // GET /api/models
-    bool healthy();                                                  // GET /api/health
 
     /// Raw-bytes GET (Phase 34: attachment/image download). Throws on
     /// transport or HTTP error. Path may contain a query string.
