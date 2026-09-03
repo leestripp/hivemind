@@ -82,7 +82,13 @@ The worker owns a container per agent (`hive-<agent-id>`):
   ROOT (they COPY `build/hive-agent/hive-agent`); `:browser` builds from
   `hive-server/data` (it COPYs `hive-screen.sh`). Built on the worker
   with `--build-arg HIVE_UID=$(geteuid)` so the container user matches
-  the host uid.
+  the host uid. Non-GPU agents default to `:latest` (the retired `:v2`
+  tag is no longer referenced).
+- Image drift: when an agent's container is STOPPED and its image id no
+  longer matches the target tag (images rebuilt after a dep bump), the
+  worker recreates it instead of resurrecting the stale one. Running
+  containers are never bounced — they adopt the new image at their next
+  natural restart.
 - Mounts: shared `/workspace` (all agents on this worker collaborate;
   also each agent's daedalus PROJECT ROOT -- state lives at
   `/workspace/.daedalus/daedalus-<Name>/`), per-agent home volume
