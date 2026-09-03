@@ -150,14 +150,23 @@ int main(int argc, char* argv[]) {
         };
     // Phase 33: on worker (re)connect, re-push every enabled global skill
     // for each agent homed on that rig (self-heals after worker downtime).
-    worker_channel.on_worker_online = [&agent_store, &hub](const std::string& wname) {
+    worker_channel.on_worker_online = [&agent_store, &hub,
+                                       &worker_channel](const std::string& wname) {
         // Phase C: spawn roster agents homed here (idempotent).
         hub.reconcile_worker(wname);
+        json keep = json::array();
         for (const auto& a : agent_store.list_agents()) {
             if (a.worker != wname) continue;
-            for (const auto& sk : agent_tools::list_enabled_skills(a.id))
+            for (const auto& sk : agent_tools::list_enabled_skills(a.id)) {
                 agent_tools::push_skill_to_worker(a, sk);
+                keep.push_back(sk);
+            }
         }
+        // Prune stale skill dirs on the worker: the sync protocol only
+        // adds, so leftovers from long-disabled skills would linger in
+        // the shared /skills mount forever (hit 2026-09-03).
+        worker_channel.send(wname,
+                            {{"op","skills_prune"},{"keep",keep}});
     };
     hivemind::SecretStore secret_store;
     ConnectorStore connector_store;

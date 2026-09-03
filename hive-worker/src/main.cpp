@@ -20,6 +20,7 @@
 #include <csignal>
 #include <condition_variable>
 #include <mutex>
+#include <set>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -644,7 +645,7 @@ int main(int argc, char* argv[]) {
                     }
                 } else if (op == "skill_begin" || op == "skill_file" ||
                            op == "skill_end" || op == "skill_abort" ||
-                           op == "skill_remove") {
+                           op == "skill_remove" || op == "skills_prune") {
                     // Phase 33: skill sync from the server. Files land in
                     // ~/.local/share/hive-worker/skills/<skill>/; on skill_end
                     // the agent's home gets ~/.agents/skills/<skill> →
@@ -657,7 +658,41 @@ int main(int argc, char* argv[]) {
                     };
                     const fs::path wbase = fs::path{std::getenv("HOME")} /
                                            ".local/share/hive-worker";
-                    if (op == "skill_remove") {
+                    if (op == "skills_prune") {
+                        // Desired-state sweep: "keep" is the union of every
+                        // enabled skill for agents homed on this worker.
+                        // Anything else in the shared library (or mirrored
+                        // into an agent home) is a stale leftover — the
+                        // push protocol only ever ADDS. (2026-09-03: a
+                        // long-disabled remotion-create lingered on the
+                        // droplet and leaked into Chief's /skills mount.)
+                        std::set<std::string> keep;
+                        for (const auto& k : frame.value("keep", json::array()))
+                            if (k.is_string()) keep.insert(k.get<std::string>());
+                        std::vector<fs::path> doomed;
+                        std::error_code ec;
+                        for (const auto& de :
+                             fs::directory_iterator(wbase / "skills", ec))
+                            if (!keep.count(de.path().filename().string()))
+                                doomed.push_back(de.path());
+                        for (const auto& he : fs::directory_iterator(wbase, ec)) {
+                            if (he.path().filename().string().rfind("home-", 0) != 0)
+                                continue;
+                            const fs::path mdir = he.path() / ".agents/skills";
+                            std::error_code ec2;
+                            if (!fs::exists(mdir, ec2)) continue;
+                            for (const auto& me : fs::directory_iterator(mdir, ec2))
+                                if (!keep.count(me.path().filename().string()))
+                                    doomed.push_back(me.path());
+                        }
+                        for (const auto& d : doomed) {
+                            std::error_code ec3;
+                            fs::remove_all(d, ec3);
+                            if (!ec3)
+                                std::cerr << "[skills] pruned stale "
+                                          << d.filename().string() << "\n";
+                        }
+                    } else if (op == "skill_remove") {
                         const std::string agent = frame.value("agent", "");
                         const std::string skill = frame.value("skill", "");
                         std::error_code ec;
