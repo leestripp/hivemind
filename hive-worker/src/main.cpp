@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <csignal>
+#include <condition_variable>
 #include <mutex>
 #include <chrono>
 #include <cstring>
@@ -269,17 +270,19 @@ int main(int argc, char* argv[]) {
                              {"caps",json::parse(caps)},{"proto",1},
                              {"models",hwfleet::list_worker_models()},
                              {"default_model",hwfleet::worker_default_model()}}.dump());
-            auto reply = ws.receiveText();
-            json r = reply ? json::parse(*reply) : json{};
-            if (r.value("op","") != "welcome") {
-                std::cerr << "worker: rejected: "
-                          << r.value("error", "no welcome") << "\n";
-                return 1;   // bad key / proto — reconnecting won't help
-            }
-            std::cout << "worker: connected as '" << name << "' (proto "
-                      << r.value("proto", 0) << ")\n";
-            backoff = 1;
-            auto connected_at = std::chrono::steady_clock::now();
+
+            // Handshake + protocol frames share ONE onText/readLoop path.
+            // receiveText() for the welcome was a silent frame-eater: its
+            // per-call buffer drops coalesced frames, and the hub's
+            // reconcile agent_spawn rides in the SAME TLS record as the
+            // welcome over wss/nginx — the spawn was eaten on every
+            // reconnect (hit 2026-09-03: Forge never spawned until a
+            // manual re-restart; the loopback droplet worker was immune
+            // because its frames arrive in separate segments).
+            std::mutex hs_m;
+            std::condition_variable hs_cv;
+            std::atomic<bool> welcomed{false};
+            json welcome_j;
 
             // All sends (heartbeat thread + exec threads) share one mutex.
             std::mutex send_m;
@@ -288,23 +291,8 @@ int main(int argc, char* argv[]) {
                 ws.sendText(f.dump());
             };
             g_send_frame = send_frame;
-
-            // heartbeat sender; receive loop below drives reconnect
             std::atomic<bool> dead{false};
-            std::thread hb([&] {
-                while (!g_stop && !dead) {
-                    std::this_thread::sleep_for(std::chrono::seconds(15));
-                    if (g_stop || dead) break;
-                    try {
-                        auto up = std::chrono::duration_cast<std::chrono::seconds>(
-                            std::chrono::steady_clock::now() - connected_at).count();
-                        send_frame({{"op","heartbeat"},{"uptime_s",up},
-                                    {"agents", g_fleet
-                                        ? g_fleet->statuses()
-                                        : json::object()}});
-                    } catch (...) { dead = true; }
-                }
-            });
+            auto connected_at = std::chrono::steady_clock::now();
 
             // ── 30.4: TCP streams over the channel ─────────────────────
             // stream_open → connect 127.0.0.1:port here, pump bytes both
@@ -340,6 +328,18 @@ int main(int argc, char* argv[]) {
             ws.onText([&](std::string msg) {
                 json frame;
                 try { frame = json::parse(msg); } catch (...) { return; }
+                if (!welcomed.load()) {
+                    // Handshake phase: welcome (or error) completes it; a
+                    // reconcile frame coalesced behind welcome falls through
+                    // to normal handling on the NEXT onText call.
+                    const std::string op0 = frame.value("op", "");
+                    if (op0 == "welcome" || op0 == "error") {
+                        { std::lock_guard lk(hs_m); welcome_j = frame; }
+                        welcomed = true;
+                        hs_cv.notify_all();
+                    }
+                    return;
+                }
                 const std::string op = frame.value("op", "");
                 if (op != "exec")
                     std::cout << "worker: frame: " << frame.dump() << "\n";
@@ -821,9 +821,52 @@ int main(int argc, char* argv[]) {
                     close_stream(frame.value("sid", ""), /*tell_peer=*/false);
                 }
             });
-            ws.readLoop();   // blocks until the connection closes
+
+            // Pump reads on a thread so the main flow can await welcome;
+            // on close it wakes the handshake waiter and ends hb below.
+            std::thread pump([&] {
+                try { ws.readLoop(); } catch (...) {}
+                dead = true;
+                hs_cv.notify_all();
+            });
+
+            json r;
+            {
+                std::unique_lock lk(hs_m);
+                hs_cv.wait_for(lk, std::chrono::seconds(20),
+                               [&] { return welcomed.load() || dead.load(); });
+                r = welcome_j;
+            }
+            if (!welcomed.load() || r.value("op","") != "welcome") {
+                std::cerr << "worker: rejected: "
+                          << r.value("error", "no welcome") << "\n";
+                try { ws.close(); } catch (...) {}
+                pump.join();
+                return 1;   // bad key / proto — reconnecting won't help
+            }
+            std::cout << "worker: connected as '" << name << "' (proto "
+                      << r.value("proto", 0) << ")\n";
+            backoff = 1;
+            connected_at = std::chrono::steady_clock::now();
+
+            // heartbeat sender; the pump thread drives reconnect via dead
+            std::thread hb([&] {
+                while (!g_stop && !dead) {
+                    std::this_thread::sleep_for(std::chrono::seconds(15));
+                    if (g_stop || dead) break;
+                    try {
+                        auto up = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now() - connected_at).count();
+                        send_frame({{"op","heartbeat"},{"uptime_s",up},
+                                    {"agents", g_fleet
+                                        ? g_fleet->statuses()
+                                        : json::object()}});
+                    } catch (...) { dead = true; }
+                }
+            });
+
+            pump.join();   // blocks until the connection closes
             std::cerr << "worker: connection closed\n";
-            dead = true;
             if (hb.joinable()) hb.join();
         } catch (const std::exception& e) {
             std::cerr << "worker: exception: " << e.what() << "\n";

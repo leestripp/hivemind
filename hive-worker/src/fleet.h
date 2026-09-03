@@ -27,7 +27,10 @@
 
 namespace hwfleet {
 
-inline constexpr const char* kImageV2 = "localhost/hive-agent:v2";
+// Phase 35 chain: :latest base → :browser → :gpu. The default is :latest
+// (the legacy :v2 tag stranded non-gpu agents on pre-chain images forever —
+// hit 2026-09-03: Chief ran a daedalus-0.9.6 :v2 while :latest was 1.0.3).
+inline constexpr const char* kImageLatest = "localhost/hive-agent:latest";
 // Phase 35: GPU workhorse image (Containerfile.hive-agent-gpu)
 inline constexpr const char* kImageGpu = "localhost/hive-agent:gpu";
 
@@ -43,7 +46,7 @@ struct AgentSpec {
     bool    auto_approve = false;
     std::string system_prompt; // written to the shared volume, passed by path
     nlohmann::json mcp_servers = nlohmann::json::array();
-    std::string image;         // "" -> kImageV2 (verbatim override wins)
+    std::string image;         // "" -> kImageLatest (verbatim override wins)
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
 };
 
@@ -52,7 +55,7 @@ struct AgentSpec {
 // verify the type -> image mapping without spawning anything.
 inline std::string resolved_image(const AgentSpec& s) {
     if (!s.image.empty()) return s.image;
-    return s.type == "gpu" ? kImageGpu : kImageV2;
+    return s.type == "gpu" ? kImageGpu : kImageLatest;
 }
 
 /// One running (or restarting) hive-agent session.

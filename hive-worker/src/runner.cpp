@@ -96,9 +96,33 @@ void ensure_container(const std::string& agent, const std::string& image,
     if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
                       &state) == 0) {
         if (state.find("running") != std::string::npos) return;   // up
-        if (podman_simple({"start", cname}, &state) != 0)
-            throw std::runtime_error("podman start failed: " + state);
-        return;
+        // Stopped container: recreate when the image DRIFTED (dep bumps,
+        // screen-stack changes) so a restart actually picks up the new
+        // image — plain `podman start` would resurrect the old one
+        // forever (hit 2026-09-03: daedalus 1.0.3 images rebuilt, agents
+        // still on the old IDs). Running containers are left alone —
+        // they adopt the new image at their next natural restart.
+        auto trimmed = [](std::string v) {
+            while (!v.empty() && (v.back() == '\n' || v.back() == ' ' ||
+                                  v.back() == '\t' || v.back() == '\r'))
+                v.pop_back();
+            return v;
+        };
+        std::string have, want;
+        podman_simple({"inspect", "--format", "{{.Image}}", cname}, &have);
+        podman_simple({"image", "inspect", "--format", "{{.Id}}", image},
+                      &want);
+        if (!trimmed(have).empty() && !trimmed(want).empty() &&
+            trimmed(have) != trimmed(want)) {
+            std::cerr << "runner: image drifted for " << cname
+                      << " — recreating on " << image << "\n";
+            podman_simple({"rm", "-f", cname}, nullptr);
+            // fall through to the create path below
+        } else {
+            if (podman_simple({"start", cname}, &state) != 0)
+                throw std::runtime_error("podman start failed: " + state);
+            return;
+        }
     }
 
     // Shared workspace ON THIS WORKER (2026-08-29): all agents on the rig

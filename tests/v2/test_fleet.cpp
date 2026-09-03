@@ -27,7 +27,7 @@ int main() {
     // containers so it always executes, even in the early-return path).
     {
         hwfleet::AgentSpec s;
-        assert(hwfleet::resolved_image(s) == hwfleet::kImageV2);
+        assert(hwfleet::resolved_image(s) == hwfleet::kImageLatest);
         s.type = "gpu";
         assert(hwfleet::resolved_image(s) == hwfleet::kImageGpu);
         s.image = "localhost/custom:tag";       // explicit override wins
