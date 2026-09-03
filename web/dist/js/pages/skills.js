@@ -161,6 +161,20 @@ async function loadRegistry() {
         await loadAll();   // refresh library table + enabled chips
         alert(`Installed "${r.installed}"${r.version ? ' v' + r.version : ''} — toggle it on per agent above.`);
       } catch (err) {
+        // The install may have succeeded server-side even when the
+        // response was lost (hub restart mid-request, network blip) —
+        // re-check before crying wolf. (2026-09-03: pdf installed fine
+        // while the user saw a fetch error + the button reset.)
+        try {
+          const reg = await API.get('/api/skills/registry');
+          const now = (reg.entries || []).find(x => x.name === entry.name);
+          if (now && now.installed) {
+            b.textContent = '✓ Installed';
+            await loadAll();
+            alert(`Installed "${entry.name}" (confirmed after a connection hiccup).`);
+            return;
+          }
+        } catch {}
         b.disabled = false; b.textContent = '⬇ Install';
         alert(err.message);
       }
