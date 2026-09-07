@@ -57,7 +57,7 @@ inline std::ostream& operator<<(std::ostream& os,
  * @brief Load and validate the Serper API key from the SettingsStore.
  *
  * §v0.5.0+: the SQLite SettingsStore (`serper_config` table, singleton row
- * id=1, in `$XDG_DATA_HOME/hive-brain/daedalus.db`) is the sole source of
+ * id=1, in `$XDG_DATA_HOME/hive-brain/hive-agent.db`) is the sole source of
  * truth for the key. Legacy settings.json / config.json files are no
  * longer consulted.
  *

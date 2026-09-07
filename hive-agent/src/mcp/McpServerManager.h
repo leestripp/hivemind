@@ -55,7 +55,7 @@ public:
     void add_config(const McpServerConfig& config);
 
     // §v0.5.0: Load configuration from a SettingsStore (SQLite).
-    // Pops McpServer entries out of the daedalus.db's mcp_servers table
+    // Pops McpServer entries out of the hive-agent.db's mcp_servers table
     // and ingests them into the same in-memory configs_ map that
     // load_config() uses. Use this when the user has migrated to the
     // SQLite-backed settings.

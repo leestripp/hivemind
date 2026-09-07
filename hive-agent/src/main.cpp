@@ -29,7 +29,7 @@
 //   HIVEMIND_AUTO_APPROVE=1      (default: approvals become events)
 //   HIVEMIND_SKILLS_DIR          (extra read-only skills mount;
 //                                 ':'-separated for several)
-//   HIVEMIND_MCP_SERVERS         (JSON array; seeded into daedalus.db)
+//   HIVEMIND_MCP_SERVERS         (JSON array; seeded into hive-agent.db)
 //   HIVEMIND_AGENT_HOME       (default <project>/.daedalus/daedalus-<Name>)
 //
 // argv[1] = project root (default CWD; the worker launches with
@@ -219,7 +219,7 @@ private:
 };
 
 // MCP seeding: write the roster-provided server specs into the agent's
-// own daedalus.db BEFORE Agent construction (same approach as v1's
+// own hive-agent.db BEFORE Agent construction (same approach as v1's
 // seed_mcp_servers, but hive-agent owns its db outright). hive-brain then
 // spawns MCP servers as local child processes - in the container.
 void seed_mcp_servers(const fs::path& home, const json& servers) {

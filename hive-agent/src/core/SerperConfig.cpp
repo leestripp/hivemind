@@ -69,7 +69,7 @@ SerperApiKeyResult load_serper_api_key() {
     // The serper api_key lives in the serper_config SQLite table.
     const auto& p = hive::Paths::global();
     fs::path db_dir = p.user_data_root();
-    fs::path db_path = db_dir / "daedalus.db";
+    fs::path db_path = db_dir / "hive-agent.db";
 
     SerperApiKeyResult r;
     r.settings_path = db_path;
@@ -78,7 +78,7 @@ SerperApiKeyResult load_serper_api_key() {
     if (!fs::exists(db_path, ec)) {
         r.status = SerperApiKeyResult::Status::MISSING_FILE;
         r.error_detail = "SettingsStore not found at " + db_path.string()
-                       + ". Run daedalus-cli --migrate-data to populate it.";
+                       + " (serper_config table).";
         return r;
     }
 

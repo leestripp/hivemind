@@ -22,7 +22,7 @@
  * === Per-user (global) data ===
  *
  * Settings (models, MCP servers, kv pairs) live in the SQLite
- * SettingsStore at `$XDG_DATA_HOME/hive-brain/daedalus.db`.
+ * SettingsStore at `$XDG_DATA_HOME/hive-brain/hive-agent.db`.
  * Use `hive::SettingsStore::instance()` to access it.
  */
 #pragma once

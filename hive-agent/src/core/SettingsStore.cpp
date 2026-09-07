@@ -8,9 +8,9 @@
 // place (OmniNet) instead of duplicating it here.
 //
 // Stored at:
-//   $XDG_DATA_HOME/hive-brain/daedalus.db        (default)
-//       └─ ~/.local/share/hive-brain/daedalus.db
-//   <home>/daedalus.db                          (per-agent override)
+//   $XDG_DATA_HOME/hive-brain/hive-agent.db        (default)
+//       └─ ~/.local/share/hive-brain/hive-agent.db
+//   <home>/hive-agent.db                          (per-agent override)
 //
 // Schema is created idempotently on first open. `schema_version` table
 // keeps migrations straightforward.
@@ -566,8 +566,8 @@ SettingsStore::SettingsStore(fs::path db_path, bool /*auto_migrate*/) {
 // ============================================================================
 fs::path default_db_path()
 {
-    // XDG_DATA_HOME/hive-brain/daedalus.db (default
-    // ~/.local/share/hive-brain/daedalus.db) — matches the plan.
+    // XDG_DATA_HOME/hive-brain/hive-agent.db (default
+    // ~/.local/share/hive-brain/hive-agent.db) — matches the plan.
     fs::path dir = fs::path(Paths::global().user_data_root());
     fs::create_directories(dir);
     fs::path db = dir / "hive-agent.db";

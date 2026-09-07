@@ -14,8 +14,8 @@
 //   - Per-project session memory / messages — those move into the DB
 //     separately in v0.3.5.
 //
-// Backed by SQLite at `<XDG_DATA_HOME>/hive-brain/daedalus.db`
-// (default `~/.local/share/hive-brain/daedalus.db`).
+// Backed by SQLite at `<XDG_DATA_HOME>/hive-brain/hive-agent.db`
+// (default `~/.local/share/hive-brain/hive-agent.db`).
 //
 // Thread-safety: all methods are safe to call from multiple threads.
 // The underlying SQLite handle is opened in serialized mode.
@@ -77,7 +77,7 @@ public:
     /// Per-agent settings root. Pass the same `home` and you get a handle
     /// that shares the same DbPool connection as any prior call with the
     /// same `home`. Pass a different `home` and you get a distinct DB under
-    /// `<home>/daedalus.db`.
+    /// `<home>/hive-agent.db`.
     ///
     /// §B2 fix: returns by value (move-constructed from the internal
     /// temporary). The DbPool entry stays alive for the process duration;
