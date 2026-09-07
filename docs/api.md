@@ -40,6 +40,15 @@ worker-local so cross-worker moves start fresh unless migrated manually).
 |----------|-------|
 | `GET /api/workers` | list with online status + last_seen |
 | `DELETE /api/workers/:name` | decommission |
+| `POST /api/workers/:name/default-model` | set worker's default model (`{model}`) |
+| `GET /api/workers/:name/models` | full model registry of that worker (**admin**) |
+| `POST /api/workers/:name/models` | upsert a model entry `{name, provider, host, …}` (**admin**) |
+| `DELETE /api/workers/:name/models/:model` | remove an entry (refuses the default) (**admin**) |
+| `POST /api/workers/:name/secrets` | write-only `{provider, key}` → worker's secrets.json (**admin**) |
+
+Model-registry management routes are **relay-only**: the hub forwards
+them over the worker channel and persists nothing — models.json /
+secrets.json stay worker-local (credentials never live on the hub).
 
 Worker enrollment is **CLI-only** (admin runs it on the hub host):
 `hive-server enroll-worker <name>` prints the raw `hmwk_` key ONCE

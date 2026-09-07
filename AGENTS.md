@@ -172,7 +172,12 @@ Key architectural mapping:
   `workers.db`; workers authenticate over `wss://`.
 - LLM credentials are **worker-owned** (`models.json` + `secrets.json`
   mode 0600) and injected into agents as spawn env. **Never** store keys
-  on the hub.
+  on the hub. Model/secret management routes
+  (`/api/workers/:name/models|secrets`) are **relay-only**: they forward
+  over the worker channel and persist nothing hub-side; keep them
+  admin-scoped in the auth middleware. Agents run daedalus with
+  `explicit_model_wins` — models.json is the single registry of record;
+  the per-agent daedalus settings store must never shadow it.
 - Workspace writes are path-confined — `send_file` destinations must not
   escape the company drive.
 

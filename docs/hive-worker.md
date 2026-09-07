@@ -147,7 +147,25 @@ hive-agent stdout events and the channel op the worker maps them to:
 file (`env/<agent-id>.env`) with HIVEMIND_API_HOST / HIVEMIND_API_KEY /
 HIVEMIND_CHAT_ENDPOINT / HIVEMIND_MODEL / HIVEMIND_MAX_CONTEXT /
 HIVEMIND_TEMPERATURE and passes it to `podman exec --env-file`. The hub
-never sees credentials.
+never sees credentials at rest; hive-agent sets daedalus'
+`explicit_model_wins` so the per-agent settings store can never override
+this injection (model-registry unification Phase 1 — models.json is the
+single source of truth).
+
+### Registry management over the channel (`model_ctl`)
+
+The hub relays registry management to the worker (it persists nothing):
+
+| `action` | frame fields | effect |
+|---|---|---|
+| `set_default` (default) | `model` | writes the models.json `"default"` key |
+| `list` | — | replies `data` = `{"models": {name: entry}, "default": name}` (secret-free) |
+| `upsert` | `model`, `entry` | create/replace an entry; requires provider + host |
+| `delete` | `model` | removes an entry; refuses the current default |
+| `set_secret` | `provider`, `key` | write-only into secrets.json (0600 enforced); never echoed |
+
+All reply synchronously as `model_result` (`error` set on failure).
+Frames omitting `action` behave as `set_default` (older hubs).
 
 ## MCP
 
