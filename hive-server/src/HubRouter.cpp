@@ -25,10 +25,18 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
         std::lock_guard<std::mutex> lk(m_);
         task_id = "t-" + std::to_string(next_task_++);
     }
+    // Phase 40: carry the company roster with every task so agents can
+    // discover each other (list_agents tool). Without it an agent told
+    // to "message Forge" had no way to learn who exists and looped
+    // trying to call a nonexistent directory tool (2026-09-07 incident).
+    json roster = json::array();
+    for (const auto& a : agents_.list_agents())
+        roster.push_back({{"id", a.id}, {"name", a.name}});
     json op = {{"op", "task"},
                {"agent_id", agent.id},
                {"id", task_id},
                {"thread_id", thread_id},
+               {"roster", roster},
                {"text", text}};
     if (!channel_.send(agent.worker, op)) {
         std::cerr << "[hub] dispatch failed: worker '" << agent.worker

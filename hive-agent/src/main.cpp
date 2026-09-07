@@ -278,6 +278,14 @@ void seed_mcp_servers(const fs::path& home, const json& servers) {
 // each turn, read by AttachFileTool. Single turn thread → no locking.
 static std::string g_thread_id;
 
+// Phase 40: company roster, cached from each task frame (hub injects it
+// in HubRouter::dispatch). The list_agents tool reads it so agents can
+// discover one another before message_agent — without it an agent told
+// to "message Forge" looped on echo-notes begging for a directory tool
+// (2026-09-07 incident).
+static json g_roster = json::array();
+static std::mutex g_roster_mu;
+
 int main(int argc, char** argv) {
     // -- config ----------------------------------------------------------
     const fs::path project_root =
@@ -379,6 +387,7 @@ int main(int argc, char** argv) {
         std::string get_name() const override { return "message_agent"; }
         std::string get_description() const override {
             return "Send an async message to another agent (by name or id). "
+                   "Use list_agents first if you are unsure who exists. "
                    "The reply arrives later as a new task in your shared "
                    "pair thread - do NOT wait for it inline; continue your "
                    "own work.";
@@ -410,6 +419,29 @@ int main(int argc, char** argv) {
         }
     };
     agent.register_tool(std::make_unique<MessageAgentTool>());
+
+    // list_agents (Phase 40): company directory from the roster the hub
+    // injects into every task frame.
+    class ListAgentsTool final : public daedalus::BaseTool {
+    public:
+        std::string get_name() const override { return "list_agents"; }
+        std::string get_description() const override {
+            return "List the agents in the company (name + id). Use this "
+                   "to discover who exists before calling message_agent.";
+        }
+        json get_definition() const override {
+            return {{"type","function"},
+                    {"function",{{"name","list_agents"},
+                                 {"description", get_description()},
+                                 {"parameters",{{"type","object"},
+                                                {"properties",json::object()}}}}}};
+        }
+        json execute(const json&, daedalus::HostToolContext&) override {
+            std::lock_guard<std::mutex> lk(g_roster_mu);
+            return {{"status","success"}, {"agents", g_roster}};
+        }
+    };
+    agent.register_tool(std::make_unique<ListAgentsTool>());
 
     // attach_file (Phase 35): agent → chat attachments. Copies a
     // workspace file into the thread's outgoing dir; the worker ships it
@@ -530,6 +562,10 @@ int main(int argc, char** argv) {
 
         const std::string kind = op.value("op", "");
         if (kind == "task") {
+            if (op.contains("roster") && op["roster"].is_array()) {
+                std::lock_guard<std::mutex> lk(g_roster_mu);
+                g_roster = op["roster"];
+            }
             Task t{op.value("id", ""), op.value("text", ""),
                    op.value("thread_id", "")};
             // Attachments: the worker places them under
