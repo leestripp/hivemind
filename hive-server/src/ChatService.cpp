@@ -6,6 +6,8 @@
 #include "hivemind/HubRouter.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/ContainerManager.h"
+#include "hivemind/ExecAuditStore.h"
 
 #include <nlohmann/json.hpp>
 
@@ -83,6 +85,7 @@ void ChatService::fan_in(const std::string& thread_id,
     live->thread_id  = thread_id;
     live->agent_id   = agent.id;
     live->agent_name = agent.name;
+    live->worker     = agent.worker;
     live->generation = generation;
 
     const std::string task_id = hub_.dispatch(agent, thread_id, prompt);
@@ -171,6 +174,22 @@ void ChatService::complete_turn(const std::string& task_id,
     const std::string agent_id   = live->agent_id;
     const std::string agent_name = live->agent_name;
     const int generation         = live->generation;
+
+    // Exec audit: turns are the unit of agent activity in the worker
+    // architecture (NDJSON stdio turns replaced per-command container
+    // execs, which starved this table — System page flatlined 2026-08-29).
+    // Log every completed turn so execs_24h / avg_ms / last_exec move.
+    {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - live->started).count();
+        const bool to = error.find("timed out") != std::string::npos ||
+                        error.find("timeout")   != std::string::npos;
+        try {
+            ContainerManager::exec_audit().log(agent_id, "<agent turn>",
+                                               error.empty() ? 0 : 1, to, ms,
+                                               live->worker);
+        } catch (...) {}
+    }
 
     std::string out = body;
     if (!error.empty()) {

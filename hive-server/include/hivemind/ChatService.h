@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <chrono>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,6 +32,9 @@ public:
         int         generation = 0;   // agent->agent fan-in depth
         std::string partial;          // streamed so far (task_delta)
         std::string error;            // non-empty if the turn failed
+        std::string worker;           // placement, for the exec audit row
+        std::chrono::steady_clock::time_point started =
+            std::chrono::steady_clock::now();  // turn start, for avg_ms
         bool done = false;
         bool cancelling = false;
     };
