@@ -93,6 +93,11 @@ private:
     mutable std::mutex m_;
     pid_t pid_ = -1;
     int stdin_fd_ = -1;
+    // Frames that arrived while the exec pipe was down (container boot)
+    // — flushed by spawn_exec once stdin_fd_ is live. Without this the
+    // first task after a cold spawn raced the exec and vanished silently
+    // (hit 2026-09-07: Forge's first Phase-43 task dropped mid-boot).
+    std::vector<std::string> pending_;
     std::string state_ = "down";
     std::atomic<bool> stopping_{false};
     int restart_backoff_s_ = 1;

@@ -145,11 +145,25 @@ void AgentProcess::spawn_exec() {
         ::close(to_child[1]); ::close(from_child[0]);
         throw std::runtime_error("fork failed");
     }
+    std::vector<std::string> flush;
     {
         std::lock_guard<std::mutex> lk(m_);
         pid_ = pid;
         stdin_fd_ = to_child[1];
+        flush.swap(pending_);
     }
+    for (const auto& pf : flush) {
+        std::string l = pf + "\n";
+        const char* q = l.data(); size_t left = l.size();
+        while (left > 0) {
+            ssize_t n = ::write(to_child[1], q, left);
+            if (n <= 0) break;
+            q += n; left -= (size_t)n;
+        }
+    }
+    if (!flush.empty())
+        std::cerr << "fleet: flushed " << flush.size()
+                  << " queued frame(s) to " << spec_.id << "\n";
     // Caller guarantees any previous reader_ is joined (start: fresh;
     // monitor_loop: joins before respawn).
     reader_ = std::thread(&AgentProcess::reader_loop, this, from_child[0]);
@@ -247,7 +261,12 @@ void AgentProcess::monitor_loop() {
 
 void AgentProcess::send(const json& op) {
     std::lock_guard<std::mutex> lk(m_);
-    if (stdin_fd_ < 0) return;
+    if (stdin_fd_ < 0) {
+        pending_.push_back(op.dump());
+        std::cerr << "fleet: stdin not ready for " << spec_.id
+                  << " — queued (" << pending_.size() << " pending)\n";
+        return;
+    }
     const std::string line = op.dump() + "\n";
     const char* p = line.data();
     size_t left = line.size();

@@ -340,8 +340,14 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 const std::string op = frame.value("op", "");
-                if (op != "exec")
-                    std::cout << "worker: frame: " << frame.dump() << "\n";
+                if (op != "exec") {
+                    json shown = frame;
+                    // Never log injected credentials (Phase 43 llm block).
+                    if (shown.contains("llm") && shown["llm"].is_object() &&
+                        shown["llm"].contains("api_key"))
+                        shown["llm"]["api_key"] = "…";
+                    std::cout << "worker: frame: " << shown.dump() << "\n";
+                }
 
                 // -- v2 fleet ops (Plan.md Phase B) --------------------
                 if (op == "agent_spawn") {
