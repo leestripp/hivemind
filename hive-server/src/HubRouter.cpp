@@ -140,7 +140,9 @@ void HubRouter::on_worker_frame(const std::string& worker,
             }
         }
         if (chat_) chat_->complete_turn(task, frame.value("body", ""),
-                                        frame.value("error", ""), atts);
+                                        frame.value("error", ""), atts,
+                                        frame.value("thread_id", ""),
+                                        agent_id);
         return;
     }
     if (op == "approval_req") {

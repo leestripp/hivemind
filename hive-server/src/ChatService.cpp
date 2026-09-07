@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace {
@@ -161,14 +162,48 @@ void ChatService::append_delta(const std::string& task_id,
 void ChatService::complete_turn(const std::string& task_id,
                                 const std::string& body,
                                 const std::string& error,
-                                const std::string& attachments_json) {
+                                const std::string& attachments_json,
+                                const std::string& frame_thread_id,
+                                const std::string& frame_agent_id) {
     std::shared_ptr<LiveTurn> live;
     {
         std::lock_guard<std::mutex> lk(m_);
         auto it = by_task_.find(task_id);
-        if (it == by_task_.end()) return;      // unknown/cancelled turn
-        live = it->second;
-        by_task_.erase(it);
+        if (it != by_task_.end()) {
+            live = it->second;
+            by_task_.erase(it);
+        }
+    }
+    if (!live) {
+        // Watchdog/manual-cancel tombstone: a late result for a cancelled
+        // task is dropped silently, NOT treated as a restart orphan.
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            if (cancelled_tasks_.erase(task_id) > 0) return;
+        }
+        // Phase 39 H2 — restart recovery. A hub restart wipes in-memory
+        // LiveTurns but workers keep running in-flight turns; when the
+        // result arrives the task is unknown. The frame still carries
+        // thread_id/agent_id (hive-agent main.cpp:517 → worker
+        // main.cpp:142), so post the reply directly. Terminal: no fan-in
+        // continuation — generation state died with the restart.
+        if (frame_thread_id.empty() || frame_agent_id.empty()) return;
+        if (body.empty() && error.empty()) return;
+        try {
+            if (!threads_.get_thread(frame_thread_id)) return;
+            std::string out = body;
+            if (!error.empty()) out += "\n\n*(turn ended with errors)*";
+            out += "\n\n*(recovered after hub restart)*";
+            threads_.add_message(frame_thread_id, "agent", frame_agent_id,
+                                 out, attachments_json);
+            std::fprintf(stderr,
+                "[chat] recovered orphaned turn %.16s → thread %.8s "
+                "(hub restart)\n", task_id.c_str(), frame_thread_id.c_str());
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[chat] ERROR recovering orphaned turn: %s\n",
+                         e.what());
+        }
+        return;
     }
     const std::string thread_id  = live->thread_id;
     const std::string agent_id   = live->agent_id;
@@ -272,6 +307,80 @@ ChatService::agent_activity() {
 
 void ChatService::quiesce() { stopping_ = true; }
 
+// ── Phase 39 H3: turn watchdog ───────────────────────────────────────
+
+int ChatService::turn_timeout_s() {
+    static const int v = [] {
+        const char* e = std::getenv("HIVEMIND_TURN_TIMEOUT_S");
+        if (!e || !*e) return 1200;
+        const int n = std::atoi(e);
+        return n >= 0 ? n : 1200;
+    }();
+    return v;
+}
+
+void ChatService::start_watchdog() {
+    if (turn_timeout_s() <= 0) return;   // disabled
+    watchdog_ = std::thread([this] { watchdog_loop(); });
+}
+
+ChatService::~ChatService() {
+    stopping_ = true;
+    if (watchdog_.joinable()) watchdog_.join();
+}
+
+void ChatService::watchdog_loop() {
+    while (!stopping_) {
+        // 60s tick, but wake promptly on shutdown.
+        for (int i = 0; i < 60 && !stopping_; ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (stopping_) break;
+
+        const int timeout = turn_timeout_s();
+        struct Victim { std::string task_id, thread_id, agent_id; };
+        std::vector<Victim> victims;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            const auto now = std::chrono::steady_clock::now();
+            for (auto& [tid, vec] : live_) {
+                for (auto& t : vec) {
+                    if (t->done || t->cancelling || t->task_id.empty())
+                        continue;
+                    const auto age = std::chrono::duration_cast<
+                        std::chrono::seconds>(now - t->started).count();
+                    if (age < timeout) continue;
+                    t->cancelling = true;
+                    if (!t->task_id.empty())
+                        cancelled_tasks_.insert(t->task_id);
+                    victims.push_back({t->task_id, t->thread_id, t->agent_id});
+                }
+            }
+        }
+        for (const auto& v : victims) {
+            std::fprintf(stderr,
+                "[chat] WATCHDOG: turn %.16s on agent %.8s exceeded %ds — "
+                "cancelling\n", v.task_id.c_str(), v.agent_id.c_str(), timeout);
+            // Abort worker-side so the agent's serial queue unblocks.
+            if (auto agent = agents_.get_agent(v.agent_id)) {
+                try { hub_.cancel_agent(*agent, v.thread_id); }
+                catch (...) {}
+            }
+            // Tell the thread what happened, then retire the turn.
+            try {
+                threads_.add_message(v.thread_id, "system", "hivemind",
+                    "*(a turn timed out after " + std::to_string(timeout) +
+                    "s and was cancelled — hub watchdog)*");
+            } catch (...) {}
+            std::lock_guard<std::mutex> lk(m_);
+            auto it = live_.find(v.thread_id);
+            if (it != live_.end())
+                for (auto& t : it->second)
+                    if (t->task_id == v.task_id) t->done = true;
+            by_task_.erase(v.task_id);
+        }
+    }
+}
+
 void ChatService::cancel_thread(const std::string& thread_id) {
     std::vector<RosterAgent> to_cancel;
     {
@@ -281,6 +390,7 @@ void ChatService::cancel_thread(const std::string& thread_id) {
         for (auto& t : it->second) {
             if (t->done || t->cancelling) continue;
             t->cancelling = true;
+            if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
             auto agent = agents_.get_agent(t->agent_id);
             if (agent) to_cancel.push_back(*agent);
         }

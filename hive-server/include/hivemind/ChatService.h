@@ -11,6 +11,8 @@
 #include <mutex>
 #include <chrono>
 #include <string>
+#include <thread>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -22,7 +24,8 @@ struct RosterAgent;
 class ChatService {
 public:
     ChatService(AgentStore& agents, ThreadStore& threads, HubRouter& hub)
-        : agents_(agents), threads_(threads), hub_(hub) {}
+        : agents_(agents), threads_(threads), hub_(hub) { start_watchdog(); }
+    ~ChatService();
 
     struct LiveTurn {
         std::string task_id;
@@ -60,7 +63,13 @@ public:
     void append_delta(const std::string& task_id, const std::string& text);
     void complete_turn(const std::string& task_id, const std::string& body,
                        const std::string& error,
-                       const std::string& attachments_json = "[]");
+                       const std::string& attachments_json = "[]",
+                       // Restart recovery (Phase 39 H2): hub restarts wipe
+                       // LiveTurns, so a completing task is unknown. The
+                       // frame still carries thread_id/agent_id — post the
+                       // reply to the thread instead of dropping it.
+                       const std::string& frame_thread_id = "",
+                       const std::string& frame_agent_id = "");
 
     /// Snapshot of in-progress (and just-finished) turns for a thread.
     std::vector<LiveTurn> activity(const std::string& thread_id);
@@ -89,6 +98,21 @@ private:
     std::unordered_map<std::string, std::vector<std::shared_ptr<LiveTurn>>> live_;
     std::unordered_map<std::string, std::shared_ptr<LiveTurn>> by_task_;
     std::atomic<bool> stopping_{false};
+
+    // Phase 39 H3 — turn watchdog. hive-agent runs tasks serially per
+    // agent, so one hung turn strands every later task to that agent;
+    // hub-side there was NO timeout at all (a wedged worker task sat in
+    // by_task_ forever, 2026-09-03 incident). The watchdog sweeps every
+    // 60s and force-cancels turns older than HIVEMIND_TURN_TIMEOUT_S
+    // (default 1200; 0 disables). cancelled_tasks_ tombstones tell
+    // complete_turn to silently drop a late result for a cancelled task
+    // instead of taking the H2 restart-recovery path.
+    std::thread watchdog_;
+    std::unordered_set<std::string> cancelled_tasks_;
+    void start_watchdog();
+    void watchdog_loop();
+    static int turn_timeout_s();   // env HIVEMIND_TURN_TIMEOUT_S, def 1200
+
     static constexpr std::size_t kMaxLivePerThread = 32;
     static constexpr int kMaxFanInGenerations = 3;
 };
