@@ -300,8 +300,11 @@ int main(int argc, char** argv) {
         "HIVEMIND_DAEDALUS_HOME",
         (project_root / ".daedalus" / ("daedalus-" + name)).string());
 
-    // LLM credentials injected by the worker (explicit fields; daedalus
-    // falls back to them when model_name is not a settings key).
+    // LLM credentials injected by the worker from ITS models.json —
+    // the single registry of record. explicit_model_wins stops the
+    // per-agent daedalus settings store from overriding them (a shadow
+    // registry diverging invisibly — model-registry unification, Phase 1).
+    cfg.explicit_model_wins = true;
     cfg.model_name     = env_or("HIVEMIND_MODEL");
     cfg.api_host       = env_or("HIVEMIND_API_HOST");
     cfg.api_key        = env_or("HIVEMIND_API_KEY");
