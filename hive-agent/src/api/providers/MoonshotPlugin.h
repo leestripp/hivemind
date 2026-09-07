@@ -19,7 +19,7 @@
 //     in MiniMaxSseParser/LLMClient.cpp).
 //   - Static model table (kimi-k3, kimi-k2.x, moonshot-v1 context sizes).
 //
-// Internal header — not part of the public libdaedalus API.
+// Internal header — not part of the public the engine API.
 
 #pragma once
 

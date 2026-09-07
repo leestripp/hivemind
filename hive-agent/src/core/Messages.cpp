@@ -39,9 +39,9 @@
 // Logger. Same formatted text routed through the Logger instead of
 // writing to stderr directly.
 #define LOG_CERR(level, expr) do {                          \
-        std::ostringstream _daedalus_msg;                   \
-        _daedalus_msg << expr;                               \
-        LOG_##level(_daedalus_msg.str());                    \
+        std::ostringstream _hive_msg;                   \
+        _hive_msg << expr;                               \
+        LOG_##level(_hive_msg.str());                    \
     } while (0)
 #include <thread>
 #include <chrono>
@@ -258,7 +258,7 @@ void re_raise(int sig) {
 // The actual signal handler. Iterates the registry, writes each
 // .crash file with the most recently persisted contents, then
 // re-raises.
-extern "C" void daedalus_crash_signal_handler(int sig) {
+extern "C" void hive_crash_signal_handler(int sig) {
     // §CRASH-6: no allocation, no locks, no stdlib — only atomic loads
     // and async-signal-safe syscalls. The registry slots point at
     // leaked MessagesCrashState objects, so even a Messages destructor
@@ -335,7 +335,7 @@ void install_signal_handlers_once() {
     static std::atomic<bool> installed{false};
     if (installed.exchange(true)) return;
     struct sigaction sa{};
-    sa.sa_handler = daedalus_crash_signal_handler;
+    sa.sa_handler = hive_crash_signal_handler;
     sigemptyset(&sa.sa_mask);
     // SA_NODEFER: don't block the signal we're handling (so re-raise
     // works). SA_RESETHAND: revert to SIG_DFL after one delivery, so
@@ -956,9 +956,9 @@ void Messages::save_impl() const {
         // `.daedalus/daedalus-bob/`), already created in the ctor. We
         // only need to ensure it still exists at save time in case the
         // user moved/deleted it between sessions.
-        std::filesystem::path daedalus_dir = messages_file_.parent_path();
-        if (!std::filesystem::exists(daedalus_dir)) {
-            std::filesystem::create_directories(daedalus_dir);
+        std::filesystem::path state_dir = messages_file_.parent_path();
+        if (!std::filesystem::exists(state_dir)) {
+            std::filesystem::create_directories(state_dir);
         }
 
         // §CRASH-1 (2026-07-16): atomic write via temp file + rename.
@@ -1671,7 +1671,7 @@ CompressResult Messages::compress() {
 
     // Write debug files if enabled
     if (config_.debug_output) {
-        write_debug_file("daedalus_compress_middle.txt", middle_copy.dump(2));
+        write_debug_file("hive_compress_middle.txt", middle_copy.dump(2));
     }
 
     // Use plain text format - removes ~50% overhead vs JSON

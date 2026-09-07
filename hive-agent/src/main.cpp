@@ -226,7 +226,7 @@ void seed_mcp_servers(const fs::path& home, const json& servers) {
     if (servers.empty()) return;
     std::error_code ec;
     fs::create_directories(home, ec);
-    const fs::path db = home / "daedalus.db";
+    const fs::path db = home / "hive-agent.db";
     sqlite3* s = nullptr;
     if (sqlite3_open(db.c_str(), &s) != SQLITE_OK) {
         log_err("mcp seed: cannot open " + db.string());

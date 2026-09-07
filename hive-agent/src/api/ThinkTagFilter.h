@@ -24,7 +24,7 @@
 //     including at flush(), where a partial tag prefix cut by end-of-stream
 //     comes back as literal text (never drop unconfirmed text).
 //
-// Not part of the public libdaedalus API. Do not include from
+// Not part of the public the engine API. Do not include from
 // include/hive-brain/* or from any header that ends up in a host's
 // translation unit.
 

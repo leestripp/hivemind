@@ -27,9 +27,9 @@
 // existing Logger. Same formatted text routed through the Logger
 // instead of writing to stderr directly.
 #define LOG_CERR(level, expr) do {                          \
-        std::ostringstream _daedalus_msg;                   \
-        _daedalus_msg << expr;                               \
-        LOG_##level(_daedalus_msg.str());                    \
+        std::ostringstream _hive_msg;                   \
+        _hive_msg << expr;                               \
+        LOG_##level(_hive_msg.str());                    \
     } while (0)
 namespace ToolHandler {
     std::shared_ptr<ToolFactory> g_tool_factory;
@@ -122,9 +122,9 @@ namespace ToolHandler {
                                   std::string_view agent_name) {
         std::filesystem::path approvals_file = get_approvals_file_path(project_path, agent_name);
         try {
-            std::filesystem::path daedalus_dir = approvals_file.parent_path();
-            if (!std::filesystem::exists(daedalus_dir)) {
-                std::filesystem::create_directories(daedalus_dir);
+            std::filesystem::path state_dir = approvals_file.parent_path();
+            if (!std::filesystem::exists(state_dir)) {
+                std::filesystem::create_directories(state_dir);
             }
             json data;
             data["approved_commands"] = json::array();
@@ -271,9 +271,9 @@ namespace ToolHandler {
         if (std::filesystem::exists(approvals_file)) {
             std::filesystem::remove(approvals_file);
         }
-        std::filesystem::path daedalus_dir = approvals_file.parent_path();
-        if (std::filesystem::exists(daedalus_dir) && std::filesystem::is_empty(daedalus_dir)) {
-            std::filesystem::remove(daedalus_dir);
+        std::filesystem::path state_dir = approvals_file.parent_path();
+        if (std::filesystem::exists(state_dir) && std::filesystem::is_empty(state_dir)) {
+            std::filesystem::remove(state_dir);
         }
     }
 

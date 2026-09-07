@@ -6,7 +6,7 @@
 // lives in src/api/LLMClient.cpp; this header exposes just the
 // class so unit tests can construct one and feed it chunks.
 //
-// Not part of the public libdaedalus API. Do not include from
+// Not part of the public the engine API. Do not include from
 // include/hive-brain/* or from any header that ends up in a host's
 // translation unit.
 

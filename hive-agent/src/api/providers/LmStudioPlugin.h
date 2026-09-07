@@ -17,7 +17,7 @@
 //     LM Studio accepts it and token accounting (and therefore the
 //     auto-compression trigger) depends on it.
 //
-// Internal header — not part of the public libdaedalus API.
+// Internal header — not part of the public the engine API.
 
 #pragma once
 

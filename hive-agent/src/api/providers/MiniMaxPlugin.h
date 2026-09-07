@@ -15,7 +15,7 @@
 //     tool_call chunks, audio_content, usage-only trailer chunks).
 //   - Static model table (M3/M2.x context sizes).
 //
-// Internal header — not part of the public libdaedalus API.
+// Internal header — not part of the public the engine API.
 
 #pragma once
 

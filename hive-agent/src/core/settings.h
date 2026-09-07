@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSL-1.0
 // include/hive-brain/settings.h
 //
-// Public, opaque settings API for libdaedalus.
+// Public, opaque settings API for the engine.
 //
 // What this replaces (v0.3.0+):
 //   - `~/.config/hive-brain/config.json`        → `models` + `kv_settings`

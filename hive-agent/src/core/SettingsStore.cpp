@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSL-1.0
 // src/core/SettingsStore.cpp
 //
-// SQLite-backed settings store for libdaedalus. Backed by OmniNet's
+// SQLite-backed settings store for the engine. Backed by OmniNet's
 // `DB::Database` (which itself wraps sqlite3) — we do NOT directly call
 // sqlite3_* APIs from hive-brain. That keeps the SQLite version, error
 // reporting, thread-safety policy, and prepared-statement caching in one
@@ -603,7 +603,7 @@ SettingsStore SettingsStore::for_home(fs::path home)
     fs::create_directories(home);
     // Phase 43: migrate daedalus.db → hive-agent.db inside the home dir.
     std::error_code ec;
-    fs::path old_db = home / "daedalus.db", new_db = home / "hive-agent.db";
+    fs::path old_db = home / "hive-agent.db", new_db = home / "hive-agent.db";
     if (!fs::exists(new_db, ec) && fs::exists(old_db, ec))
         fs::rename(old_db, new_db, ec);
     return SettingsStore(new_db, /*auto_migrate=*/false);

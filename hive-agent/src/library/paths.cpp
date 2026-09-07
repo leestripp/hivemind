@@ -11,31 +11,31 @@
  *     4. $HOME/.local/share/hive-brain (XDG fallback when neither set)
  *
  *   user_config_root() priority:
- *     1. $DAEDALUS_CONFIG_HOME
+ *     1. $HIVE_AGENT_CONFIG_HOME
  *     2. $XDG_CONFIG_HOME/hive-brain
  *     3. $HOME/.config/hive-brain
  *
  *   user_data_root() priority:
- *     1. $DAEDALUS_DATA_HOME
+ *     1. $HIVE_AGENT_DATA_HOME
  *     2. $XDG_DATA_HOME/hive-brain
  *     3. $HOME/.local/share/hive-brain
  *
  *   user_state_root() priority:
- *     1. $DAEDALUS_STATE_HOME
+ *     1. $HIVE_AGENT_STATE_HOME
  *     2. $XDG_STATE_HOME/hive-brain
  *     3. $HOME/.local/state/hive-brain
  *
  *   user_cache_root() priority:
- *     1. $DAEDALUS_CACHE_HOME
+ *     1. $HIVE_AGENT_CACHE_HOME
  *     2. $XDG_CACHE_HOME/hive-brain
  *     3. $HOME/.cache/hive-brain
  *
  *   system_data_dirs()   priority:
- *     1. $DAEDALUS_SYSTEM_DATA_DIRS   (colon-separated)
+ *     1. $HIVE_AGENT_SYSTEM_DATA_DIRS   (colon-separated)
  *     2. /usr/local/share/hive-brain:/usr/share/hive-brain
  *
  *   system_config_dirs() priority:
- *     1. $DAEDALUS_SYSTEM_CONFIG_DIRS
+ *     1. $HIVE_AGENT_SYSTEM_CONFIG_DIRS
  *     2. /etc/xdg/hive-brain
  *
  * §Phase 12: legacy `~/.daedalus/` is honoured as a read-fallback
@@ -124,7 +124,7 @@ public:
 
 	fs::path user_config_root() const override
 	{
-		if ( fs::path p = env_path_or_empty( "DAEDALUS_CONFIG_HOME" ); !p.empty() ) {
+		if ( fs::path p = env_path_or_empty( "HIVE_AGENT_CONFIG_HOME" ); !p.empty() ) {
 			return p;
 		}
 		if ( fs::path xdg = env_path_or_empty( "XDG_CONFIG_HOME" ); !xdg.empty() ) {
@@ -135,7 +135,7 @@ public:
 
 	fs::path user_data_root() const override
 	{
-		if ( fs::path p = env_path_or_empty( "DAEDALUS_DATA_HOME" ); !p.empty() ) {
+		if ( fs::path p = env_path_or_empty( "HIVE_AGENT_DATA_HOME" ); !p.empty() ) {
 			return p;
 		}
 		if ( fs::path xdg = env_path_or_empty( "XDG_DATA_HOME" ); !xdg.empty() ) {
@@ -146,7 +146,7 @@ public:
 
 	fs::path user_state_root() const override
 	{
-		if ( fs::path p = env_path_or_empty( "DAEDALUS_STATE_HOME" ); !p.empty() ) {
+		if ( fs::path p = env_path_or_empty( "HIVE_AGENT_STATE_HOME" ); !p.empty() ) {
 			return p;
 		}
 		if ( fs::path xdg = env_path_or_empty( "XDG_STATE_HOME" ); !xdg.empty() ) {
@@ -157,7 +157,7 @@ public:
 
 	fs::path user_cache_root() const override
 	{
-		if ( fs::path p = env_path_or_empty( "DAEDALUS_CACHE_HOME" ); !p.empty() ) {
+		if ( fs::path p = env_path_or_empty( "HIVE_AGENT_CACHE_HOME" ); !p.empty() ) {
 			return p;
 		}
 		if ( fs::path xdg = env_path_or_empty( "XDG_CACHE_HOME" ); !xdg.empty() ) {
@@ -168,7 +168,7 @@ public:
 
 	std::vector<fs::path> system_data_dirs() const override
 	{
-		std::string override = env_or_empty( "DAEDALUS_SYSTEM_DATA_DIRS" );
+		std::string override = env_or_empty( "HIVE_AGENT_SYSTEM_DATA_DIRS" );
 		if ( !override.empty() ) {
 			return split_path_list( override );
 		}
@@ -178,7 +178,7 @@ public:
 
 	std::vector<fs::path> system_config_dirs() const override
 	{
-		std::string override = env_or_empty( "DAEDALUS_SYSTEM_CONFIG_DIRS" );
+		std::string override = env_or_empty( "HIVE_AGENT_SYSTEM_CONFIG_DIRS" );
 		if ( !override.empty() ) {
 			return split_path_list( override );
 		}

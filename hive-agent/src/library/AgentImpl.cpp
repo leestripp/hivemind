@@ -929,8 +929,8 @@ ModelInfo AgentImpl::active_model() const noexcept
 
 std::string AgentImpl::library_version() noexcept
 {
-#ifdef DAEDALUS_GIT_VERSION
-    return DAEDALUS_GIT_VERSION;
+#ifdef HIVE_AGENT_GIT_VERSION
+    return HIVE_AGENT_GIT_VERSION;
 #else
     return "v0.0.0";
 #endif

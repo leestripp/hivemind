@@ -7,7 +7,7 @@
 // without linking LLMClient.cpp (same pattern as is_usage_only_chunk
 // in MiniMaxSseParser.h).
 //
-// Not part of the public libdaedalus API. Do not include from
+// Not part of the public the engine API. Do not include from
 // include/hive-brain/*.
 
 #pragma once

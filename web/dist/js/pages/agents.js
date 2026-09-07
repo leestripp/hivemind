@@ -97,7 +97,7 @@ async function refresh() {
     grid.innerHTML = '';
     for (const a of agents) {
       const st = live[a.id];
-      // Real brain/fleet state from /api/agents (daedalus AgentState via
+      // Real brain/fleet state from /api/agents (hive-agent AgentState via
       // worker heartbeats); the live-map only adds the cancelling nuance.
       const brain = (a.state || '').toLowerCase();
       const ACTIVE = ['understanding','planning','acting','verifying',

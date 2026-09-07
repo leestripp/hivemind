@@ -1,5 +1,5 @@
-#ifndef DAEDALUS_COMMON_UTILS_H
-#define DAEDALUS_COMMON_UTILS_H
+#ifndef HIVE_COMMON_UTILS_H
+#define HIVE_COMMON_UTILS_H
 
 #include <string>
 #include <vector>
@@ -172,4 +172,4 @@ inline std::string try_recover_json_string(const std::string& json_str) {
 
 } // namespace hive
 
-#endif // DAEDALUS_COMMON_UTILS_H
+#endif // HIVE_COMMON_UTILS_H

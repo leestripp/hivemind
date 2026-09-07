@@ -20,9 +20,9 @@
 // existing Logger. Same formatted text routed through the Logger
 // instead of writing to stderr directly.
 #define LOG_CERR(level, expr) do {                          \
-        std::ostringstream _daedalus_msg;                   \
-        _daedalus_msg << expr;                               \
-        LOG_##level(_daedalus_msg.str());                    \
+        std::ostringstream _hive_msg;                   \
+        _hive_msg << expr;                               \
+        LOG_##level(_hive_msg.str());                    \
     } while (0)
 // Base64 encoding table
 static const char* base64_chars = 

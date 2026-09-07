@@ -5,7 +5,7 @@
 // the library's classic generic OpenAI-compatible behavior. Used for
 // any provider row whose `plugin` column names no registered plugin.
 //
-// Internal header — not part of the public libdaedalus API.
+// Internal header — not part of the public the engine API.
 
 #pragma once
 

@@ -178,7 +178,7 @@ private:
 
     // Configuration
     static constexpr size_t MAX_OUTPUT_SIZE = 100000;  // 100KB max output buffer
-    static constexpr const char* TEMP_DIR_PREFIX = "daedalus_bg_";
+    static constexpr const char* TEMP_DIR_PREFIX = "hive_bg_";
 
     // State
     std::filesystem::path temp_base_;
