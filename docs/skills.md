@@ -2,7 +2,7 @@
 
 Skills are Anthropic-style capability packages (SKILL.md + scripts and
 resources). In v2 the hub owns the canonical library and every agent sees
-the same skills — because the skill files sit at daedalus' known global
+the same skills — because the skill files sit at hive-brain' known global
 location inside every container.
 
 ## The Skills Manager (hub side)
@@ -19,11 +19,11 @@ location inside every container.
 ## The worker side
 
 - Lands the library at `~/.local/share/hive-worker/skills/`.
-- Bind-mounts it read-only into every agent container at daedalus'
+- Bind-mounts it read-only into every agent container at hive-brain'
   global skills dir (`Paths::global().global_skills_dir()` — the XDG
-  path daedalus scans automatically).
+  path hive-brain scans automatically).
 - Per-agent enable/disable is roster metadata; the hub passes each
-  agent's enabled list at spawn (mount subset or env filter — daedalus
+  agent's enabled list at spawn (mount subset or env filter — hive-brain
   `skills` config).
 - Additionally, `/workspace/.agents/skills/` (project-local) is scanned
   automatically by every agent whose project root is the shared

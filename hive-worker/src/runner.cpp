@@ -1,7 +1,7 @@
 // runner.cpp — hive-worker slim podman executor (Phase 30.3).
 //
 // Deliberately NOT ContainerManager: the worker is a dumb executor with
-// no SecretStore, no roster DB, no daedalus. It replicates only the
+// no SecretStore, no roster DB, no hive-brain. It replicates only the
 // container shape (same image, same name scheme, per-agent workspace +
 // home under ~/.local/share/hive-worker/) and runs argv verbatim.
 
@@ -99,7 +99,7 @@ void ensure_container(const std::string& agent, const std::string& image,
         // Stopped container: recreate when the image DRIFTED (dep bumps,
         // screen-stack changes) so a restart actually picks up the new
         // image — plain `podman start` would resurrect the old one
-        // forever (hit 2026-09-03: daedalus 1.0.3 images rebuilt, agents
+        // forever (hit 2026-09-03: hive-brain 1.0.3 images rebuilt, agents
         // still on the old IDs). Running containers are left alone —
         // they adopt the new image at their next natural restart.
         auto trimmed = [](std::string v) {

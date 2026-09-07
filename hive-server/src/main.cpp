@@ -12,9 +12,9 @@
 //
 // Library stack:
 //   - OmniNet (HTTP + WS) — gitlab.com/leestripp/omninet (CMake FetchContent)
-//   - daedalus  (AI agent)  — gitlab.com/leestripp/daedalus (CMake FetchContent)
+//   - hive-brain  (AI agent)  — gitlab.com/leestripp/hive-brain (CMake FetchContent)
 //   - SQLite   (persistence) — system package
-//   (no libcurl — daedalus and hivemind both use OmniNet HTTP)
+//   (no libcurl — hive-brain and hivemind both use OmniNet HTTP)
 //   - nlohmann/json         — system package
 // =============================================================================
 

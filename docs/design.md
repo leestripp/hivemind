@@ -7,7 +7,7 @@ migration phases.
 
 ## Principles
 
-1. **The brain lives where the work is.** Agents (daedalus) run inside
+1. **The brain lives where the work is.** Agents (hive-brain) run inside
    their containers on workers — skills, MCP servers, shell access and
    files are all local to the agent. Nothing is tunneled.
 2. **The server is a comms hub, not a host.** It routes messages between
@@ -44,18 +44,18 @@ migration phases.
 - Shared `/workspace` mount per worker so its agents collaborate on the
   same files; per-agent home volumes for history/memory.
 - Synced skills library mounted read-only into every container at
-  daedalus' global skills dir.
+  hive-brain' global skills dir.
 - Relays the task protocol between hub and the in-container agents.
 
 ### hive-agent — the brain (in-container)
 
-- Thin host around `daedalus::Agent` (icarus-style wiring), running with
+- Thin host around `hive-brain::Agent` (icarus-style wiring), running with
   project root = the worker's shared `/workspace` — every agent's
-  daedalus state lives side by side at `/workspace/.daedalus/`, and
+  hive-brain state lives side by side at `/workspace/.daedalus/`, and
   `/workspace/.agents/skills/` is a shared project-local skills dir all
   agents auto-scan.
 - stdio NDJSON task protocol in; delta/message/approval/image events out.
-- Full daedalus feature set: skills with scripts, MCP servers spawned as
+- Full hive-brain feature set: skills with scripts, MCP servers spawned as
   local child processes, persistent memory + conversation history on the
   home volume.
 - Credentials arrive as spawn env from the worker — never stored on the

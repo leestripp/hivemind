@@ -107,7 +107,7 @@ std::string agent_name_of(const json& agents, const std::string& id) {
 
 
 // ── chat message rendering ──────────────────────────────────────────────────
-// Agent message bodies arrive as daedalus turn transcripts: natural language
+// Agent message bodies arrive as hive-brain turn transcripts: natural language
 // interleaved with "[tool: name args…]" call lines and "  → {json}" result
 // lines. Strip the transcript plumbing for display; the raw body can still be
 // dumped to a debug log (HIVEMIND_DEBUG=1 → ~/.local/share/hivemind/client-raw.log).
@@ -1268,7 +1268,7 @@ void HiveWindow::rebuild_roster() {
         // always, so "down" agents are visibly offline.
         std::string st_ = a.value("state", "down");
         for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
-        // Brain state machine (daedalus, via worker heartbeats):
+        // Brain state machine (hive-brain, via worker heartbeats):
         // understanding/planning/acting/verifying/documenting/compressing
         // are active phases; awaitingapproval parks on a human.
         const bool working = a.value("busy", false) ||
@@ -1456,7 +1456,7 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
           << "\n" << body << "\n\n";
     }
 
-    // Older thread history still holds raw daedalus transcripts (pre-fix
+    // Older thread history still holds raw hive-brain transcripts (pre-fix
     // server posted those); new messages arrive clean. Filter defensively.
     const std::string clean = sender_kind == "agent" ? strip_tool_transcript(body) : body;
     if (clean.empty()) return;   // pure tool-call transcript — nothing to show

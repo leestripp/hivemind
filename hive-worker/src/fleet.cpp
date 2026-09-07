@@ -303,7 +303,7 @@ std::string AgentProcess::build_env_file() {
         env_line(body, "HIVEMIND_MCP_SERVERS", spec_.mcp_servers.dump());
     // The synced canonical skill library is mounted read-only at /skills
     // (ensure_container). Project-local /workspace/.agents/skills/ is
-    // auto-scanned by daedalus on its own.
+    // auto-scanned by hive-brain on its own.
     env_line(body, "HIVEMIND_SKILLS_DIR", "/skills");
 
     const fs::path dir = fs::path(hwrunner::worker_dir()) / "env";

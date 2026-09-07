@@ -10,7 +10,7 @@
  * AgentStore — SQLite persistence for the agent roster (HiveMind 2.0).
  *
  * A RosterAgent is a persistent, named teammate (see Plan.md Phase 1).
- * Runtime state (daedalus messages/memory) lives on disk under
+ * Runtime state (hive-brain messages/memory) lives on disk under
  * ~/.local/share/hivemind/agents/<id>/ — this DB row is the registry.
  *
  * Thread-safety: same pattern as GraphStore — fresh connection per op.
@@ -20,7 +20,7 @@ struct RosterAgent {
     std::string id;
     std::string name;           // unique, daedalus-compatible agent name
     std::string role;           // persona / job description ("" = general)
-    std::string model;          // daedalus SettingsStore model name ("" = store default)
+    std::string model;          // hive-brain SettingsStore model name ("" = store default)
     std::string workspace_mode; // "shared" (company /workspace) — containers land in Phase 2
     std::string container_id;   // "" until Phase 2
     std::string avatar;         // dept avatar name e.g. "engineering-female"; "" = auto (name hash)

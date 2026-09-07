@@ -1,6 +1,6 @@
 #pragma once
 
-// AgentTools (HiveMind 2.0 Phase C): the daedalus host Tool classes are
+// AgentTools (HiveMind 2.0 Phase C): the hive-brain host Tool classes are
 // GONE (brains run in hive-agent on workers now). What remains is the
 // worker skill-sync plumbing used by SkillRoutes / RosterRoutes / main.
 

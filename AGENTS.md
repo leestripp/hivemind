@@ -16,7 +16,7 @@ share files, and park commands in an approval queue when
 
 **v2 architecture (see `docs/design.md`):**
 
-- **The brain lives where the work is** — agents (daedalus) run *inside*
+- **The brain lives where the work is** — agents (hive-brain) run *inside*
   containers on worker machines; skills, MCP servers, shell access and
   files are local to the agent.
 - **The server is a comms hub, not a host** — it routes messages between
@@ -36,13 +36,13 @@ Current release line: **0.6.x** (distributed workers milestone was 0.5.0).
 | Language | **C++23** (required), C |
 | Build | **CMake ≥ 3.28**, Ninja generator, `enable_testing()` + ctest |
 | HTTP/WebSocket | **OmniNet** (first-party, fetched from gitlab.com/leestripp/omninet) — the *only* HTTP stack; **no libcurl** |
-| Agent engine | **daedalus** (first-party, fetched, tracks `main` with configure-time auto-update; pin via `-DDAEDALUS_TAG=`) |
+| Agent engine | **hive-brain** (first-party, fetched, tracks `main` with configure-time auto-update; pin via `-DDAEDALUS_TAG=`) |
 | Persistence | **SQLite3** (raw C API via `DbUtil.h` helpers) |
 | JSON | **nlohmann_json** |
 | Native client | **GTK4 / gtkmm-4.0** (+ optional WebKitGTK 6.0 for embedded noVNC) |
 | Web dashboard | Vanilla JS + CSS in `web/dist/` (no framework, no bundler) |
 | Agent sandbox | Rootless **podman**; on-demand desktop (Xvfb + x11vnc + noVNC + Chromium) per container — starts on demand, auto-sleeps when viewerless |
-| Crypto/misc | OpenSSL, libpng, poppler-cpp (daedalus deps) |
+| Crypto/misc | OpenSSL, libpng, poppler-cpp (hive-brain deps) |
 
 ## Build & Test Commands
 
@@ -54,7 +54,7 @@ sudo apt install -y cmake g++ nlohmann-json3-dev \
     libgtkmm-4.0-dev podman   # no libcurl — OmniNet is the only HTTP stack
 ```
 
-Configure & build (CMake auto-fetches daedalus + OmniNet via FetchContent):
+Configure & build (CMake auto-fetches hive-brain + OmniNet via FetchContent):
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
@@ -64,9 +64,9 @@ cmake --build build -j"$(nproc)"
 Useful configure options:
 
 - `-DHIVEMIND_BUILD_SERVER=OFF` / `-DHIVEMIND_BUILD_CLIENT=OFF` — component toggles
-- `-DHIVEMIND_USE_DAEDALUS=OFF` — skip daedalus
-- `-DDAEDALUS_LOCAL=/path/to/daedalus`, `-DOMNINET_LOCAL=/path/to/omninet` — use local checkouts instead of fetching
-- `-DDAEDALUS_TAG=<tag>` — pin a different daedalus version
+- `-DHIVEMIND_USE_DAEDALUS=OFF` — skip hive-brain
+- `-DDAEDALUS_LOCAL=/path/to/hive-brain`, `-DOMNINET_LOCAL=/path/to/omninet` — use local checkouts instead of fetching
+- `-DDAEDALUS_TAG=<tag>` — pin a different hive-brain version
 - `-DOMNINET_AUTO_UPDATE=OFF` — stop configure-time `git fetch + reset --hard origin/main` of the vendored OmniNet
 - Clang toolchain: `cmake -S . -B build-clang -DCMAKE_TOOLCHAIN_FILE=cmake/clang.cmake`
 
@@ -115,8 +115,8 @@ hive-server/          C++23 + OmniNet hub: REST API, threads, approvals,
   data/               Containerfiles, screen scripts, seed /workspace content
   deploy/             systemd units, backup timer, remote deploy scripts
 hive-worker/          Remote executor daemon (fleet manager). Links OmniNet
-                      ONLY — no daedalus, no LLM keys, no roster DB.
-hive-agent/           In-container brain: thin daedalus::Agent host speaking
+                      ONLY — no hive-brain, no LLM keys, no roster DB.
+hive-agent/           In-container brain: thin hive-brain::Agent host speaking
                       stdio NDJSON with hive-worker. No HTTP.
 hive-client/          GTK4/gtkmm4 native client (roster, threads, approvals,
                       screen view). Icons/avatars bundled via GResource.
@@ -131,7 +131,7 @@ Key architectural mapping:
 - `hivemind_core` static lib (everything except `main.cpp`) is shared by
   the server binary **and** the test suite — add new core sources to
   `CORE_SOURCES` / `ROUTE_SOURCES` in `hive-server/CMakeLists.txt`.
-- Server is a pure hub: OmniNet + SQLite only. Daedalus linkage was
+- Server is a pure hub: OmniNet + SQLite only. hive-brain linkage was
   deliberately removed from the server (Phase C).
 - Hub ↔ worker: JSON text frames over WS. Worker ↔ agent: stdio NDJSON
   (task/delta/message/approval/image events).
@@ -175,9 +175,9 @@ Key architectural mapping:
   on the hub. Model/secret management routes
   (`/api/workers/:name/models|secrets`) are **relay-only**: they forward
   over the worker channel and persist nothing hub-side; keep them
-  admin-scoped in the auth middleware. Agents run daedalus with
+  admin-scoped in the auth middleware. Agents run hive-brain with
   `explicit_model_wins` — models.json is the single registry of record;
-  the per-agent daedalus settings store must never shadow it.
+  the per-agent hive-brain settings store must never shadow it.
 - Workspace writes are path-confined — `send_file` destinations must not
   escape the company drive.
 

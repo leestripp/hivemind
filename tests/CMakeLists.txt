@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 # Tests link hivemind_core (defined in hive-server/) which PUBLIC-propagates
-# all include dirs and deps (OmniNet, daedalus, sqlite3, curl, nlohmann_json).
+# all include dirs and deps (OmniNet, hive-brain, sqlite3, curl, nlohmann_json).
 
 macro(hivemind_test name)
     add_executable(${name} ${name}.cpp)

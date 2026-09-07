@@ -3,7 +3,7 @@
 # Baked into the :gpu image; run by hive-agent-init.sh at container start
 # (and safe for agents to re-run any time).
 #
-# Chain: daedalus spawns the `blender-mcp` stdio bridge (mcp_servers in the
+# Chain: hive-brain spawns the `blender-mcp` stdio bridge (mcp_servers in the
 # spawn frame) -> bridge connects to this TCP server on localhost:9876 ->
 # requests execute inside Blender via the official lab/blender_mcp addon.
 #

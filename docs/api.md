@@ -81,7 +81,7 @@ dialog.
 
 ## Approvals
 
-Approvals originate INSIDE agents now (daedalus approval hooks) and relay
+Approvals originate INSIDE agents now (hive-brain approval hooks) and relay
 through the hub: `GET /api/approvals?status=pending`,
 `POST /api/approvals/:id/resolve`. The hub holds no tool proxy of its
 own.

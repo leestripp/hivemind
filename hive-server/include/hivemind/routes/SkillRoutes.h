@@ -1,6 +1,6 @@
 // include/hivemind/routes/SkillRoutes.h
 // -----------------------------------------------------------------------------
-// Global skills library (HiveMind 2.0). daedalus discovers per-agent skills in
+// Global skills library (HiveMind 2.0). hive-brain discovers per-agent skills in
 // <agent_dir>/.agents/skills (project-local). HiveMind adds a managed GLOBAL
 // library at ~/.local/share/hivemind/skills/; "enabling" a global skill for an
 // agent symlinks it into the agent's skills dir, so there is one source of

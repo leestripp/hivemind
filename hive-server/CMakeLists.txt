@@ -69,7 +69,7 @@ target_link_libraries(hivemind_core PUBLIC
 )
 
 if(HIVEMIND_USE_DAEDALUS)
-    # Phase C: daedalus linkage REMOVED - brains run on workers
+    # Phase C: hive-brain linkage REMOVED - brains run on workers
     # (hive-agent). The server is a pure hub: OmniNet + SQLite only.
 endif()
 

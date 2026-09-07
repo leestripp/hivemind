@@ -1,5 +1,5 @@
 // src/AgentTools.cpp - Phase C: worker skill-sync helpers only.
-// (The daedalus Tool classes moved into hive-agent on workers.)
+// (The hive-brain Tool classes moved into hive-agent on workers.)
 
 #include "hivemind/AgentTools.h"
 #include "hivemind/AgentStore.h"

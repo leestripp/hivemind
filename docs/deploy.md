@@ -23,7 +23,7 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
 - Config `server.json`: port, worker channel port, auth keys.
 - TLS: terminate at the reverse proxy in front (the client speaks HTTPS
   to the proxy; the hub itself is plain HTTP on localhost).
-- v2: no daedalus, no LLM keys, no podman on the hub host (unless it
+- v2: no hive-brain, no LLM keys, no podman on the hub host (unless it
   also runs a worker).
 
 ## hive-worker
@@ -61,6 +61,6 @@ directly. The droplet stays a deployment target, not a test proxy.
 
 Threads/messages/roster DBs carry over (the hub keeps them). Agents get
 their `worker` field set (existing "local" agents → the co-hosted
-worker). Agent history moves: v1 kept daedalus history on the hub under
+worker). Agent history moves: v1 kept hive-brain history on the hub under
 `agents/<id>/`; the cutover tool copies each agent's home dir into its
 container home volume on the target worker.

@@ -90,10 +90,10 @@ The worker owns a container per agent (`hive-<agent-id>`):
   containers are never bounced — they adopt the new image at their next
   natural restart.
 - Mounts: shared `/workspace` (all agents on this worker collaborate;
-  also each agent's daedalus PROJECT ROOT -- state lives at
+  also each agent's hive-brain PROJECT ROOT -- state lives at
   `/workspace/.daedalus/daedalus-<Name>/`), per-agent home volume
   (`~/.local/share/hive-worker/home-<agentid>/`), `/skills` read-only
-  (synced library at daedalus' global skills location).
+  (synced library at hive-brain' global skills location).
 - `--userns=keep-id` so container writes land as the worker user.
 - Rootless networking is a shared pasta netns -- see docs/containers.md
   for the operational gotchas.
@@ -126,7 +126,7 @@ hub <--ops--- worker <--stdout-- hive-agent
 ```
 
 hive-agent stdin ops: `task` {id,text,thread_id}, `approval_resp`
-{id,allow}, `cancel`, `shutdown` (persists daedalus history, exits 0).
+{id,allow}, `cancel`, `shutdown` (persists hive-brain history, exits 0).
 
 hive-agent stdout events and the channel op the worker maps them to:
 
@@ -147,7 +147,7 @@ hive-agent stdout events and the channel op the worker maps them to:
 file (`env/<agent-id>.env`) with HIVEMIND_API_HOST / HIVEMIND_API_KEY /
 HIVEMIND_CHAT_ENDPOINT / HIVEMIND_MODEL / HIVEMIND_MAX_CONTEXT /
 HIVEMIND_TEMPERATURE and passes it to `podman exec --env-file`. The hub
-never sees credentials at rest; hive-agent sets daedalus'
+never sees credentials at rest; hive-agent sets hive-brain'
 `explicit_model_wins` so the per-agent settings store can never override
 this injection (model-registry unification Phase 1 — models.json is the
 single source of truth).
@@ -170,13 +170,13 @@ Frames omitting `action` behave as `set_default` (older hubs).
 ## MCP
 
 MCP server specs arrive in `agent_spawn` (`mcp_servers`) and are seeded
-into the agent's daedalus.db by hive-agent at startup; daedalus spawns
+into the agent's daedalus.db by hive-agent at startup; hive-brain spawns
 them as local child processes inside the container. No tunnels.
 
 ### Blender MCP (:gpu image, verified 2026-09-07)
 
 Official `projects.blender.org/lab/blender_mcp` (both halves from one
-snapshot). Chain: daedalus spawns the `blender-mcp` stdio bridge → bridge
+snapshot). Chain: hive-brain spawns the `blender-mcp` stdio bridge → bridge
 connects to the addon's TCP socket on localhost:9876 → requests execute
 inside Blender. Gotchas:
 
@@ -189,7 +189,7 @@ inside Blender. Gotchas:
   :gpu CMD) runs it at container start.
 - Background mode is synchronous-only (no deferred responses; that needs
   the UI event loop on the Xvfb desktop).
-- Tools are namespaced `mcp__blender__*` in daedalus and do NOT appear in
+- Tools are namespaced `mcp__blender__*` in hive-brain and do NOT appear in
   the agent's static prompt tool list — agents must be told the exact
   names in their system prompt (Forge's prompt documents this).
 - Executed code: `bpy` is NOT pre-imported; return data via the `result`
@@ -213,4 +213,4 @@ inside Blender. Gotchas:
 The hub streams its canonical library down (`skill_begin` / `skill_file`
 / `skill_end` / `skill_remove`; the worker answers `skill_ack`). The
 worker stores it under `~/.local/share/hive-worker/skills/` and
-bind-mounts it read-only into containers at daedalus' global skills dir.
+bind-mounts it read-only into containers at hive-brain' global skills dir.

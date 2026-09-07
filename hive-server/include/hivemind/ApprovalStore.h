@@ -10,7 +10,7 @@
  * ApprovalStore — human-in-the-loop approval queue (HiveMind 2.0, Phase 3).
  *
  * When a roster agent has require_approval=true, gated actions (shell
- * commands via daedalus' request_command_approval) create a pending row
+ * commands via hive-brain' request_command_approval) create a pending row
  * here and the agent turn BLOCKS until a human resolves it via the REST
  * API (or the wait times out → auto-deny).
  *

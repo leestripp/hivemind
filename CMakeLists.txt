@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.28)
 #   hive-server/  C++23 + OmniNet server (API, agents, graph runner, scheduler)
 #   hive-client/  GTK4/gtkmm4 native Linux client
 #   tests/        server test suite
-# Deps (first-party, fetched): OmniNet + daedalus (gitlab.com/leestripp/*)
+# Deps (first-party, fetched): OmniNet (gitlab.com/leestripp/*)
 # ============================================================================
 
 # Add multiarch cmake paths so OmniNet's find_package(OpenSSL) finds OpenSSLConfig.cmake
@@ -54,78 +54,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SQLite3 REQUIRED sqlite3)
 
 include(FetchContent)
-
-# ============================================================================
-# daedalus — Agent engine (gitlab.com/leestripp/daedalus)
-#   -DHIVEMIND_USE_DAEDALUS=OFF         skip daedalus entirely
-#   -DDAEDALUS_TAG=0.9.6               pin a different tag / branch / SHA
-#                                      (default: main, auto-updated like OmniNet)
-#   -DDAEDALUS_LOCAL=/path/to/daedalus use a local checkout instead of fetching
-# Required system packages: libssl-dev libpng-dev libpoppler-cpp-dev
-# ============================================================================
-option(HIVEMIND_USE_DAEDALUS "Use daedalus as the Agent engine" ON)
-
-if(HIVEMIND_USE_DAEDALUS)
-    find_package(OpenSSL REQUIRED)
-    pkg_check_modules(PNG     REQUIRED libpng)
-    pkg_check_modules(POPPLER REQUIRED poppler-cpp)
-
-    set(DAEDALUS_TAG "main" CACHE STRING "Git tag / branch / SHA for daedalus")
-
-    if(DEFINED DAEDALUS_LOCAL AND EXISTS "${DAEDALUS_LOCAL}/CMakeLists.txt")
-        message(STATUS "[hivemind] Using local daedalus at ${DAEDALUS_LOCAL}")
-        add_subdirectory("${DAEDALUS_LOCAL}" daedalus-build EXCLUDE_FROM_ALL)
-    else()
-        message(STATUS "[hivemind] Fetching daedalus ${DAEDALUS_TAG} from gitlab.com/leestripp/daedalus")
-        FetchContent_Declare(
-            daedalus
-            GIT_REPOSITORY https://gitlab.com/leestripp/daedalus.git
-            GIT_TAG        ${DAEDALUS_TAG}
-            GIT_SHALLOW    TRUE
-        )
-        FetchContent_MakeAvailable(daedalus)
-
-        # Same stale-branch hazard as OmniNet (see below): FetchContent does
-        # NOT re-fetch when GIT_TAG names an unchanged branch, so "main"
-        # would silently freeze at first-fetch time. Fetch + fast-forward
-        # at configure time unless the checkout has local edits.
-        option(DAEDALUS_AUTO_UPDATE "Fetch+ff the vendored daedalus checkout at configure time" ON)
-        if(DAEDALUS_AUTO_UPDATE AND DAEDALUS_TAG STREQUAL "main"
-                AND EXISTS "${daedalus_SOURCE_DIR}/.git")
-            execute_process(
-                COMMAND git status --porcelain
-                WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
-                OUTPUT_VARIABLE _daedalus_dirty OUTPUT_STRIP_TRAILING_WHITESPACE)
-            if(_daedalus_dirty STREQUAL "")
-                execute_process(
-                    COMMAND git fetch origin
-                    WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
-                    RESULT_VARIABLE _dfetch_rc OUTPUT_QUIET ERROR_QUIET)
-                if(_dfetch_rc EQUAL 0)
-                    execute_process(
-                        COMMAND git reset --hard origin/main
-                        WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
-                        OUTPUT_QUIET ERROR_QUIET)
-                    execute_process(
-                        COMMAND git describe --tags
-                        WORKING_DIRECTORY "${daedalus_SOURCE_DIR}"
-                        OUTPUT_VARIABLE _daedalus_ver OUTPUT_STRIP_TRAILING_WHITESPACE
-                        ERROR_QUIET)
-                    message(STATUS "[hivemind] daedalus updated to ${_daedalus_ver} (origin/main)")
-                endif()
-            else()
-                message(WARNING "[hivemind] daedalus checkout has local edits — skipping auto-update")
-            endif()
-        endif()
-    endif()
-
-    get_target_property(_daedalus_inc daedalus INCLUDE_DIRECTORIES)
-    if(NOT _daedalus_inc)
-        message(FATAL_ERROR
-            "[hivemind] daedalus target has no include directories. "
-            "Check that leestripp/daedalus exports a `daedalus` CMake target.")
-    endif()
-endif()
 
 # ============================================================================
 # OmniNet — HTTP/WebSocket server (gitlab.com/leestripp/omninet)
@@ -249,3 +177,4 @@ if(_CLANG_TIDY)
 else()
     message(WARNING "clang-tidy not found — install it with: apt install clang-tidy")
 endif()
+

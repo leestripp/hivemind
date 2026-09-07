@@ -17,7 +17,7 @@ and only come back when they need your approval.
 ## What it does
 
 - **Persistent named agents** — each teammate is a long-lived
-  [daedalus](https://gitlab.com/leestripp/daedalus) agent with its own memory
+  [hive-brain](https://gitlab.com/leestripp/hive-brain) agent with its own memory
   and conversation history that survives restarts.
 - **Chat, not config** — talk to agents in threads (DMs or group threads);
   no workflow builder required. (The 1.x node-graph engine was retired in
@@ -80,7 +80,7 @@ sudo apt install -y cmake g++ nlohmann-json3-dev \
 # or the web UI: xdg-open http://localhost:8421/
 ```
 
-CMake fetches [daedalus](https://gitlab.com/leestripp/daedalus) (agent
+CMake fetches [hive-brain](https://gitlab.com/leestripp/hive-brain) (agent
 engine) and [OmniNet](https://gitlab.com/leestripp/omninet) (HTTP server)
 automatically.
 

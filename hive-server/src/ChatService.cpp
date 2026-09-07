@@ -77,7 +77,7 @@ void ChatService::fan_in(const std::string& thread_id,
                          const std::string& sender_label,
                          const std::string& body,
                          int generation) {
-    // The agent's daedalus conversation (persisted on the worker's
+    // The agent's hive-brain conversation (persisted on the worker's
     // /workspace volume) IS the context - each task carries ONLY the new
     // message. DO NOT add a thread-history backlog here (v1 lesson).
     std::string prompt = "[" + sender_label + "] " + body;

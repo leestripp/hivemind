@@ -2,17 +2,17 @@
 
 Every HiveMind agent lives in a podman container on its worker. The
 container is not a sandbox we reach into — it is where the agent (the
-daedalus brain, packaged as **hive-agent**) actually runs.
+hive-brain brain, packaged as **hive-agent**) actually runs.
 
 ## Layout
 
 | Mount | Source | Mode | Purpose |
 |-------|--------|------|---------|
-| `/workspace` | worker's shared workspace dir | rw | **The agent's project root.** All agents on the worker share it — and daedalus derives everything from it |
-| `$HOME` | per-agent host dir (home volume) | rw | Non-daedalus dotfiles (browser profiles, app config) — survives container replacement |
-| `/skills` | worker's synced skills library | ro | Mounted at daedalus' global skills location; every agent sees the same skills |
+| `/workspace` | worker's shared workspace dir | rw | **The agent's project root.** All agents on the worker share it — and hive-brain derives everything from it |
+| `$HOME` | per-agent host dir (home volume) | rw | Non-hive-brain dotfiles (browser profiles, app config) — survives container replacement |
+| `/skills` | worker's synced skills library | ro | Mounted at hive-brain' global skills location; every agent sees the same skills |
 
-Running at project root `/workspace` puts the daedalus state tree on the
+Running at project root `/workspace` puts the hive-brain state tree on the
 shared volume:
 
 ```
@@ -33,9 +33,9 @@ on the host owned by the worker user.
 
 ## The payload: hive-agent
 
-The container's main process is hive-agent, a thin daedalus host:
+The container's main process is hive-agent, a thin hive-brain host:
 
-- Starts with working dir = `/workspace` (its daedalus project root) —
+- Starts with working dir = `/workspace` (its hive-brain project root) —
   state lands in `/workspace/.daedalus/daedalus-<Name>/`.
 - Reads its identity + model credentials from env (injected by the worker
   at spawn; credentials live on the worker host only).
@@ -62,7 +62,7 @@ container starts.
 
 OPERATIONAL GOTCHA (hit 2026-08-30): if the pasta process dies, ALL
 container networking dies with it -- agents stay "running" but every LLM
-call fails with daedalus "Network error" retries while `getent hosts` in
+call fails with hive-brain "Network error" retries while `getent hosts` in
 the container returns nothing. Diagnosis: `pgrep pasta` as the worker
 user. Recovery: `podman stop` ALL containers on the worker, then start
 them again -- restarting just one while others still run REATTACHES it

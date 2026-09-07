@@ -43,7 +43,7 @@ json routine_json(const Routine& r) {
     };
 }
 
-// Skills live at <agent_dir>/.agents/skills/<name>/SKILL.md (daedalus
+// Skills live at <agent_dir>/.agents/skills/<name>/SKILL.md (hive-brain
 // discovers the project-relative .agents/skills directory).
 fs::path skills_root(const std::string& agent_id) {
     return AgentStore::agents_base_dir() / agent_id / ".agents" / "skills";

@@ -1,6 +1,6 @@
 // hive-agent - the v2 "brain in the box" (Plan.md Phase A).
 //
-// A thin host around daedalus::Agent running INSIDE a podman container
+// A thin host around hive::Agent running INSIDE a podman container
 // (or standalone on any host). Speaks NDJSON over stdio with the
 // hive-worker; no HTTP, no OmniNet.
 //
@@ -33,11 +33,11 @@
 //   HIVEMIND_DAEDALUS_HOME       (default <project>/.daedalus/daedalus-<Name>)
 //
 // argv[1] = project root (default CWD; the worker launches with
-// /workspace so daedalus state lands on the shared volume).
+// /workspace so hive-brain state lands on the shared volume).
 
-#include <daedalus/Agent.h>
-#include <daedalus/AgentSink.h>
-#include <daedalus/types/AgentConfig.h>
+#include "library/Agent.h"
+#include "library/AgentSink.h"
+#include "types/AgentConfig.h"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -84,7 +84,7 @@ void log_err(const std::string& msg) {
     std::fflush(stderr);
 }
 
-// Approval broker: daedalus' sink hook blocks until an approval_resp
+// Approval broker: hive-brain' sink hook blocks until an approval_resp
 // arrives on stdin (or a 10-minute safety timeout denies).
 class ApprovalBroker {
 public:
@@ -127,10 +127,10 @@ private:
     std::atomic<int> seq_{0};
 };
 
-// NDJSON sink: daedalus events -> protocol events; collects the turn's
+// NDJSON sink: hive-brain events -> protocol events; collects the turn's
 // user-facing output (assistant prose + untruncated tell_user payloads,
 // same semantics as the v1 hive-server sink).
-class NdjsonSink : public daedalus::AgentSink {
+class NdjsonSink : public hive::AgentSink {
 public:
     explicit NdjsonSink(ApprovalBroker& approvals) : approvals_(approvals) {}
 
@@ -172,18 +172,18 @@ public:
         }
     }
 
-    // Brain state machine -> roster presence. daedalus notifies every
+    // Brain state machine -> roster presence. hive-brain notifies every
     // transition; terminal turn states map back to "ready" (the agent is
     // idle and waiting for the next task, not "done" forever).
     void on_state_change(int /*from*/, int to) noexcept override {
-        std::string st = daedalus::to_string(static_cast<daedalus::AgentState>(to));
+        std::string st = hive::to_string(static_cast<hive::AgentState>(to));
         for (auto& c : st) c = (char)tolower((unsigned char)c);
         if (st == "done" || st == "cancelled") st = "ready";
         if (st == "idle") return;   // constructed/reset noise; fleet already knows
         emit({{"ev", "status"}, {"state", st}});
     }
 
-    void on_error(daedalus::ErrorKind /*kind*/, std::string_view msg,
+    void on_error(hive::ErrorKind /*kind*/, std::string_view msg,
                   bool will_retry) noexcept override {
         errored_ = true;
         emit({{"ev", "log"},
@@ -191,7 +191,7 @@ public:
               {"text", std::string(msg)}});
     }
 
-    void on_log(daedalus::LogLevel /*lvl*/,
+    void on_log(hive::LogLevel /*lvl*/,
                 std::string_view msg) noexcept override {
         // Operational chatter goes to stderr, NOT the protocol stream.
         std::fwrite(msg.data(), 1, msg.size(), stderr);
@@ -218,7 +218,7 @@ private:
 
 // MCP seeding: write the roster-provided server specs into the agent's
 // own daedalus.db BEFORE Agent construction (same approach as v1's
-// seed_mcp_servers, but hive-agent owns its db outright). daedalus then
+// seed_mcp_servers, but hive-agent owns its db outright). hive-brain then
 // spawns MCP servers as local child processes - in the container.
 void seed_mcp_servers(const fs::path& home, const json& servers) {
     if (servers.empty()) return;
@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    daedalus::AgentConfig cfg;
+    hive::AgentConfig cfg;
     cfg.project_root = project_root;
     cfg.agent_name   = name;
     cfg.session_id   = "hive-" + name;   // stable prompt-cache key
@@ -310,7 +310,7 @@ int main(int argc, char** argv) {
 
     // LLM credentials injected by the worker from ITS models.json —
     // the single registry of record. explicit_model_wins stops the
-    // per-agent daedalus settings store from overriding them (a shadow
+    // per-agent hive-brain settings store from overriding them (a shadow
     // registry diverging invisibly — model-registry unification, Phase 1).
     cfg.explicit_model_wins = true;
     cfg.model_name     = env_or("HIVEMIND_MODEL");
@@ -322,14 +322,14 @@ int main(int argc, char** argv) {
     if (auto v = env_or("HIVEMIND_TEMPERATURE"); !v.empty())
         cfg.temperature = std::stof(v);
 
-    // Approvals: host-authoritative. Default off -> daedalus asks the
+    // Approvals: host-authoritative. Default off -> hive-brain asks the
     // sink; the sink emits approval_request and blocks for approval_resp.
     cfg.auto_approve = (env_or("HIVEMIND_AUTO_APPROVE") == "1");
 
     cfg.stream = true;
     cfg.max_agent_iterations = 600;
 
-    // Skills: daedalus auto-scans <project>/.agents/skills/ (project-local,
+    // Skills: hive-brain auto-scans <project>/.agents/skills/ (project-local,
     // shared by every agent on the worker because /workspace is shared).
     // The read-only synced library comes via HIVEMIND_SKILLS_DIR mounts.
     {
@@ -346,7 +346,7 @@ int main(int argc, char** argv) {
         if (!dirs.empty()) cfg.skills_dirs = dirs;
     }
 
-    // System prompt: inline env wins, then file, then daedalus defaults.
+    // System prompt: inline env wins, then file, then hive-brain defaults.
     if (auto sp = env_or("HIVEMIND_SYSTEM_PROMPT"); !sp.empty()) {
         cfg.system_prompt = sp;
     } else if (auto f = env_or("HIVEMIND_SYSTEM_PROMPT_FILE"); !f.empty()) {
@@ -377,12 +377,12 @@ int main(int argc, char** argv) {
     ApprovalBroker approvals;
     auto sink = std::make_shared<NdjsonSink>(approvals);
 
-    daedalus::Agent agent(cfg, sink);
+    hive::Agent agent(cfg, sink);
     // message_agent: async agent-to-agent via the hub (v1-validated
     // design). The tool emits an NDJSON event; the worker relays it as
     // agent_msg; the hub posts to the pair thread and the reply arrives
     // later as a new task. NEVER a synchronous nested turn.
-    class MessageAgentTool final : public daedalus::BaseTool {
+    class MessageAgentTool final : public hive::BaseTool {
     public:
         std::string get_name() const override { return "message_agent"; }
         std::string get_description() const override {
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
                                  {"description", get_description()},
                                  {"parameters",params}}}};
         }
-        json execute(const json& args, daedalus::HostToolContext&) override {
+        json execute(const json& args, hive::HostToolContext&) override {
             const std::string target = args.value("target","");
             const std::string text   = args.value("text","");
             if (target.empty() || text.empty())
@@ -422,7 +422,7 @@ int main(int argc, char** argv) {
 
     // list_agents (Phase 40): company directory from the roster the hub
     // injects into every task frame.
-    class ListAgentsTool final : public daedalus::BaseTool {
+    class ListAgentsTool final : public hive::BaseTool {
     public:
         std::string get_name() const override { return "list_agents"; }
         std::string get_description() const override {
@@ -436,7 +436,7 @@ int main(int argc, char** argv) {
                                  {"parameters",{{"type","object"},
                                                 {"properties",json::object()}}}}}};
         }
-        json execute(const json&, daedalus::HostToolContext&) override {
+        json execute(const json&, hive::HostToolContext&) override {
             std::lock_guard<std::mutex> lk(g_roster_mu);
             return {{"status","success"}, {"agents", g_roster}};
         }
@@ -446,7 +446,7 @@ int main(int argc, char** argv) {
     // attach_file (Phase 35): agent → chat attachments. Copies a
     // workspace file into the thread's outgoing dir; the worker ships it
     // with task_result and clients render it inline (images/video).
-    class AttachFileTool final : public daedalus::BaseTool {
+    class AttachFileTool final : public hive::BaseTool {
     public:
         std::string get_name() const override { return "attach_file"; }
         std::string get_description() const override {
@@ -468,7 +468,7 @@ int main(int argc, char** argv) {
                                  {"description", get_description()},
                                  {"parameters",params}}}};
         }
-        json execute(const json& args, daedalus::HostToolContext&) override {
+        json execute(const json& args, hive::HostToolContext&) override {
             std::string p = args.value("path","");
             if (p.empty())
                 return {{"status","error"},{"error","path required"}};

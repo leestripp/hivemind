@@ -43,7 +43,7 @@ public:
     // (OmniNet's WebSocket::Server wraps its own HTTP server, so it
     // cannot share the main API port).
     int worker_ws_port() const { return worker_ws_port_; }
-    // Phase 33: loopback MCP bridge (daedalus streamable-http → worker channel)
+    // Phase 33: loopback MCP bridge (hive-brain streamable-http → worker channel)
     const std::string& worker_ws_bind() const { return worker_ws_bind_; }
     void set_screen_resolution(const std::string& res);   // validates WxH
 
