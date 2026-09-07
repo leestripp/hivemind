@@ -91,7 +91,7 @@ The worker owns a container per agent (`hive-<agent-id>`):
   natural restart.
 - Mounts: shared `/workspace` (all agents on this worker collaborate;
   also each agent's hive-brain PROJECT ROOT -- state lives at
-  `/workspace/.daedalus/daedalus-<Name>/`), per-agent home volume
+  `/workspace/.hive-agent/<Name>/`), per-agent home volume
   (`~/.local/share/hive-worker/home-<agentid>/`), `/skills` read-only
   (synced library at hive-brain' global skills location).
 - `--userns=keep-id` so container writes land as the worker user.
@@ -170,7 +170,7 @@ Frames omitting `action` behave as `set_default` (older hubs).
 ## MCP
 
 MCP server specs arrive in `agent_spawn` (`mcp_servers`) and are seeded
-into the agent's daedalus.db by hive-agent at startup; hive-brain spawns
+into the agent's hive-agent.db by hive-agent at startup; hive-agent spawns
 them as local child processes inside the container. No tunnels.
 
 ### Blender MCP (:gpu image, verified 2026-09-07)

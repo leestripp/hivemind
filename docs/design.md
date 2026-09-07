@@ -51,7 +51,7 @@ migration phases.
 
 - Thin host around `hive-brain::Agent` (icarus-style wiring), running with
   project root = the worker's shared `/workspace` — every agent's
-  hive-brain state lives side by side at `/workspace/.daedalus/`, and
+  hive-agent state lives side by side at `/workspace/.hive-agent/<Name>/`, and
   `/workspace/.agents/skills/` is a shared project-local skills dir all
   agents auto-scan.
 - stdio NDJSON task protocol in; delta/message/approval/image events out.

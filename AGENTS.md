@@ -36,7 +36,7 @@ Current release line: **0.6.x** (distributed workers milestone was 0.5.0).
 | Language | **C++23** (required), C |
 | Build | **CMake ≥ 3.28**, Ninja generator, `enable_testing()` + ctest |
 | HTTP/WebSocket | **OmniNet** (first-party, fetched from gitlab.com/leestripp/omninet) — the *only* HTTP stack; **no libcurl** |
-| Agent engine | **hive-brain** (first-party, fetched, tracks `main` with configure-time auto-update; pin via `-DDAEDALUS_TAG=`) |
+| Agent engine | **hive-agent** (in-tree at `hive-agent/src/` — merged into this repo 2026-09-07; builds as part of the main build) |
 | Persistence | **SQLite3** (raw C API via `DbUtil.h` helpers) |
 | JSON | **nlohmann_json** |
 | Native client | **GTK4 / gtkmm-4.0** (+ optional WebKitGTK 6.0 for embedded noVNC) |
@@ -64,9 +64,7 @@ cmake --build build -j"$(nproc)"
 Useful configure options:
 
 - `-DHIVEMIND_BUILD_SERVER=OFF` / `-DHIVEMIND_BUILD_CLIENT=OFF` — component toggles
-- `-DHIVEMIND_USE_DAEDALUS=OFF` — skip hive-brain
-- `-DDAEDALUS_LOCAL=/path/to/hive-brain`, `-DOMNINET_LOCAL=/path/to/omninet` — use local checkouts instead of fetching
-- `-DDAEDALUS_TAG=<tag>` — pin a different hive-brain version
+- `-DOMNINET_LOCAL=/path/to/omninet` — use a local OmniNet checkout instead of fetching
 - `-DOMNINET_AUTO_UPDATE=OFF` — stop configure-time `git fetch + reset --hard origin/main` of the vendored OmniNet
 - Clang toolchain: `cmake -S . -B build-clang -DCMAKE_TOOLCHAIN_FILE=cmake/clang.cmake`
 
@@ -207,7 +205,7 @@ Key architectural mapping:
 4. Web UI changes are plain files in `web/dist/` — no build step; bump
    the `?v=` cache-buster query in `index.html` when editing CSS/JS.
 5. Don't reintroduce libcurl or a second HTTP stack; use OmniNet.
-6. `.daedalus/` and `build/` are gitignored local state — never commit
+6. `.hive-agent/` and `build/` are gitignored local state — never commit
    or delete them as "cleanup."
 7. **popen pipes must always be drained** (`podman_simple` pattern) — an
    undrained pipe SIGPIPEs the child (rc 141) once it writes.

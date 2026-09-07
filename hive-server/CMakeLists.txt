@@ -70,11 +70,6 @@ target_link_libraries(hivemind_core PUBLIC
     pthread
 )
 
-if(HIVEMIND_USE_DAEDALUS)
-    # Phase C: hive-brain linkage REMOVED - brains run on workers
-    # (hive-agent). The server is a pure hub: OmniNet + SQLite only.
-endif()
-
 add_executable(hive-server src/main.cpp)
 target_link_libraries(hive-server PRIVATE hivemind_core)
 

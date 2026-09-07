@@ -17,9 +17,9 @@ shared volume:
 
 ```
 /workspace/
-├── .daedalus/                    # one subfolder per agent on this worker
-│   ├── daedalus-Sticky/          #   history, memory, daedalus.db
-│   └── daedalus-Bob/
+├── .hive-agent/                  # one subfolder per agent on this worker
+│   ├── Sticky/                   #   history, memory, hive-agent.db
+│   └── Bob/
 ├── .agents/skills/               # project-local skills — auto-scanned
 │                                 #   by EVERY agent (shared, zero mounts)
 └── … the actual work …
@@ -36,7 +36,7 @@ on the host owned by the worker user.
 The container's main process is hive-agent, a thin hive-brain host:
 
 - Starts with working dir = `/workspace` (its hive-brain project root) —
-  state lands in `/workspace/.daedalus/daedalus-<Name>/`.
+  state lands in `/workspace/.hive-agent/<Name>/`.
 - Reads its identity + model credentials from env (injected by the worker
   at spawn; credentials live on the worker host only).
 - Speaks NDJSON on stdio: `task` ops in, events out (ready / delta /
