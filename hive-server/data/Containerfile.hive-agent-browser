@@ -41,7 +41,7 @@ RUN pip install --no-cache-dir --break-system-packages playwright \
     && playwright install chromium --with-deps \
     && chmod -R a+rX /opt/ms-playwright
 
-COPY hive-screen.sh /usr/local/bin/hive-screen.sh
+COPY hive-server/data/hive-screen.sh /usr/local/bin/hive-screen.sh
 RUN chmod +x /usr/local/bin/hive-screen.sh
 
 USER hive
