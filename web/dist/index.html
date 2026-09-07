@@ -342,7 +342,7 @@
       <div class="modal-body">
         <label>Name <input id="provider-name" placeholder="KimiCode" autocomplete="off"></label>
         <label>Host <input id="provider-host" placeholder="https://api.kimi.com/coding" autocomplete="off"></label>
-        <label>Chat endpoint <input id="provider-endpoint" placeholder="https://api.kimi.com/coding/v1/chat/completions" autocomplete="off"></label>
+        <label>Chat endpoint <input id="provider-endpoint" placeholder="/v1/chat/completions — path appended to host" autocomplete="off"></label>
         <label>API key <input id="provider-key" type="password" placeholder="sk-…  (leave blank on edit to keep the current key)" autocomplete="off"></label>
         <p class="muted">The key is stored in the hub registry (llm.db) and injected into task frames at dispatch — never returned by any API.</p>
         <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="button" id="provider-save">Save</button></div>
