@@ -40,6 +40,12 @@ public:
             std::chrono::steady_clock::now();  // turn start, for avg_ms
         bool done = false;
         bool cancelling = false;
+        // When cancelling began — the watchdog retires a cancelling turn
+        // after a grace period if the worker never confirms (dropped task
+        // frame / dead worker / idle brain → no task_result). Without this
+        // a cancelled-but-unconfirmed turn wedges busy forever and the
+        // watchdog SKIPS it (Forge incident, 2026-09-07).
+        std::chrono::steady_clock::time_point cancel_started{};
     };
 
     /// Record a user message and dispatch a task to every agent
@@ -112,6 +118,9 @@ private:
     void start_watchdog();
     void watchdog_loop();
     static int turn_timeout_s();   // env HIVEMIND_TURN_TIMEOUT_S, def 1200
+    // Grace for a cancel to be confirmed by the worker before the watchdog
+    // force-retires the turn. env HIVEMIND_CANCEL_GRACE_S, def 90.
+    static int cancel_grace_s();
 
     static constexpr std::size_t kMaxLivePerThread = 32;
     static constexpr int kMaxFanInGenerations = 3;

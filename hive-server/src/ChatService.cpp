@@ -102,6 +102,15 @@ void ChatService::fan_in(const std::string& thread_id,
         if (task_id.empty()) {
             live->error = "worker offline";
             live->done = true;
+            // Visibility: without this the user message sits at
+            // "processing" forever with no explanation (hit 2026-09-07
+            // when a dispatch raced the worker's hub reconnect).
+            try {
+                threads_.add_message(thread_id, "system", "hivemind",
+                    "*(dispatch to agent " + agent.name +
+                    " failed — worker offline or no LLM config; "
+                    "resend the message to retry)*");
+            } catch (...) {}
         } else {
             live->task_id = task_id;
             by_task_[task_id] = live;
@@ -319,6 +328,16 @@ int ChatService::turn_timeout_s() {
     return v;
 }
 
+int ChatService::cancel_grace_s() {
+    static const int v = [] {
+        const char* e = std::getenv("HIVEMIND_CANCEL_GRACE_S");
+        if (!e || !*e) return 90;
+        const int n = std::atoi(e);
+        return n > 0 ? n : 90;
+    }();
+    return v;
+}
+
 void ChatService::start_watchdog() {
     if (turn_timeout_s() <= 0) return;   // disabled
     watchdog_ = std::thread([this] { watchdog_loop(); });
@@ -337,29 +356,49 @@ void ChatService::watchdog_loop() {
         if (stopping_) break;
 
         const int timeout = turn_timeout_s();
-        struct Victim { std::string task_id, thread_id, agent_id; };
+        struct Victim { std::string task_id, thread_id, agent_id;
+                        bool was_cancelling = false; };
         std::vector<Victim> victims;
         {
             std::lock_guard<std::mutex> lk(m_);
             const auto now = std::chrono::steady_clock::now();
             for (auto& [tid, vec] : live_) {
                 for (auto& t : vec) {
-                    if (t->done || t->cancelling || t->task_id.empty())
+                    if (t->done || t->task_id.empty())
                         continue;
-                    const auto age = std::chrono::duration_cast<
-                        std::chrono::seconds>(now - t->started).count();
-                    if (age < timeout) continue;
-                    t->cancelling = true;
-                    if (!t->task_id.empty())
-                        cancelled_tasks_.insert(t->task_id);
-                    victims.push_back({t->task_id, t->thread_id, t->agent_id});
+                    const auto now_s = now;
+                    const bool already_cancelling = t->cancelling;
+                    if (t->cancelling) {
+                        // Cancel never confirmed by the worker (dropped task
+                        // frame, dead worker, idle brain) — retire after the
+                        // grace period or the turn wedges busy forever.
+                        if (t->cancel_started ==
+                            std::chrono::steady_clock::time_point{})
+                            t->cancel_started = now_s;
+                        const auto cs = std::chrono::duration_cast<
+                            std::chrono::seconds>(now_s - t->cancel_started).count();
+                        if (cs < cancel_grace_s()) continue;
+                    } else {
+                        const auto age = std::chrono::duration_cast<
+                            std::chrono::seconds>(now_s - t->started).count();
+                        if (age < timeout) continue;
+                        t->cancelling = true;
+                        t->cancel_started = now_s;
+                        if (!t->task_id.empty())
+                            cancelled_tasks_.insert(t->task_id);
+                    }
+                    victims.push_back({t->task_id, t->thread_id, t->agent_id,
+                                       already_cancelling});
                 }
             }
         }
         for (const auto& v : victims) {
             std::fprintf(stderr,
-                "[chat] WATCHDOG: turn %.16s on agent %.8s exceeded %ds — "
-                "cancelling\n", v.task_id.c_str(), v.agent_id.c_str(), timeout);
+                "[chat] WATCHDOG: turn %.16s on agent %.8s %s — retiring\n",
+                v.task_id.c_str(), v.agent_id.c_str(),
+                v.was_cancelling
+                    ? "cancel unconfirmed by worker (grace elapsed)"
+                    : ("exceeded " + std::to_string(timeout) + "s").c_str());
             // Abort worker-side so the agent's serial queue unblocks.
             if (auto agent = agents_.get_agent(v.agent_id)) {
                 try { hub_.cancel_agent(*agent, v.thread_id); }
@@ -368,8 +407,11 @@ void ChatService::watchdog_loop() {
             // Tell the thread what happened, then retire the turn.
             try {
                 threads_.add_message(v.thread_id, "system", "hivemind",
-                    "*(a turn timed out after " + std::to_string(timeout) +
-                    "s and was cancelled — hub watchdog)*");
+                    v.was_cancelling
+                        ? "*(the cancel was never confirmed by the worker — "
+                          "turn retired by the hub watchdog)*"
+                        : "*(a turn timed out after " + std::to_string(timeout) +
+                          "s and was cancelled — hub watchdog)*");
             } catch (...) {}
             std::lock_guard<std::mutex> lk(m_);
             auto it = live_.find(v.thread_id);
@@ -390,6 +432,7 @@ void ChatService::cancel_thread(const std::string& thread_id) {
         for (auto& t : it->second) {
             if (t->done || t->cancelling) continue;
             t->cancelling = true;
+            t->cancel_started = std::chrono::steady_clock::now();
             if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
             auto agent = agents_.get_agent(t->agent_id);
             if (agent) to_cancel.push_back(*agent);
