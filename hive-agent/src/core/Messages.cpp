@@ -166,7 +166,7 @@ prefix, suffix, or explanation. Just output the summary in the format above.
 // ============================================================================
 // §CRASH-4 (2026-07-16): async-signal-safe crash handler infrastructure.
 // §CRASH-6 (2026-08-05): reworked per the monkeybyte crash report
-// (daedalus_bugs.md, defects #1-#5). The old design kept a
+// (hive-agent-bugs.md, defects #1-#5). The old design kept a
 // std::vector<Messages*> guarded by a spinlock, snapshotted it into a
 // std::vector inside the signal handler (malloc in a SIGSEGV handler —
 // deadlock/heap corruption if the fault originated in the allocator),
@@ -874,7 +874,7 @@ void Messages::save() const {
 // save_mutex_ so that crash-mirror mutations and the atomic
 // dirty_/snapshot dance are serialized.
 void Messages::save_impl() const {
-    // §PERSIST-RACE (2026-09-02, daedalus_bugs.md BUG 1): snapshot the
+    // §PERSIST-RACE (2026-09-02, hive-agent-bugs.md BUG 1): snapshot the
     // PUBLISHED chain, never messages_ itself. The LLMClient turn path
     // mutates messages_ through the raw get_messages() reference without
     // holding messages_mutex_; a deep copy racing those mutations is a

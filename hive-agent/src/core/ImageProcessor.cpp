@@ -280,7 +280,7 @@ static std::string load_and_scale_image(const std::string& path) {
     png_output_buffer.reserve(new_width * new_height); // Rough estimate
     
     // Write to a temp file
-    std::string temp_path = std::filesystem::temp_directory_path().string() + "/daedalus_scaled_" + 
+    std::string temp_path = std::filesystem::temp_directory_path().string() + "/hive_scaled_" + 
                            std::to_string(std::time(nullptr)) + ".png";
     
     FILE* out_fp = fopen(temp_path.c_str(), "wb");

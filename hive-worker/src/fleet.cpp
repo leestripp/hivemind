@@ -23,220 +23,6 @@ using nlohmann::json;
 namespace hwfleet {
 
 // -- secrets ---------------------------------------------------------------
-
-std::string resolve_api_key(const std::string& provider) {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "secrets.json";
-    std::ifstream in(p);
-    if (!in)
-        throw std::runtime_error("worker secrets missing: " + p.string() +
-                                 " (create 0600, {\"<provider>\": \"<key>\"})");
-    json j;
-    try { in >> j; }
-    catch (...) { throw std::runtime_error("worker secrets: bad json"); }
-    const std::string key = j.value(provider, "");
-    if (key.empty())
-        throw std::runtime_error("worker secrets: no key for provider '" +
-                                 provider + "'");
-    return key;
-}
-
-/// Resolve a model NAME to its full config from the worker-local
-/// models.json (~/.local/share/hive-worker/models.json, 0600):
-///   {"<name>": {"model_id","host","endpoint","provider",
-///               "max_context","temperature"}}
-/// Fields missing from the entry keep the spec's own values.
-/// models.json -> [{name, provider}] for the hello catalog.
-json list_worker_models() {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    std::ifstream in(p);
-    json out = json::array();
-    if (!in) return out;
-    json j;
-    try { in >> j; } catch (...) { return out; }
-    for (auto& [name, e] : j.items())
-        if (e.is_object())   // skip the "default" string convention key
-            out.push_back({{"name", name},
-                           {"provider", e.value("provider", "")}});
-    return out;
-}
-
-std::string worker_default_model() {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    std::ifstream in(p);
-    if (!in) return "";
-    json j;
-    try { in >> j; } catch (...) { return ""; }
-    if (j.contains("default") && j["default"].is_string() &&
-        j.contains(j["default"].get<std::string>()))
-        return j["default"].get<std::string>();
-    for (auto& [name, e] : j.items())
-        if (e.is_object()) return name;
-    return "";
-}
-
-std::string set_default_model(const std::string& name) {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    std::ifstream in(p);
-    if (!in) return "models.json missing on worker";
-    json j;
-    try { in >> j; } catch (...) { return "models.json: bad json"; }
-    auto it = j.find(name);
-    if (it == j.end() || !it->is_object()) return "unknown model: " + name;
-    j["default"] = name;
-    std::ofstream out(p, std::ios::trunc);
-    if (!out) return "models.json: write failed";
-    out << j.dump(2) << "\n";
-    return "";
-}
-
-// -- Model-registry management (unification Phase 2) -----------------------
-
-namespace {
-
-bool valid_model_name(const std::string& n) {
-    if (n.empty() || n.size() > 64 || n == "default") return false;
-    for (char c : n) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-                        c == '.';
-        if (!ok) return false;
-    }
-    return true;
-}
-
-bool valid_provider_name(const std::string& n) {
-    return valid_model_name(n);   // same alphabet; "default" is fine here
-}
-
-} // namespace
-
-json list_models_detail() {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    json out{{"models", json::object()}, {"default", ""}};
-    std::ifstream in(p);
-    if (!in) return out;
-    json j;
-    try { in >> j; } catch (...) { return out; }
-    for (auto& [name, e] : j.items())
-        if (e.is_object())          // skip the "default" convention key
-            out["models"][name] = e;
-    if (j.contains("default") && j["default"].is_string())
-        out["default"] = j["default"];
-    return out;
-}
-
-std::string upsert_model(const std::string& name, const json& entry) {
-    if (!valid_model_name(name)) return "bad model name";
-    if (!entry.is_object()) return "entry must be an object";
-    const std::string provider = entry.value("provider", "");
-    const std::string host     = entry.value("host", "");
-    if (provider.empty() || host.empty())
-        return "provider and host are required";
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    json j = json::object();
-    {
-        std::ifstream in(p);
-        if (in) { try { in >> j; } catch (...) { return "models.json: bad json"; } }
-    }
-    if (!j.is_object()) j = json::object();
-    json e = json::object();
-    e["provider"] = provider;
-    e["host"]     = host;
-    if (auto v = entry.value("model_id", ""); !v.empty()) e["model_id"] = v;
-    if (auto v = entry.value("endpoint", ""); !v.empty()) e["endpoint"] = v;
-    if (entry.contains("max_context") && entry["max_context"].is_number())
-        e["max_context"] = entry["max_context"];
-    if (entry.contains("temperature") && entry["temperature"].is_number())
-        e["temperature"] = entry["temperature"];
-    j[name] = e;
-    std::ofstream out(p, std::ios::trunc);
-    if (!out) return "models.json: write failed";
-    out << j.dump(2) << "\n";
-    return "";
-}
-
-std::string delete_model(const std::string& name) {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    std::ifstream in(p);
-    if (!in) return "models.json missing on worker";
-    json j;
-    try { in >> j; } catch (...) { return "models.json: bad json"; }
-    auto it = j.find(name);
-    if (it == j.end() || !it->is_object()) return "unknown model: " + name;
-    if (j.value("default", "") == name)
-        return "'" + name + "' is the default — set a different default first";
-    j.erase(name);
-    std::ofstream out(p, std::ios::trunc);
-    if (!out) return "models.json: write failed";
-    out << j.dump(2) << "\n";
-    return "";
-}
-
-std::string set_secret(const std::string& provider, const std::string& key) {
-    if (!valid_provider_name(provider)) return "bad provider name";
-    if (key.empty() || key.size() > 4096) return "bad key";
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "secrets.json";
-    json j = json::object();
-    {
-        std::ifstream in(p);
-        if (in) { try { in >> j; } catch (...) { return "secrets.json: bad json"; } }
-    }
-    if (!j.is_object()) j = json::object();
-    j[provider] = key;
-    std::ofstream out(p, std::ios::trunc);
-    if (!out) return "secrets.json: write failed";
-    out << j.dump(2) << "\n";
-    std::error_code ec;
-    fs::permissions(p, fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::replace, ec);   // enforce 0600
-    if (ec) return "secrets.json: chmod failed";
-    return "";
-}
-
-void resolve_model(AgentSpec& spec) {
-    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
-    std::ifstream in(p);
-    if (!in)
-        throw std::runtime_error("worker models missing: " + p.string() +
-            " (create 0600, {\"<name>\": {\"model_id\",\"host\",...}})");
-    json j;
-    try { in >> j; }
-    catch (...) { throw std::runtime_error("worker models: bad json"); }
-    // "" = worker default. Convention: a top-level "default" key names
-    // the entry to use; without one, the alphabetically-first entry wins
-    // (nlohmann objects are ordered maps). Previously "" always threw,
-    // so UI "worker default" selections could never spawn.
-    if (spec.model.empty()) {
-        if (j.contains("default") && j["default"].is_string() &&
-            j.contains(j["default"].get<std::string>()))
-            spec.model = j["default"].get<std::string>();
-        else
-            for (auto& [name, e2] : j.items())
-                if (e2.is_object()) { spec.model = name; break; }
-        if (spec.model.empty())
-            throw std::runtime_error("worker models: no usable entries");
-    }
-    if (!j.contains(spec.model))
-        throw std::runtime_error("worker models: no entry for model '" +
-                                 spec.model + "'");
-    const json& e = j[spec.model];
-    const std::string mid = e.value("model_id", "");
-    if (!mid.empty()) spec.model = mid;        // name -> remote model id
-    if (spec.api_host.empty())
-        spec.api_host = e.value("host", "");
-    if (spec.chat_endpoint.empty())
-        spec.chat_endpoint = e.value("endpoint", "/v1/chat/completions");
-    if (spec.provider.empty())
-        spec.provider = e.value("provider", "");
-    if (spec.max_context <= 0)
-        spec.max_context = e.value("max_context", 0L);
-    if (spec.temperature < 0)
-        spec.temperature = e.value("temperature", -1.0);
-    if (spec.api_host.empty() || spec.provider.empty())
-        throw std::runtime_error("worker models: entry for '" + spec.model +
-                                 "' lacks host/provider");
-}
-
 // -- AgentProcess ----------------------------------------------------------
 
 AgentProcess::AgentProcess(AgentSpec spec, EventFn on_event)
@@ -284,16 +70,9 @@ std::string AgentProcess::build_env_file() {
     std::string body;
     env_line(body, "HIVEMIND_AGENT_ID", spec_.id);
     env_line(body, "HIVEMIND_AGENT_NAME", spec_.name);
-    env_line(body, "HIVEMIND_MODEL", spec_.model);
-    env_line(body, "HIVEMIND_API_HOST", spec_.api_host);
-    env_line(body, "HIVEMIND_API_KEY", resolve_api_key(spec_.provider));
-    env_line(body, "HIVEMIND_CHAT_ENDPOINT", spec_.chat_endpoint);
-    if (spec_.max_context > 0)
-        env_line(body, "HIVEMIND_MAX_CONTEXT",
-                 std::to_string(spec_.max_context));
-    if (spec_.temperature >= 0)
-        env_line(body, "HIVEMIND_TEMPERATURE",
-                 std::to_string(spec_.temperature));
+    // Phase 43: no LLM env here — the hub injects provider/model config
+    // (endpoint + key + tuning) into every task frame; the brain upserts
+    // it live. models.json / secrets.json are gone.
     if (spec_.auto_approve)
         env_line(body, "HIVEMIND_AUTO_APPROVE", "1");
     const std::string prompt_path = write_prompt_file();
@@ -325,7 +104,8 @@ void AgentProcess::start() {
         state_ = "starting";
     }
     stopping_ = false;
-    resolve_model(spec_);            // model/provider names -> full config
+    // Phase 43: no model resolution here — the hub injects the full
+    // provider/model config into every task frame (llm).
     // Phase 35: type "gpu" -> gpu image + device passthrough flags
     hwrunner::ensure_container(spec_.id, resolved_image(spec_),
                                spec_.type == "gpu");

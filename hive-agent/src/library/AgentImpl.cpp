@@ -133,18 +133,18 @@ AgentImpl::AgentImpl(AgentConfig cfg, std::shared_ptr<AgentSink> sink)
     // §v0.5.0: settings moved to SQLite. AgentConfig::settings_path /
     // mcp_servers_path / mcp_env_path / memory_dir are now deprecated
     // ([[deprecated]] in default_paths.h) — the library reads from
-    // SettingsStore via cfg.daedalus_home. The legacy path-defaulting
+    // SettingsStore via cfg.agent_home. The legacy path-defaulting
     // block that used to live here (assigning those four fields from
-    // cfg.daedalus_home or `default_*_path()` helpers) was deleted in
+    // cfg.agent_home or `default_*_path()` helpers) was deleted in
     // v0.4.2: those fields were set, never read.
 
     // §v0.5.0: wire directly to SettingsStore instead of SettingsManager.
-    // Use per-agent DB if daedalus_home is set, otherwise the global singleton.
+    // Use per-agent DB if agent_home is set, otherwise the global singleton.
     // §B2 fix (v0.5.1): for_home() and instance() now return by value;
     // emplace into the optional so the stored copy is stable for the
     // lifetime of Body (and LLMClient, which takes a pointer to it).
-    if (!cfg_.daedalus_home.empty()) {
-        body_->store.emplace(hive::SettingsStore::for_home(cfg_.daedalus_home));
+    if (!cfg_.agent_home.empty()) {
+        body_->store.emplace(hive::SettingsStore::for_home(cfg_.agent_home));
     } else {
         body_->store.emplace(hive::SettingsStore::instance());
     }
@@ -248,7 +248,7 @@ void AgentImpl::initialize()
     // cycle, but warns once per process so users notice.
     //
     // Detection rule (must match Paths::user_root() in src/library/paths.cpp):
-    //   - $DAEDALUS_HOME unset (override wins, no deprecation)
+    //   - $HIVE_AGENT_HOME unset (override wins, no deprecation)
     //   - $XDG_DATA_HOME unset  (XDG wins, no deprecation)
     //   - $HOME/.daedalus exists on disk → legacy layout in use
     //
@@ -258,9 +258,9 @@ void AgentImpl::initialize()
     {
         const char* home = std::getenv("HOME");
         const char* xdg_data = std::getenv("XDG_DATA_HOME");
-        const char* daedalus_home = std::getenv("DAEDALUS_HOME");
+        const char* agent_home = std::getenv("HIVE_AGENT_HOME");
         std::error_code ec;
-        bool legacy_in_use = !daedalus_home && !xdg_data
+        bool legacy_in_use = !agent_home && !xdg_data
                              && home && *home
                              && std::filesystem::is_directory(
                                  std::filesystem::path(home) / ".daedalus", ec);
@@ -269,7 +269,7 @@ void AgentImpl::initialize()
                 "[DEPRECATION] ~/.daedalus/ is the legacy user-tier layout. "
                 "Per Plan.md §3.4 it is honoured as a READ fallback for one "
                 "release cycle, then removed. Migrate via "
-                "`daedalus-cli --migrate-data`, or set $DAEDALUS_HOME / "
+                "`daedalus-cli --migrate-data`, or set $HIVE_AGENT_HOME / "
                 "$XDG_CONFIG_HOME / $XDG_DATA_HOME to opt into XDG-compliant "
                 "locations immediately. See docs/storage.md (Plan.md Phase 6).");
         }
@@ -331,7 +331,7 @@ void AgentImpl::initialize()
     // with no model at all if the host forgot to pass --model — the
     // settings default wasn't treated as a credential source.
     // The webui demo is exactly such a host: it knows nothing about
-    // models and just passes cfg.daedalus_home. Now those hosts work
+    // models and just passes cfg.agent_home. Now those hosts work
     // out of the box too.
     bool has_explicit_creds = !cfg_.model_name.empty()
         || (!cfg_.api_key.empty() && !cfg_.api_host.empty());
@@ -938,13 +938,13 @@ std::string AgentImpl::library_version() noexcept
 
 ModelDiscoveryResult AgentImpl::discover_models(
     const std::string& model_name,
-    const std::filesystem::path& daedalus_home)
+    const std::filesystem::path& agent_home)
 {
     std::optional<ResolvedModelConfig> cfg;
-    if (daedalus_home.empty()) {
+    if (agent_home.empty()) {
         cfg = SettingsStore::instance().resolve_model(model_name);
     } else {
-        cfg = SettingsStore::for_home(daedalus_home).resolve_model(model_name);
+        cfg = SettingsStore::for_home(agent_home).resolve_model(model_name);
     }
 
     if (!cfg) {
@@ -1171,6 +1171,11 @@ void AgentImpl::clear_memory()
         sink_->on_log(hive::LogLevel::Info,
                       "[MEMORY] All session memory cleared for this project");
     }
+}
+
+SettingsStore* AgentImpl::settings()
+{
+    return body_->store ? &*body_->store : nullptr;
 }
 
 bool AgentImpl::switch_model(const std::string& model_name)

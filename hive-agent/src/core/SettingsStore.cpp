@@ -570,7 +570,13 @@ fs::path default_db_path()
     // ~/.local/share/hive-brain/daedalus.db) — matches the plan.
     fs::path dir = fs::path(Paths::global().user_data_root());
     fs::create_directories(dir);
-    return dir / "daedalus.db";
+    fs::path db = dir / "hive-agent.db";
+    // Phase 43: migrate daedalus.db → hive-agent.db.
+    std::error_code ec;
+    fs::path old_db = dir / "daedalus.db";
+    if (!fs::exists(db, ec) && fs::exists(old_db, ec))
+        fs::rename(old_db, db, ec);
+    return db;
 }
 
 SettingsStore& SettingsStore::instance()
@@ -595,7 +601,12 @@ SettingsStore SettingsStore::for_home(fs::path home)
     // auto_migrate=false: tests that call for_home() on temp paths must
     // not accidentally migrate user-data JSON files.
     fs::create_directories(home);
-    return SettingsStore(home / "daedalus.db", /*auto_migrate=*/false);
+    // Phase 43: migrate daedalus.db → hive-agent.db inside the home dir.
+    std::error_code ec;
+    fs::path old_db = home / "daedalus.db", new_db = home / "hive-agent.db";
+    if (!fs::exists(new_db, ec) && fs::exists(old_db, ec))
+        fs::rename(old_db, new_db, ec);
+    return SettingsStore(new_db, /*auto_migrate=*/false);
 }
 
 // ============================================================================

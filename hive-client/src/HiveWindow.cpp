@@ -2945,26 +2945,19 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     std::vector<ModelEntry>  model_entries;
     std::string default_model;
     try {
-        // /api/models is PER-WORKER since the registry unification
-        // (Phase 41): [{worker, default_model, models:[{name,provider}]}].
-        // Flatten to provider/model entries for the dropdowns, keeping
-        // the worker name visible so identically-named models from
-        // different rigs stay distinguishable.
+        // Phase 43: /api/models is hub-owned and FLAT again —
+        // {models:[{name,provider,model_id,...}], default_model}. The hub
+        // injects the provider config at dispatch, so any model runs on
+        // any machine; machine choice is pure placement.
         std::set<std::string> provs;
-        std::set<std::string> seen;
-        for (auto& w : api_.models().value("models", nlohmann::json::array())) {
-            const std::string worker = w.value("worker", "");
-            for (auto& m : w.value("models", nlohmann::json::array())) {
-                const std::string n = m.value("name", "");
-                if (n.empty()) continue;
-                const std::string p = m.value("provider", "");
-                const std::string key = n + "\x1f" + p + "\x1f" + worker;
-                if (!seen.insert(key).second) continue;   // dedupe
-                model_entries.push_back({n, p,   // bare — refill_models matches on this
-                                         n + "  (" + p + (worker.empty() ? "" : ", " + worker) + ")"});
-                provs.insert(p);
-            }
+        for (auto& m : api_.models().value("models", nlohmann::json::array())) {
+            const std::string n = m.value("name", "");
+            if (n.empty()) continue;
+            const std::string p = m.value("provider", "");
+            model_entries.push_back({n, p, n + "  (" + p + ")"});
+            provs.insert(p);
         }
+        default_model = api_.models().value("default_model", "");
         provider_names.assign(provs.begin(), provs.end());
     } catch (...) { /* server unreachable - dropdowns stay empty */ }
 
@@ -2974,13 +2967,13 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     auto* model = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create({}));
 
     // Repopulate the model list for the selected provider. First entry is
-    // always "(server default)" → sends "" (server picks the default model).
+    // always "(hub default)" → sends "" (server picks the default model).
     auto* model_names = new std::vector<std::string>();   // owned via dialog lifetime below
     auto refill_models = [model, model_entries, model_names, default_model](const std::string& prov) {
         std::vector<Glib::ustring> items;
         model_names->clear();
-        items.push_back(default_model.empty() ? "(server default)"
-                                              : "(server default: " + default_model + ")");
+        items.push_back(default_model.empty() ? "(hub default)"
+                                              : "(hub default: " + default_model + ")");
         model_names->push_back("");
         for (auto& me : model_entries)
             if (me.provider == prov) { items.push_back(me.label); model_names->push_back(me.name); }

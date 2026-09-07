@@ -47,7 +47,7 @@ struct AgentConfig {
     // std::invalid_argument on a bad name; you can also call
     // is_valid_agent_name() yourself first.
     //
-    // ORTHOGONAL to daedalus_home (Phase 8.5): daedalus_home is the
+    // ORTHOGONAL to agent_home (Phase 8.5): agent_home is the
     // config-source axis (settings.json, mcp/), agent_name is the
     // runtime-state axis (messages.json, memory.json). They don't
     // combine into a single path.
@@ -81,19 +81,19 @@ struct AgentConfig {
     // §Phase 8.5 (2026-07-10): each Agent can have its own hive-brain home.
     // If set, this is the base for all derived paths below (settings,
     // mcp_servers, mcp_env, memory). If a derived field is explicitly
-    // set, it wins over the daedalus_home default. Two Agents in one
+    // set, it wins over the agent_home default. Two Agents in one
     // process can now read different settings.json files, use different
     // MCP servers, and store memory in different places.
     //
-    // §Phase 10+: the empty default is $DAEDALUS_HOME (this library's
+    // §Phase 10+: the empty default is $HIVE_AGENT_HOME (this library's
     // env var) or $HOME/.local/share/hive-brain (XDG default).
-    std::filesystem::path daedalus_home;      // empty = $DAEDALUS_HOME or XDG default
+    std::filesystem::path agent_home;      // empty = $HIVE_AGENT_HOME or XDG default
     // §Plan.md v0.5.0 (settled): the per-field *_path overrides
     // (`settings_path`, `mcp_servers_path`, `mcp_env_path`, `memory_dir`,
     // `log_file`) are GONE. Hosts that want a custom path for any of these
     // supply it via the SettingsStore (or pass it directly to the relevant
     // subsystem); the AgentConfig struct now has a single source of truth,
-    // `daedalus_home`.
+    // `agent_home`.
 
     // ----- Behaviour flags -----
     // §BUG-006: auto_approve is now tri-state. Unset (std::nullopt) = legacy

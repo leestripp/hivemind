@@ -40,6 +40,8 @@
 #include "types/ToolInfo.h"
 
 namespace hive {
+class SettingsStore;
+
 
 namespace detail {
 class AgentImpl;  // PIMPL
@@ -230,12 +232,12 @@ public:
 
     /// @brief Discover models exposed by the provider for `model_name`.
     ///
-    /// Looks up the model in the SettingsStore (using `daedalus_home` if
+    /// Looks up the model in the SettingsStore (using `agent_home` if
     /// non-empty, otherwise the default store) and queries its
     /// OpenAI-compatible `GET /v1/models` endpoint.
     static ModelDiscoveryResult discover_models(
         const std::string& model_name,
-        const std::filesystem::path& daedalus_home = {});
+        const std::filesystem::path& agent_home = {});
 
     /// @brief Execute a registered tool directly (without LLM involvement).
     nlohmann::json execute_tool(const std::string& name,
@@ -297,6 +299,12 @@ public:
     ///        with a fresh context (the new model may have a smaller
     ///        context window than the previous one).
     bool switch_model(const std::string& model_name);
+
+    /// Phase 43: direct access to the brain's settings store so the host
+    /// can upsert hub-injected provider/model config (frame "llm") before
+    /// a turn, then switch_model() to activate it. nullptr before
+    /// initialize().
+    SettingsStore* settings();
 
     /// @brief List configured provider names.
     [[nodiscard]] std::vector<std::string> list_providers() const;

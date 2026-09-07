@@ -96,21 +96,21 @@ async function loadSettingsPage() {
       ['address', '<code>' + location.host + '</code>']]);
   } catch { rows('set-server', [['status', 'offline']]); }
   try {
-    // v2: read-only catalog from connected workers ({name, provider, worker}).
+    // Phase 43: hub-owned registry ({name, provider}) + hub default.
     const d = await API.get('/api/models');
     const models = d.models || [];
     rows('set-models', models.length
-      ? models.map(m => [m.name,
-          `<code>${esc(m.provider || '')}</code> via ${esc(m.worker || '?')}`])
-      : [['models', 'none - connect a worker (models.json lives worker-side)']]);
+      ? models.map(m => [m.name + (m.name === d.default_model ? ' (default)' : ''),
+          `<code>${esc(m.provider || '')}</code>`])
+      : [['models', 'none - add a provider on the Models page']]);
   } catch { rows('set-models', [['models', 'unavailable']]); }
   try {
-    // v2: brains are daedalus agents in containers on workers.
+    // v2: brains are hive-agent engines in containers on workers.
     const w = await API.get('/api/workers');
     const workers = w.workers || [];
     const online = workers.filter(x => x.online);
     rows('set-agent', [
-      ['engine', '<code>daedalus</code> brains in podman containers'],
+      ['engine', '<code>hive-agent</code> brains in podman containers'],
       ['workers', workers.length
         ? workers.map(x => esc(x.name) + (x.online ? ' (online)' : ' (offline)')).join(', ')
         : 'none enrolled'],

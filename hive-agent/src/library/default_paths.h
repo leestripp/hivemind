@@ -33,8 +33,8 @@
 
 namespace hive {
 
-/// $HOME/.daedalus (or $DAEDALUS_HOME, or the XDG-compliant path)
-std::filesystem::path default_daedalus_home();
+/// $HOME/.daedalus (or $HIVE_AGENT_HOME, or the XDG-compliant path)
+std::filesystem::path default_agent_home();
 
 /// @brief Validate an agent_name string (§Phase 8.8).
 ///

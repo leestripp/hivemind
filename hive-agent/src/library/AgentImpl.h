@@ -109,7 +109,7 @@ public:
     static std::string     library_version() noexcept;
     static ModelDiscoveryResult discover_models(
         const std::string& model_name,
-        const std::filesystem::path& daedalus_home = {});
+        const std::filesystem::path& agent_home = {});
     nlohmann::json execute_tool(const std::string& name,
                                 const nlohmann::json& args);
 
@@ -135,6 +135,7 @@ public:
     void register_tool(std::unique_ptr<BaseTool> tool);
     void clear_memory();
     bool switch_model(const std::string& model_name);
+    SettingsStore* settings();   // Phase 43 — see Agent.h
     [[nodiscard]] std::vector<std::string> list_providers() const;
     [[nodiscard]] std::vector<ProviderConfig> list_providers_detailed() const;
     bool upsert_provider(const ProviderConfig& provider);

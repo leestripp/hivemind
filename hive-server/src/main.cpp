@@ -45,6 +45,8 @@
 #include "hivemind/WorkerRouter.h"
 #include "hivemind/AgentTools.h"
 #include "hivemind/routes/WorkerRoutes.h"
+#include "hivemind/routes/ModelRoutes.h"
+#include "hivemind/LlmStore.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/AgentStore.h"
@@ -128,6 +130,7 @@ int main(int argc, char* argv[]) {
     RoutineStore routine_store;
     AuthStore auth_store;
     WorkerStore worker_store;
+    LlmStore llm_store;
     WorkerChannel worker_channel{worker_store,
                                  ServerConfig::instance().worker_ws_port(),
                                  ServerConfig::instance().worker_ws_bind()};
@@ -138,6 +141,7 @@ int main(int argc, char* argv[]) {
     // Phase C: pure hub. Turns run on workers (hive-agent); the HubRouter
     // dispatches task ops over the worker channel and feeds results back.
     HubRouter hub{agent_store, thread_store, worker_channel, approval_store};
+    hub.set_llm_store(&llm_store);
     ChatService chat_service{agent_store, thread_store, hub};
     hub.set_chat_service(&chat_service);
     worker_channel.on_frame =
@@ -274,6 +278,7 @@ int main(int argc, char* argv[]) {
     register_approval_routes(server, hub, approval_store, agent_store);
     register_key_routes(server, auth_store);
     register_worker_routes(server, worker_store, worker_channel);
+    register_model_routes(server, llm_store);
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);

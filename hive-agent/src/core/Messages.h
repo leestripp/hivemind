@@ -205,7 +205,7 @@ public:
      * consistent snapshot is published for the flush worker. The worker
      * never reads messages_ directly (see persist_snapshot_ below), so
      * unlocked mutation through this reference cannot tear a worker's
-     * deep copy (MonkeyByte SIGSEGV, daedalus_bugs.md BUG 1).
+     * deep copy (MonkeyByte SIGSEGV, hive-agent-bugs.md BUG 1).
      */
     json& get_messages() { return messages_; }
     const json& get_messages() const { return messages_; }
@@ -613,7 +613,7 @@ private:
     // the raw get_messages() reference without holding messages_mutex_,
     // and a deep copy racing those mutations is a torn read (json object
     // header with a null payload pointer -> SIGSEGV in the flush worker,
-    // taking down the whole host process; daedalus_bugs.md BUG 1).
+    // taking down the whole host process; hive-agent-bugs.md BUG 1).
     // Guarded by messages_mutex_. mutable because save() is const.
     mutable json persist_snapshot_;
 

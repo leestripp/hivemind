@@ -19,9 +19,13 @@ namespace hive {
 namespace fs = std::filesystem;
 
 namespace {
-constexpr std::string_view kAgentBaseDir        = ".daedalus";
-constexpr std::string_view kAgentDirNewPrefix   = "hive-brain";
-constexpr std::string_view kAgentDirNewNamedPrefix = "daedalus-";
+constexpr std::string_view kAgentBaseDir        = ".hive-agent";
+constexpr std::string_view kAgentDirNewPrefix   = "default";
+constexpr std::string_view kAgentDirNewNamedPrefix = "";   // .hive-agent/<name>
+// Phase 43 renames (daedalus → hive-agent): TWO old layouts migrate.
+constexpr std::string_view kAgentDirPrevBase    = ".daedalus";
+constexpr std::string_view kAgentDirPrevPrefix  = "hive-brain";
+constexpr std::string_view kAgentDirPrevNamedPrefix = "daedalus-";
 constexpr std::string_view kAgentDirLegacyPrefix = ".daedalus";
 constexpr std::string_view kAgentDirLegacyNamedPrefix = ".daedalus-";
 
@@ -90,8 +94,24 @@ fs::path ProjectPaths::active_agent_dir() const
 	if ( fs::exists( current, ec ) ) {
 		return current;
 	}
+	// Phase 43: migrate the previous layout (.daedalus/daedalus-<name> or
+	// .daedalus/hive-brain) in place — rename keeps every byte of agent
+	// state (memory, todos, logs, sessions) without a copy.
+	fs::path prev = m_project_root / std::string( kAgentDirPrevBase )
+					/ ( m_agent_name.empty()
+						? std::string( kAgentDirPrevPrefix )
+						: ( std::string( kAgentDirPrevNamedPrefix ) + m_agent_name ) );
+	if ( fs::is_directory( prev, ec ) ) {
+		fs::create_directories( current.parent_path(), ec );
+		if ( fs::rename( prev, current, ec ), !ec ) return current;
+		ec.clear();
+		return prev;   // rename failed (cross-fs?) — keep reading the old dir
+	}
 	fs::path legacy = legacy_agent_dir();
 	if ( fs::is_directory( legacy, ec ) ) {
+		fs::create_directories( current.parent_path(), ec );
+		if ( fs::rename( legacy, current, ec ), !ec ) return current;
+		ec.clear();
 		return legacy;
 	}
 	return current;

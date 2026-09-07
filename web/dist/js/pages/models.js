@@ -1,130 +1,156 @@
-// js/pages/models.js — per-worker model registry management.
-// Registry of record lives on each worker (models.json + secrets.json,
-// 0600); the hub RELAYS management ops over the worker channel and never
-// persists credentials (model-registry unification, Phase 3).
-//   GET    /api/models                       connected workers + catalog
-//   GET    /api/workers/:name/models         full entries (secret-free)
-//   POST   /api/workers/:name/models         {name, provider, host, ...}
-//   DELETE /api/workers/:name/models/:model  (refuses the default)
-//   POST   /api/workers/:name/default-model  {model}
-//   POST   /api/workers/:name/secrets        {provider, key} — write-only
+// js/pages/models.js — hub-owned provider/model registry (Phase 43).
+// ONE place: providers (endpoint + key) live in the hub's llm.db; models
+// belong to a provider; the hub injects the resolved config into every
+// task frame. Any model can run on any machine.
+//   GET    /api/providers                     list (keys masked)
+//   POST   /api/providers                     upsert (blank key = keep)
+//   DELETE /api/providers/:name               cascades its models
+//   POST   /api/providers/:name/discover      GET {host}/v1/models, auto-add
+//   GET    /api/models                        {models[], default_model}
+//   POST   /api/models                        upsert {name, provider, ...}
+//   DELETE /api/models/:name
+//   POST   /api/models/default                {name}
 import { API } from '../api.js';
 import { $, esc } from '../util.js';
 
 function openModal(id)  { $(id).classList.remove('hidden'); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 
-let editing = null;   // {worker, name} when editing, {worker, name:null} when adding
+let editingProvider = null;                    // name when editing, '' when adding
+let editingModel = null;                       // {provider, name|null}
+let lastModels = { models: [], default_model: '' };
 
 async function load() {
-  const d = await API.get('/api/models');
-  const workers = d.models || [];
-  // Detail per worker (full entries) — best-effort; fall back to the
-  // hello catalog (name+provider only) when the detail call fails.
-  const detailed = await Promise.all(workers.map(async w => {
-    try {
-      const det = await API.get(`/api/workers/${encodeURIComponent(w.worker)}/models`);
-      return { worker: w.worker, default: det.default || '',
-               entries: det.models || {} };
-    } catch {
-      const entries = {};
-      for (const m of (w.models || [])) entries[m.name] = { provider: m.provider };
-      return { worker: w.worker, default: w.default_model || '', entries };
-    }
-  }));
-  render(detailed);
+  const [prov, mod] = await Promise.all([
+    API.get('/api/providers'), API.get('/api/models')]);
+  renderProviders(prov.providers || []);
+  lastModels = mod;
+  renderModels(mod.models || [], mod.default_model || '');
 }
 
-function render(workers) {
-  const host = $('models-workers');
-  host.innerHTML = '';
-  if (!workers.length) {
-    host.innerHTML = '<p class="muted">No workers connected.</p>';
+// ── Providers table ────────────────────────────────────────────────────
+
+function renderProviders(providers) {
+  const tb = $('providers-tbody');
+  if (!providers.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="muted">No providers yet — add one, then Discover its models.</td></tr>';
     return;
   }
-  for (const w of workers) host.appendChild(workerCard(w));
+  tb.innerHTML = providers.map(p => `<tr>
+    <td><strong>${esc(p.name)}</strong></td>
+    <td>${esc(p.host || '—')}</td>
+    <td class="muted" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(p.chat_endpoint || '—')}</td>
+    <td>${p.has_key ? '<code>' + esc(p.api_key) + '</code>' : '<span class="muted">none</span>'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-small" data-act="discover" data-name="${esc(p.name)}" title="Discover models via {host}/v1/models">🔍 Discover</button>
+      <button class="btn btn-small" data-act="edit" data-name="${esc(p.name)}" title="Edit">✎</button>
+      <button class="btn btn-small" data-act="delete" data-name="${esc(p.name)}" title="Delete (cascades its models)">🗑</button>
+    </td>
+  </tr>`).join('');
+  tb.querySelectorAll('button[data-act]').forEach(b => {
+    b.onclick = () => onProviderAction(b.dataset.act, b.dataset.name, b);
+  });
 }
 
-function workerCard(w) {
+async function onProviderAction(act, name, btn) {
+  try {
+    if (act === 'discover') {
+      btn.disabled = true; btn.textContent = '…';
+      const r = await API.post(`/api/providers/${encodeURIComponent(name)}/discover`, {});
+      const n = (r.discovered || []).length;
+      btn.textContent = n ? `✓ ${n} models` : '✓ none new';
+      setTimeout(load, 600);
+    } else if (act === 'edit') {
+      const p = (await API.get('/api/providers')).providers.find(x => x.name === name);
+      editingProvider = name;
+      $('provider-name').value = name;
+      $('provider-name').disabled = true;
+      $('provider-host').value = p ? p.host : '';
+      $('provider-endpoint').value = p ? p.chat_endpoint : '';
+      $('provider-key').value = '';
+      $('provider-modal-title').textContent = `Edit provider: ${name}`;
+      openModal('provider-modal');
+    } else if (act === 'delete') {
+      if (!confirm(`Delete provider "${name}" and ALL its models?`)) return;
+      await API.req('DELETE', `/api/providers/${encodeURIComponent(name)}`);
+      setTimeout(load, 300);
+    }
+  } catch { btn.disabled = false; btn.textContent = '🔍 Discover'; }
+}
+
+// ── Models, grouped per provider ───────────────────────────────────────
+
+function renderModels(models, defaultModel) {
+  const host = $('models-workers');
+  host.innerHTML = '';
+  if (!models.length) {
+    host.innerHTML = '<p class="muted">No models yet — add a provider above and hit 🔍 Discover, or add models by hand.</p>';
+    return;
+  }
+  const byProv = {};
+  for (const m of models) (byProv[m.provider] = byProv[m.provider] || []).push(m);
+  for (const prov of Object.keys(byProv).sort())
+    host.appendChild(providerCard(prov, byProv[prov], defaultModel));
+}
+
+function providerCard(prov, models, defaultModel) {
   const card = document.createElement('div');
   card.className = 'card';
   card.style.marginBottom = '16px';
-
-  const names = Object.keys(w.entries);
-  const rows = names.length ? names.map(name => {
-    const e = w.entries[name] || {};
-    return `<tr>
-      <td><strong>${esc(name)}</strong>${name === w.default ? ' <span class="badge">default</span>' : ''}</td>
-      <td>${esc(e.provider || '')}</td>
-      <td>${esc(e.model_id || '—')}</td>
-      <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(e.host || '—')}</td>
-      <td>${e.max_context || '—'}</td>
-      <td>${e.temperature ?? '—'}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-small" data-act="default" data-name="${esc(name)}" title="Set as worker default">★</button>
-        <button class="btn btn-small" data-act="edit" data-name="${esc(name)}" title="Edit">✎</button>
-        <button class="btn btn-small" data-act="delete" data-name="${esc(name)}" title="Delete">🗑</button>
-      </td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="7" class="muted">no models in this worker’s models.json</td></tr>';
-
+  const rows = models.map(m => `<tr>
+    <td><strong>${esc(m.name)}</strong>${m.name === defaultModel ? ' <span class="badge">default</span>' : ''}</td>
+    <td>${esc(m.model_id || m.name)}</td>
+    <td>${m.max_context || '—'}</td>
+    <td>${m.temperature ?? '—'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-small" data-act="default" data-name="${esc(m.name)}" title="Set as hub default">★</button>
+      <button class="btn btn-small" data-act="edit" data-name="${esc(m.name)}" title="Edit">✎</button>
+      <button class="btn btn-small" data-act="delete" data-name="${esc(m.name)}" title="Delete">🗑</button>
+    </td>
+  </tr>`).join('');
   card.innerHTML = `
     <div class="page-head" style="margin-bottom:8px">
-      <div><h3 style="margin:0">${esc(w.worker)}</h3></div>
-      <div>
-        <button class="btn" data-act="add">+ Add model</button>
-        <button class="btn" data-act="secret" style="margin-left:6px">🔑 Set API key</button>
-      </div>
+      <div><h3 style="margin:0">${esc(prov)}</h3></div>
+      <button class="btn" data-act="add">+ Add model</button>
     </div>
     <table class="kv-table">
-      <thead><tr><th>Name</th><th>Provider</th><th>Model ID</th><th>Host</th><th>Ctx</th><th>Temp</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Model ID</th><th>Ctx</th><th>Temp</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
-    <p class="muted" style="margin:8px 0 0">Agents with model set to
-      <em>worker default</em> spawn on <strong>${esc(w.default || '—')}</strong>.
-      Changes apply to future spawns; running agents keep their env.</p>`;
-
-  card.querySelectorAll('button[data-act]').forEach(btn => {
-    btn.onclick = () => onAction(w, btn.dataset.act, btn.dataset.name || null, btn);
+    </table>`;
+  card.querySelectorAll('button[data-act]').forEach(b => {
+    b.onclick = () => onModelAction(prov, b.dataset.act, b.dataset.name || null, b);
   });
   return card;
 }
 
-async function onAction(w, act, name, btn) {
-  const wname = encodeURIComponent(w.worker);
+async function onModelAction(prov, act, name, btn) {
   try {
     if (act === 'default') {
       btn.disabled = true;
-      await API.post(`/api/workers/${wname}/default-model`, { model: name });
+      await API.post('/api/models/default', { name });
       setTimeout(load, 300);
     } else if (act === 'edit') {
-      editing = { worker: w.worker, name };
-      fillModal(name, w.entries[name] || {});
+      const m = lastModels.models.find(x => x.name === name);
+      editingModel = { provider: prov, name };
+      fillModal(name, m || {});
       openModal('model-edit-modal');
     } else if (act === 'delete') {
-      if (!confirm(`Delete model "${name}" from ${w.worker}'s models.json?`)) return;
-      await API.req('DELETE', `/api/workers/${wname}/models/${encodeURIComponent(name)}`);
+      if (!confirm(`Delete model "${name}"?`)) return;
+      await API.req('DELETE', `/api/models/${encodeURIComponent(name)}`);
       setTimeout(load, 300);
     } else if (act === 'add') {
-      editing = { worker: w.worker, name: null };
+      editingModel = { provider: prov, name: null };
       fillModal('', {});
       openModal('model-edit-modal');
-    } else if (act === 'secret') {
-      editing = { worker: w.worker };
-      $('secret-provider').value = '';
-      $('secret-key').value = '';
-      openModal('model-secret-modal');
     }
-  } catch (e) { /* notifyError already shown by API.req */ }
+  } catch {}
 }
 
 function fillModal(name, e) {
   $('model-name').value = name;
   $('model-name').disabled = !!name;      // name is the key — immutable on edit
-  $('model-provider').value = e.provider || '';
+  $('model-provider').value = editingModel ? editingModel.provider : '';
   $('model-modelid').value = e.model_id || '';
-  $('model-host').value = e.host || '';
-  $('model-endpoint').value = e.endpoint || '';
   $('model-context').value = e.max_context || '';
   $('model-temp').value = (e.temperature ?? '') === 0 ? '0' : (e.temperature ?? '');
   $('model-modal-title').textContent = name ? `Edit model: ${name}` : 'Add model';
@@ -133,51 +159,60 @@ function fillModal(name, e) {
 export function enterModels() { load().catch(() => {}); }
 
 export function initModels() {
+  $('provider-add').onclick = () => {
+    editingProvider = '';
+    $('provider-name').value = '';
+    $('provider-name').disabled = false;
+    $('provider-host').value = '';
+    $('provider-endpoint').value = '';
+    $('provider-key').value = '';
+    $('provider-modal-title').textContent = 'Add provider';
+    openModal('provider-modal');
+  };
+
+  $('provider-save').onclick = async () => {
+    const body = {
+      name: (editingProvider || $('provider-name').value).trim(),
+      host: $('provider-host').value.trim(),
+      chat_endpoint: $('provider-endpoint').value.trim(),
+    };
+    const key = $('provider-key').value.trim();
+    if (key) body.api_key = key;
+    if (!body.name || !body.host) { alert('name and host are required'); return; }
+    const btn = $('provider-save');
+    btn.disabled = true;
+    try {
+      await API.post('/api/providers', body);
+      closeModal('provider-modal');
+      setTimeout(load, 300);
+    } catch {} finally { btn.disabled = false; }
+  };
+
   $('model-edit-save').onclick = async () => {
-    if (!editing) return;
+    if (!editingModel) return;
     const body = {
       name: $('model-name').value.trim(),
-      provider: $('model-provider').value.trim(),
-      host: $('model-host').value.trim(),
+      provider: editingModel.provider,
     };
     const mid = $('model-modelid').value.trim();
-    const ep  = $('model-endpoint').value.trim();
     const ctx = parseInt($('model-context').value, 10);
     const tmp = parseFloat($('model-temp').value);
     if (mid) body.model_id = mid;
-    if (ep)  body.endpoint = ep;
     if (!isNaN(ctx)) body.max_context = ctx;
     if (!isNaN(tmp)) body.temperature = tmp;
-    if (!body.name || !body.provider || !body.host) {
-      alert('name, provider and host are required');
-      return;
-    }
+    if (!body.name) { alert('name is required'); return; }
     const btn = $('model-edit-save');
     btn.disabled = true;
     try {
-      await API.post(`/api/workers/${encodeURIComponent(editing.worker)}/models`, body);
+      await API.post('/api/models', body);
       closeModal('model-edit-modal');
       setTimeout(load, 300);
     } catch {} finally { btn.disabled = false; }
   };
 
-  $('model-secret-save').onclick = async () => {
-    if (!editing) return;
-    const provider = $('secret-provider').value.trim();
-    const key = $('secret-key').value.trim();
-    if (!provider || !key) { alert('provider and key are required'); return; }
-    const btn = $('model-secret-save');
-    btn.disabled = true;
-    try {
-      await API.post(`/api/workers/${encodeURIComponent(editing.worker)}/secrets`,
-                     { provider, key });
-      closeModal('model-secret-modal');
-    } catch {} finally { btn.disabled = false; }
-  };
-
-  document.querySelectorAll('#model-edit-modal [data-close], #model-secret-modal [data-close]')
+  document.querySelectorAll('#model-edit-modal [data-close], #provider-modal [data-close]')
     .forEach(b => b.onclick = () => {
       closeModal('model-edit-modal');
-      closeModal('model-secret-modal');
+      closeModal('provider-modal');
     });
 }

@@ -268,9 +268,7 @@ int main(int argc, char* argv[]) {
         try {
             Connection ws{url};
             ws.sendText(json{{"op","hello"},{"worker",name},{"key",key},
-                             {"caps",json::parse(caps)},{"proto",1},
-                             {"models",hwfleet::list_worker_models()},
-                             {"default_model",hwfleet::worker_default_model()}}.dump());
+                             {"caps",json::parse(caps)},{"proto",1}}.dump());
 
             // Handshake + protocol frames share ONE onText/readLoop path.
             // receiveText() for the welcome was a silent frame-eater: its
@@ -776,40 +774,6 @@ int main(int argc, char* argv[]) {
                                       << sy.files << " files)\n";
                         }
                         }   // skill_end
-                } else if (op == "model_ctl") {
-                    // Hub → worker: model-registry management. Synchronous
-                    // reply. action defaults to "set_default" (older hubs
-                    // send no action field — backward compatible).
-                    // Registry of record stays worker-local (models.json /
-                    // secrets.json); the hub relays, never persists.
-                    const std::string id = frame.value("id", "");
-                    const std::string action = frame.value("action", "set_default");
-                    json resp{{"op","model_result"},{"id",id},{"action",action}};
-                    if (action == "set_default") {
-                        const std::string model = frame.value("model", "");
-                        std::string err = hwfleet::set_default_model(model);
-                        if (!err.empty()) resp["error"] = err;
-                        else resp["default_model"] = model;
-                    } else if (action == "list") {
-                        resp["data"] = hwfleet::list_models_detail();
-                    } else if (action == "upsert") {
-                        std::string err = hwfleet::upsert_model(
-                            frame.value("model", ""),
-                            frame.value("entry", json::object()));
-                        if (!err.empty()) resp["error"] = err;
-                    } else if (action == "delete") {
-                        std::string err = hwfleet::delete_model(
-                            frame.value("model", ""));
-                        if (!err.empty()) resp["error"] = err;
-                    } else if (action == "set_secret") {
-                        std::string err = hwfleet::set_secret(
-                            frame.value("provider", ""),
-                            frame.value("key", ""));
-                        if (!err.empty()) resp["error"] = err;
-                    } else {
-                        resp["error"] = "unknown model_ctl action: " + action;
-                    }
-                    try { send_frame(resp); } catch (...) {}
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

@@ -38,7 +38,7 @@
 //
 // §Thread-safety: not thread-safe. One parser per stream.
 // §Library rule: no stdio. Lives in src/library so it can be linked
-//   into libdaedalus.a without violating the no-stdio rule.
+//   into the engine without violating the no-stdio rule.
 
 #pragma once
 

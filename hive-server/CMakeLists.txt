@@ -11,6 +11,7 @@ set(CORE_SOURCES
     src/Vault.cpp
     src/ConnectorStore.cpp
     src/WorkerStore.cpp
+    src/LlmStore.cpp
     src/WorkerChannel.cpp
     src/WorkerRouter.cpp
     src/Settings.cpp
@@ -38,6 +39,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/FileRoutes.cpp
     include/hivemind/routes/ConnectorRoutes.cpp
     include/hivemind/routes/WorkerRoutes.cpp
+    include/hivemind/routes/ModelRoutes.cpp
     include/hivemind/routes/SkillRoutes.cpp
     include/hivemind/routes/SecretRoutes.cpp
     include/hivemind/routes/ContainerRoutes.cpp

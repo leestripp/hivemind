@@ -404,7 +404,7 @@ SubprocessResult Subprocess::execute_combined(const std::string& command,
         
         // If both pipes closed, process should have exited
         if (stdout_eof && stderr_eof) {
-            // §SUBPROC-EOF-HANG (2026-09-02, daedalus_bugs.md BUG 2,
+            // §SUBPROC-EOF-HANG (2026-09-02, hive-agent-bugs.md BUG 2,
             // MonkeyByte): the direct child may have closed its inherited
             // pipe fds but still be running (`exec sleep 300 >&- 2>&-`,
             // daemonizing processes). Both pipes hit EOF while the child
@@ -464,7 +464,7 @@ SubprocessResult Subprocess::execute_combined(const std::string& command,
             kill_group(pid);
             result.timed_out = true;
             
-            // §SUBPROC-DRAIN-HANG (2026-09-02, daedalus_bugs.md BUG 2,
+            // §SUBPROC-DRAIN-HANG (2026-09-02, hive-agent-bugs.md BUG 2,
             // MonkeyByte): a grandchild that escaped the process group
             // (setsid / daemon double-fork) survives killpg() and keeps
             // the pipe write ends open, so EOF never arrives — the old

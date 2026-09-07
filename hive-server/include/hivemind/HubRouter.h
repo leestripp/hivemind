@@ -28,6 +28,7 @@ class WorkerChannel;
 class ApprovalStore;
 class ChatService;
 struct RosterAgent;
+class LlmStore;
 
 class HubRouter {
 public:
@@ -36,6 +37,10 @@ public:
     ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
+
+    /// Phase 43: hub-owned LLM registry — dispatch resolves the agent's
+    /// model here and injects the full provider config into the frame.
+    void set_llm_store(LlmStore* s) { llm_ = s; }
 
     /// Dispatch a task to the agent's worker. Returns the task id, or ""
     /// when the worker is offline (caller marks the live turn failed).
@@ -83,6 +88,7 @@ private:
     WorkerChannel& channel_;
     ApprovalStore& approvals_;
     ChatService* chat_ = nullptr;
+    LlmStore* llm_ = nullptr;
 
     mutable std::mutex m_;
     struct Task { std::string agent_id; std::string worker; };

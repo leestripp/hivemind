@@ -61,8 +61,8 @@ public:
 
 	/// User "root" — parent of `config/`, `data/`, `state/`, `cache/`
 	/// subdirs. The single-root convenience override
-	/// (`$DAEDALUS_HOME` / `$CODEMAXLIB_HOME`) lands here when set.
-	/// Priority: $DAEDALUS_HOME → $XDG_DATA_HOME/hive-brain →
+	/// (`$HIVE_AGENT_HOME` / `$CODEMAXLIB_HOME`) lands here when set.
+	/// Priority: $HIVE_AGENT_HOME → $XDG_DATA_HOME/hive-brain →
 	/// $HOME/.daedalus (LEGACY) → $HOME/.local/share/hive-brain.
 	virtual std::filesystem::path user_root() const = 0;
 

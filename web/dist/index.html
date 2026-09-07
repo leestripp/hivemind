@@ -200,17 +200,27 @@
     <div class="page-body page-wide">
       <div class="page-head">
         <div>
-          <h2>Model Catalog</h2>
+          <h2>Providers &amp; Models</h2>
           <p class="muted">
-            Models are defined per worker
-            (<code>~/.local/share/hive-worker/models.json</code> +
-            <code>secrets.json</code>) — credentials never live on the hub.
-            Each worker has a <strong>default model</strong> that agents
-            spawn with when their model is set to “worker default”.
+            ONE hub-owned registry. A <strong>provider</strong> is an API
+            endpoint + key that serves models; models belong to a provider.
+            The hub injects the resolved config into every task — any model
+            can run on any machine. Agents with no model set use the
+            <strong>default model</strong>.
           </p>
         </div>
       </div>
 
+      <div class="section-head">
+        <h3>Providers</h3>
+        <button id="provider-add" class="btn">+ Add Provider</button>
+      </div>
+      <table class="kv-table">
+        <thead><tr><th>Name</th><th>Host</th><th>Chat endpoint</th><th>API key</th><th></th></tr></thead>
+        <tbody id="providers-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
+      </table>
+
+      <div class="section-head" style="margin-top:24px"><h3>Models</h3></div>
       <div id="models-workers"><p class="muted">loading...</p></div>
     </div>
   </div>
@@ -315,27 +325,27 @@
     <div class="modal-panel">
       <div class="modal-head"><h3 id="model-modal-title">Add model</h3><button class="icon-btn" data-close title="Close">✕</button></div>
       <div class="modal-body">
-        <label>Name <input id="model-name" placeholder="kimi-k2.7" autocomplete="off"></label>
-        <label>Provider <input id="model-provider" placeholder="kimi" autocomplete="off"></label>
-        <label>Model ID <input id="model-modelid" placeholder="kimi-k2.7-code — the id sent to the API (defaults to name)" autocomplete="off"></label>
-        <label>Host <input id="model-host" placeholder="https://api.example.com" autocomplete="off"></label>
-        <label>Endpoint <input id="model-endpoint" placeholder="/v1/chat/completions" autocomplete="off"></label>
-        <label>Max context <input id="model-context" type="number" min="0" placeholder="200000"></label>
-        <label>Temperature <input id="model-temp" type="number" step="0.1" placeholder="0.7"></label>
-        <p class="muted">Written to the worker's models.json — applies to future agent spawns.</p>
+        <label>Name <input id="model-name" placeholder="k3" autocomplete="off"></label>
+        <label>Provider <input id="model-provider" disabled autocomplete="off"></label>
+        <label>Model ID <input id="model-modelid" placeholder="kimi-k3-0905-preview — the id sent to the API (defaults to name)" autocomplete="off"></label>
+        <label>Max context <input id="model-context" type="number" min="0" placeholder="262144"></label>
+        <label>Temperature <input id="model-temp" type="number" step="0.1" placeholder="0.6"></label>
+        <p class="muted">Stored in the hub registry — injected into tasks at dispatch, live for running agents.</p>
         <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="button" id="model-edit-save">Save</button></div>
       </div>
     </div>
   </div>
 
-  <div id="model-secret-modal" class="modal-overlay hidden">
+  <div id="provider-modal" class="modal-overlay hidden">
     <div class="modal-panel">
-      <div class="modal-head"><h3>Set provider API key</h3><button class="icon-btn" data-close title="Close">✕</button></div>
+      <div class="modal-head"><h3 id="provider-modal-title">Add provider</h3><button class="icon-btn" data-close title="Close">✕</button></div>
       <div class="modal-body">
-        <label>Provider <input id="secret-provider" placeholder="kimi" autocomplete="off"></label>
-        <label>API key <input id="secret-key" type="password" placeholder="sk-…" autocomplete="off"></label>
-        <p class="muted">Write-only: relayed to the worker's secrets.json (0600) and never stored on or returned by the hub.</p>
-        <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="button" id="model-secret-save">Set key</button></div>
+        <label>Name <input id="provider-name" placeholder="KimiCode" autocomplete="off"></label>
+        <label>Host <input id="provider-host" placeholder="https://api.kimi.com/coding" autocomplete="off"></label>
+        <label>Chat endpoint <input id="provider-endpoint" placeholder="https://api.kimi.com/coding/v1/chat/completions" autocomplete="off"></label>
+        <label>API key <input id="provider-key" type="password" placeholder="sk-…  (leave blank on edit to keep the current key)" autocomplete="off"></label>
+        <p class="muted">The key is stored in the hub registry (llm.db) and injected into task frames at dispatch — never returned by any API.</p>
+        <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="button" id="provider-save">Save</button></div>
       </div>
     </div>
   </div>

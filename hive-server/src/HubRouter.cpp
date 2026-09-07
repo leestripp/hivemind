@@ -2,6 +2,7 @@
 // roster/threads, workers, and the client. See HubRouter.h.
 
 #include "hivemind/HubRouter.h"
+#include "hivemind/LlmStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ApprovalStore.h"
 #include "hivemind/ChatService.h"
@@ -38,6 +39,30 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
                {"thread_id", thread_id},
                {"roster", roster},
                {"text", text}};
+    // Phase 43: the hub owns provider/model config. Resolve the agent's
+    // model ("" = hub default) and inject the full provider config into
+    // the frame — the brain upserts it into its settings store before the
+    // turn, so any model runs on any machine and config changes are live.
+    if (llm_) {
+        LlmModelInfo mi;
+        auto prov = llm_->resolve(agent.model, &mi);
+        if (prov) {
+            op["llm"] = {{"provider", prov->name}, {"host", prov->host},
+                         {"api_key", prov->api_key},
+                         {"chat_endpoint", prov->chat_endpoint},
+                         {"plugin", prov->plugin},
+                         {"model", mi.name},
+                         {"model_id", mi.model_id.empty() ? mi.name : mi.model_id},
+                         {"max_context", mi.max_context},
+                         {"temperature", mi.temperature}};
+        } else {
+            std::cerr << "[hub] dispatch: no LLM config for model '"
+                      << (agent.model.empty() ? "(default)" : agent.model)
+                      << "' — register providers/models first (agent "
+                      << agent.name << ")\n";
+            return "";
+        }
+    }
     if (!channel_.send(agent.worker, op)) {
         std::cerr << "[hub] dispatch failed: worker '" << agent.worker
                   << "' offline (agent " << agent.name << ")\n";

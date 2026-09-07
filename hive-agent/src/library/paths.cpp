@@ -5,7 +5,7 @@
  * Resolution algorithm (per Plan.md §3.2 + §3.7):
  *
  *   user_root() priority:
- *     1. $DAEDALUS_HOME          (single-root override, like $GOPATH)
+ *     1. $HIVE_AGENT_HOME          (single-root override, like $GOPATH)
  *     2. $XDG_DATA_HOME/hive-brain (XDG-compliant)
  *     3. $HOME/.daedalus         (LEGACY, deprecated)
  *     4. $HOME/.local/share/hive-brain (XDG fallback when neither set)
@@ -98,8 +98,8 @@ class DefaultPaths final : public Paths
 public:
 	fs::path user_root() const override
 	{
-		// 1. $DAEDALUS_HOME — single-root override.
-		if ( fs::path p = env_path_or_empty( "DAEDALUS_HOME" ); !p.empty() ) {
+		// 1. $HIVE_AGENT_HOME — single-root override.
+		if ( fs::path p = env_path_or_empty( "HIVE_AGENT_HOME" ); !p.empty() ) {
 			return p;
 		}
 		// 2. $XDG_DATA_HOME/hive-brain — XDG-compliant default.

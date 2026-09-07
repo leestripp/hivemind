@@ -43,3 +43,11 @@ target_link_libraries(test_fleet PRIVATE OmniNet nlohmann_json::nlohmann_json)
 target_compile_options(test_fleet PRIVATE -UNDEBUG)   # keep assert() live
 add_test(NAME test_fleet COMMAND test_fleet)
 set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
+
+# Phase 43: hub LlmStore (provider/model registry, dispatch resolution).
+add_executable(test_llmstore v2/test_llmstore.cpp
+    ${CMAKE_SOURCE_DIR}/hive-server/src/LlmStore.cpp)
+target_include_directories(test_llmstore PRIVATE ${CMAKE_SOURCE_DIR}/hive-server/include)
+target_link_libraries(test_llmstore PRIVATE sqlite3)
+target_compile_options(test_llmstore PRIVATE -UNDEBUG)
+add_test(NAME test_llmstore COMMAND test_llmstore)

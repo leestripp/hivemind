@@ -30,12 +30,14 @@
 //   HIVEMIND_SKILLS_DIR          (extra read-only skills mount;
 //                                 ':'-separated for several)
 //   HIVEMIND_MCP_SERVERS         (JSON array; seeded into daedalus.db)
-//   HIVEMIND_DAEDALUS_HOME       (default <project>/.daedalus/daedalus-<Name>)
+//   HIVEMIND_AGENT_HOME       (default <project>/.daedalus/daedalus-<Name>)
 //
 // argv[1] = project root (default CWD; the worker launches with
 // /workspace so hive-brain state lands on the shared volume).
 
 #include "library/Agent.h"
+#include "core/settings.h"
+#include "types/ProviderConfig.h"
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
 
@@ -302,25 +304,28 @@ int main(int argc, char** argv) {
     cfg.session_id   = "hive-" + name;   // stable prompt-cache key
     cfg.user_agent   = "hivemind-agent/" GIT_VERSION;
 
-    // Per-agent brain dir on the (shared) project volume: history, memory
-    // and daedalus.db all live at <project>/.daedalus/daedalus-<Name>/.
-    cfg.daedalus_home = env_or(
-        "HIVEMIND_DAEDALUS_HOME",
-        (project_root / ".daedalus" / ("daedalus-" + name)).string());
+    // Per-agent state dir on the (shared) project volume: history, memory,
+    // todos, logs, hive-agent.db — all at <project>/.hive-agent/<Name>/.
+    // (Phase 43: was .daedalus/daedalus-<Name>/ — migrated in place below.)
+    const std::string home_env = env_or("HIVEMIND_AGENT_HOME");
+    if (!home_env.empty()) {
+        cfg.agent_home = home_env;
+    } else {
+        fs::path home = project_root / ".hive-agent" / name;
+        std::error_code ec;
+        fs::path prev = project_root / ".daedalus" / ("daedalus-" + name);
+        if (!fs::exists(home, ec) && fs::is_directory(prev, ec)) {
+            fs::create_directories(home.parent_path(), ec);
+            fs::rename(prev, home, ec);
+            if (!ec) log_err("migrated agent state → " + home.string());
+            ec.clear();
+        }
+        cfg.agent_home = home.string();
+    }
 
-    // LLM credentials injected by the worker from ITS models.json —
-    // the single registry of record. explicit_model_wins stops the
-    // per-agent hive-brain settings store from overriding them (a shadow
-    // registry diverging invisibly — model-registry unification, Phase 1).
-    cfg.explicit_model_wins = true;
-    cfg.model_name     = env_or("HIVEMIND_MODEL");
-    cfg.api_host       = env_or("HIVEMIND_API_HOST");
-    cfg.api_key        = env_or("HIVEMIND_API_KEY");
-    cfg.chat_endpoint  = env_or("HIVEMIND_CHAT_ENDPOINT");
-    if (auto v = env_or("HIVEMIND_MAX_CONTEXT"); !v.empty())
-        cfg.max_context_size = std::stoul(v);
-    if (auto v = env_or("HIVEMIND_TEMPERATURE"); !v.empty())
-        cfg.temperature = std::stof(v);
+    // Phase 43: no LLM env config — the hub owns the provider/model
+    // registry and injects the resolved config (endpoint + key + tuning)
+    // into every task frame; applied to the settings store before the turn.
 
     // Approvals: host-authoritative. Default off -> hive-brain asks the
     // sink; the sink emits approval_request and blocks for approval_resp.
@@ -367,7 +372,7 @@ int main(int argc, char** argv) {
 
     // MCP specs arrive as JSON; seed before Agent construction.
     if (auto mcp = env_or("HIVEMIND_MCP_SERVERS"); !mcp.empty()) {
-        try { seed_mcp_servers(cfg.daedalus_home, json::parse(mcp)); }
+        try { seed_mcp_servers(cfg.agent_home, json::parse(mcp)); }
         catch (const std::exception& e) {
             log_err(std::string("mcp seed parse: ") + e.what());
         }
@@ -565,6 +570,32 @@ int main(int argc, char** argv) {
             if (op.contains("roster") && op["roster"].is_array()) {
                 std::lock_guard<std::mutex> lk(g_roster_mu);
                 g_roster = op["roster"];
+            }
+
+            // Phase 43: hub-owned LLM config. The hub resolves the agent's
+            // model → provider (endpoint + key) and injects it here; the
+            // brain upserts into its settings store and switches model.
+            // Any model can run on any machine; config changes are live.
+            if (op.contains("llm") && op["llm"].is_object()) {
+                const auto& L = op["llm"];
+                hive::ProviderConfig pc;
+                pc.name          = L.value("provider", "");
+                pc.host          = L.value("host", "");
+                pc.api_key       = L.value("api_key", "");
+                pc.chat_endpoint = L.value("chat_endpoint", "");
+                pc.plugin        = L.value("plugin", "");
+                const std::string model    = L.value("model", "");
+                const std::string model_id = L.value("model_id", model);
+                if (auto* st = agent.settings(); st && !pc.name.empty() && !model.empty()) {
+                    st->upsert_provider(pc);
+                    hive::ModelConfig mc;
+                    mc.name = model; mc.provider = pc.name; mc.model_id = model_id;
+                    st->upsert_model(mc);
+                    if (agent.switch_model(model))
+                        log_err("llm config applied: " + model + " via " + pc.name);
+                    else
+                        log_err("llm config apply failed for model '" + model + "'");
+                }
             }
             Task t{op.value("id", ""), op.value("text", ""),
                    op.value("thread_id", "")};

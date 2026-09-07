@@ -394,7 +394,7 @@ async function openAgentModal(existing = null, prefill = null) {
   wsel.onchange = refreshType;
   refreshType();
 
-  // Provider/model from the union catalog (workers' models.json files).
+  // Provider/model from the hub registry (Phase 43 — flat list).
   let models = [];
   try { models = (await API.get('/api/models')).models || []; } catch {}
   const psel = $('am-provider'), msel = $('am-model');
@@ -407,7 +407,7 @@ async function openAgentModal(existing = null, prefill = null) {
   const refillModels = () => {
     msel.innerHTML = '';
     const d = document.createElement('option');
-    d.value = ''; d.textContent = '(worker default)';
+    d.value = ''; d.textContent = '(hub default)';
     msel.appendChild(d);
     for (const m of models.filter(x => x.provider === psel.value)) {
       const o = document.createElement('option');

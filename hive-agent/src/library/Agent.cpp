@@ -81,9 +81,9 @@ std::string Agent::library_version() noexcept   { return detail::AgentImpl::libr
 
 ModelDiscoveryResult Agent::discover_models(
     const std::string& model_name,
-    const std::filesystem::path& daedalus_home)
+    const std::filesystem::path& agent_home)
 {
-    return detail::AgentImpl::discover_models(model_name, daedalus_home);
+    return detail::AgentImpl::discover_models(model_name, agent_home);
 }
 
 nlohmann::json Agent::execute_tool(const std::string& name,
@@ -143,6 +143,11 @@ void Agent::clear_memory() { impl_->clear_memory(); }
 bool Agent::switch_model(const std::string& model_name)
 {
     return impl_->switch_model(model_name);
+}
+
+SettingsStore* Agent::settings()
+{
+    return impl_->settings();
 }
 
 std::vector<std::string> Agent::list_providers() const
