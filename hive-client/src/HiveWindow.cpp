@@ -1127,6 +1127,17 @@ void HiveWindow::refresh_threads() {
                 if (sig == threads_sig_) return;
                 threads_sig_ = std::move(sig);
                 threads_ = std::move(arr);
+                if (!current_dm_agent_.empty()) {
+                    bool dm_still_exists = false;
+                    for (const auto& t : threads_) {
+                        auto ids = t.value("agent_ids", json::array());
+                        if (ids.size() == 1 &&
+                            ids[0].get<std::string>() == current_dm_agent_) {
+                            dm_still_exists = true; break;
+                        }
+                    }
+                    if (!dm_still_exists) current_dm_agent_.clear();
+                }
                 process_thread_activity();
                 rebuild_thread_list();
             });
@@ -3347,6 +3358,8 @@ void HiveWindow::on_delete_thread() {
                 if (!alive_) return;
                 if (current_thread_ == tid) {
                     current_thread_.clear();
+                    current_dm_agent_.clear();  // the DM is gone — re-clicking
+                                                // the agent must recreate it
                     last_message_id_.clear();
                     rendered_msg_ids_.clear();
                     delete_thread_btn_.set_sensitive(false);
