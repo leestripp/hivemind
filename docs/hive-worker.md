@@ -173,6 +173,28 @@ MCP server specs arrive in `agent_spawn` (`mcp_servers`) and are seeded
 into the agent's daedalus.db by hive-agent at startup; daedalus spawns
 them as local child processes inside the container. No tunnels.
 
+### Blender MCP (:gpu image, verified 2026-09-07)
+
+Official `projects.blender.org/lab/blender_mcp` (both halves from one
+snapshot). Chain: daedalus spawns the `blender-mcp` stdio bridge → bridge
+connects to the addon's TCP socket on localhost:9876 → requests execute
+inside Blender. Gotchas:
+
+- **Pin `mcp[cli]<2`** at image build — upstream declares `mcp>=1.2.0`
+  unbounded and mcp 2.x renamed FastMCP → MCPServer, killing the bridge.
+- The addon registers the `blender_mcp` CLI command in `register()`, so
+  the extension must be **enabled** (persisted userpref) before
+  `blender --background --command blender_mcp` works. `blender-mcp-up.sh`
+  handles enable-once + launch + port-wait; `hive-agent-init.sh` (the
+  :gpu CMD) runs it at container start.
+- Background mode is synchronous-only (no deferred responses; that needs
+  the UI event loop on the Xvfb desktop).
+- Tools are namespaced `mcp__blender__*` in daedalus and do NOT appear in
+  the agent's static prompt tool list — agents must be told the exact
+  names in their system prompt (Forge's prompt documents this).
+- Executed code: `bpy` is NOT pre-imported; return data via the `result`
+  variable (top-level `return` is a SyntaxError inside exec).
+
 ## Files
 
 - `file_fetch` / `file_push` / `file_list` ops move bytes between the hub
