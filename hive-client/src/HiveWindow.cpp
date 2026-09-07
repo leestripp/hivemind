@@ -2945,13 +2945,25 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     std::vector<ModelEntry>  model_entries;
     std::string default_model;
     try {
-        // v2: /api/models is the union of connected workers' models.json
-        // (the hub holds no LLM config; model ids never leave workers).
+        // /api/models is PER-WORKER since the registry unification
+        // (Phase 41): [{worker, default_model, models:[{name,provider}]}].
+        // Flatten to provider/model entries for the dropdowns, keeping
+        // the worker name visible so identically-named models from
+        // different rigs stay distinguishable.
         std::set<std::string> provs;
-        for (auto& m : api_.models().value("models", nlohmann::json::array())) {
-            model_entries.push_back({m.value("name", ""), m.value("provider", ""),
-                                     m.value("name", "") + "  (" + m.value("provider", "") + ")"});
-            provs.insert(m.value("provider", ""));
+        std::set<std::string> seen;
+        for (auto& w : api_.models().value("models", nlohmann::json::array())) {
+            const std::string worker = w.value("worker", "");
+            for (auto& m : w.value("models", nlohmann::json::array())) {
+                const std::string n = m.value("name", "");
+                if (n.empty()) continue;
+                const std::string p = m.value("provider", "");
+                const std::string key = n + "\x1f" + p + "\x1f" + worker;
+                if (!seen.insert(key).second) continue;   // dedupe
+                model_entries.push_back({n, p,   // bare — refill_models matches on this
+                                         n + "  (" + p + (worker.empty() ? "" : ", " + worker) + ")"});
+                provs.insert(p);
+            }
         }
         provider_names.assign(provs.begin(), provs.end());
     } catch (...) { /* server unreachable - dropdowns stay empty */ }
