@@ -38,6 +38,9 @@ RUN curl -fsSL -o /tmp/blender.tar.xz \
 # a child of hive-agent), (2) the Blender 5.1 extension whose TCP socket
 # server it relays to (localhost:9876; extension autostart pref defaults
 # True once enabled). uv per the official tooling; baked at build time.
+# PIN mcp<2: upstream declares mcp[cli]>=1.2.0 (unbounded) and mcp 2.x
+# renamed FastMCP -> MCPServer, breaking the bridge import (verified
+# 2026-09-07: ModuleNotFoundError mcp.server.fastmcp).
 # NOTE: Gitea's /archive/ endpoint 403s for anonymous fetches — git clone
 # (smart-http) works anonymously. Git is already in the :browser base.
 RUN git clone --depth 1 https://projects.blender.org/lab/blender_mcp.git \
@@ -45,7 +48,7 @@ RUN git clone --depth 1 https://projects.blender.org/lab/blender_mcp.git \
     && rm -rf /opt/blender-mcp-src/.git \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
-       uv tool install /opt/blender-mcp-src/mcp
+       uv tool install /opt/blender-mcp-src/mcp --with "mcp[cli]<2"
 
 # Install the extension into a system extensions repo: the hive user's
 # ~/.config is a per-agent mounted volume, so image-baked files must live
@@ -101,3 +104,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 
 USER hive
 WORKDIR /workspace
+
+# ── MCP socket server autostart ──────────────────────────────────────
+# blender-mcp-up.sh: idempotent launcher (enables the addon once per
+# volume, starts `blender --background --command blender_mcp`, waits for
+# :9876). hive-agent-init.sh replaces the inherited `sleep infinity` CMD
+# so the socket is up before daedalus' blender-mcp bridge connects.
+COPY hive-server/data/blender-mcp-up.sh /usr/local/bin/blender-mcp-up.sh
+COPY hive-server/data/hive-agent-init.sh /usr/local/bin/hive-agent-init.sh
+RUN chmod +x /usr/local/bin/blender-mcp-up.sh /usr/local/bin/hive-agent-init.sh
+CMD ["/usr/local/bin/hive-agent-init.sh"]
