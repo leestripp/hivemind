@@ -858,6 +858,16 @@ HiveWindow::HiveWindow() {
         return alive_;
     }, 1500);
 
+    // 10 s thread-list poll: pair threads created by agents messaging
+    // each other (and activity badges on existing threads) appear without
+    // waiting for a user action. refresh_threads() is signature-gated,
+    // so this only rebuilds the list when something actually changed.
+    threads_timer_ = Glib::signal_timeout().connect([this] {
+        if (connect_dialog_ || api_.api_key().empty()) return alive_;
+        refresh_threads();
+        return alive_;
+    }, 10000);
+
     load_config();
     follow_system_theme();   // Phase 37: track GNOME Dark/Light
     setup_icons();   // persistent icon structure, once
@@ -873,6 +883,7 @@ HiveWindow::HiveWindow() {
 HiveWindow::~HiveWindow() {
     alive_ = false;
     poll_timer_.disconnect();
+    threads_timer_.disconnect();
 }
 
 // ── connection config (Phase 9) ─────────────────────────────────────────────
@@ -1101,7 +1112,21 @@ void HiveWindow::refresh_threads() {
             std::lock_guard<std::mutex> lk(queue_m_);
             done_queue_.push_back([this, threads] {
                 if (!alive_) return;
-                threads_ = threads.value("threads", json::array());
+                auto arr = threads.value("threads", json::array());
+                // Change signature: id + title + last_activity per row.
+                // New pair thread (agents talking) → new id; new message
+                // in any thread → last_activity moves. Skip the rebuild
+                // entirely when nothing changed (10s poll would otherwise
+                // rebuild the list ~500×/h for nothing).
+                std::string sig;
+                for (const auto& t : arr) {
+                    sig += t.value("id", "");          sig += '\x1f';
+                    sig += t.value("title", "");       sig += '\x1f';
+                    sig += t.value("last_activity", ""); sig += '\x1e';
+                }
+                if (sig == threads_sig_) return;
+                threads_sig_ = std::move(sig);
+                threads_ = std::move(arr);
                 process_thread_activity();
                 rebuild_thread_list();
             });

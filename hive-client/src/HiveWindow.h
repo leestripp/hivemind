@@ -216,6 +216,8 @@ private:
     void update_attach_row();
 
     sigc::connection poll_timer_;
+    sigc::connection threads_timer_;   // 10s thread-list poll (agent↔agent threads appear live)
+    std::string threads_sig_;          // change signature; rebuild only on change
 
     // at most one connect dialog may exist — guards against the 1.5 s poll
     // timer spawning a fresh modal dialog on every 401 response
