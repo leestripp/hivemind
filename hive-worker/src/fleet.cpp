@@ -89,6 +89,110 @@ std::string set_default_model(const std::string& name) {
     return "";
 }
 
+// -- Model-registry management (unification Phase 2) -----------------------
+
+namespace {
+
+bool valid_model_name(const std::string& n) {
+    if (n.empty() || n.size() > 64 || n == "default") return false;
+    for (char c : n) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                        c == '.';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool valid_provider_name(const std::string& n) {
+    return valid_model_name(n);   // same alphabet; "default" is fine here
+}
+
+} // namespace
+
+json list_models_detail() {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    json out{{"models", json::object()}, {"default", ""}};
+    std::ifstream in(p);
+    if (!in) return out;
+    json j;
+    try { in >> j; } catch (...) { return out; }
+    for (auto& [name, e] : j.items())
+        if (e.is_object())          // skip the "default" convention key
+            out["models"][name] = e;
+    if (j.contains("default") && j["default"].is_string())
+        out["default"] = j["default"];
+    return out;
+}
+
+std::string upsert_model(const std::string& name, const json& entry) {
+    if (!valid_model_name(name)) return "bad model name";
+    if (!entry.is_object()) return "entry must be an object";
+    const std::string provider = entry.value("provider", "");
+    const std::string host     = entry.value("host", "");
+    if (provider.empty() || host.empty())
+        return "provider and host are required";
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    json j = json::object();
+    {
+        std::ifstream in(p);
+        if (in) { try { in >> j; } catch (...) { return "models.json: bad json"; } }
+    }
+    if (!j.is_object()) j = json::object();
+    json e = json::object();
+    e["provider"] = provider;
+    e["host"]     = host;
+    if (auto v = entry.value("model_id", ""); !v.empty()) e["model_id"] = v;
+    if (auto v = entry.value("endpoint", ""); !v.empty()) e["endpoint"] = v;
+    if (entry.contains("max_context") && entry["max_context"].is_number())
+        e["max_context"] = entry["max_context"];
+    if (entry.contains("temperature") && entry["temperature"].is_number())
+        e["temperature"] = entry["temperature"];
+    j[name] = e;
+    std::ofstream out(p, std::ios::trunc);
+    if (!out) return "models.json: write failed";
+    out << j.dump(2) << "\n";
+    return "";
+}
+
+std::string delete_model(const std::string& name) {
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
+    std::ifstream in(p);
+    if (!in) return "models.json missing on worker";
+    json j;
+    try { in >> j; } catch (...) { return "models.json: bad json"; }
+    auto it = j.find(name);
+    if (it == j.end() || !it->is_object()) return "unknown model: " + name;
+    if (j.value("default", "") == name)
+        return "'" + name + "' is the default — set a different default first";
+    j.erase(name);
+    std::ofstream out(p, std::ios::trunc);
+    if (!out) return "models.json: write failed";
+    out << j.dump(2) << "\n";
+    return "";
+}
+
+std::string set_secret(const std::string& provider, const std::string& key) {
+    if (!valid_provider_name(provider)) return "bad provider name";
+    if (key.empty() || key.size() > 4096) return "bad key";
+    const fs::path p = fs::path(hwrunner::worker_dir()) / "secrets.json";
+    json j = json::object();
+    {
+        std::ifstream in(p);
+        if (in) { try { in >> j; } catch (...) { return "secrets.json: bad json"; } }
+    }
+    if (!j.is_object()) j = json::object();
+    j[provider] = key;
+    std::ofstream out(p, std::ios::trunc);
+    if (!out) return "secrets.json: write failed";
+    out << j.dump(2) << "\n";
+    std::error_code ec;
+    fs::permissions(p, fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace, ec);   // enforce 0600
+    if (ec) return "secrets.json: chmod failed";
+    return "";
+}
+
 void resolve_model(AgentSpec& spec) {
     const fs::path p = fs::path(hwrunner::worker_dir()) / "models.json";
     std::ifstream in(p);

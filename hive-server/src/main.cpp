@@ -232,6 +232,11 @@ int main(int argc, char* argv[]) {
         const bool admin = AuthStore::has_scope(*scopes, "admin");
         if (path.rfind("/api/keys", 0) == 0 ||
             path.rfind("/api/secrets", 0) == 0 ||
+            // Model-registry management is credential-adjacent
+            // (relay to worker models.json/secrets.json) — admin only.
+            (path.rfind("/api/workers/", 0) == 0 &&
+             (path.find("/models") != std::string::npos ||
+              path.find("/secrets") != std::string::npos)) ||
             (path.rfind("/api/connectors", 0) == 0 &&
              req.method() != OmniNet::HTTP::Method::GET) ||
             path.find("/container/exec") != std::string::npos ||

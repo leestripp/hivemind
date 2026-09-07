@@ -89,6 +89,53 @@ int main() {
         std::cout << "test_fleet: resolve_model default resolution OK\n";
     }
 
+    // Model-registry management ops (unification Phase 2) — pure half.
+    {
+        const char* old_home = std::getenv("HOME");
+        const std::string saved_home = old_home ? old_home : "";
+        fs::path tmp = fs::temp_directory_path() / "hive_test_model_ops";
+        fs::remove_all(tmp);
+        fs::create_directories(tmp / ".local/share/hive-worker");
+        setenv("HOME", tmp.c_str(), 1);
+        const fs::path dir = tmp / ".local/share/hive-worker";
+
+        // upsert: creates models.json, validates name/provider/host
+        assert(hwfleet::upsert_model("bad name!", {}) != "");
+        assert(hwfleet::upsert_model("default", {}) != "");   // reserved
+        assert(hwfleet::upsert_model("m1", {{"provider","p"}}) != "");  // host missing
+        assert(hwfleet::upsert_model("m1", {{"provider","p"},
+                                            {"host","https://h"},
+                                            {"model_id","mid-1"},
+                                            {"max_context",128000},
+                                            {"temperature",0.7}}) == "");
+        // list_models_detail: entry round-trips, default empty
+        json d = hwfleet::list_models_detail();
+        assert(d["models"]["m1"]["model_id"] == "mid-1");
+        assert(d["models"]["m1"]["max_context"] == 128000);
+        assert(d["default"] == "");
+
+        // delete: refuses the default, removes others
+        assert(hwfleet::set_default_model("m1").empty());
+        assert(hwfleet::delete_model("m1").find("default") != std::string::npos);
+        assert(hwfleet::upsert_model("m2", {{"provider","p"},
+                                            {"host","https://h"}}) == "");
+        assert(hwfleet::delete_model("m2") == "");
+        assert(hwfleet::list_models_detail()["models"].size() == 1);
+
+        // set_secret: writes secrets.json, enforces 0600
+        assert(hwfleet::set_secret("", "k") != "");
+        assert(hwfleet::set_secret("p", "sk-test-123") == "");
+        const auto perms = fs::status(dir / "secrets.json").permissions();
+        assert((perms & fs::perms::group_read) == fs::perms::none);
+        assert((perms & fs::perms::others_read) == fs::perms::none);
+        // secret is resolvable for spawn
+        assert(hwfleet::resolve_api_key("p") == "sk-test-123");
+
+        if (!saved_home.empty()) setenv("HOME", saved_home.c_str(), 1);
+        fs::remove_all(tmp);
+        std::cout << "test_fleet: model-registry ops OK\n";
+    }
+
     const char* key = std::getenv("HIVE_TEST_API_KEY");
     // 77 = ctest SKIP_RETURN_CODE: pure tests above already ran; the
     // container half needs a live Kimi key and is skipped under ctest.

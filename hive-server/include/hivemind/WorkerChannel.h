@@ -110,10 +110,31 @@ public:
 
     /// Ask a worker to set its default model (writes its models.json).
     /// nullopt when the worker is offline; error field set on failure.
-    struct ModelResult { bool ok = false; std::string error; };
+    struct ModelResult { bool ok = false; std::string error;
+                         nlohmann::json data; };
     std::optional<ModelResult> set_default_model(const std::string& worker,
                                                  const std::string& model,
                                                  int timeout_s = 30);
+
+    /// Model-registry unification (Phase 2): relayed management ops.
+    /// The hub NEVER persists these — models.json/secrets.json stay
+    /// worker-local; frames transit the (TLS) channel in memory only.
+    /// nullopt when the worker is offline; error field on worker-side
+    /// failure. list_models_detail fills data = {"models":{...},
+    /// "default":"..."}. set_secret is write-only (key never returned).
+    std::optional<ModelResult> list_models_detail(const std::string& worker,
+                                                  int timeout_s = 30);
+    std::optional<ModelResult> upsert_model(const std::string& worker,
+                                            const std::string& model,
+                                            const nlohmann::json& entry,
+                                            int timeout_s = 30);
+    std::optional<ModelResult> delete_model(const std::string& worker,
+                                            const std::string& model,
+                                            int timeout_s = 30);
+    std::optional<ModelResult> set_secret(const std::string& worker,
+                                          const std::string& provider,
+                                          const std::string& key,
+                                          int timeout_s = 30);
 
     /// Phase 30.4: TCP stream over the channel. open_stream blocks until
     /// the worker acknowledges (stream_opened) or fails (stream_error /
@@ -231,6 +252,11 @@ private:
 
     // worker → default model name (from hello "default_model")
     std::unordered_map<std::string, std::string> defaults_;
+
+    /// Shared model_ctl request/reply (id-registered waiter, sync).
+    std::optional<ModelResult> model_request(const std::string& worker,
+                                             nlohmann::json frame,
+                                             int timeout_s);
 
     // in-flight model_ctl requests (id → result slot)
     struct ModelJob {

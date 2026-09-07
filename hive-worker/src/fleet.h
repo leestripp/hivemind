@@ -145,6 +145,27 @@ std::string worker_default_model();
 std::string set_default_model(const std::string& name);
 
 /// Resolve a model NAME to its full config from the worker-local
+/// ── Model-registry management (unification Phase 2) ──────────────
+/// The hub RELAYS these over the worker channel; models.json and
+/// secrets.json stay worker-local (the hub never holds credentials).
+/// All return an error string ("" = success) except list_models_detail.
+
+/// Full registry dump: {"models": {name: {model_id, host, endpoint,
+/// provider, max_context, temperature}}, "default": "<name>"}.
+/// Entries carry no secrets — API keys live in secrets.json.
+nlohmann::json list_models_detail();
+
+/// Create/replace a models.json entry. Required: provider, host.
+/// Optional: model_id, endpoint, max_context, temperature.
+std::string upsert_model(const std::string& name, const nlohmann::json& entry);
+
+/// Remove an entry. Refuses to delete the current default.
+std::string delete_model(const std::string& name);
+
+/// Write-only API-key set into secrets.json (0600 enforced). Never
+/// echoed back over the channel.
+std::string set_secret(const std::string& provider, const std::string& key);
+
 /// models.json. "" means "worker default": a top-level "default" key
 /// naming another entry wins; absent that, the alphabetically-first
 /// entry (nlohmann objects are ordered). Throws when unresolvable.

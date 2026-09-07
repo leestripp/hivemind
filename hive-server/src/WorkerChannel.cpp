@@ -116,8 +116,8 @@ std::string WorkerChannel::default_model(const std::string& worker) const {
 }
 
 std::optional<WorkerChannel::ModelResult>
-WorkerChannel::set_default_model(const std::string& worker,
-                                 const std::string& model, int timeout_s) {
+WorkerChannel::model_request(const std::string& worker, nlohmann::json frame,
+                             int timeout_s) {
     if (!is_online(worker)) return std::nullopt;
     const std::string id = "mc-" + std::to_string(next_job_++);
     auto mj = std::make_shared<ModelJob>();
@@ -125,7 +125,9 @@ WorkerChannel::set_default_model(const std::string& worker,
         std::lock_guard lk(m_);
         model_jobs_[id] = mj;
     }
-    if (!send(worker, {{"op","model_ctl"},{"id",id},{"model",model}})) {
+    frame["op"] = "model_ctl";
+    frame["id"] = id;
+    if (!send(worker, frame)) {
         std::lock_guard lk(m_);
         model_jobs_.erase(id);
         return std::nullopt;
@@ -137,12 +139,53 @@ WorkerChannel::set_default_model(const std::string& worker,
         model_jobs_.erase(id);
         throw std::runtime_error("worker model_ctl timed out");
     }
+    auto result = mj->result;
     {
         std::lock_guard g(m_);
         model_jobs_.erase(id);
-        if (mj->result.ok) defaults_[worker] = model;
     }
-    return mj->result;
+    return result;
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::set_default_model(const std::string& worker,
+                                 const std::string& model, int timeout_s) {
+    auto r = model_request(worker, {{"action","set_default"},
+                                    {"model",model}}, timeout_s);
+    if (r && r->ok) {
+        std::lock_guard g(m_);
+        defaults_[worker] = model;
+    }
+    return r;
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::list_models_detail(const std::string& worker, int timeout_s) {
+    return model_request(worker, {{"action","list"}}, timeout_s);
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::upsert_model(const std::string& worker,
+                            const std::string& model,
+                            const nlohmann::json& entry, int timeout_s) {
+    return model_request(worker, {{"action","upsert"},{"model",model},
+                                  {"entry",entry}}, timeout_s);
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::delete_model(const std::string& worker,
+                            const std::string& model, int timeout_s) {
+    return model_request(worker, {{"action","delete"},{"model",model}},
+                         timeout_s);
+}
+
+std::optional<WorkerChannel::ModelResult>
+WorkerChannel::set_secret(const std::string& worker,
+                          const std::string& provider,
+                          const std::string& key, int timeout_s) {
+    return model_request(worker, {{"action","set_secret"},
+                                  {"provider",provider},{"key",key}},
+                         timeout_s);
 }
 
 void WorkerChannel::stop() {
@@ -393,6 +436,7 @@ void WorkerChannel::handle(Connection& ws) {
                 std::lock_guard jl(mj->m);
                 mj->result.ok = frame.value("error", "").empty();
                 mj->result.error = frame.value("error", "");
+                mj->result.data = frame.value("data", nlohmann::json::object());
                 mj->done = true;
                 mj->cv.notify_all();
             }
