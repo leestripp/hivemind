@@ -6,6 +6,8 @@
 #include "tools/SkillTool.h"
 #include "tools/MemoryTool.h"
 #include "tools/ReadImageTool.h"
+#include "tools/WebFetchTool.h"
+#include "tools/WebSearchTool.h"
 #include "tools/PDFTool.h"
 #include "tools/TodoListTool.h"
 #include "mcp/McpServerManager.h"
@@ -100,6 +102,13 @@ void ToolFactory::initialize_tools() {
 
     // §PDF-CORE: extract text from PDF files via poppler-cpp (required dep).
     register_tool(std::make_shared<ReadPDFTool>());
+
+    // §WEB-CORE (2026-09-09): key-less web tools restored — these lived in
+    // MonkeyByte and never made the daedalus in-tree merge (Phase 42/43),
+    // leaving hive-agents with no web access after serper_search was
+    // retired. DuckDuckGo HTML endpoint, no API key required.
+    register_tool(std::make_shared<WebSearchTool>());
+    register_tool(std::make_shared<WebFetchTool>());
 
     // Todo list tools
     register_tool(std::make_shared<TodoAddTool>());
