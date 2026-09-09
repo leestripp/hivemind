@@ -8,6 +8,7 @@
 #include <giomm/memoryinputstream.h>
 #include <giomm/resource.h>
 #include <gdkmm/pixbuf.h>
+#include <algorithm>
 #include <future>
 
 #include <cctype>
@@ -832,8 +833,19 @@ HiveWindow::HiveWindow() {
 
     paned_.set_start_child(sidebar_);
     paned_.set_end_child(chat_box_);
-    paned_.set_position(260);
+    paned_.set_position(main_split_);
     paned_.set_vexpand(true);
+    // Persist the sidebar/chat split exactly like the Agents/Threads one
+    // (debounced — drags fire position-changed continuously).
+    paned_.property_position().signal_changed().connect([this] {
+        main_split_ = paned_.get_position();
+        if (split_save_pending_ || !alive_) return;
+        split_save_pending_ = true;
+        Glib::signal_timeout().connect_once([this] {
+            split_save_pending_ = false;
+            if (alive_) save_config();
+        }, 800);
+    });
     root_.append(paned_);
     set_child(root_);
 
@@ -869,6 +881,38 @@ HiveWindow::HiveWindow() {
     }, 10000);
 
     load_config();
+    // Restore persisted geometry: window size + sidebar/chat split. The split
+    // is applied from idle — a Paned ignores set_position before it has an
+    // allocation (same trick as the Agents/Threads split above).
+    set_default_size(window_w_, window_h_);
+    Glib::signal_idle().connect_once(
+        [this] { paned_.set_position(main_split_); });
+    // Track user resizes (debounced persist). GTK4 mirrors user resizes into
+    // default-width/height; skip while maximized so restoring never bakes in
+    // the fullscreen dimensions.
+    auto on_resize = [this] {
+        if (is_maximized()) return;
+        window_w_ = property_default_width().get_value();
+        window_h_ = property_default_height().get_value();
+        if (split_save_pending_ || !alive_) return;
+        split_save_pending_ = true;
+        Glib::signal_timeout().connect_once([this] {
+            split_save_pending_ = false;
+            if (alive_) save_config();
+        }, 800);
+    };
+    property_default_width().signal_changed().connect(on_resize);
+    property_default_height().signal_changed().connect(on_resize);
+    // Snapshot everything one last time on the way out.
+    signal_close_request().connect([this] {
+        if (!is_maximized() && get_width() > 0 && get_height() > 0) {
+            window_w_ = get_width();
+            window_h_ = get_height();
+        }
+        main_split_ = paned_.get_position();
+        save_config();
+        return false;   // let the close proceed
+    }, false);
     follow_system_theme();   // Phase 37: track GNOME Dark/Light
     setup_icons();   // persistent icon structure, once
     apply_theme();   // dark/light + initial pixbuf tint
@@ -903,6 +947,9 @@ void HiveWindow::load_config() {
         user_avatar_  = j.value("user_avatar", "");
         font_scale_   = j.value("font_scale", 1.0);
         sidebar_split_ = j.value("sidebar_split", 320);
+        main_split_   = std::clamp(j.value("main_split", 260), 120, 1200);
+        window_w_     = std::clamp(j.value("window_w", 1100), 400, 7680);
+        window_h_     = std::clamp(j.value("window_h", 760), 300, 4320);
     } catch (...) {}
 }
 
@@ -917,7 +964,9 @@ void HiveWindow::save_config() {
     f << json{{"server", server_url_}, {"api_key", api_.api_key()},
 {"display_name", display_name_},
               {"user_avatar", user_avatar_}, {"font_scale", font_scale_},
-              {"sidebar_split", sidebar_split_}}.dump(2);
+              {"sidebar_split", sidebar_split_},
+              {"main_split", main_split_},
+              {"window_w", window_w_}, {"window_h", window_h_}}.dump(2);
     f.close();
     fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write, ec);
 }

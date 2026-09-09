@@ -185,7 +185,9 @@ private:
     std::string user_avatar_;            // "" = default user silhouette
     double font_scale_ = 1.0;            // UI font scale; 1.0 = system default
     int  sidebar_split_ = 320;           // Agents/Threads paned position (px)
-    bool split_save_pending_ = false;    // debounce for persisting the split
+    int  main_split_ = 260;              // sidebar/chat paned position (px)
+    int  window_w_ = 1100, window_h_ = 760;  // main-window size (px)
+    bool split_save_pending_ = false;    // debounce for persisting geometry
     std::string user_label() const { return display_name_.empty() ? "You" : display_name_; }
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
