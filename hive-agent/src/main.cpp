@@ -40,6 +40,7 @@
 #include "types/ProviderConfig.h"
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
+#include "tools/BrowserTools.h"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -555,6 +556,15 @@ int main(int argc, char** argv) {
         }
     };
     agent.register_tool(std::make_unique<AttachFileTool>());
+
+    // browser_* (Phase 47): computer use — recreation of the v1 hub-side
+    // tools lost in the Phase C refactor. Backed by browser_driver.py
+    // in-container (CDP :9222, the same Chromium the user sees in the
+    // client's Computer view). On plain :latest images the driver is
+    // absent and every action returns a descriptive error.
+    for (auto& spec : hive::BrowserTool::specs())
+        agent.register_tool(std::make_unique<hive::BrowserTool>(std::move(spec)));
+    agent.register_tool(std::make_unique<hive::BrowserFillSecretTool>());
     try {
         agent.initialize();
     } catch (const std::exception& e) {

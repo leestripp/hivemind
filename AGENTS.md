@@ -1,3 +1,5 @@
+<!-- monkeybyte:type: cpp -->
+
 # AGENTS.md — Guidance for AI Coding Agents
 
 This file tells AI coding agents (and humans) how to work effectively in
