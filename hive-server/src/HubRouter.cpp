@@ -210,11 +210,41 @@ void HubRouter::on_worker_frame(const std::string& worker,
                 if (auto by_name = agents_.get_agent_by_name(target))
                     target = by_name->id;
             }
+            // Phase 44: an agent addressing the human via message_agent
+            // (target "user"/"human"/unresolvable) is REDIRECTED to the
+            // User Inbox instead of failing. Before this, agents trying
+            // to PM the user improvised into group threads, fanned in to
+            // every participant and looped endlessly (2026-09-09).
+            if (!agents_.get_agent(target)) {
+                try {
+                    chat_->post_user_inbox_message(agent_id,
+                                                   frame.value("text", ""));
+                    std::cerr << "[hub] agent_msg target '" << target
+                              << "' unresolved -> user inbox\n";
+                } catch (const std::exception& e) {
+                    std::cerr << "[hub] agent_msg->inbox failed: "
+                              << e.what() << "\n";
+                }
+                return;
+            }
             try {
                 chat_->post_agent_message(agent_id, target,
                                           frame.value("text", ""));
             } catch (const std::exception& e) {
                 std::cerr << "[hub] agent_msg failed: " << e.what() << "\n";
+            }
+        }
+        return;
+    }
+    if (op == "user_msg") {
+        // Phase 44: hive-agent's message_user tool -> User Inbox thread.
+        // One-way notification to the human; never fans in.
+        if (chat_) {
+            try {
+                chat_->post_user_inbox_message(agent_id,
+                                               frame.value("text", ""));
+            } catch (const std::exception& e) {
+                std::cerr << "[hub] user_msg failed: " << e.what() << "\n";
             }
         }
         return;

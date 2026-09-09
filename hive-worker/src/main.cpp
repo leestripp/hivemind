@@ -152,6 +152,10 @@ int main(int argc, char* argv[]) {
                 f = {{"op","agent_msg"},{"agent",agent_id},
                      {"target",ev.value("target","")},
                      {"text",ev.value("text","")}};
+            // Phase 44: message_user tool -> hub User Inbox thread.
+            else if (kind == "send_user_message")
+                f = {{"op","user_msg"},{"agent",agent_id},
+                     {"text",ev.value("text","")}};
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},

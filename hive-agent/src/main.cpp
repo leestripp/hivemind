@@ -425,6 +425,52 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<MessageAgentTool>());
 
+    // message_user (Phase 44): the agent's direct line to the HUMAN.
+    // Posts into the hub's singleton User Inbox thread — a one-way,
+    // loop-safe notification channel with zero agent participants, so
+    // nothing sent here can wake another agent. Before this tool existed,
+    // agents trying to address the user improvised into group threads,
+    // fanned in to every participant and looped endlessly (2026-09-09).
+    class MessageUserTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "message_user"; }
+        std::string get_description() const override {
+            return "Send a direct message to the human user. This is the "
+                   "ONLY correct way to address the user outside your own "
+                   "thread reply. Use it for: status updates the user should "
+                   "see, questions only the user can answer, and finished "
+                   "deliverables you want to hand over. The message lands in "
+                   "the user's dedicated inbox thread and is NOT delivered "
+                   "to any other agent, so it can never start an agent "
+                   "loop. NEVER post user-directed messages into group "
+                   "threads, and do NOT use message_agent for the user - "
+                   "message_agent is strictly agent-to-agent. The user "
+                   "reads the inbox when they are around; do not wait for "
+                   "a reply, continue your own work.";
+        }
+        json get_definition() const override {
+            json text   = {{"type","string"},
+                           {"description","Message body for the human user"}};
+            json params = {{"type","object"},
+                           {"properties",{{"text",text}}},
+                           {"required",{"text"}}};
+            return {{"type","function"},
+                    {"function",{{"name","message_user"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string text = args.value("text","");
+            if (text.empty())
+                return {{"status","error"},{"error","text required"}};
+            emit({{"ev","send_user_message"},{"text",text}});
+            return {{"status","success"},
+                    {"note","posted to the user's inbox; do not wait for a "
+                            "reply - the user reads it asynchronously"}};
+        }
+    };
+    agent.register_tool(std::make_unique<MessageUserTool>());
+
     // list_agents (Phase 40): company directory from the roster the hub
     // injects into every task frame.
     class ListAgentsTool final : public hive::BaseTool {

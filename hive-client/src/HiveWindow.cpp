@@ -1176,6 +1176,14 @@ void HiveWindow::refresh_threads() {
                 if (sig == threads_sig_) return;
                 threads_sig_ = std::move(sig);
                 threads_ = std::move(arr);
+                // Phase 44: pin the User Inbox (kind "user") to the TOP —
+                // it is the agent-to-human channel and must always be
+                // visible above the churn of agent threads.
+                std::stable_sort(threads_.begin(), threads_.end(),
+                    [](const json& a, const json& b) {
+                        return a.value("kind", "") == "user" &&
+                               b.value("kind", "") != "user";
+                    });
                 if (!current_dm_agent_.empty()) {
                     bool dm_still_exists = false;
                     for (const auto& t : threads_) {
@@ -1438,6 +1446,8 @@ void HiveWindow::rebuild_thread_list() {
         threads_list_.remove(*row);
     for (auto& t : threads_) {
         std::string title = t.value("title", "");
+        if (t.value("kind", "") == "user")
+            title = "\U0001F4E5 " + title;   // 📥 User Inbox (Phase 44)
         if (title.empty()) {
             // fall back to participant names
             for (auto& id : t.value("agent_ids", json::array())) {
@@ -1908,8 +1918,18 @@ void HiveWindow::on_thread_selected() {
     last_message_id_.clear();
     rendered_msg_ids_.clear();
     chat_stick_bottom_ = true;   // opening a thread always shows the newest
-    delete_thread_btn_.set_sensitive(true);
-    learn_btn_.set_sensitive(true);
+    // Phase 44: the User Inbox is a one-way agent->human channel. It can
+    // never be deleted, and the composer is disabled — the inbox has zero
+    // agent participants, so a reply here would dispatch to nobody.
+    const bool is_inbox = (*id == "user");
+    delete_thread_btn_.set_sensitive(!is_inbox);
+    learn_btn_.set_sensitive(!is_inbox);
+    entry_.set_sensitive(!is_inbox);
+    send_btn_.set_sensitive(!is_inbox);
+    attach_btn_.set_sensitive(!is_inbox);
+    entry_.set_placeholder_text(is_inbox
+        ? "Agents message you here — reply in an agent's own thread"
+        : "Message the team…  (Enter to send)");
     for (auto& t : threads_)
         if (t.value("id", "") == *id)
             last_seen_activity_[*id] = t.value("last_activity", "");
@@ -1924,6 +1944,10 @@ void HiveWindow::on_send() {
     std::string text = entry_.get_text();
     if (current_thread_.empty()) {
         set_status("Select an agent or thread first — message not sent.");
+        return;
+    }
+    if (current_thread_ == "user") {
+        set_status("The inbox is one-way — reply in an agent's own thread.");
         return;
     }
     if (text.empty() && pending_attachments_.empty()) return;

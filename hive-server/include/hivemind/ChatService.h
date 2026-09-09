@@ -61,6 +61,15 @@ public:
                                    const std::string& target_id,
                                    const std::string& body);
 
+    /// Agent -> human direct message (Phase 44): posts to the singleton
+    /// User Inbox thread (kUserThreadId) as sender_kind="agent". NO
+    /// fan_in, NO dispatch — the inbox has zero agent participants, so
+    /// nothing an agent writes there can trigger another turn. This is
+    /// the loop-safe channel for agent-to-user output.
+    /// Throws std::invalid_argument for an unknown sender agent.
+    std::string post_user_inbox_message(const std::string& sender_id,
+                                        const std::string& body);
+
     /// Proactive nudge (gap analysis): sender_kind="system", fanned in.
     std::string post_nudge(const std::string& thread_id,
                            const std::string& body);

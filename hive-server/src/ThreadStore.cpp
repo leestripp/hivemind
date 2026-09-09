@@ -142,13 +142,38 @@ std::optional<Thread> ThreadStore::find_dm(const std::string& agent_id) {
     return std::nullopt;
 }
 
+Thread ThreadStore::ensure_user_thread() {
+    if (auto t = get_thread(kUserThreadId)) return *t;
+    Thread t;
+    t.id = kUserThreadId;
+    t.title = "You (inbox)";
+    t.kind = "user";
+    t.created_at = iso_now();
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    // INSERT OR IGNORE: two hubs racing boot (or a test re-open) must not throw.
+    if (sqlite3_prepare_v2(db,
+            "INSERT OR IGNORE INTO threads (id, title, kind, created_at)"
+            " VALUES (?,?,?,?)", -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, t.id);
+        bind_text(st, 2, t.title);
+        bind_text(st, 3, t.kind);
+        bind_text(st, 4, t.created_at);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return t;
+}
+
 Thread ThreadStore::create_thread(const std::string& title,
                                   const std::string& kind,
                                   const std::vector<std::string>& agent_ids) {
     Thread t;
     t.id = uuid_v4();
     t.title = title;
-    t.kind = (kind == "group" || agent_ids.size() > 1) ? "group" : "dm";
+    t.kind = (kind == "user")                    ? "user"
+           : (kind == "group" || agent_ids.size() > 1) ? "group" : "dm";
     t.created_at = iso_now();
     t.agent_ids = agent_ids;
 
@@ -318,6 +343,7 @@ bool ThreadStore::remove_participant(const std::string& thread_id,
 }
 
 bool ThreadStore::delete_thread(const std::string& id) {
+    if (is_user_thread(id)) return false;   // Phase 44: inbox is protected
     sqlite3* db = open_conn();
     exec_sql(db, "BEGIN");
     bool ok = false;

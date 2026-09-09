@@ -126,6 +126,7 @@ int main(int argc, char* argv[]) {
 
     AgentStore agent_store;
     ThreadStore thread_store;
+    thread_store.ensure_user_thread();   // Phase 44: User Inbox always exists
     ApprovalStore approval_store;
     RoutineStore routine_store;
     AuthStore auth_store;

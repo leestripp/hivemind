@@ -198,10 +198,6 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     enabled     INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS serper_config (
-    id      INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
-    api_key TEXT NOT NULL
-);
 )sql";
 
 /// Per-version migrations. Called when schema_version table reports
@@ -1028,38 +1024,6 @@ ServerErrorSettings SettingsStore::get_server_error_settings() const
     }
     s.max_retries_per_call = get_int("server_error_max_retries_per_call", s.max_retries_per_call);
     return s;
-}
-
-// ============================================================================
-// v0.5.0: Serper.dev API key (serper_config table, singleton row id=1)
-// ============================================================================
-
-std::string SettingsStore::get_serper_api_key() const {
-    if (!db_) return {};
-    try {
-        // Singleton row (id=1); if missing, return empty.
-        auto result = query_one_prepared(*mutex_, *db_,
-            "SELECT api_key FROM serper_config WHERE id = 1");
-        if (!result || result->empty()) return {};
-        return (*result)[0];
-    } catch (const std::exception& e) {
-        LOG_WARNING("SettingsStore::get_serper_api_key failed: "
-                    + std::string(e.what()));
-        return {};
-    }
-}
-
-void SettingsStore::set_serper_api_key(std::string_view api_key) {
-    if (!db_) return;
-    try {
-        exec_prepared(*mutex_, *db_,
-            "INSERT INTO serper_config(id, api_key) VALUES (1, ?) "
-            "ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key",
-            std::string(api_key));
-    } catch (const std::exception& e) {
-        LOG_WARNING("SettingsStore::set_serper_api_key failed: "
-                    + std::string(e.what()));
-    }
 }
 
 // ============================================================================

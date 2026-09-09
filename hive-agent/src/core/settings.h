@@ -7,7 +7,6 @@
 //   - `~/.config/hive-brain/config.json`        → `models` + `kv_settings`
 //   - `~/.config/hive-brain/mcp/servers.json`    → `mcp_servers`
 //   - `~/.config/hive-brain/mcp/.env`            → `kv_settings`
-//   - `serper-search.api_key` in config.json   → `serper_config`
 //
 // What this DOES NOT touch:
 //   - Skills subsystem (file-based by design — editable, version-controllable)
@@ -197,17 +196,6 @@ public:
 
     /// Get server_error settings from kv_settings. Returns defaults if none set.
     ServerErrorSettings get_server_error_settings() const;
-
-    // v0.5.0: Serper.dev API key.
-    //
-    // Stored in the `serper_config` table (singleton row, id=1).
-    // Populated by daedalus-cli --migrate-data or via set_serper_api_key().
-
-    /// Get the Serper API key from the store. Empty string if not set.
-    std::string get_serper_api_key() const;
-
-    /// Set the Serper API key. Empty string clears the row.
-    void set_serper_api_key(std::string_view api_key);
 
     // -----------------------------------------------------------------------
     // v0.3.5: per-project persistence (session memory + messages).

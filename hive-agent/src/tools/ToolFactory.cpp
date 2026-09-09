@@ -5,7 +5,6 @@
 #include "tools/BashTool.h"
 #include "tools/SkillTool.h"
 #include "tools/MemoryTool.h"
-#include "tools/SerperSearchTool.h"
 #include "tools/ReadImageTool.h"
 #include "tools/PDFTool.h"
 #include "tools/TodoListTool.h"
@@ -59,12 +58,7 @@ void ToolFactory::initialize_tools() {
     // and are registered by hosts that need them.
     // §PDF-CORE (2026-08-31): read_pdf moved back into core -- poppler-cpp
     // is a REQUIRED build dependency of the library, so the tool ships as
-    // a built-in rather than an opt-in example (same reasoning as
-    // §SERPER-CORE below).
-    // §SERPER-CORE (2026-08-02): serper_search moved back into core — its
-    // config (SettingsStore serper_config table, core/SerperConfig) has
-    // always been core, and the tool degrades to a descriptive error
-    // when no API key is set.
+    // a built-in rather than an opt-in example.
 
     // User interaction tools
     register_tool(std::make_shared<TellUserTool>());
@@ -95,9 +89,6 @@ void ToolFactory::initialize_tools() {
     register_tool(std::make_shared<ForgetTool>());
     register_tool(std::make_shared<MemoriesTool>());
     register_tool(std::make_shared<MemoryStatsTool>());
-
-    // §SERPER-CORE: web search via Serper.dev (see note above).
-    register_tool(std::make_shared<SerperSearchTool>());
 
     // §READ-IMAGE-CORE (2026-08-10): local image -> base64 data URI so
     // vision-capable models (Kimi K3, moonshot-v1-*-vision) can see it.

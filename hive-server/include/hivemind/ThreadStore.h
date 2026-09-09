@@ -17,6 +17,13 @@
  * DB file: ~/.local/share/hivemind/threads.db (created on first access).
  * Thread-safety: fresh connection per op (same pattern as GraphStore).
  */
+/// Phase 44: the singleton, non-deletable User Inbox thread. Fixed id so
+/// the hub, worker relay and client all agree without a lookup. Kind
+/// "user", zero agent participants — agents post notifications to the
+/// human here via ChatService::post_user_inbox_message; because it has no
+/// participants, nothing posted can fan in and start an agent turn.
+inline constexpr const char* kUserThreadId = "user";
+
 struct Thread {
     std::string id;
     std::string title;
@@ -51,13 +58,20 @@ public:
     /// not mint a fresh empty DM every time).
     std::optional<Thread> find_dm(const std::string& agent_id);
 
+    /// Idempotent: create the User Inbox thread if it does not exist
+    /// (called on hub boot). Returns the thread.
+    Thread ensure_user_thread();
+    static bool is_user_thread(const std::string& id) { return id == kUserThreadId; }
+
     Thread create_thread(const std::string& title,
                          const std::string& kind,
                          const std::vector<std::string>& agent_ids);
 
     std::optional<Thread> get_thread(const std::string& id);
     std::vector<Thread> list_threads();
-    bool delete_thread(const std::string& id);  // cascades messages + participants
+    /// Cascades messages + participants. The User Inbox (kUserThreadId)
+    /// is protected: delete_thread returns false for it.
+    bool delete_thread(const std::string& id);
     bool remove_participant(const std::string& thread_id,
                             const std::string& agent_id);
     bool add_participant(const std::string& thread_id,

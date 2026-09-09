@@ -72,6 +72,18 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     return tid;
 }
 
+std::string ChatService::post_user_inbox_message(const std::string& sender_id,
+                                                 const std::string& body) {
+    if (stopping_)
+        throw std::invalid_argument("server is shutting down");
+    auto sender = agents_.get_agent(sender_id);
+    if (!sender)
+        throw std::invalid_argument("unknown sender agent");
+    threads_.ensure_user_thread();
+    threads_.add_message(kUserThreadId, "agent", sender_id, body);
+    return kUserThreadId;
+}
+
 void ChatService::fan_in(const std::string& thread_id,
                          const RosterAgent& agent,
                          const std::string& sender_label,

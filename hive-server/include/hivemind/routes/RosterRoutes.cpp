@@ -508,6 +508,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         [&threads, &chat](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            // Phase 44: the User Inbox is the one thread that must always
+            // exist — agents need a guaranteed channel to the human.
+            if (ThreadStore::is_user_thread(seg[2])) {
+                send_error(resp, 400, "cannot delete the user inbox");
+                return;
+            }
             chat.cancel_thread(seg[2]);   // stop live turns before deleting
             if (!threads.delete_thread(seg[2])) {
                 send_error(resp, 404, "thread not found"); return;

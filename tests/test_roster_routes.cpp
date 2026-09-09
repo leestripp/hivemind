@@ -152,8 +152,17 @@ int main() {
     assert(posted.contains("message_id"));
 
     auto msgs = jget(port, "/api/threads/" + gid + "/messages");
-    assert(msgs["messages"].size() == 1);
-    assert(msgs["messages"][0]["body"] == "what do you two think?");
+    // ba6c27a: a failed dispatch (workers are offline in this test) posts a
+    // visible system message per participant, synchronously, right after the
+    // user message — so the thread holds 1 user + N system messages. Assert
+    // on the USER message, not the total count.
+    int user_msgs = 0;
+    for (const auto& m : msgs["messages"])
+        if (m.value("sender_kind", "") == "user") {
+            ++user_msgs;
+            assert(m["body"] == "what do you two think?");
+        }
+    assert(user_msgs == 1);
 
     // empty body rejected
     r = request("POST", port, "/api/threads/" + gid + "/messages", {{"body", ""}});
@@ -184,6 +193,42 @@ int main() {
     // messages endpoint on deleted thread 404s too
     r = request("GET", port, "/api/threads/" + gid + "/messages");
     assert(r.statusCode() == 404);
+
+    // ── Phase 44: User Inbox — singleton, non-deletable, loop-safe ───────
+    threads.ensure_user_thread();
+    auto inbox = jget(port, "/api/threads/user");
+    assert(inbox["kind"] == "user");
+    assert(inbox["agent_ids"].empty());      // zero participants: no fan-in
+    // idempotent
+    threads.ensure_user_thread();
+    auto all = jget(port, "/api/threads");
+    int inbox_count = 0;
+    for (const auto& t : all["threads"])
+        if (t.value("kind", "") == "user") ++inbox_count;
+    assert(inbox_count == 1);
+    // protected from deletion (route 400 + store refuses)
+    r = request("DELETE", port, "/api/threads/user");
+    assert(r.statusCode() == 400);
+    assert(jget(port, "/api/threads/user")["id"] == "user");
+
+    // user_msg op (message_user tool relay) posts as the sender agent
+    hub.set_chat_service(&chat);
+    hub.on_worker_frame("testrig", {{"op", "user_msg"}, {"agent", a1},
+                                    {"text", "status for the human"}});
+    auto im = jget(port, "/api/threads/user/messages");
+    assert(im["messages"].size() == 1);
+    assert(im["messages"][0].value("sender_kind", "") == "agent");
+    assert(im["messages"][0].value("sender_id", "") == a1);
+
+    // agent_msg with an unresolvable target ("user") redirects to the inbox
+    // instead of failing — the loop vector from the 2026-09-09 incident.
+    hub.on_worker_frame("testrig", {{"op", "agent_msg"}, {"agent", a1},
+                                    {"target", "user"}, {"text", "ping lee"}});
+    im = jget(port, "/api/threads/user/messages");
+    assert(im["messages"].size() == 2);
+    // no system/dispatch noise in the inbox: both messages are agent posts
+    for (const auto& m : im["messages"])
+        assert(m.value("sender_kind", "") == "agent");
 
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
