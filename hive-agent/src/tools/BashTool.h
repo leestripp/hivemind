@@ -38,7 +38,7 @@ public:
 
     [[nodiscard]] std::string get_name() const override { return "execute_bash"; }
     [[nodiscard]] std::string get_description() const override {
-        return "Execute shell commands in the project root. Supports synchronous execution and background/detached processes for servers or long-running tools.";
+        return "Execute shell commands in the project root. Supports synchronous execution and background/detached processes for servers or long-running tools. IMPORTANT: a synchronous run blocks your ENTIRE agent until the command exits or the timeout fires — you cannot answer messages while it runs. Servers, daemons, watchers, and anything long-running MUST be started in the background (background:true, action:start, or a trailing &) and monitored with action=poll; never run them synchronously.";
     }
     [[nodiscard]] json get_definition() const override;
     json execute(const json& args, FileIO& file_io) override;

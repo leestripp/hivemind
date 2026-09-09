@@ -21,6 +21,7 @@
 
 #include "library/model_discovery.h"
 #include "library/paths.h"
+#include "core/Subprocess.h"
 #include "core/settings.h"
 #include "api/ProviderPlugin.h"    // §ProviderPlugins: endpoint fallback
 #include "api/ProviderRegistry.h"  // §ProviderPlugins
@@ -663,6 +664,11 @@ void AgentImpl::cancel() noexcept
     if (body_->cancel_source.stop_possible()) {
         body_->cancel_source.request_stop();
     }
+    // §2026-09-09 (Buzz wedge): if the turn thread is blocked inside a
+    // synchronous bash subprocess (e.g. a foreground daemon in accept()),
+    // the stop_token can't reach it — kill the child's process group so
+    // the exec returns and the turn loop can observe the cancel.
+    Subprocess::interrupt_current();
     // §Phase 5.1: also fire the LLMClient's cancel_source_ so the
     // SSE wait loop and per-iteration check exit promptly. Previously
     // the body_->cancel_source was a stranded signal — nothing in

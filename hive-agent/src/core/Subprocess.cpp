@@ -5,6 +5,8 @@
 
 #include "Subprocess.h"
 
+#include <atomic>
+
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -290,6 +292,18 @@ std::vector<std::string> Subprocess::parse_command(const std::string& command) {
     return args;
 }
 
+namespace {
+// pgid of the in-flight execute_combined child (child calls setpgid(0,0),
+// so pgid == child pid). 0 when idle. Written by the turn thread, read by
+// interrupt_current() from the cancel thread.
+std::atomic<pid_t> g_active_pgid{0};
+}  // namespace
+
+void Subprocess::interrupt_current() noexcept {
+    const pid_t p = g_active_pgid.load(std::memory_order_acquire);
+    if (p > 0) static_cast<void>(kill_group(p));
+}
+
 SubprocessResult Subprocess::execute_shell(const std::string& command,
                                           const std::string& cwd,
                                           int timeout_ms) {
@@ -361,6 +375,15 @@ SubprocessResult Subprocess::execute_combined(const std::string& command,
     // Parent - close write ends
     close(pipe_stdout[1]); pipe_stdout[1] = -1;
     close(pipe_stderr[1]); pipe_stderr[1] = -1;
+
+    // Publish the child pgid for interrupt_current(); RAII so every exit
+    // path (normal, EOF-hang timeout, timeout kill) clears it.
+    struct ActivePgidGuard {
+        explicit ActivePgidGuard(pid_t p) {
+            g_active_pgid.store(p, std::memory_order_release);
+        }
+        ~ActivePgidGuard() { g_active_pgid.store(0, std::memory_order_release); }
+    } pgid_guard(pid);
     
     // Read output with timeout
     std::string stdout_output;

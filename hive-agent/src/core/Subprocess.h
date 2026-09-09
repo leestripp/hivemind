@@ -91,6 +91,13 @@ public:
      * @return true if signal was sent successfully
      */
     static bool kill_group(int64_t pid);
+
+    /** Interrupt the currently-executing command (if any) by killing its
+     *  process group. Thread-safe; no-op when idle. Called from
+     *  Agent::cancel() so a wedged synchronous exec (e.g. a foreground
+     *  daemon blocked in accept()) cannot pin the serial turn loop —
+     *  the 2026-09-09 Buzz incident wedged an agent ~50min this way. */
+    static void interrupt_current() noexcept;
     
     /**
      * Execute a command with timeout and return result
