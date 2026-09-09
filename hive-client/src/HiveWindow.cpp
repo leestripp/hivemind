@@ -3072,9 +3072,19 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     struct WorkerEntry { std::string name; bool online; std::string caps; };
     std::vector<WorkerEntry> all_workers;
     try {
-        for (auto& w : api_.list_workers().value("workers", nlohmann::json::array()))
+        for (auto& w : api_.list_workers().value("workers", nlohmann::json::array())) {
+            // /api/workers returns "caps" as a JSON OBJECT (the hub parses the
+            // stored string before serialising). value("caps", "{}") THROWS
+            // type_error on that — and the catch below then silently hid the
+            // whole worker row, so no worker (not even a lone online one)
+            // could be selected. Accept either shape and normalise to string.
+            std::string caps = "{}";
+            if (w.contains("caps"))
+                caps = w["caps"].is_string() ? w["caps"].get<std::string>()
+                                             : w["caps"].dump();
             all_workers.push_back({w.value("name", ""), w.value("online", false),
-                                   w.value("caps", "{}")});
+                                   std::move(caps)});
+        }
     } catch (...) { /* server unreachable — worker row stays hidden */ }
     const std::string cur_worker =
         existing ? existing->value("worker", "") : "";
