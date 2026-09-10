@@ -74,3 +74,6 @@ add_executable(hive-server src/main.cpp)
 target_link_libraries(hive-server PRIVATE hivemind_core)
 
 install(TARGETS hive-server DESTINATION "bin")
+
+# Unit tests — ./tests/ (one binary per area, linked against hivemind_core).
+add_subdirectory(tests)

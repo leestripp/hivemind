@@ -101,7 +101,7 @@ hive-server/   C++23 + OmniNet server: roster, threads, approvals,
 hive-client/   GTK4/gtkmm4 native client
 hive-worker/   Remote executor daemon — runs agent containers on other
                machines, driven over a WebSocket channel (Phase 30)
-tests/         ctest suite
+*/tests/       per-app ctest suites
 hivemindctl    build/start/stop/status/logs/client/test
 ```
 

@@ -5,7 +5,7 @@
 // Env required: HIVE_TEST_API_KEY (kimi key), optional HIVE_TEST_MODEL.
 // Run from the REPO ROOT (image build context convention).
 
-#include "../../hive-worker/src/fleet.h"
+#include "../src/fleet.h"
 
 #include <sys/stat.h>
 

@@ -76,7 +76,7 @@ Tests (server-side only; skipped when `HIVEMIND_BUILD_SERVER=OFF`):
 cmake --build build        # tests link hivemind_core
 ctest --test-dir build --output-on-failure
 # or a single test:
-./build/tests/test_agent_store
+./build/hive-server/tests/test_agent_store
 ```
 
 Lint (requires `compile_commands.json`, i.e. `CMAKE_EXPORT_COMPILE_COMMANDS=ON`):
@@ -120,7 +120,7 @@ hive-agent/           In-container brain: thin hive-brain::Agent host speaking
                       stdio NDJSON with hive-worker. No HTTP.
 hive-client/          GTK4/gtkmm4 native client (roster, threads, approvals,
                       screen view). Icons/avatars bundled via GResource.
-tests/                ctest suite — one binary per area, assert()-based
+*/tests/              per-app ctest suites — one binary per area, assert()-based
 web/dist/             Web dashboard (vanilla JS pages under js/pages/)
 docs/                 design.md, api.md, hive-worker.md, deploy.md, …
 resources/            banner/icon images
@@ -162,7 +162,8 @@ Key architectural mapping:
 - Tests: plain `main()` + `assert()` (no framework), temp dirs under
   `fs::temp_directory_path()`, cleaned on start. Tests are compiled with
   `-UNDEBUG` so asserts stay live in Release — do not rely on NDEBUG.
-- New tests: add `hivemind_test(test_name)` to `tests/CMakeLists.txt`.
+- New tests: add `hivemind_test(test_name)` to `hive-server/tests/CMakeLists.txt`
+  (worker/agent apps use `hive_worker_test` / `hive_agent_test` in their own tests/ dirs).
 
 ## Security Rules (do not regress)
 

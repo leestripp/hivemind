@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.28)
 # HiveMind 2.0 — superbuild
 #   hive-server/  C++23 + OmniNet server (API, agents, graph runner, scheduler)
 #   hive-client/  GTK4/gtkmm4 native Linux client
-#   tests/        server test suite
+#   */tests/      per-app unit-test suites (hive-server, hive-worker, hive-agent, hive-client)
 # Deps (first-party, fetched): OmniNet (gitlab.com/leestripp/*)
 # ============================================================================
 
@@ -143,11 +143,10 @@ if(HIVEMIND_BUILD_CLIENT)
     endif()
 endif()
 
-# Tests cover the server side only — skip in client-only builds
-# (e.g. the Flatpak manifest configures with HIVEMIND_BUILD_SERVER=OFF).
-if(HIVEMIND_BUILD_SERVER AND EXISTS "${CMAKE_SOURCE_DIR}/tests")
-    add_subdirectory(tests)
-endif()
+# Unit tests live with each app: hive-server/tests, hive-worker/tests,
+# hive-agent/tests, hive-client/tests. Each app's CMakeLists wires its own
+# add_subdirectory(tests); the HIVEMIND_BUILD_SERVER / HIVEMIND_BUILD_CLIENT
+# guards above already skip tests for apps that aren't being built.
 
 # ============================================================================
 # Clang-Tidy — requires compile_commands.json

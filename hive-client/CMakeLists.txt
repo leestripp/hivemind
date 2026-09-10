@@ -66,3 +66,6 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.hivemind.Client.desktop
         DESTINATION "share/applications")
 install(FILES data/icons/org.hivemind.Client.svg
         DESTINATION "share/icons/hicolor/scalable/apps")
+
+# Unit tests — ./tests/ (scaffold; no test targets yet).
+add_subdirectory(tests)
