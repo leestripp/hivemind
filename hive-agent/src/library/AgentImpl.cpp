@@ -204,7 +204,7 @@ void AgentImpl::initialize()
 
     // §Phase 14.7: per-project system_prompt override.
     // Decision (see Agent.md §14.7 Q2): if
-    // <project_root>/.daedalus/hive-brain/system_prompt.txt exists, its contents
+    // <project_root>/.hive-agent/<name-or-default>/system_prompt.txt exists, its contents
     // are APPENDED to cfg_.system_prompt after the demo's default.
     // Demo default is the base; project file is concatenated after.
     // If cfg_.system_prompt is empty, only the project file is used.
@@ -240,7 +240,7 @@ void AgentImpl::initialize()
             "AgentConfig::agent_name is invalid: \"" + cfg_.agent_name +
             "\". Phase 8.8 rule: must match [A-Za-z0-9_.-]{1,64} and "
             "must not start with '.' or '-'. Empty string is allowed "
-            "(means 'no namespace, use <project_root>/.daedalus/hive-brain/').");
+            "(means 'no namespace, use <project_root>/.hive-agent/default/').");
     }
 
     // §Plan.md Phase 4 (2026-07-13): deprecation warning for legacy
@@ -270,7 +270,7 @@ void AgentImpl::initialize()
                 "[DEPRECATION] ~/.daedalus/ is the legacy user-tier layout. "
                 "Per Plan.md §3.4 it is honoured as a READ fallback for one "
                 "release cycle, then removed. Migrate via "
-                "`daedalus-cli --migrate-data`, or set $HIVE_AGENT_HOME / "
+                "move the contents to the XDG layout, or set $HIVE_AGENT_HOME / "
                 "$XDG_CONFIG_HOME / $XDG_DATA_HOME to opt into XDG-compliant "
                 "locations immediately. See docs/storage.md (Plan.md Phase 6).");
         }
@@ -356,7 +356,7 @@ void AgentImpl::initialize()
     // §Phase 8.5+: also wipe when --no-memory is set. The user-facing
     // semantics of "no memory" is "no prior context of any kind", which
     // includes the conversation history
-    // (`<project>/.daedalus/hive-brain/messages.json`), not just the
+    // (`<project>/.hive-agent/default/messages.json`), not just the
     // SessionMemory notes. Without this, a long session (e.g. 1000+
     // messages) would exceed cheaper models' context windows (e.g.
     // MiniMax-M2.7 at 200K tokens) and the API would 400.

@@ -557,8 +557,8 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<AttachFileTool>());
 
-    // browser_* (Phase 47): computer use — recreation of the v1 hub-side
-    // tools lost in the Phase C refactor. Backed by browser_driver.py
+    // browser_* (Phase 47): computer use — recreation of the original
+    // hub-side tools lost in the Phase C refactor. Backed by browser_driver.py
     // in-container (CDP :9222, the same Chromium the user sees in the
     // client's Computer view). On plain :latest images the driver is
     // absent and every action returns a descriptive error.

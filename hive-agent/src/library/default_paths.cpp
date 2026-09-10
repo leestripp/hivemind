@@ -9,7 +9,7 @@
  * change vs. the pre-Phase-1 implementation is:
  *
  *   - The user-tier overrides are now `$HIVE_AGENT_HOME`,
- *     `$HIVE_AGENT_CONFIG_HOME`, etc. (the legacy `$HIVE_AGENT_HOME`
+ *     `$HIVE_AGENT_CONFIG_HOME`, etc. (the legacy `$DAEDALUS_HOME`
  *     is NO LONGER honoured at this layer; use `$HIVE_AGENT_HOME`
  *     instead, matching the public API in paths.h).
  *   - When `$XDG_*` variables are set, the helpers honour them

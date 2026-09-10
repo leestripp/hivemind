@@ -343,6 +343,11 @@ private:
 // =========================================================================
 
 inline bool SkillManager::is_skill_active(const std::string& skill_name) const {
+    // §Phase 15: a disabled skill never reports active, even if it is
+    // still present in active_skill_names_ (the disable is runtime, the
+    // internal list keeps it). Callers use this as the runtime gate
+    // (LLMClient activate flow, SkillTool is_active reporting).
+    if (disabled_skills_.count(skill_name) > 0) return false;
     return active_skill_names_.find(skill_name) != active_skill_names_.end();
 }
 

@@ -165,13 +165,13 @@ std::string SystemPromptBuilder::getStateMachineSection() {
 
 std::string SystemPromptBuilder::getReservedAgentDirsSection() {
     // §Reserved Agent Dirs: ALWAYS appended last.  Tells the agent
-    // that .daedalus* folders are reserved runtime state — same
+    // that .hive-agent* folders are reserved runtime state — same
     // contract as .git/ — so it never deletes / renames / edits /
     // moves them.  Without this, a well-meaning "clean up junk
     // directories" task will silently nuke the agent's memory and
     // the user's session scratch state.
     return
-        "# Reserved Agent Directories (.daedalus*)\n"
+        "# Reserved Agent Directories (.hive-agent*)\n"
         "\n"
         "The following directories in the project root are owned by the\n"
         "agent runtime. They are HIDDEN system folders — treat them with\n"
@@ -179,13 +179,13 @@ std::string SystemPromptBuilder::getReservedAgentDirsSection() {
         "\n"
         "| Directory | Purpose |\n"
         "|-----------|---------|\n"
-        "| `.daedalus/` | Base directory for all agent runtime state. Do not touch. |\n"
-        "| `.daedalus/hive-brain/` | Default agent's persistent state. Memory, session scratch, per-project config, skills cache. |\n"
-        "| `.daedalus/daedalus-<id>/` | Per-agent / per-session state when the host namespaces agents. `<id>` is a hex / session id; the contents are the same as `.daedalus/hive-brain/`. |\n"
+        "| `.hive-agent/` | Base directory for all agent runtime state. Do not touch. |\n"
+        "| `.hive-agent/default/` | Default agent's persistent state. Memory, session scratch, per-project config, skills cache. |\n"
+        "| `.hive-agent/<name>/` | Named agent's persistent state; same contents as `.hive-agent/default/`. |\n"
         "\n"
         "NEVER:\n"
         "\n"
-        "1. **Delete** any `.daedalus*` directory. Doing so wipes the\n"
+        "1. **Delete** any `.hive-agent*` directory. Doing so wipes the\n"
         "   agent's memory and all session scratch — unrecoverable.\n"
         "2. **Rename** or **move** them.\n"
         "3. **Edit files inside them directly** with `modify_file` /\n"
@@ -203,7 +203,7 @@ std::string SystemPromptBuilder::getReservedAgentDirsSection() {
         "   tools (`memory_*`, `get_skill_context`, etc.) and never\n"
         "   touch the directory tree directly.\n"
         "2. If the user asks you to do something that would affect a\n"
-        "   `.daedalus*` directory, **stop and ask** before doing it.\n";
+        "   `.hive-agent*` directory, **stop and ask** before doing it.\n";
 }
 
 // ============================================================================
@@ -260,7 +260,7 @@ std::string SystemPromptBuilder::compose(const SystemPromptOptions& options) {
     sections.push_back(getStateMachineSection());
 
     // 8. Reserved agent directories — ALWAYS appended.  Tells the agent
-    //     that .daedalus* folders are owned by the runtime and must
+    //     that .hive-agent* folders are owned by the runtime and must
     //     never be deleted / renamed / edited.
     //
     // §ContextCache: the composed prompt must stay BYTE-STATIC across

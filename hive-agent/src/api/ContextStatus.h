@@ -32,11 +32,11 @@ namespace hive::context_status {
 
 /// Marker prepended to the transient status message content so the next
 /// iteration can find and replace exactly that message.
-inline constexpr const char* kBeginMarker = "<!-- daedalus-context-status -->\n";
+inline constexpr const char* kBeginMarker = "<!-- hive-agent-context-status -->\n";
 
 /// Terminator written at the end of the stats block (kept from the §B8
 /// fix) — also used to recognise legacy embedded blocks.
-inline constexpr const char* kEndSentinel = "<!-- /daedalus-context-status -->\n";
+inline constexpr const char* kEndSentinel = "<!-- /hive-agent-context-status -->\n";
 
 /// Fold the provider's cache-hit count out of a `usage` object.
 ///   - Moonshot/Kimi: top-level "cached_tokens"

@@ -26,9 +26,9 @@ struct AgentConfig {
 
     // §Phase 8.8 (2026-07-12): per-agent namespace for runtime
     // state. Empty string = the historical default (no namespace,
-    // data lives under `<project_root>/.daedalus/`). Non-empty =
-    // data lives under `<project_root>/.daedalus-<name>/`, e.g.
-    // `.daedalus-bob/`. This allows multiple Agent instances in the
+    // data lives under `<project_root>/.hive-agent/default/`). Non-empty =
+    // data lives under `<project_root>/.hive-agent/<name>/`, e.g.
+    // `.hive-agent/bob/`. This allows multiple Agent instances in the
     // same project to have isolated `messages.json` /
     // `memory.json` without trampling each other, and enables
     // operations like "clone Bob into Alice" via a folder copy.

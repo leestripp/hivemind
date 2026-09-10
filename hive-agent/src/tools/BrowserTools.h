@@ -11,9 +11,9 @@
  * Chromium over CDP on the Xvfb display — the same browser the user sees
  * (and can take over) in the client's Computer view.
  *
- * Recreation of the v1 hub-side tools (hive-server/src/BrowserTools.cpp,
+ * Recreation of the original hub-side tools (hive-server/src/BrowserTools.cpp,
  * lost in the Phase C hub-routing refactor `d989ad8` and never carried
- * into the daedalus-merge hive-agent). In v2 the agent runs IN the
+ * into the daedalus-merge hive-agent). The agent now runs IN the
  * container, so the driver is invoked directly via Subprocess (no podman
  * exec). Specs preserved verbatim from 9a5f230 so agent prompts and docs
  * stay accurate.

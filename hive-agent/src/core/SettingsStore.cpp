@@ -1033,7 +1033,7 @@ ServerErrorSettings SettingsStore::get_server_error_settings() const
 // These accessors store McpServer entries in the `mcp_servers` table.
 // Hosts (or McpServerManager) call list_mcp_servers() on startup to
 // load the user's configured MCP servers, replacing the old JSON file
-// path. The one-shot JSON→SQLite migration is handled by daedalus-cli's
+// path. The one-shot JSON→SQLite migration was handled by the old CLI's
 // --migrate-data flag (see src/tools/migrate.cpp).
 
 namespace {

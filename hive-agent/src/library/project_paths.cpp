@@ -2,7 +2,7 @@
  * @file project_paths.cpp
  * @brief Per-project, per-agent filesystem location resolver.
  *
- * Resolves `<project_root>/.daedalus[-<name>]/` for every
+ * Resolves `<project_root>/.hive-agent/<name-or-default>/` for every
  * (project_root, agent_name) pair. The same ProjectPaths logic
  * is shared with the legacy `resolve_agent_dir()` helper in
  * `src/library/default_paths.cpp` so all per-project path
@@ -33,8 +33,8 @@ fs::path resolve_agent_dir_impl(
 	const fs::path& project_root,
 	std::string_view agent_name )
 {
-	// New layout: <project>/.daedalus/hive-brain/        (default)
-	//             <project>/.daedalus/daedalus-<name>/ (named)
+	// New layout: <project>/.hive-agent/default/  (default)
+	//             <project>/.hive-agent/<name>/    (named)
 	fs::path inner = agent_name.empty()
 	                     ? std::string( kAgentDirNewPrefix )
 	                     : ( std::string( kAgentDirNewNamedPrefix ) + std::string( agent_name ) );

@@ -109,10 +109,10 @@ public:
     /// non-empty string — there is no host option to disable it.
     static std::string getStateMachineSection();
 
-    /// `# Reserved Agent Directories (.daedalus*)` — ALWAYS appended
+    /// `# Reserved Agent Directories (.hive-agent*)` — ALWAYS appended
     /// last (after the state-machine section).  Explains that the
-    /// `.daedalus/`, `.daedalus/hive-brain/`, and
-    /// `.daedalus/daedalus-<id>/` folders in the project root are owned
+    /// `.hive-agent/`, `.hive-agent/default/`, and
+    /// `.hive-agent/<name>/` folders in the project root are owned
     /// by the agent runtime and must NEVER be deleted, renamed, edited,
     /// or moved by the model.  Returns a static, non-empty string —
     /// there is no host option to disable it.

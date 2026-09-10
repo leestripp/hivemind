@@ -2229,7 +2229,7 @@ void Messages::inject_context_stats(size_t current_tokens, size_t iteration, siz
           << " (" << static_cast<int>(get_compression_ratio(current_tokens) * 100) << "%)\n";
     stats << "- **Iterations**: " << iteration << "/" << max_iterations << "\n";
     stats << "- **Messages**: " << messages_.size() << "\n";
-    constexpr const char* kEndSentinel = "<!-- /daedalus-context-status -->\n";
+    constexpr const char* kEndSentinel = "<!-- /hive-agent-context-status -->\n";
     stats << kEndSentinel;
 
     // Find or append Context Status section.
