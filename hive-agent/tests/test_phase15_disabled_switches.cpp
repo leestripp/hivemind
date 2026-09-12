@@ -23,7 +23,9 @@
 #include "mcp/McpServerManager.h"
 #include "mcp/McpServerConfig.h"
 #include "core/SkillManager.h"
+#include "core/FileIO.h"
 #include "core/settings.h"
+#include "tools/SkillTool.h"
 
 #include <cassert>
 #include <cstdio>
@@ -409,6 +411,44 @@ void test_skill_disabled_filters_active_at_runtime() {
 
 }  // namespace
 
+// §Phase 50: LoadSkillTool refuses a disabled skill BEFORE loading —
+// error status, accurate message, and NO skill body in the payload.
+void test_load_skill_tool_full_gate() {
+    SkillManager::delete_default();
+    SkillManager* sm = SkillManager::get_instance();
+    sm->deactivate_all_skills();
+    sm->set_disabled_skills({});
+    SkillsSettings isolated;
+    isolated.directories = {};
+    isolated.auto_discover = false;
+    sm->load_settings(isolated);
+
+    fs::path tmp = fs::temp_directory_path() / "phase15-tool-gate-test";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "secret-skill");
+    {
+        std::ofstream f(tmp / "secret-skill" / "SKILL.md");
+        f << "---\nname: secret-skill\ndescription: gated\n---\n\n"
+          << "TOP SECRET BODY THAT MUST NOT LEAK\n";
+    }
+    sm->add_skill_directory(tmp);
+    sm->discover_all_skills();
+    sm->set_disabled_skills({"secret-skill"});
+
+    LoadSkillTool tool;
+    FileIO fio(tmp);
+    auto r = tool.execute(json{{"skill_name", "secret-skill"}}, fio);
+    assert(r.value("status", "") == "error");
+    assert(r.value("activated", true) == false);
+    assert(r.value("message", "").find("disabled by host policy") !=
+           std::string::npos);
+    assert(!r.contains("context"));  // no content leak
+    std::cout << "[ok] test_load_skill_tool_full_gate" << std::endl;
+
+    SkillManager::delete_default();
+    fs::remove_all(tmp);
+}
+
 int main() {
     test_mcp_disabled_skips_config_entry();
     test_mcp_disabled_filters_after_load();
@@ -418,7 +458,8 @@ int main() {
     test_skill_disabled_blocks_activate();
     test_skill_empty_disabled_means_all_enabled();
     test_skill_disabled_filters_active_at_runtime();
+    test_load_skill_tool_full_gate();
 
-    std::cout << "test_phase15_disabled_switches: 7 tests passed\n";
+    std::cout << "test_phase15_disabled_switches: 8 tests passed\n";
     return 0;
 }

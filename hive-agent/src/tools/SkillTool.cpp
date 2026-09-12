@@ -133,6 +133,17 @@ json LoadSkillTool::execute(const json& args, FileIO& /*file_io*/) {
         });
     }
     
+    // §Phase 50: a host-disabled skill is FULLY gated — refuse before
+    // loading so the body never reaches the context, and say WHY
+    // (the generic "max active skills reached" message was masking this).
+    if (skill_manager->is_skill_disabled(skill_name)) {
+        return json::object({
+            {"status", "error"},
+            {"activated", false},
+            {"message", "Skill '" + skill_name +
+                        "' is disabled by host policy"}});
+    }
+
     auto skill = skill_manager->load_skill_by_name(skill_name);
     if (!skill.has_value()) {
         return json::object({
