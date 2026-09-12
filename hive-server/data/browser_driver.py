@@ -53,12 +53,34 @@ def chromium_binary():
     return hits[-1]  # newest
 
 
+def ensure_display():
+    """Bring up the Xvfb screen stack if :99 has no X server.
+
+    The worker runs screens on demand (hub screen_ctl op when the user
+    opens Computer view, torn down after idle) — so :99 usually is NOT up
+    when a browser tool fires. hive-screen.sh is idempotent: it spawns
+    Xvfb/Xvnc/websockify then watchdogs them. Detach it so the watchdog
+    outlives this driver invocation.
+    """
+    if os.path.exists("/tmp/.X11-unix/X99"):
+        return
+    subprocess.Popen(
+        ["hive-screen.sh", os.environ.get("HIVE_SCREEN_RES", "1280x800")],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    for _ in range(40):  # up to ~20s for Xvfb to create its socket
+        if os.path.exists("/tmp/.X11-unix/X99"):
+            return
+        time.sleep(0.5)
+
+
 def ensure_browser(pw):
     """Connect to the running Chromium; launch it if CDP is unreachable."""
     try:
         return pw.chromium.connect_over_cdp(CDP_URL)
     except Exception:
         pass
+    ensure_display()
     os.makedirs(PROFILE, exist_ok=True)
     env = {**os.environ,
            # X11 stack (Phase 25): the Xvfb display the user sees via noVNC.
