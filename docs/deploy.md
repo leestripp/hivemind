@@ -1,7 +1,7 @@
 # Deployment (v2)
 
 > Operational runbook (per-rig commands, verification gates, pitfalls):
-> the `deploy-hivement` agent skill (`.agents/skills/deploy-hivement/SKILL.md`).
+> the `deploy-hivemind` agent skill (`.agents/skills/deploy-hivemind/SKILL.md`).
 > This doc is the topology/reference overview; keep both in sync.
 
 HiveMind deploys as a hub plus any number of workers. The smallest real
