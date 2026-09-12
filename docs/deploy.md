@@ -1,5 +1,9 @@
 # Deployment (v2)
 
+> Operational runbook (per-rig commands, verification gates, pitfalls):
+> the `deploy-hivement` agent skill (`.agents/skills/deploy-hivement/SKILL.md`).
+> This doc is the topology/reference overview; keep both in sync.
+
 HiveMind deploys as a hub plus any number of workers. The smallest real
 setup is ONE machine running both: hive-server (hub) + hive-worker
 (always-online agents).
@@ -28,11 +32,13 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
 
 ## hive-worker
 
-- systemd --user service `hive-worker-<hostname>`; config `worker.json`
+- systemd --user service `hive-worker`; config `worker.json`
   with the hub URL + worker key from enrollment.
 - Needs: rootless podman, subuid/subgid ranges, the hive-agent container
-  image (built from `hive-worker/Containerfile` — the hub can hand out a
-  registry reference instead).
+  image chain — `:latest` → `:browser` → `:gpu`, built from
+  `hive-server/data/Containerfile.hive-agent{,-browser,-gpu}`, ALL with
+  repo-root build context. The chain copies the host-built hive-agent
+  binary, so build it before the images.
 - Data under `~/.local/share/hive-worker/`: workspace, skills library,
   per-agent home volumes, model/provider credentials (local LLM store —
   credentials never live on the hub).
