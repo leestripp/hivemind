@@ -45,8 +45,11 @@ COPY hive-server/data/hive-screen.sh /usr/local/bin/hive-screen.sh
 RUN chmod +x /usr/local/bin/hive-screen.sh
 # Computer-use driver (Phase 47): the agent's browser_* tools invoke this
 # in-container — persistent Chromium over CDP :9222 on the Xvfb display.
-COPY hive-server/data/browser_driver.py /home/hive/browser_driver.py
-RUN chmod +x /home/hive/browser_driver.py && chown hive:hive /home/hive/browser_driver.py
+# /usr/local/bin, NOT /home/hive — the agent home is a per-agent bind mount
+# at runtime, which would mask the driver (browser_* tools then report
+# "driver not installed").
+COPY hive-server/data/browser_driver.py /usr/local/bin/browser_driver.py
+RUN chmod 0755 /usr/local/bin/browser_driver.py
 
 USER hive
 WORKDIR /workspace

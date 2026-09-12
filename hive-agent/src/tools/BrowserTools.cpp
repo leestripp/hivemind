@@ -10,7 +10,9 @@
 namespace hive {
 namespace {
 
-constexpr const char* kDriver = "/home/hive/browser_driver.py";
+// /home/hive is a per-agent bind mount at runtime — image files there
+// are MASKED. The driver lives with the other runtime scripts.
+constexpr const char* kDriver = "/usr/local/bin/browser_driver.py";
 
 json prop(const char* desc) {
     return {{"type", "string"}, {"description", desc}};
