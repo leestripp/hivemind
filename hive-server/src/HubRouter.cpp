@@ -8,8 +8,11 @@
 #include "hivemind/ChatService.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerChannel.h"
+#include "hivemind/AgentTools.h"
 
+#include <filesystem>
 #include <iostream>
+#include <set>
 
 using nlohmann::json;
 
@@ -17,6 +20,26 @@ HubRouter::HubRouter(AgentStore& agents, ThreadStore& threads,
                      WorkerChannel& channel, ApprovalStore& approvals)
     : agents_(agents), threads_(threads), channel_(channel),
       approvals_(approvals) {}
+
+namespace {
+/// Phase 50: the agent's disabled-skill set — hub-known skills
+/// (dirs under the server skills root) minus its enabled global-skills.
+/// Rides the task frame so enable/disable goes live without a restart.
+json disabled_skills_for(const std::string& agent_id) {
+    json out = json::array();
+    const auto enabled = agent_tools::list_enabled_skills(agent_id);
+    const std::set<std::string> en(enabled.begin(), enabled.end());
+    const auto root =
+        AgentStore::agents_base_dir().parent_path() / "skills";
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(root, ec)) {
+        if (!e.is_directory()) continue;
+        const auto name = e.path().filename().string();
+        if (!en.count(name)) out.push_back(name);
+    }
+    return out;
+}
+}  // namespace
 
 std::string HubRouter::dispatch(const RosterAgent& agent,
                                 const std::string& thread_id,
@@ -38,6 +61,7 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
                {"id", task_id},
                {"thread_id", thread_id},
                {"roster", roster},
+               {"disabled_skills", disabled_skills_for(agent.id)},
                {"text", text}};
     // Phase 43: the hub owns provider/model config. Resolve the agent's
     // model ("" = hub default) and inject the full provider config into
@@ -116,7 +140,8 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"auto_approve", !agent.require_approval},
             {"mcp_servers", mcp},
             {"image", ""},                  // "" = worker default (v2)
-            {"type", agent.type}};            // Phase 35: "" / "gpu"
+            {"type", agent.type},             // Phase 35: "" / "gpu"
+            {"disabled_skills", disabled_skills_for(agent.id)}};  // Phase 50
 }
 
 void HubRouter::reconcile_worker(const std::string& worker) {

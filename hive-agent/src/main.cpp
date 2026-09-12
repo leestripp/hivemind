@@ -351,6 +351,20 @@ int main(int argc, char** argv) {
         }
         if (!dirs.empty()) cfg.skills_dirs = dirs;
     }
+    // Phase 50: per-skill gate from the hub (comma-joined names). Applied
+    // at initialize() via cfg.skills_disabled; task frames refresh it live.
+    {
+        std::string dis = env_or("HIVEMIND_SKILLS_DISABLED");
+        size_t pos = 0;
+        while (!dis.empty()) {
+            const size_t comma = dis.find(',', pos);
+            std::string name = dis.substr(
+                pos, comma == std::string::npos ? comma : comma - pos);
+            if (!name.empty()) cfg.skills_disabled.insert(name);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    }
 
     // System prompt: inline env wins, then file, then hive-brain defaults.
     if (auto sp = env_or("HIVEMIND_SYSTEM_PROMPT"); !sp.empty()) {
@@ -652,6 +666,21 @@ int main(int argc, char** argv) {
                     else
                         log_err("llm config apply failed for model '" + model + "'");
                 }
+            }
+            // Phase 50: live disabled-skills gate. The hub computes the
+            // agent's disabled set (hub-known skills minus its enabled
+            // global-skills) and rides it on every task frame, so skill
+            // enable/disable takes effect without a process restart.
+            if (op.contains("disabled_skills") && op["disabled_skills"].is_array()) {
+                std::set<std::string> desired;
+                for (const auto& n : op["disabled_skills"])
+                    if (n.is_string()) desired.insert(n.get<std::string>());
+                std::set<std::string> current;
+                for (const auto& n : agent.disabled_skills()) current.insert(n);
+                for (const auto& n : desired)
+                    if (!current.count(n)) agent.set_skill_enabled(n, false);
+                for (const auto& n : current)
+                    if (!desired.count(n)) agent.set_skill_enabled(n, true);
             }
             Task t{op.value("id", ""), op.value("text", ""),
                    op.value("thread_id", "")};

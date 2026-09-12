@@ -84,6 +84,15 @@ std::string AgentProcess::build_env_file() {
     // (ensure_container). Project-local /workspace/.agents/skills/ is
     // auto-scanned by hive-brain on its own.
     env_line(body, "HIVEMIND_SKILLS_DIR", "/skills");
+    // Phase 50: per-skill gate (comma-joined; hive-agent parses at startup)
+    if (!spec_.disabled_skills.empty()) {
+        std::string joined;
+        for (const auto& n : spec_.disabled_skills) {
+            if (!joined.empty()) joined += ',';
+            joined += n;
+        }
+        env_line(body, "HIVEMIND_SKILLS_DISABLED", joined);
+    }
 
     const fs::path dir = fs::path(hwrunner::worker_dir()) / "env";
     std::error_code ec;

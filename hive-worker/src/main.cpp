@@ -376,6 +376,13 @@ int main(int argc, char* argv[]) {
                                                              json::array());
                             spec.image         = specj.value("image","");
                             spec.type          = specj.value("type","");   // Phase 35
+                            // Phase 50: per-skill gate from the hub
+                            if (specj.contains("disabled_skills") &&
+                                specj["disabled_skills"].is_array())
+                                for (const auto& n : specj["disabled_skills"])
+                                    if (n.is_string())
+                                        spec.disabled_skills.push_back(
+                                            n.get<std::string>());
                             g_fleet->spawn(spec);
                         } catch (const std::exception& e) {
                             std::cerr << "worker: agent_spawn " << aid

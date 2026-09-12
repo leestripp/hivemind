@@ -48,6 +48,7 @@ struct AgentSpec {
     nlohmann::json mcp_servers = nlohmann::json::array();
     std::string image;         // "" -> kImageLatest (verbatim override wins)
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
+    std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
 };
 
 // Phase 35: explicit image wins; otherwise type selects the image.
