@@ -67,6 +67,10 @@ def ensure_browser(pw):
         [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
          "--disable-session-crashed-bubble", "--disable-dev-shm-usage",
+         # Rootless podman can't run Chrome's SUID/namespace sandbox — the
+         # browser process dies on launch without this (the agent container
+         # itself is the sandbox boundary).
+         "--no-sandbox",
          "--disable-gpu", "--noerrdialogs",
          "--disable-features=TranslateUI", "--start-maximized", "about:blank"],
         env=env,
