@@ -4,6 +4,22 @@ A hive-worker runs on any Linux machine (including the hive-server host
 itself, for always-online agents) and owns everything compute: podman
 containers, the agents inside them, and the files they produce.
 
+## Running as a service (systemd user unit)
+
+A ready template lives at `hive-server/deploy/hive-worker.service` —
+copy it to `~/.config/systemd/user/hive-worker.service`, fill in
+`@WORKER_NAME@` / `@WORKER_KEY@` (mint keys on the hub with
+`hive-server enroll-worker <name>`), then `systemctl --user
+daemon-reload && systemctl --user enable --now hive-worker` and
+`sudo loginctl enable-linger $USER`.
+
+The template sets `KillMode=mixed` on purpose: rootless podman's port
+forwarder (pasta) and conmon are descendants of whichever process ran
+`podman start`, and the default `control-group` kill mode reaps them on
+every service restart — published container ports then refuse
+connections (the Phase 54 screen-share bug). Do not remove it.
+
+
 ## Connection
 
 One OUTBOUND WebSocket to the hub's dedicated worker port:

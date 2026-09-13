@@ -1,0 +1,31 @@
+# hive-worker systemd USER unit — template.
+# Install per worker host:
+#   1. cp hive-worker.service ~/.config/systemd/user/hive-worker.service
+#   2. Edit @WORKER_NAME@ (hub-unique, e.g. gpu-rig) and @WORKER_KEY@
+#      (mint on the hub host: build/hive-server/hive-server enroll-worker
+#       <name>  — prints an hmwk_… key)
+#   3. systemctl --user daemon-reload
+#      systemctl --user enable --now hive-worker
+#   4. sudo loginctl enable-linger $USER   (start at boot, survive logout)
+
+[Unit]
+Description=HiveMind worker (@WORKER_NAME@)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# mixed, NOT the default control-group: rootless podman spawns the port
+# forwarder (pasta) and conmon as descendants of whichever process ran
+# `podman start` — with control-group, every service restart KILLED them
+# all (published ports listed by `podman port` but refusing connections;
+# screen share 101s with no VNC data). mixed kills only the main process
+# on stop, so forwarding survives deploys. (Phase 54, 2026-09-14)
+KillMode=mixed
+WorkingDirectory=%h/hivemind
+ExecStart=%h/hivemind/build/hive-worker/hive-worker --server wss://hub.example.com --key @WORKER_KEY@ --name @WORKER_NAME@
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
