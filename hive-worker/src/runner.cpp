@@ -9,6 +9,9 @@
 
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
@@ -301,6 +304,24 @@ ExecOutcome run_container_exec(
     return oc;
 }
 
+/// True when a loopback TCP connect to the published host port succeeds —
+/// the only honest "can the splice reach it" test. Rootless port
+/// forwarding (pasta) is occasionally missing after create+start; the
+/// mapping shows in `podman port` but refuses connections until the
+/// container is restarted (gpu-rig, podman 5.7.0, 2026-09-14).
+bool port_accepts(uint16_t port) {
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const bool ok = ::connect(fd, reinterpret_cast<sockaddr*>(&addr),
+                              sizeof(addr)) == 0;
+    ::close(fd);
+    return ok;
+}
+
 uint16_t screen_port_of(const std::string& agent) {
     std::string out;
     if (podman_simple({"port", container_name(agent), "6080"}, &out) != 0)
@@ -340,8 +361,9 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         // redirects to a dead splice with an empty password). websockify
         // owns the listener — no websockify, no screen.
         if (r.port != 0 &&
-            podman_simple({"exec", cname, "pgrep", "-f", "websockify"},
-                          nullptr) != 0)
+            (podman_simple({"exec", cname, "pgrep", "-f", "websockify"},
+                           nullptr) != 0 ||
+             !port_accepts(r.port)))
             r.port = 0;
         r.running = r.port != 0;
         if (r.running) r.password = screen_password_of(agent);
@@ -444,6 +466,19 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     if (r.port == 0) {
         r.error = "container has no published 6080 port";
         return r;
+    }
+    // Rootless forwarding can be missing right after create+start (see
+    // port_accepts) — one restart re-establishes it.
+    if (!port_accepts(r.port)) {
+        std::cerr << "runner: published 6080 refuses connections for "
+                  << cname << " — restarting container to re-establish "
+                     "port forwarding\n";
+        podman_simple({"restart", cname}, &out);
+        if (!port_accepts(r.port)) {
+            r.port = 0;
+            r.error = "published 6080 port refuses connections";
+            return r;
+        }
     }
 
     // Idempotent display-stack bring-up inside the container.
