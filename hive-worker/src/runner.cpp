@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <fstream>
 #include <mutex>
+#include <thread>
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
@@ -467,14 +468,22 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         r.error = "container has no published 6080 port";
         return r;
     }
-    // Rootless forwarding can be missing right after create+start (see
-    // port_accepts) — one restart re-establishes it.
-    if (!port_accepts(r.port)) {
+    // Rootless forwarding (pasta) can lag or be missing right after
+    // create+start (see port_accepts) — grace-probe first, then one
+    // container restart, then grace-probe again before giving up.
+    auto accepts_soon = [&] {
+        for (int i = 0; i < 15; ++i) {
+            if (port_accepts(r.port)) return true;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        return false;
+    };
+    if (!accepts_soon()) {
         std::cerr << "runner: published 6080 refuses connections for "
                   << cname << " — restarting container to re-establish "
                      "port forwarding\n";
         podman_simple({"restart", cname}, &out);
-        if (!port_accepts(r.port)) {
+        if (!accepts_soon()) {
             r.port = 0;
             r.error = "published 6080 port refuses connections";
             return r;
