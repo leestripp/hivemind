@@ -471,8 +471,10 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     // Rootless forwarding (pasta) can lag or be missing right after
     // create+start (see port_accepts) — grace-probe first, then one
     // container restart, then grace-probe again before giving up.
+    // 45s: pasta took ~30-45s to listen after a container restart on
+    // gpu-rig (09:11 502 with a 15s window; retry converged).
     auto accepts_soon = [&] {
-        for (int i = 0; i < 15; ++i) {
+        for (int i = 0; i < 45; ++i) {
             if (port_accepts(r.port)) return true;
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
