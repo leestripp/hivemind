@@ -17,6 +17,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <mutex>
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
@@ -86,11 +88,45 @@ static void ensure_image_built(const std::string& image) {
         throw std::runtime_error("podman build failed: " + img);
 }
 
-void ensure_container(const std::string& agent, const std::string& image,
+// ── Phase 54: screen-image pinning ─────────────────────────────────────
+// A screen session pins the container to the desktop image (:browser /
+// :gpu). screen_ctl start writes this marker, stop removes it;
+// ensure_container honours it so the fleet drift-check doesn't "correct"
+// a screen container back onto :latest mid-session — and so a stopped
+// screen container comes BACK on the screen image after a worker
+// restart (marker persists on disk).
+fs::path screen_marker_path(const std::string& agent) {
+    return fs::path(worker_dir()) / ("screen-" + agent);
+}
+
+std::string screen_pinned_image(const std::string& agent) {
+    std::ifstream in(screen_marker_path(agent));
+    std::string tag;
+    std::getline(in, tag);
+    while (!tag.empty() && isspace((unsigned char)tag.back())) tag.pop_back();
+    return tag;
+}
+
+// Serialize the container recreate paths: fleet ensure_container and
+// screen_ctl start run on different threads and raced rm+create on the
+// same container (2026-09-14: screen start 502'd as the fleet recreated
+// the container onto :latest underneath it).
+std::mutex& container_recreate_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+void ensure_container(const std::string& agent, std::string image,
                       bool gpu) {
     const std::string cname = container_name(agent);
 
+    // Screen session pins the image (see screen_pinned_image).
+    if (std::string pinned = screen_pinned_image(agent); !pinned.empty())
+        image = pinned;
+
     ensure_image_built(image);
+
+    std::lock_guard<std::mutex> recreate_lock(container_recreate_mutex());
 
     std::string state;
     if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
@@ -317,6 +353,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         // trios here let the watchdog revive x11vnc (stop never stuck).
         std::string out;
         podman_simple({"exec", cname, "hive-screen.sh", "stop"}, &out);
+        fs::remove(screen_marker_path(agent));   // Phase 54: unpin
         r.running = false;
         return r;
     }
@@ -342,6 +379,15 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
             return r;
         }
     }
+
+    // Phase 54: pin the screen image BEFORE touching the container so a
+    // concurrent fleet reconcile targets the same image instead of
+    // "correcting" the container back onto :latest mid-bring-up.
+    {
+        std::ofstream pin(screen_marker_path(agent));
+        pin << image << "\n";
+    }
+    std::lock_guard<std::mutex> recreate_lock(container_recreate_mutex());
 
     // Phase 36: ensure_container always publishes 6080 now, so recreate
     // is only a LEGACY fallback (pre-Phase-36 containers without the
