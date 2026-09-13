@@ -36,5 +36,6 @@ nohup "$CHROME" --remote-debugging-port=9222 \
     --user-data-dir="$PROFILE" --no-first-run \
     --no-default-browser-check --disable-session-crashed-bubble \
     --disable-dev-shm-usage --no-sandbox --disable-gpu --noerrdialogs \
+    --hide-crash-restore-bubble \
     --disable-features=TranslateUI \
     --start-maximized "$URL" >/tmp/chromium.log 2>&1 &

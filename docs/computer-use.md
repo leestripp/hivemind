@@ -22,6 +22,26 @@ first (pidfile) so it can't revive the stack mid-teardown.
 - The hub only routes the stream/control messages; the pixels never
   leave the worker except as the viewer stream to the client.
 
+## User control (Phase 51)
+
+The desktop is a real (minimal) openbox session, not just a browser
+framebuffer. **Right-click the desktop** in the noVNC view for the menu:
+
+- **Chrome (shared session)** — relaunches the browser after you close
+  it, via `hive-chrome.sh`. If an instance is alive it opens a NEW
+  WINDOW in the same session instead, so user and agent always share
+  one browser (the login-handoff contract). The wrapper owns the launch
+  flags (CDP :9222, `--no-sandbox`, stale-singleton cleanup,
+  crash-restore-bubble suppression); `hive-screen.sh` uses the same
+  wrapper at stack bring-up.
+- **Terminal / Terminal (xterm) / htop** — a shell inside the agent
+  container (as the `hive` user, cwd `/workspace`) for hands-on
+  inspection and debugging.
+
+scrot is installed in the image for desktop screenshots
+(`DISPLAY=:99 scrot /tmp/desktop.png`) — handy for verifying the
+desktop state from automation.
+
 Implementation detail from v1 that carries over: the browser container
 runs on the same podman host as the agent's container and shares its
 network namespace, so the agent's browser automation tools connect
