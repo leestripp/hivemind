@@ -127,7 +127,16 @@ TEST(multiple_tasks_concurrent) {
     }
 
     CHECK_EQ(counter.load(), 8);
-    auto after_stats = pool.get_stats();
+    // completed_ increments in the worker AFTER the future fulfils —
+    // under parallel-suite load the worker can lag; poll briefly
+    // (flakes the suite intermittently otherwise).
+    ThreadPool::Stats after_stats;
+    for (int i = 0; i < 200; ++i) {
+        after_stats = pool.get_stats();
+        if (after_stats.completed_tasks >= before_stats.completed_tasks + 8)
+            break;
+        std::this_thread::sleep_for(10ms);
+    }
     CHECK(after_stats.completed_tasks >= before_stats.completed_tasks + 8);
     CHECK(after_stats.total_submitted >= before_stats.total_submitted + 8);
     return 0;
@@ -242,7 +251,13 @@ TEST(stats_increment_after_task) {
     });
     fut.get();
 
-    auto after = pool.get_stats();
+    // Same visibility lag as multiple_tasks_concurrent — poll.
+    ThreadPool::Stats after;
+    for (int i = 0; i < 200; ++i) {
+        after = pool.get_stats();
+        if (after.completed_tasks > before.completed_tasks) break;
+        std::this_thread::sleep_for(10ms);
+    }
     CHECK(after.completed_tasks > before.completed_tasks);
     CHECK(after.total_submitted > before.total_submitted);
     return 0;
@@ -280,8 +295,11 @@ TEST(cancellable_task_cancelled) {
         }
     );
 
-    // Let it run for 30ms then request stop
-    std::this_thread::sleep_for(30ms);
+    // Wait until the task has actually STARTED before requesting stop —
+    // a fixed 30ms sleep raced worker-wake latency under parallel-suite
+    // load (should_stop landed first, loop never ran, count == 0).
+    for (int i = 0; i < 500 && iterations.load() == 0; ++i)
+        std::this_thread::sleep_for(10ms);
     should_stop.store(true);
 
     int count = fut.get();
