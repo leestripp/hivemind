@@ -23,6 +23,7 @@
 #include <nlohmann/json.hpp>
 
 class AgentStore;
+class RoutineStore;
 class ThreadStore;
 class WorkerChannel;
 class ApprovalStore;
@@ -33,7 +34,8 @@ class LlmStore;
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,
-              WorkerChannel& channel, ApprovalStore& approvals);
+              WorkerChannel& channel, ApprovalStore& approvals,
+              RoutineStore& routines);
     ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
@@ -54,6 +56,13 @@ public:
     /// Worker channel frame handler - wire to WorkerChannel::on_frame.
     void on_worker_frame(const std::string& worker,
                          const nlohmann::json& frame);
+
+    /// Phase 53: agent routine tools — apply a routine_req against
+    /// RoutineStore (mirroring RoutineRoutes semantics, ownership-checked
+    /// to the requesting agent) and reply routine_resp to the worker.
+    void handle_routine_req(const std::string& worker,
+                            const std::string& agent_id,
+                            const nlohmann::json& frame);
 
     /// WorkerChannel::on_heartbeat hook: per-agent states map.
     void on_heartbeat(const std::string& worker,
@@ -87,6 +96,7 @@ private:
     ThreadStore& threads_;
     WorkerChannel& channel_;
     ApprovalStore& approvals_;
+    RoutineStore& routines_;
     ChatService* chat_ = nullptr;
     LlmStore* llm_ = nullptr;
 

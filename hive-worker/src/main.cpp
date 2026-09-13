@@ -156,6 +156,15 @@ int main(int argc, char* argv[]) {
             else if (kind == "send_user_message")
                 f = {{"op","user_msg"},{"agent",agent_id},
                      {"text",ev.value("text","")}};
+            // Phase 53: routine tools -> hub RoutineStore (request/response;
+            // the hub replies with routine_resp which rides the forward
+            // list below back to this agent's stdin).
+            else if (kind == "routine_req") {
+                f = ev;
+                f["op"] = "routine_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},
@@ -408,7 +417,8 @@ int main(int argc, char* argv[]) {
                     }).detach();
                     return;
                 }
-                if (op == "task" || op == "approval_resp" || op == "cancel") {
+                if (op == "task" || op == "approval_resp" || op == "cancel" ||
+                    op == "routine_resp") {
                     const std::string aid = frame.value("agent_id","");
                     if (!g_fleet || !g_fleet->send_to(aid, frame)) {
                         try {

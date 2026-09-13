@@ -2,6 +2,8 @@
 // roster/threads, workers, and the client. See HubRouter.h.
 
 #include "hivemind/HubRouter.h"
+#include "hivemind/RoutineStore.h"
+#include "hivemind/Schedule.h"
 #include "hivemind/LlmStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ApprovalStore.h"
@@ -17,11 +19,28 @@
 using nlohmann::json;
 
 HubRouter::HubRouter(AgentStore& agents, ThreadStore& threads,
-                     WorkerChannel& channel, ApprovalStore& approvals)
+                     WorkerChannel& channel, ApprovalStore& approvals,
+                     RoutineStore& routines)
     : agents_(agents), threads_(threads), channel_(channel),
-      approvals_(approvals) {}
+      approvals_(approvals), routines_(routines) {}
 
 namespace {
+
+/// Phase 53: same shape as RoutineRoutes' routine_json (that one is
+/// file-local; duplicated here to keep the routes untouched).
+json routine_to_json(const Routine& r) {
+    json sched;
+    try { sched = json::parse(r.schedule_json); }
+    catch (...) { sched = json::object(); }
+    return {
+        {"id", r.id}, {"agent_id", r.agent_id}, {"thread_id", r.thread_id},
+        {"name", r.name}, {"prompt", r.prompt},
+        {"schedule", sched},
+        {"schedule_text", hm::describe_schedule(sched)},
+        {"next_fire_at", r.next_fire_at}, {"enabled", r.enabled},
+        {"created_at", r.created_at}, {"last_fired_at", r.last_fired_at},
+    };
+}
 /// Phase 50: the agent's disabled-skill set — hub-known skills
 /// (dirs under the server skills root) minus its enabled global-skills.
 /// Rides the task frame so enable/disable goes live without a restart.
@@ -95,6 +114,94 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
     std::lock_guard<std::mutex> lk(m_);
     tasks_[task_id] = {agent.id, agent.worker};
     return task_id;
+}
+
+void HubRouter::handle_routine_req(const std::string& worker,
+                                   const std::string& agent_id,
+                                   const json& frame) {
+    const std::string id     = frame.value("id", "");
+    const std::string action = frame.value("action", "");
+    json resp = {{"op", "routine_resp"}, {"agent_id", agent_id}, {"id", id}};
+    auto fail = [&](const std::string& err) {
+        resp["ok"] = false;
+        resp["error"] = err;
+        channel_.send(worker, resp);
+    };
+    try {
+        if (action == "list") {
+            json arr = json::array();
+            for (auto& r : routines_.list())
+                if (r.agent_id == agent_id)
+                    arr.push_back(routine_to_json(r));
+            resp["ok"] = true;
+            resp["result"] = {{"routines", arr}};
+        } else if (action == "add") {
+            const std::string name   = frame.value("name", "");
+            const std::string prompt = frame.value("prompt", "");
+            const json schedule = frame.value("schedule", json::object());
+            if (name.empty() || prompt.empty())
+                return fail("name and prompt required");
+            if (auto err = hm::validate_schedule(schedule); !err.empty())
+                return fail(err);
+            // Same as the HTTP route: each routine gets its own thread so
+            // fires don't spam DMs.
+            auto t = threads_.create_thread("routine: " + name, "dm",
+                                            {agent_id});
+            auto next = hm::compute_next_fire(schedule, hm::now_iso_local(),
+                                              hm::now_iso_local());
+            auto r = routines_.create(agent_id, t.id, name, prompt,
+                                      schedule.dump(), next.value_or(""));
+            resp["ok"] = true;
+            resp["result"] = routine_to_json(r);
+        } else if (action == "update") {
+            const std::string rid = frame.value("routine_id", "");
+            auto r = routines_.get(rid);
+            if (!r) return fail("routine not found");
+            if (r->agent_id != agent_id)
+                return fail("routine belongs to another agent");
+            if (frame.contains("enabled"))
+                routines_.set_enabled(rid, frame.value("enabled", true));
+            if (frame.contains("name") || frame.contains("prompt") ||
+                frame.contains("schedule")) {
+                std::string name   = frame.value("name", r->name);
+                std::string prompt = frame.value("prompt", r->prompt);
+                std::string sched  = r->schedule_json;
+                std::string next   = r->next_fire_at;
+                if (frame.contains("schedule")) {
+                    if (auto err = hm::validate_schedule(frame["schedule"]);
+                        !err.empty())
+                        return fail(err);
+                    sched = frame["schedule"].dump();
+                    next = hm::compute_next_fire(frame["schedule"],
+                                                 hm::now_iso_local(),
+                                                 r->created_at).value_or("");
+                }
+                routines_.update(rid, name, prompt, sched, next);
+            }
+            auto updated = routines_.get(rid);
+            resp["ok"] = true;
+            resp["result"] = updated ? routine_to_json(*updated)
+                                     : json::object();
+        } else if (action == "delete") {
+            const std::string rid = frame.value("routine_id", "");
+            auto r = routines_.get(rid);
+            if (!r) return fail("routine not found");
+            if (r->agent_id != agent_id)
+                return fail("routine belongs to another agent");
+            const std::string tid = r->thread_id;
+            routines_.remove(rid);
+            if (!tid.empty()) {
+                try { threads_.delete_thread(tid); } catch (...) {}
+            }
+            resp["ok"] = true;
+            resp["result"] = {{"deleted", rid}};
+        } else {
+            return fail("unknown routine action: " + action);
+        }
+    } catch (const std::exception& e) {
+        return fail(e.what());
+    }
+    channel_.send(worker, resp);
 }
 
 void HubRouter::cancel_agent(const RosterAgent& agent,
@@ -171,6 +278,10 @@ void HubRouter::on_worker_frame(const std::string& worker,
     if (op == "task_delta") {
         if (chat_) chat_->append_delta(frame.value("task", ""),
                                        frame.value("text", ""));
+        return;
+    }
+    if (op == "routine_req") {   // Phase 53
+        handle_routine_req(worker, agent_id, frame);
         return;
     }
     if (op == "task_result") {

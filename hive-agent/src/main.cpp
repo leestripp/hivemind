@@ -87,6 +87,51 @@ void log_err(const std::string& msg) {
     std::fflush(stderr);
 }
 
+// Routine bridge (Phase 53): request/response to the hub for scheduled
+// tasks. Tools emit {"ev":"routine_req",...}; the worker forwards it as
+// an op frame; the hub applies it against RoutineStore and replies with
+// {"op":"routine_resp","id":...,"ok":bool,"result"|"error"} on stdin.
+// Same blocking pattern as the approval broker, 30s timeout.
+class RoutineBridge {
+public:
+    json call(const std::string& action, const json& payload) {
+        const std::string id = "r" + std::to_string(++seq_);
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pending_[id] = std::nullopt;
+        }
+        json ev = {{"ev", "routine_req"}, {"id", id}, {"action", action}};
+        for (auto& [k, v] : payload.items()) ev[k] = v;
+        emit(ev);
+        std::unique_lock<std::mutex> lk(m_);
+        const bool got = cv_.wait_for(lk, std::chrono::seconds(30), [&] {
+            return pending_[id].has_value();
+        });
+        json out = got
+            ? *pending_[id]
+            : json{{"ok", false},
+                   {"error", "routine request timed out (hub offline?)"}};
+        pending_.erase(id);
+        return out;
+    }
+
+    void resolve(const std::string& id, const json& frame) {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = pending_.find(id);
+        if (it != pending_.end()) {
+            it->second = frame;
+            cv_.notify_all();
+        }
+    }
+
+private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::map<std::string, std::optional<json>> pending_;
+    int seq_ = 0;
+};
+RoutineBridge g_routines;
+
 // Approval broker: hive-brain' sink hook blocks until an approval_resp
 // arrives on stdin (or a 10-minute safety timeout denies).
 class ApprovalBroker {
@@ -584,6 +629,144 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<AttachFileTool>());
 
+    // ── Phase 53: scheduled tasks (routines) — hub-managed via the
+    // routine_req/routine_resp bridge. Tools mirror the hub's Scheduled
+    // page semantics (each routine fires a prompt into its own thread).
+    static const char* kScheduleShapes =
+        "schedule is a JSON object, one of: "
+        R"json({"type":"once","at":"YYYY-MM-DDTHH:MM"}, )json"
+        R"json({"type":"interval","every_minutes":N}, )json"
+        R"json({"type":"daily","time":"HH:MM"}, )json"
+        R"json({"type":"weekly","time":"HH:MM","days":[0-6]} )json"
+        "(0=Sunday). Times are hub-local.";
+
+    class ScheduleTaskTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "schedule_task"; }
+        std::string get_description() const {
+            return std::string("Create a scheduled task (routine): a prompt "
+                "that fires automatically on a schedule, in its own thread. ") +
+                kScheduleShapes;
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"name",{{"type","string"},
+                      {"description","Short routine name"}}},
+                    {"prompt",{{"type","string"},
+                      {"description","The prompt that runs on each fire"}}},
+                    {"schedule",{{"type","object"},
+                      {"description","Schedule JSON (see shapes in the tool description)"}}}}},
+                {"required",{"name","prompt","schedule"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json resp = g_routines.call("add", {
+                {"name", args.value("name", "")},
+                {"prompt", args.value("prompt", "")},
+                {"schedule", args.value("schedule", json::object())}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<ScheduleTaskTool>());
+
+    class ListSchedulesTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "list_schedules"; }
+        std::string get_description() const {
+            return "List your scheduled tasks (routines): id, name, "
+                   "schedule, next fire time, enabled. Use this before "
+                   "update_schedule/delete_schedule to get routine ids.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                           {"properties",json::object()}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json&, hive::HostToolContext&) override {
+            json resp = g_routines.call("list", json::object());
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<ListSchedulesTool>());
+
+    class UpdateScheduleTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "update_schedule"; }
+        std::string get_description() const {
+            return std::string("Edit a scheduled task (routine) you own: "
+                "rename, change the prompt or schedule, or enable/disable "
+                "it. Only provided fields change. ") + kScheduleShapes;
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"id",{{"type","string"},
+                      {"description","Routine id from list_schedules"}}},
+                    {"name",{{"type","string"},{"description","New name (optional)"}}},
+                    {"prompt",{{"type","string"},{"description","New prompt (optional)"}}},
+                    {"schedule",{{"type","object"},{"description","New schedule JSON (optional)"}}},
+                    {"enabled",{{"type","boolean"},{"description","Enable/disable (optional)"}}}}},
+                {"required",{"id"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json payload = {{"routine_id", args.value("id", "")}};
+            for (const char* k : {"name", "prompt", "schedule", "enabled"})
+                if (args.contains(k)) payload[k] = args[k];
+            json resp = g_routines.call("update", payload);
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<UpdateScheduleTool>());
+
+    class DeleteScheduleTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "delete_schedule"; }
+        std::string get_description() const {
+            return "Delete a scheduled task (routine) you own. Its thread "
+                   "is removed too. Use list_schedules to get the id.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"id",{{"type","string"},
+                      {"description","Routine id from list_schedules"}}}}},
+                {"required",{"id"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json resp = g_routines.call("delete",
+                                        {{"routine_id", args.value("id","")}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<DeleteScheduleTool>());
+
     // browser_* (Phase 47): computer use — recreation of the original
     // hub-side tools lost in the Phase C refactor. Backed by browser_driver.py
     // in-container (CDP :9222, the same Chromium the user sees in the
@@ -716,6 +899,8 @@ int main(int argc, char** argv) {
             q_cv.notify_one();
         } else if (kind == "approval_resp") {
             approvals.resolve(op.value("id", ""), op.value("allow", false));
+        } else if (kind == "routine_resp") {
+            g_routines.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
         } else if (kind == "shutdown") {
