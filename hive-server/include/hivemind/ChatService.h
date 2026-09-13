@@ -40,6 +40,9 @@ public:
             std::chrono::steady_clock::now();  // turn start, for avg_ms
         bool done = false;
         bool cancelling = false;
+        // Phase 52: partial already posted to the thread (cancel /
+        // watchdog flush) — guards against double-posting.
+        bool partial_flushed = false;
         // When cancelling began — the watchdog retires a cancelling turn
         // after a grace period if the worker never confirms (dropped task
         // frame / dead worker / idle brain → no task_result). Without this
@@ -76,6 +79,10 @@ public:
 
     // -- HubRouter callbacks (worker channel events) --------------------
     void append_delta(const std::string& task_id, const std::string& text);
+    /// Phase 52: post a dying turn's streamed partial into its thread so
+    /// user-facing text survives cancel/timeout. No-op when empty or
+    /// already flushed. Sets partial_flushed.
+    void flush_partial(LiveTurn& t);
     void complete_turn(const std::string& task_id, const std::string& body,
                        const std::string& error,
                        const std::string& attachments_json = "[]",

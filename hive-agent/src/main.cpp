@@ -173,6 +173,19 @@ public:
                 user_output_ += content;
             }
         }
+        // Phase 52: the stop tool ends the turn — its summary can carry
+        // the model's final user-facing answer (models sometimes put it
+        // there instead of in text). Capture it or it is lost.
+        if (name == "stop") {
+            const std::string summary = result.value("summary", "");
+            if (!summary.empty()) {
+                std::lock_guard<std::mutex> lk(m_);
+                if (!user_output_.empty() && user_output_.back() != '\n')
+                    user_output_ += '\n';
+                user_output_ += '\n';
+                user_output_ += summary;
+            }
+        }
     }
 
     // Brain state machine -> roster presence. hive-brain notifies every

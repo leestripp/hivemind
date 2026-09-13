@@ -116,6 +116,9 @@ private:
     // ── rendering helpers ─────────────────────────────────────────────────
     void rebuild_roster();
     void rebuild_thread_list();
+    /// Phase 52: render/remove the live streaming bubble from the
+    /// activity poll's turns[] (partial text of the first active turn).
+    void update_live_bubble(const nlohmann::json& turns);
     void append_message_bubble(const std::string& sender_kind,
                                const std::string& sender_label,
                                const std::string& body,
@@ -207,6 +210,11 @@ private:
     bool chat_scroll_prog_ = false;   // guard: our own scroll in flight
     bool chat_scroll_idle_ = false;   // coalesces deferred scrolls
     Gtk::Box messages_box_{Gtk::Orientation::VERTICAL};
+    // Phase 52: live streaming bubble (managed children of messages_box_;
+    // raw pointers, nulled on remove / messages_box_ clears).
+    Gtk::Box* live_row_ = nullptr;
+    Gtk::Label* live_label_ = nullptr;
+    std::string live_agent_key_;         // agent_id owning the bubble
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
     Gtk::Button attach_btn_;             // Phase 18: 📎 attach files
     Gtk::Entry entry_;

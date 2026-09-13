@@ -40,6 +40,8 @@ const char* kCss = R"(
                  padding: 8px; margin: 4px 12px 4px 48px; }
 .hv-msg-system { color: alpha(@window_fg_color, 0.6); font-style: italic;
                  margin: 4px 12px; }
+.hv-msg-live   { opacity: 0.75; font-style: italic;
+                 box-shadow: inset 0 0 0 1px alpha(@accent_color, 0.35); }
 .hv-sender { font-weight: 600; font-size: 0.85em;
              color: alpha(@window_fg_color, 0.65); }
 .hv-section { font-weight: 700; margin: 0; padding: 7px 10px;
@@ -650,6 +652,7 @@ void HiveWindow::on_settings() {
                     rendered_msg_ids_.clear();
                     while (auto* c = messages_box_.get_first_child())
                         messages_box_.remove(*c);
+                        live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
                     rendered_.clear();
                     poll_chat();
                 }
@@ -1247,6 +1250,7 @@ void HiveWindow::poll_chat() {
                         }
                     set_status(who + " is working…");
                 }
+                update_live_bubble(act.value("turns", json::array()));
             });
         }
         dispatcher_.emit();
@@ -1501,6 +1505,70 @@ void HiveWindow::update_thread_title() {
         return;
     }
     thread_title_.set_text("");
+}
+
+// Phase 52: live streaming bubble. The activity poll already delivers
+// turns[].partial (the agent's running commentary between tool calls) —
+// render the first active turn's partial as an ephemeral agent-styled
+// bubble at the bottom of the chat. Removed when the turn ends; the
+// stored final message then appears via the normal fetch.
+void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
+    std::string agent_id, agent_name, partial;
+    for (auto& t : turns) {
+        if (t.value("done", true)) continue;
+        agent_id   = t.value("agent_id", "");
+        agent_name = t.value("agent_name", "?");
+        partial    = strip_tool_transcript(t.value("partial", ""));
+        if (!partial.empty()) break;
+        agent_id.clear(); agent_name.clear(); partial.clear();
+    }
+
+    if (partial.empty()) {
+        if (live_row_) {
+            messages_box_.remove(*live_row_);
+            live_row_ = nullptr;
+            live_label_ = nullptr;
+            live_agent_key_.clear();
+        }
+        return;
+    }
+
+    // A different agent's turn took over: rebuild the row identity.
+    if (live_row_ && live_agent_key_ != agent_id) {
+        messages_box_.remove(*live_row_);
+        live_row_ = nullptr;
+        live_label_ = nullptr;
+    }
+
+    if (!live_row_) {
+        live_row_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+        live_row_->add_css_class("hv-msg-agent");
+        live_row_->add_css_class("hv-msg-live");
+        std::string avatar;
+        for (auto& a : agents_)
+            if (a.value("name", "") == agent_name) {
+                avatar = a.value("avatar", "");
+                break;
+            }
+        live_row_->append(*make_avatar(agent_name, false, AVATAR_LOGICAL,
+                                       avatar));
+        auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+        box->set_hexpand(true);
+        auto* header = Gtk::make_managed<Gtk::Label>(agent_name + " — live");
+        header->add_css_class("hv-sender");
+        header->set_halign(Gtk::Align::START);
+        box->append(*header);
+        live_label_ = Gtk::make_managed<Gtk::Label>();
+        live_label_->set_wrap(true);
+        live_label_->set_selectable(true);
+        live_label_->set_halign(Gtk::Align::START);
+        live_label_->set_xalign(0);
+        box->append(*live_label_);
+        live_row_->append(*box);
+        messages_box_.append(*live_row_);
+        live_agent_key_ = agent_id;
+    }
+    live_label_->set_text(partial + " â");
 }
 
 void HiveWindow::append_message_bubble(const std::string& sender_kind,
@@ -1899,6 +1967,7 @@ void HiveWindow::on_agent_selected() {
                 rendered_msg_ids_.clear();
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
+                    live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
                 rendered_.clear();
                 refresh_threads();
                 poll_chat();
@@ -1936,6 +2005,7 @@ void HiveWindow::on_thread_selected() {
     update_thread_title();
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);
+        live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
     rendered_.clear();
     poll_chat();
 }
@@ -3386,6 +3456,7 @@ void HiveWindow::on_new_thread() {
                             rendered_msg_ids_.clear();
                             while (auto* c = messages_box_.get_first_child())
                                 messages_box_.remove(*c);
+                                live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
                             rendered_.clear();
                             refresh_threads();
                         });
@@ -3511,6 +3582,7 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
         rendered_msg_ids_.clear();
         while (auto* c = messages_box_.get_first_child())
             messages_box_.remove(*c);
+            live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
         rendered_.clear();
         refresh_threads();
         return nt;
@@ -3527,6 +3599,7 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
                 delete_thread_btn_.set_sensitive(true);
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
+                    live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
                 rendered_.clear();
                 poll_chat();
                 return nlohmann::json{{"selected", id}};

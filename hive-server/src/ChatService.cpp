@@ -369,7 +369,8 @@ void ChatService::watchdog_loop() {
 
         const int timeout = turn_timeout_s();
         struct Victim { std::string task_id, thread_id, agent_id;
-                        bool was_cancelling = false; };
+                        bool was_cancelling = false;
+                        std::shared_ptr<LiveTurn> turn; };
         std::vector<Victim> victims;
         {
             std::lock_guard<std::mutex> lk(m_);
@@ -400,7 +401,7 @@ void ChatService::watchdog_loop() {
                             cancelled_tasks_.insert(t->task_id);
                     }
                     victims.push_back({t->task_id, t->thread_id, t->agent_id,
-                                       already_cancelling});
+                                       already_cancelling, t});
                 }
             }
         }
@@ -416,6 +417,10 @@ void ChatService::watchdog_loop() {
                 try { hub_.cancel_agent(*agent, v.thread_id); }
                 catch (...) {}
             }
+            // Phase 52: preserve whatever the agent said before dying.
+            // (Cancel-path turns were already flushed by cancel_thread;
+            // flush_partial is idempotent via the flag.)
+            if (v.turn) flush_partial(*v.turn);
             // Tell the thread what happened, then retire the turn.
             try {
                 threads_.add_message(v.thread_id, "system", "hivemind",
@@ -435,8 +440,25 @@ void ChatService::watchdog_loop() {
     }
 }
 
+void ChatService::flush_partial(LiveTurn& t) {
+    if (t.partial_flushed || t.partial.empty()) return;
+    t.partial_flushed = true;
+    // The turn's own final result will NOT arrive (cancelled turns are
+    // tombstoned in complete_turn), so this is the only place the
+    // user-facing commentary survives. Posted as the agent with an
+    // interrupted marker.
+    try {
+        threads_.add_message(t.thread_id, "agent", t.agent_id,
+                             t.partial + "\n\n*(interrupted)*");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[chat] ERROR flushing partial for %.16s: %s\n",
+                     t.task_id.c_str(), e.what());
+    }
+}
+
 void ChatService::cancel_thread(const std::string& thread_id) {
     std::vector<RosterAgent> to_cancel;
+    std::vector<std::shared_ptr<LiveTurn>> to_flush;
     {
         std::lock_guard<std::mutex> lk(m_);
         auto it = live_.find(thread_id);
@@ -448,7 +470,12 @@ void ChatService::cancel_thread(const std::string& thread_id) {
             if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
             auto agent = agents_.get_agent(t->agent_id);
             if (agent) to_cancel.push_back(*agent);
+            to_flush.push_back(t);   // Phase 52: keep the commentary
         }
     }
     for (const auto& a : to_cancel) hub_.cancel_agent(a, thread_id);
+    // Phase 52: flush AFTER the lock (ThreadStore lock ordering) and
+    // after cancel_agent so the interrupt note lands after any in-flight
+    // text. Late results are tombstoned — this is the surviving record.
+    for (auto& t : to_flush) flush_partial(*t);
 }
