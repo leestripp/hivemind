@@ -2148,20 +2148,14 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
 void HiveWindow::show_agent_screen(const nlohmann::json& agent, bool view_only) {
     const std::string id = agent.value("id", "");
     if (id.empty()) return;
+    const std::string name = agent.value("name", id);
     std::string url = api_.base_url() + "/screen/" + id +
                       "/?key=" + api_.api_key();
     if (view_only) url += "&view_only=1";
 
-    // The screen stack may not be running — POST screen/start first or
-    // the page 503s. ApiClient is synchronous, so start in a worker
-    // thread; the UI thread opens the window immediately.
-    std::thread([this, id] {
-        try { api_.screen_start(id); } catch (...) {}
-    }).detach();
-
 #ifdef HIVEMIND_WITH_WEBKIT
     auto* win = Gtk::make_managed<Gtk::Window>();
-    win->set_title("Computer — " + agent.value("name", id));
+    win->set_title("Computer — " + name + " (starting…)");
     win->set_default_size(1320, 860);
     win->set_transient_for(*this);
 
@@ -2172,16 +2166,49 @@ void HiveWindow::show_agent_screen(const nlohmann::json& agent, bool view_only) 
     win->set_child(*Glib::wrap(GTK_WIDGET(wv)));
     win->present();
 
-    // Give the bring-up a moment, then load. If the screen still isn't
-    // up, noVNC shows the server's error page and the user can retry.
-    Glib::signal_timeout().connect_once([wv, url] {
-        webkit_web_view_load_uri(WEBKIT_WEB_VIEW(wv), url.c_str());
-    }, 3000);
+    // Bring-up can take MINUTES (standard agents are recreated from the
+    // browser image; x11vnc/websockify then start inside). The old fixed
+    // 3s delay virtually guaranteed the 503 "screen not running" page.
+    // Start, poll status until the worker reports the stack up, THEN
+    // load noVNC. alive guards against the user closing the window
+    // mid-poll (detached thread outliving the widgets).
+    auto alive = std::make_shared<bool>(true);
+    win->signal_destroy().connect([alive] { *alive = false; });
+    std::thread([this, id, url, wv, win, name, alive] {
+        try { api_.screen_start(id); } catch (...) {}
+        bool up = false;
+        for (int i = 0; i < 48 && !up; ++i) {   // ~4 min cap, 5s ticks
+            try {
+                up = api_.screen_status(id).value("running", false);
+            } catch (...) {}
+            if (!up) std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+        Glib::signal_idle().connect_once([wv, win, url, name, up, alive] {
+            if (!*alive) return;
+            if (up) {
+                win->set_title("Computer — " + name);
+                webkit_web_view_load_uri(WEBKIT_WEB_VIEW(wv), url.c_str());
+            } else {
+                win->set_title("Computer — " + name +
+                               " (screen failed to start — close and retry)");
+            }
+        });
+    }).detach();
 #else
-    // System-browser fallback: same delay logic via a timeout, then open.
-    Glib::signal_timeout().connect_once([url] {
-        Gio::AppInfo::launch_default_for_uri(url);
-    }, 3000);
+    // System-browser fallback: same poll, then open.
+    std::thread([this, id, url] {
+        try { api_.screen_start(id); } catch (...) {}
+        bool up = false;
+        for (int i = 0; i < 48 && !up; ++i) {
+            try {
+                up = api_.screen_status(id).value("running", false);
+            } catch (...) {}
+            if (!up) std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+        if (up)
+            Glib::signal_idle().connect_once(
+                [url] { Gio::AppInfo::launch_default_for_uri(url); });
+    }).detach();
 #endif
 }
 

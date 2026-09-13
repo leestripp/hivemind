@@ -298,6 +298,15 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
 
     if (action == "status") {
         r.port = screen_port_of(agent);
+        // The published port mapping outlives the screen stack: the idle
+        // watcher tears websockify/x11vnc down but the 6080 mapping
+        // persists, so the port alone LIES about "running" (hub then
+        // redirects to a dead splice with an empty password). websockify
+        // owns the listener — no websockify, no screen.
+        if (r.port != 0 &&
+            podman_simple({"exec", cname, "pgrep", "-f", "websockify"},
+                          nullptr) != 0)
+            r.port = 0;
         r.running = r.port != 0;
         if (r.running) r.password = screen_password_of(agent);
         return r;

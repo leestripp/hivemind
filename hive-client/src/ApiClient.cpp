@@ -171,6 +171,10 @@ nlohmann::json ApiClient::screen_start(const std::string& agent_id) {
     return request("POST", "/api/agents/" + agent_id + "/screen/start");
 }
 
+nlohmann::json ApiClient::screen_status(const std::string& agent_id) {
+    return request("GET", "/api/agents/" + agent_id + "/screen");
+}
+
 nlohmann::json ApiClient::exec_log(const std::string& agent_id, int limit) {
     return request("GET", "/api/agents/" + agent_id +
                           "/exec-log?limit=" + std::to_string(limit));

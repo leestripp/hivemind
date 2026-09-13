@@ -58,6 +58,7 @@ public:
     void run_routine(const std::string& id);                           // POST /api/routines/:id/run
     void set_routine_enabled(const std::string& id, bool enabled);     // POST …/enabled
     nlohmann::json screen_start(const std::string& agent_id);
+    nlohmann::json screen_status(const std::string& agent_id);
     nlohmann::json agent_start(const std::string& agent_id);       // POST .../start
     nlohmann::json agent_stop(const std::string& agent_id);        // POST .../stop
     nlohmann::json exec_log(const std::string& agent_id,

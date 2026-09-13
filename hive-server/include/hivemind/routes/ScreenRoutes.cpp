@@ -210,7 +210,13 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             const uint16_t port = resolve(id);
             // v2: podman/image facts live on the WORKER - the channel is
             // the only source of truth; no worker -> screen stack down.
-            auto remote = WorkerRouter::screen_ctl(id, "status");
+            // screen_ctl THROWS when the worker is offline — report 503
+            // (start handler does), not an uncaught 500.
+            std::optional<WorkerChannel::ScreenResult> remote;
+            try { remote = WorkerRouter::screen_ctl(id, "status"); }
+            catch (const std::exception& e) {
+                routes::send_error(resp, 503, e.what()); return;
+            }
             routes::send_json(resp, json{
                 {"podman", remote.has_value()},
                 {"browser_image", remote.has_value() && remote->error.empty()},
@@ -294,8 +300,14 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             // OmniNet's — follow without the cookie we just set).
             if (seg.size() == 2) {
                 // Absolute Location — OmniNet's client won't follow relative
-                // redirects; browsers accept either.
-                std::string loc = "http://" +
+                // redirects; browsers accept either. Scheme: behind TLS
+                // nginx the hardcoded http:// downgraded the noVNC page to
+                // plaintext (and its WS to ws://) — honour X-Forwarded-Proto,
+                // default https (the site is TLS-only).
+                std::string scheme = "https";
+                if (auto xfp = req.header("X-Forwarded-Proto"))
+                    if (!xfp->empty()) scheme = *xfp;
+                std::string loc = scheme + "://" +
                     std::string{req.header("Host").value_or("localhost")} +
                     "/screen/" + seg[1] +
                     "/vnc.html?autoconnect=true&resize=scale"
