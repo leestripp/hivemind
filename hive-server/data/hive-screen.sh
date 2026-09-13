@@ -73,23 +73,10 @@ alive websockify || \
         >/tmp/websockify.log 2>&1 &
 
 # The shared browser: maximized on :99, CDP :9222 for browser_driver.py.
-# Skip if already up (CDP answers).
-if ! curl -sf --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
-    # Real Chrome first (no testing/automation branding — sites that
-    # reject test builds must accept it); playwright chromium as fallback.
-    # Stale singleton locks survive container recreates (home mount
-    # persists) and block Chrome: "profile in use on another computer".
-    # Safe to clear here — this branch only runs when CDP is DOWN, i.e.
-    # no live chrome holds the profile.
-    rm -f /home/hive/.browser-profile/Singleton{Lock,Socket,Cookie}
-    CHROME="$(command -v google-chrome || ls /opt/ms-playwright/chromium-*/chrome-linux64/chrome /opt/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | tail -1)"
-    [ -n "$CHROME" ] && nohup "$CHROME" --remote-debugging-port=9222 \
-        --user-data-dir=/home/hive/.browser-profile --no-first-run \
-        --no-default-browser-check --disable-session-crashed-bubble \
-        --disable-dev-shm-usage --disable-gpu --noerrdialogs \
-        --disable-features=TranslateUI \
-        --start-maximized about:blank >/tmp/chromium.log 2>&1 &
-fi
+# The wrapper owns the flags (incl. --no-sandbox) and the stale-lock
+# dance, and doubles as the desktop menu's relaunch entry — one source
+# of truth so the user-relaunched browser matches the agent's.
+hive-chrome.sh || true
 
 # Readiness: x11vnc + websockify alive and :5900 answering.
 for _ in $(seq 1 30); do

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- openbox root menu for the hive-agent desktop (right-click the desktop
+     in noVNC). System-wide so it survives the per-agent home bind mount.
+     Keep entries dependency-light: everything here ships in the image. -->
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+<menu id="root-menu" label="HiveMind">
+  <item label="Chrome (shared session)">
+    <action name="Execute"><command>hive-chrome.sh</command></action>
+  </item>
+  <separator/>
+  <item label="Terminal">
+    <action name="Execute"><command>xfce4-terminal</command></action>
+  </item>
+  <item label="Terminal (xterm)">
+    <action name="Execute"><command>xterm</command></action>
+  </item>
+  <item label="htop">
+    <action name="Execute"><command>xfce4-terminal -e htop</command></action>
+  </item>
+  <separator/>
+  <item label="Reconfigure">
+    <action name="Reconfigure"/>
+  </item>
+</menu>
+</openbox_menu>
