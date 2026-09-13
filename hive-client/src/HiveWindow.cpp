@@ -2002,6 +2002,12 @@ void HiveWindow::on_thread_selected() {
     for (auto& t : threads_)
         if (t.value("id", "") == *id)
             last_seen_activity_[*id] = t.value("last_activity", "");
+    // Clear the unread dot NOW: rows (and their dots) are otherwise only
+    // rebuilt by the 10s signature-gated refresh — and clicking changes
+    // no server-side data, so the dot could linger for minutes. The
+    // rebuild re-selects the current row; the row_selected handler
+    // re-fires but returns early on *id == current_thread_ (no loop).
+    rebuild_thread_list();
     update_thread_title();
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);
