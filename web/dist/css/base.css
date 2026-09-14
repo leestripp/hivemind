@@ -191,6 +191,7 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .kv-table tbody tr:last-child td { border-bottom: none; }
 .kv-table tbody tr:hover { background: rgba(136,192,208,.05); }
 .row-revoked td { opacity: .45; }
+.row-revoked td.col-actions { opacity: 1; }   /* buttons stay readable on dimmed rows */
 .cell-name { font-weight: 600; }
 .cell-id {
   font-size: 11.5px; color: var(--accent);
