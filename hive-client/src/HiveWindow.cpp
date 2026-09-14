@@ -2248,8 +2248,10 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     mk("\U0001F441 Computer (view-only)", nullptr,
        [this, agent] { show_agent_screen(agent, true); });
     mk("\U0001F4CB Exec log", nullptr, [this, agent] { show_exec_log(agent); });
-    mk("\u23F0 Scheduled Tasks\u2026", nullptr,
-       [this, agent] { show_routines_dialog(agent.value("id", "")); });
+    // Agent menu = agent-scoped action: Add a task FOR THIS agent
+    // (preselected). The full manager lives on the title bar.
+    mk("\u23F0 Schedule Task\u2026", nullptr,
+       [this, agent] { show_task_dialog(agent.value("id", "")); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
     mk("Inspector\u2026", nullptr, [this, agent] { show_inspector(agent); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
