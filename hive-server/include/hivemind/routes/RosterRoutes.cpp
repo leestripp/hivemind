@@ -505,6 +505,19 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             send_json(resp, thread_json(*t));
         });
 
+    // Phase 56: POST /api/threads/:id/clear — wipe history, keep thread.
+    server.post("/api/threads/:id/clear",
+        [&threads](const OmniNet::HTTP::Request& req,
+                   OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
+            if (!threads.get_thread(seg[2])) {
+                send_error(resp, 404, "thread not found"); return;
+            }
+            const int removed = threads.clear_messages(seg[2]);
+            send_json(resp, json{{"cleared", true}, {"removed", removed}});
+        });
+
     server.delete_("/api/threads/:id",
         [&threads, &chat](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());

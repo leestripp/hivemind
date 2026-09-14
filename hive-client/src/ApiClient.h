@@ -94,7 +94,8 @@ public:
                                      const std::string& bytes);
     nlohmann::json activity(const std::string& thread_id);           // GET …/activity
     void cancel_thread(const std::string& thread_id);      // POST …/cancel
-    void delete_thread(const std::string& thread_id);      // DELETE …/:id
+    void delete_thread(const std::string& thread_id);
+    void clear_thread(const std::string& thread_id);      // DELETE …/:id
 
     // ── approvals ─────────────────────────────────────────────────────────
     nlohmann::json list_approvals(const std::string& status = "pending");

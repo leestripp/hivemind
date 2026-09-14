@@ -298,6 +298,11 @@ void ApiClient::delete_thread(const std::string& thread_id) {
     request("DELETE", "/api/threads/" + thread_id);
 }
 
+void ApiClient::clear_thread(const std::string& thread_id) {
+    // Phase 56: wipe the thread's messages, keep the thread.
+    request("POST", "/api/threads/" + thread_id + "/clear");
+}
+
 } // namespace hive
 
 namespace hive {

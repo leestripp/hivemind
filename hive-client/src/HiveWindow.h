@@ -111,7 +111,11 @@ private:
     void on_approvals();
     void on_stop();
     void on_learn_routine();   // Phase 20: distill thread into a routine
-    void on_delete_thread();
+    void on_delete_thread(const std::string& thread_id);
+    void on_clear_thread(const std::string& thread_id,
+                         const std::string& title);
+    void show_thread_menu(Gtk::Widget& anchor, const nlohmann::json& thread,
+                          double x, double y);
 
     // ── rendering helpers ─────────────────────────────────────────────────
     void rebuild_roster();
@@ -189,7 +193,6 @@ private:
     Gtk::Button connect_btn_;
     Gtk::Button stop_btn_;
     Gtk::Button learn_btn_;              // Phase 20: learn-by-demonstration
-    Gtk::Button delete_thread_btn_;
     bool dark_mode_ = false;             // persisted in config.json
     // User profile (persisted in config.json): chat identity for the human.
     std::string display_name_;           // "" = "You"

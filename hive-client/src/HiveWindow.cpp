@@ -377,7 +377,6 @@ void HiveWindow::setup_icons() {
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
     slot(settings_btn_,      "settings",   "Settings — your display name & avatar");
     slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
-    slot(delete_thread_btn_, "trash",      "Delete the selected thread");
     slot(send_btn_,          "send",       "Send message");
 
 
@@ -701,14 +700,11 @@ HiveWindow::HiveWindow() {
         "into a scheduled routine (save_routine)");
     learn_btn_.signal_clicked().connect([this] { on_learn_routine(); });
     learn_btn_.set_sensitive(false);   // enabled with a thread selection
-    delete_thread_btn_.signal_clicked().connect([this] { on_delete_thread(); });
-    delete_thread_btn_.set_sensitive(false);  // enabled with a selection
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(settings_btn_);
-    header_.pack_end(delete_thread_btn_);
     header_.pack_end(stop_btn_);
     header_.pack_end(learn_btn_);
     header_.pack_end(approvals_btn_);
@@ -1493,6 +1489,15 @@ void HiveWindow::rebuild_thread_list() {
         row->set_child(*row_box);
         row->set_data("thread_id", new std::string(t.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
+        // Phase 56: right-click → thread context menu (Clear / Delete).
+        auto rc = Gtk::GestureClick::create();
+        rc->set_button(0);   // listen to all buttons, filter in the handler
+        rc->signal_pressed().connect(
+            [this, rc, t](int, double x, double y) {
+                if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
+                    show_thread_menu(*rc->get_widget(), t, x, y);
+            });
+        row->add_controller(rc);
         threads_list_.append(*row);
         // Keep the visible selection on the thread the chat is showing —
         // rebuilding the list drops it otherwise (refresh clears highlight).
@@ -2107,7 +2112,6 @@ void HiveWindow::on_thread_selected() {
     // never be deleted, and the composer is disabled — the inbox has zero
     // agent participants, so a reply here would dispatch to nobody.
     const bool is_inbox = (*id == "user");
-    delete_thread_btn_.set_sensitive(!is_inbox);
     learn_btn_.set_sensitive(!is_inbox);
     entry_.set_sensitive(!is_inbox);
     send_btn_.set_sensitive(!is_inbox);
@@ -3638,8 +3642,97 @@ void HiveWindow::on_stop() {
     });
 }
 
-void HiveWindow::on_delete_thread() {
-    if (current_thread_.empty()) return;
+// Phase 56: right-click a thread row → context menu (Clear / Delete).
+void HiveWindow::show_thread_menu(Gtk::Widget& anchor,
+                                  const nlohmann::json& thread,
+                                  double x, double y) {
+    const std::string tid = thread.value("id", "");
+    if (tid.empty()) return;
+    auto* pop = Gtk::make_managed<Gtk::Popover>();
+    pop->set_has_arrow(false);
+    pop->set_autohide(true);
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    box->set_margin(4);
+    auto mk = [&](const char* label, const char* css,
+                  std::function<void()> fn) {
+        auto* b = Gtk::make_managed<Gtk::Button>(label);
+        b->set_has_frame(false);
+        b->add_css_class("hv-menu-item");
+        if (css) b->add_css_class(css);
+        b->signal_clicked().connect([pop, fn = std::move(fn)] {
+            pop->popdown();
+            fn();
+        });
+        box->append(*b);
+    };
+    const std::string title = thread.value("title", "");
+    mk("\U0001F9F9 Clear history\u2026", nullptr,
+       [this, tid, title] { on_clear_thread(tid, title); });
+    // Phase 44: the User Inbox can be cleared but never deleted.
+    if (thread.value("kind", "") != "user")
+        mk("\U0001F5D1 Delete thread\u2026", "destructive-action",
+           [this, tid] { on_delete_thread(tid); });
+    pop->set_child(*box);
+    pop->set_parent(anchor);
+    Gdk::Rectangle rect((int)x, (int)y, 1, 1);
+    pop->set_pointing_to(rect);
+    pop->signal_closed().connect([pop] { pop->unparent(); });
+    pop->popup();
+}
+
+void HiveWindow::on_clear_thread(const std::string& thread_id,
+                                 const std::string& title) {
+    if (thread_id.empty()) return;
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title("Clear thread history?");
+    install_dialog_titlebar(*dialog, "Clear thread history?");
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    auto* clr = dialog->add_button("Clear", Gtk::ResponseType::OK);
+    clr->add_css_class("destructive-action");
+    auto* lbl = Gtk::make_managed<Gtk::Label>(
+        "Clear every message in \u201C" + (title.empty() ? "this thread" : title) +
+        "\u201D? The thread stays; the history is gone for good.");
+    lbl->set_margin(18);
+    lbl->set_wrap(true);
+    lbl->set_max_width_chars(42);
+    dialog->get_content_area()->append(*lbl);
+    const std::string tid = thread_id;
+    dialog->signal_response().connect([this, dialog, tid](int r) {
+        dialog->destroy();
+        if (r != Gtk::ResponseType::OK) return;
+        run_async([this, tid] {
+            api_.clear_thread(tid);
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, tid] {
+                if (!alive_) return;
+                // No activity left — any unread dot for it dies too.
+                last_seen_activity_.erase(tid);
+                if (current_thread_ == tid) {
+                    // Open view on the cleared thread: wipe it back to
+                    // the empty state (thread itself survives).
+                    last_message_id_.clear();
+                    rendered_msg_ids_.clear();
+                    rendered_.clear();
+                    while (auto* ch = messages_box_.get_first_child())
+                        messages_box_.remove(*ch);
+                    live_row_ = nullptr; live_label_ = nullptr;
+                    live_agent_key_.clear();
+                    load_earlier_btn_ = nullptr; has_more_history_ = false;
+                    oldest_message_id_.clear(); loading_earlier_ = false;
+                    poll_chat();
+                }
+                refresh_threads();
+            });
+            dispatcher_.emit();
+        });
+    });
+    dialog->present();
+}
+
+void HiveWindow::on_delete_thread(const std::string& thread_id) {
+    if (thread_id.empty()) return;
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("Delete thread?");
     install_dialog_titlebar(*dialog, "Delete thread?");
@@ -3654,7 +3747,7 @@ void HiveWindow::on_delete_thread() {
     lbl->set_wrap(true);
     lbl->set_max_width_chars(42);
     dialog->get_content_area()->append(*lbl);
-    std::string tid = current_thread_;
+    std::string tid = thread_id;
     dialog->signal_response().connect([this, dialog, tid](int r) {
         dialog->destroy();
         if (r != Gtk::ResponseType::OK) return;
@@ -3669,7 +3762,6 @@ void HiveWindow::on_delete_thread() {
                                                 // the agent must recreate it
                     last_message_id_.clear();
                     rendered_msg_ids_.clear();
-                    delete_thread_btn_.set_sensitive(false);
                     learn_btn_.set_sensitive(false);
                     while (auto* ch = messages_box_.get_first_child())
                         messages_box_.remove(*ch);
@@ -3751,7 +3843,6 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
                 current_thread_ = id;
                 last_message_id_.clear();
                 rendered_msg_ids_.clear();
-                delete_thread_btn_.set_sensitive(true);
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
                     live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
@@ -3794,7 +3885,6 @@ nlohmann::json HiveWindow::ui_delete_thread(const std::string& id) {
             current_thread_.clear();
             last_message_id_.clear();
             rendered_msg_ids_.clear();
-            delete_thread_btn_.set_sensitive(false);
             while (auto* ch = messages_box_.get_first_child())
                 messages_box_.remove(*ch);
             rendered_.clear();

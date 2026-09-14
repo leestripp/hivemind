@@ -72,6 +72,11 @@ public:
     /// Cascades messages + participants. The User Inbox (kUserThreadId)
     /// is protected: delete_thread returns false for it.
     bool delete_thread(const std::string& id);
+
+    /// Phase 56: wipe a thread's messages, keep the thread. The User
+    /// Inbox MAY be cleared (unlike delete) — it is the agent->human
+    /// channel and only its history goes. Returns rows removed.
+    int clear_messages(const std::string& thread_id);
     bool remove_participant(const std::string& thread_id,
                             const std::string& agent_id);
     bool add_participant(const std::string& thread_id,

@@ -342,6 +342,22 @@ bool ThreadStore::remove_participant(const std::string& thread_id,
     return ok;
 }
 
+int ThreadStore::clear_messages(const std::string& thread_id) {
+    sqlite3* db = open_conn();
+    int removed = 0;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "DELETE FROM messages WHERE thread_id = ?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        if (sqlite3_step(st) == SQLITE_DONE)
+            removed = sqlite3_changes(db);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return removed;
+}
+
 bool ThreadStore::delete_thread(const std::string& id) {
     if (is_user_thread(id)) return false;   // Phase 44: inbox is protected
     sqlite3* db = open_conn();
