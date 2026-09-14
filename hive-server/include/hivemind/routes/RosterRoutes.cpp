@@ -535,6 +535,18 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"deleted", true}});
         });
 
+    // ── POST /api/agents/:id/cancel — stop the agent's turn(s) (Phase 57) ─
+    server.post("/api/agents/:id/cancel",
+        [&agents, &chat](const OmniNet::HTTP::Request& req,
+                         OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 3 || !agents.get_agent(seg[2])) {
+                send_error(resp, 404, "agent not found"); return;
+            }
+            const int n = chat.cancel_agent_turns(seg[2]);
+            send_json(resp, json{{"cancelled", n}});
+        });
+
     // ── POST /api/threads/:id/cancel — stop live turns (Phase 11.3) ──────
     server.post("/api/threads/:id/cancel",
         [&threads, &chat](const OmniNet::HTTP::Request& req,

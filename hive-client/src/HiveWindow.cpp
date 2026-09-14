@@ -376,7 +376,6 @@ void HiveWindow::setup_icons() {
     slot(tasks_btn_,         "task-add",   "Schedule a task (routine)");
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
     slot(settings_btn_,      "settings",   "Settings — your display name & avatar");
-    slot(stop_btn_,          "stop",       "Cancel the running turn in this thread");
     slot(send_btn_,          "send",       "Send message");
 
 
@@ -691,9 +690,6 @@ HiveWindow::HiveWindow() {
         [this] { maybe_show_connect_dialog(); });
     settings_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_settings));
-    stop_btn_.signal_clicked().connect([this] { on_stop(); });
-    stop_btn_.set_sensitive(false);   // enabled while a turn is running
-    stop_btn_.add_css_class("destructive-action");
     learn_btn_.set_label("🎓 Learn");
     learn_btn_.set_tooltip_text(
         "Learn-by-demonstration: the agent distills this thread's workflow "
@@ -705,7 +701,6 @@ HiveWindow::HiveWindow() {
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(settings_btn_);
-    header_.pack_end(stop_btn_);
     header_.pack_end(learn_btn_);
     header_.pack_end(approvals_btn_);
     // CSD: install our HeaderBar AS the window titlebar so the compositor
@@ -1247,7 +1242,6 @@ void HiveWindow::poll_chat() {
                 // handler (fires once the new bubbles are laid out).
                 bool busy = act.value("busy", false);
                 thread_busy_ = busy;
-                stop_btn_.set_sensitive(busy);
                 if (busy) {
                     std::string who;
                     for (auto& t : act.value("turns", json::array()))
@@ -2248,6 +2242,8 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
         });
         box->append(*b);
     };
+    mk("\u23F9 Stop", "destructive-action",
+       [this, agent] { on_stop_agent(agent); });
     mk("\U0001F5A5 Computer", nullptr, [this, agent] { show_agent_screen(agent); });
     mk("\U0001F441 Computer (view-only)", nullptr,
        [this, agent] { show_agent_screen(agent, true); });
@@ -3627,16 +3623,25 @@ void HiveWindow::on_new_thread() {
     dialog->present();
 }
 
-void HiveWindow::on_stop() {
-    if (current_thread_.empty()) return;
-    std::string tid = current_thread_;
-    stop_btn_.set_sensitive(false);
-    set_status("Cancelling…");
-    run_async([this, tid] {
-        api_.cancel_thread(tid);
+// Phase 57: agent-context-menu Stop — cancels the agent's live turn(s)
+// in whatever thread it's working in (the old title-bar button cancelled
+// the whole THREAD, which was confusing in shared threads).
+void HiveWindow::on_stop_agent(const nlohmann::json& agent) {
+    const std::string id = agent.value("id", "");
+    const std::string name = agent.value("name", id);
+    if (id.empty()) return;
+    set_status("Cancelling " + name + "\u2026");
+    run_async([this, id, name] {
+        int cancelled = 0;
+        try {
+            cancelled = api_.cancel_agent(id).value("cancelled", 0);
+        } catch (...) {}
         std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this] {
-            if (alive_) set_status("Cancel requested.");
+                done_queue_.push_back([this, name, cancelled] {
+            if (!alive_) return;
+            set_status(cancelled > 0
+                ? "Cancel sent to " + name
+                : name + " wasn\u2019t working");
         });
         dispatcher_.emit();
     });
@@ -3871,7 +3876,19 @@ nlohmann::json HiveWindow::ui_stop() {
     return invoke_on_ui([this] {
         if (current_thread_.empty())
             return nlohmann::json{{"error", "no thread selected"}};
-        on_stop();   // exact button path
+        // Thread-level cancel (the removed title-bar button's path) —
+        // kept for the UiApi; human UI cancel is per-agent via the
+        // roster context menu (Phase 57).
+        std::string tid = current_thread_;
+        set_status("Cancelling…");
+        run_async([this, tid] {
+            api_.cancel_thread(tid);
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this] {
+                if (alive_) set_status("Cancelled");
+            });
+            dispatcher_.emit();
+        });
         return nlohmann::json{{"cancel_requested", true}};
     });
 }

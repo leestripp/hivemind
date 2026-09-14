@@ -109,7 +109,7 @@ private:
     void process_thread_activity();
     void on_new_thread();
     void on_approvals();
-    void on_stop();
+    void on_stop_agent(const nlohmann::json& agent);
     void on_learn_routine();   // Phase 20: distill thread into a routine
     void on_delete_thread(const std::string& thread_id);
     void on_clear_thread(const std::string& thread_id,
@@ -191,7 +191,6 @@ private:
     Gtk::Image approvals_icon_;          // child of approvals_btn_
     Gtk::Button settings_btn_;           // user profile settings
     Gtk::Button connect_btn_;
-    Gtk::Button stop_btn_;
     Gtk::Button learn_btn_;              // Phase 20: learn-by-demonstration
     bool dark_mode_ = false;             // persisted in config.json
     // User profile (persisted in config.json): chat identity for the human.

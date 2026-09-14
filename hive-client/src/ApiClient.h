@@ -93,7 +93,8 @@ public:
                                      const std::string& filename,
                                      const std::string& bytes);
     nlohmann::json activity(const std::string& thread_id);           // GET …/activity
-    void cancel_thread(const std::string& thread_id);      // POST …/cancel
+    void cancel_thread(const std::string& thread_id);
+    nlohmann::json cancel_agent(const std::string& agent_id);      // POST …/cancel
     void delete_thread(const std::string& thread_id);
     void clear_thread(const std::string& thread_id);      // DELETE …/:id
 

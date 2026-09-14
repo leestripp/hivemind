@@ -290,6 +290,11 @@ nlohmann::json ApiClient::models() { return request("GET", "/api/models"); }
 
 
 
+nlohmann::json ApiClient::cancel_agent(const std::string& agent_id) {
+    // Phase 57: cancel the agent's live turn(s), any thread.
+    return request("POST", "/api/agents/" + agent_id + "/cancel");
+}
+
 void ApiClient::cancel_thread(const std::string& thread_id) {
     request("POST", "/api/threads/" + thread_id + "/cancel");
 }

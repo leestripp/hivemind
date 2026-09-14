@@ -456,6 +456,33 @@ void ChatService::flush_partial(LiveTurn& t) {
     }
 }
 
+int ChatService::cancel_agent_turns(const std::string& agent_id) {
+    std::vector<std::pair<RosterAgent, std::string>> to_cancel;
+    std::vector<std::shared_ptr<LiveTurn>> to_flush;
+    int count = 0;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        for (auto& [thread_id, turns] : live_) {
+            for (auto& t : turns) {
+                if (t->agent_id != agent_id || t->done || t->cancelling)
+                    continue;
+                t->cancelling = true;
+                t->cancel_started = std::chrono::steady_clock::now();
+                if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
+                auto agent = agents_.get_agent(t->agent_id);
+                if (agent) to_cancel.emplace_back(*agent, thread_id);
+                to_flush.push_back(t);   // Phase 52: keep the commentary
+                ++count;
+            }
+        }
+    }
+    // Same ordering as cancel_thread: cancels out of the lock, then
+    // flush so the interrupt note lands after any in-flight text.
+    for (const auto& [a, tid] : to_cancel) hub_.cancel_agent(a, tid);
+    for (auto& t : to_flush) flush_partial(*t);
+    return count;
+}
+
 void ChatService::cancel_thread(const std::string& thread_id) {
     std::vector<RosterAgent> to_cancel;
     std::vector<std::shared_ptr<LiveTurn>> to_flush;

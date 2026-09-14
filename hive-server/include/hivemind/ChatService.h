@@ -106,6 +106,9 @@ public:
 
     /// Cancel every live turn in a thread.
     void cancel_thread(const std::string& thread_id);
+    /// Phase 57: cancel every live turn owned by an agent, any thread.
+    /// Returns the number of turns cancelled (0 = agent wasn't working).
+    int cancel_agent_turns(const std::string& agent_id);
 
 private:
     void fan_in(const std::string& thread_id, const RosterAgent& agent,
