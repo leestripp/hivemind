@@ -2248,9 +2248,8 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     mk("\U0001F441 Computer (view-only)", nullptr,
        [this, agent] { show_agent_screen(agent, true); });
     mk("\U0001F4CB Exec log", nullptr, [this, agent] { show_exec_log(agent); });
-    mk("Add Task\u2026", nullptr,
-       [this, agent] { show_task_dialog(agent.value("id", "")); });
-    mk("Routines\u2026", nullptr, [this] { show_routines_dialog(); });
+    mk("\u23F0 Scheduled Tasks\u2026", nullptr,
+       [this, agent] { show_routines_dialog(agent.value("id", "")); });
     mk("Skills\u2026", nullptr, [this, agent] { show_skills_dialog(agent); });
     mk("Inspector\u2026", nullptr, [this, agent] { show_inspector(agent); });
     mk("Edit Agent", nullptr, [this, agent] { on_edit_agent(agent); });
@@ -2903,7 +2902,8 @@ void HiveWindow::on_new_task() {
 // pattern as the provider/model fetch in the agent dialog — so server
 // validation errors can be shown in-dialog without closing it.
 void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
-                                  const nlohmann::json* existing) {
+                                  const nlohmann::json* existing,
+                                  std::function<void()> on_saved) {
     const bool editing = existing != nullptr;
     const json er = editing ? *existing : json::object();
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
@@ -3060,7 +3060,7 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
     dialog->signal_response().connect(
         [this, dialog, name, agent_dd, agent_ids, prompt, type_dd,
          once_date, once_time, every, daily_time, weekly_time, day_checks, err,
-         editing, er](int r) {
+         editing, er, on_saved](int r) {
             if (r != (int)Gtk::ResponseType::OK) {
                 delete agent_ids;
                 dialog->destroy();
@@ -3097,6 +3097,9 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
                     api_.create_routine(aid, n, p, sched);   // blocking — shows errors inline
                 delete agent_ids;
                 dialog->destroy();
+                // Phase 58: let the caller refresh (the Scheduled Tasks
+                // list reloads itself after Add/Edit via this hook).
+                if (on_saved) on_saved();
                 run_async([this] {   // nothing visual to refresh; keep queue pattern
                     std::lock_guard<std::mutex> lk(queue_m_);
                     done_queue_.push_back([this] { if (alive_) refresh_all(); });
@@ -3113,9 +3116,9 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
 // ── Routines manager (Phase 29) ─────────────────────────────────────────
 // Roster right-click → Routines…: every scheduled task with Edit / Run now /
 // enable toggle / Delete. Edit reuses the task dialog in edit mode (PATCH).
-void HiveWindow::show_routines_dialog() {
+void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
     auto* win = Gtk::make_managed<Gtk::Window>();
-    win->set_title("Routines");
+    win->set_title("Scheduled Tasks");
     win->set_transient_for(*this);
     win->set_default_size(640, 420);
 
@@ -3130,9 +3133,19 @@ void HiveWindow::show_routines_dialog() {
     auto* status = Gtk::make_managed<Gtk::Label>("Loading…");
     status->set_halign(Gtk::Align::START);
     vbox->append(*status);
+    // Phase 58: Add folds into the manager — one Scheduled Tasks entry
+    // point (preselects the agent whose menu opened this).
+    auto* add_btn = Gtk::make_managed<Gtk::Button>("\u2795 Add task\u2026");
+    add_btn->set_halign(Gtk::Align::START);
+    vbox->append(*add_btn);
     win->set_child(*vbox);
 
     auto reload = std::make_shared<std::function<void()>>();
+    add_btn->signal_clicked().connect(
+        [this, preselect_agent_id, reload] {
+            show_task_dialog(preselect_agent_id, nullptr,
+                             [reload] { if (*reload) (*reload)(); });
+        });
     *reload = [this, list, status, reload] {
         run_async([this, list, status, reload] {
             std::string err; json data;
@@ -3164,6 +3177,9 @@ void HiveWindow::show_routines_dialog() {
                         auto* sw = Gtk::make_managed<Gtk::Switch>();
                         sw->set_active(r.value("enabled", true));
                         sw->set_valign(Gtk::Align::CENTER);
+                        sw->set_tooltip_text(r.value("enabled", true)
+                            ? "Enabled — click to pause this task"
+                            : "Paused — click to resume this task");
                         sw->property_active().signal_changed().connect(
                             [this, rid, sw] {
                                 run_async([this, rid, on = sw->get_active()] {
@@ -3183,9 +3199,10 @@ void HiveWindow::show_routines_dialog() {
                         edit->set_valign(Gtk::Align::CENTER);
                         json rcopy = r;
                         edit->signal_clicked().connect([this, rcopy, reload] {
-                            auto* d = Gtk::make_managed<Gtk::Window>();  // dummy anchor ref
-                            (void)d;
-                            show_task_dialog("", &rcopy);
+                            // on_saved: reload the list after Save lands
+                            // (it previously stayed stale until reopen).
+                            show_task_dialog("", &rcopy,
+                                             [reload] { if (*reload) (*reload)(); });
                         });
                         auto* del = Gtk::make_managed<Gtk::Button>("\u2715");
                         del->add_css_class("destructive-action");

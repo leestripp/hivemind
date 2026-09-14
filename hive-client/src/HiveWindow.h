@@ -96,8 +96,9 @@ private:
                          double x, double y);
     void on_new_task();
     void show_task_dialog(const std::string& preselect_agent_id = "",
-                          const nlohmann::json* existing = nullptr); // edit mode
-    void show_routines_dialog();                     // Phase 29 manager
+                          const nlohmann::json* existing = nullptr, // edit mode
+                          std::function<void()> on_saved = nullptr);
+    void show_routines_dialog(const std::string& preselect_agent_id = "");
     void show_skills_dialog(const nlohmann::json& agent);   // Phase 14.2
     void show_new_skill_dialog(Gtk::Window* parent);          // Phase 29
     void show_inspector(const nlohmann::json& agent);       // Phase 14.4
