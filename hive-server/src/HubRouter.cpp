@@ -7,6 +7,8 @@
 #include "hivemind/LlmStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ApprovalStore.h"
+#include "hivemind/ContainerManager.h"
+#include "hivemind/SecretStore.h"
 #include "hivemind/ChatService.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerChannel.h"
@@ -238,9 +240,20 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
     json mcp;
     try { mcp = json::parse(agent.mcp_servers); }
     catch (...) { mcp = json::array(); }
+    // Phase 60: deliver GRANTED secrets with the spawn — the agent's
+    // browser-fill tool reads HIVE_SECRET_<NAME> from its environment.
+    // env_for_agent renders "NAME=value" lines (escaping handled there);
+    // the worker writes them into the 0600 env file, nothing else.
+    std::string secret_env;
+    try {
+        for (auto& [k, v] :
+             ContainerManager::secret_store().env_for_agent(agent.id))
+            secret_env += k + "=" + v + "\n";
+    } catch (...) {}
     return {{"op", "agent_spawn"},
             {"agent_id", agent.id},
             {"name", agent.name},
+            {"secret_env", secret_env},
             {"model", agent.model},          // NAME - worker resolves
             {"provider", ""},                // worker's models.json knows
             {"system_prompt", agent.role},

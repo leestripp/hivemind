@@ -385,6 +385,8 @@ int main(int argc, char* argv[]) {
                                                              json::array());
                             spec.image         = specj.value("image","");
                             spec.type          = specj.value("type","");   // Phase 35
+                            // Phase 60: granted secrets (rendered env text)
+                            spec.secret_env    = specj.value("secret_env","");
                             // Phase 50: per-skill gate from the hub
                             if (specj.contains("disabled_skills") &&
                                 specj["disabled_skills"].is_array())

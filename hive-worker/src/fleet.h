@@ -49,6 +49,7 @@ struct AgentSpec {
     std::string image;         // "" -> kImageLatest (verbatim override wins)
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
     std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
+    std::string secret_env;      // Phase 60: hub-rendered HIVE_SECRET_* lines
 };
 
 // Phase 35: explicit image wins; otherwise type selects the image.

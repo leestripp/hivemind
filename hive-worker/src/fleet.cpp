@@ -84,6 +84,10 @@ std::string AgentProcess::build_env_file() {
     // (ensure_container). Project-local /workspace/.agents/skills/ is
     // auto-scanned by hive-brain on its own.
     env_line(body, "HIVEMIND_SKILLS_DIR", "/skills");
+    // Phase 60: hub-rendered granted secrets (HIVE_SECRET_<NAME>=…,
+    // pre-escaped) — appended verbatim; the file is 0600 worker-local.
+    if (!spec_.secret_env.empty())
+        body += spec_.secret_env;
     // Phase 50: per-skill gate (comma-joined; hive-agent parses at startup)
     if (!spec_.disabled_skills.empty()) {
         std::string joined;
