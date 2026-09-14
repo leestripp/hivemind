@@ -2895,7 +2895,11 @@ void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
 }
 
 void HiveWindow::on_new_task() {
-    show_task_dialog("");
+    // Phase 58 follow-up: the title-bar button opens the Scheduled Tasks
+    // MANAGER (same as the agent context menu route) — Add lives inside
+    // the manager now. No preselect: the user picks the agent in the
+    // Add dialog.
+    show_routines_dialog("");
 }
 
 // Schedule-a-task dialog (routines). Blocking create call on OK — same
