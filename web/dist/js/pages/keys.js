@@ -41,7 +41,7 @@ async function loadKeys() {
       const actions = tr.querySelector('.col-actions');
       const mkbtn = (label, title, danger, fn) => {
         const b = document.createElement('button');
-        b.className = 'icon-btn' + (danger ? ' icon-danger' : '');
+        b.className = 'btn btn-small' + (danger ? ' danger' : '');
         b.title = title;
         b.textContent = label;
         b.onclick = fn;
