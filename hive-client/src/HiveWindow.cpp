@@ -257,11 +257,19 @@ std::string format_msg_time(const std::string& iso) {
 extern "C" { GResource* hivemind_get_resource(void); }
 
 static std::string resource_text(const std::string& path) {
-    auto bytes = Gio::Resource::lookup_data_global(path);
+    // C API with nullptr GError: returns NULL on a missing resource and
+    // NEVER throws. glibmm's lookup_data_global RAISES Glib::Error on a
+    // miss — and a throw inside a GTK signal handler kills the callback
+    // (2026-09-14: a stale stored avatar name aborted the roster rebuild
+    // mid-render and left the Agents list EMPTY).
+    GBytes* bytes = g_resources_lookup_data(
+        path.c_str(), G_RESOURCE_LOOKUP_FLAGS_NONE, nullptr);
     if (!bytes) return {};
     gsize sz = 0;
-    auto* data = static_cast<const char*>(bytes->get_data(sz));
-    return {data, sz};
+    const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &sz));
+    std::string out{data, sz};
+    g_bytes_unref(bytes);
+    return out;
 }
 
 static Glib::RefPtr<Gdk::Pixbuf> svg_pixbuf(std::string svg, int size) {
