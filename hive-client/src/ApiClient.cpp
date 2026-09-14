@@ -225,6 +225,13 @@ nlohmann::json ApiClient::list_messages(const std::string& thread_id,
     return request("GET", path);
 }
 
+nlohmann::json ApiClient::list_messages_before(
+        const std::string& thread_id, const std::string& before_id) {
+    // Phase 55: page back through history (server-default window).
+    return request("GET", "/api/threads/" + thread_id +
+                              "/messages?before=" + before_id);
+}
+
 nlohmann::json ApiClient::post_message(const std::string& thread_id,
                                        const std::string& body_text,
                                        const nlohmann::json& attachments) {

@@ -150,6 +150,16 @@
       <section class="settings-section"><h3>Models (hive-agent SettingsStore)</h3><div id="set-models" class="kv"></div></section>
       <section class="settings-section"><h3>Agent runtime</h3><div id="set-agent" class="kv"></div></section>
       <section class="settings-section"><h3>Storage</h3><div id="set-storage" class="kv"></div></section>
+      <section class="settings-section"><h3>Chat history</h3>
+        <div class="kv">
+          <div class="k">message window</div>
+          <div><input id="set-msg-window" type="number" min="10" max="5000" step="10" style="width:7em">
+            <button id="set-msg-window-save" class="btn-small">Save</button>
+            <span id="set-msg-window-status" class="muted"></span></div>
+          <div class="k">what it does</div>
+          <div class="muted">Messages each client loads when a thread opens (older ones page back on demand). 10–5000.</div>
+        </div>
+      </section>
     </div>
   </div>
   <div id="page-agents" class="page hidden">

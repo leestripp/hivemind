@@ -46,6 +46,7 @@ void ServerConfig::load() {
         workspace_root_ = j.value("workspace_root", "");
         warm_containers_ = j.value("warm_containers", true);
         screen_resolution_ = j.value("screen_resolution", "1280x800");
+        message_window_ = j.value("message_window", 200);
         worker_ws_port_ = j.value("worker_ws_port", 8423);
         worker_ws_bind_ = j.value("worker_ws_bind", std::string{"0.0.0.0"});
         cors_origins_.clear();
@@ -63,7 +64,8 @@ void ServerConfig::save() const {
     f << nlohmann::json{{"workspace_root", workspace_root_},
                         {"cors_origins", cors_origins_},
                         {"warm_containers", warm_containers_},
-                        {"screen_resolution", screen_resolution_}}.dump(2) << "\n";
+                        {"screen_resolution", screen_resolution_},
+                        {"message_window", message_window_}}.dump(2) << "\n";
 }
 
 std::string ServerConfig::workspace_root() {
@@ -123,6 +125,16 @@ void ServerConfig::set_workspace_root(const std::string& path) {
     if (!fs::is_directory(expanded))
         throw std::invalid_argument("'" + expanded + "' is not a directory");
     workspace_root_ = expanded;
+    save();
+}
+
+void ServerConfig::set_message_window(int n) {
+    // The client renders whatever this returns; keep it sane. Below 10
+    // a thread looks empty; above 5000 the initial load is the very
+    // problem this setting exists to bound.
+    if (n < 10 || n > 5000)
+        throw std::invalid_argument("message_window must be 10..5000");
+    message_window_ = n;
     save();
 }
 

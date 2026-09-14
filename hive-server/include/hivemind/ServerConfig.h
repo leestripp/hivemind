@@ -47,6 +47,12 @@ public:
     const std::string& worker_ws_bind() const { return worker_ws_bind_; }
     void set_screen_resolution(const std::string& res);   // validates WxH
 
+    /// Phase 55: default window of messages returned by GET
+    /// /api/threads/:id/messages when no ?after/?before cursor is given
+    /// (initial thread load). Clients page back with ?before=<id>.
+    int message_window() const { return message_window_; }
+    void set_message_window(int n);   // validates 10..5000
+
     /// Phase 28: pre-start every agent's container at boot so the first
     /// turn isn't a cold start. Default true.
     bool warm_containers() const { return warm_containers_; }
@@ -68,6 +74,7 @@ private:
     std::vector<std::string> cors_origins_;   // "" = use default
     bool warm_containers_ = true;
     std::string screen_resolution_ = "1280x800";
+    int message_window_ = 200;
     int worker_ws_port_ = 8423;
     std::string worker_ws_bind_ = "0.0.0.0";   // "127.0.0.1" behind nginx
 };

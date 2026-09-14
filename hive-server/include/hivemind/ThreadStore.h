@@ -99,6 +99,13 @@ public:
     std::unordered_map<std::string, SenderCounts>
     message_counts_since(const std::string& since_iso);
 
+    /// Phase 55: bounded initial/page-back reads. No `before` → the
+    /// LATEST `limit` messages; with `before` → up to `limit` messages
+    /// older than it. Always chronological (ASC) on return. has_more
+    /// is set when older messages remain beyond the window.
+    std::vector<ThreadMessage> list_messages_window(
+        const std::string& thread_id, const std::string& before_id,
+        int limit, bool& has_more);
     std::vector<ThreadMessage> list_messages(const std::string& thread_id,
                                              const std::string& after_id = "");
 

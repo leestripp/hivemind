@@ -12,6 +12,7 @@
 
 #include <iostream>
 #include "hivemind/RoutineStore.h"
+#include "hivemind/ServerConfig.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerStore.h"
 
@@ -543,10 +544,31 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 send_error(resp, 404, "thread not found"); return;
             }
             std::string after = req.queryParameter("after", "");
+            // ?after=<id> — incremental live-poll path: everything newer,
+            // unbounded by design (the client drains each 1.5s tick).
+            if (!after.empty()) {
+                json list = json::array();
+                for (auto& m : threads.list_messages(seg[2], after))
+                    list.push_back(message_json(m));
+                send_json(resp, json{{"messages", list}});
+                return;
+            }
+            // Phase 55: initial load / page-back — bounded window.
+            // No cursor → the LATEST window; ?before=<id> pages older.
+            std::string before = req.queryParameter("before", "");
+            int limit = 0;
+            if (std::string ls = req.queryParameter("limit", ""); !ls.empty()) {
+                try { limit = std::stoi(ls); } catch (...) { limit = 0; }
+            }
+            if (limit <= 0 || limit > 5000)
+                limit = ServerConfig::instance().message_window();
+            bool has_more = false;
             json list = json::array();
-            for (auto& m : threads.list_messages(seg[2], after))
+            for (auto& m : threads.list_messages_window(seg[2], before,
+                                                        limit, has_more))
                 list.push_back(message_json(m));
-            send_json(resp, json{{"messages", list}});
+            send_json(resp, json{{"messages", list},
+                                 {"has_more", has_more}});
         });
 
     // ── POST /api/threads/:id/messages ────────────────────────────────────

@@ -653,6 +653,8 @@ void HiveWindow::on_settings() {
                     while (auto* c = messages_box_.get_first_child())
                         messages_box_.remove(*c);
                         live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
                     rendered_.clear();
                     poll_chat();
                 }
@@ -1215,7 +1217,7 @@ void HiveWindow::poll_chat() {
         json act = api_.activity(tid);
         {
             std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, tid, msgs, act] {
+            done_queue_.push_back([this, tid, msgs, act, after] {
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
                 for (auto& m : arr) {
@@ -1235,6 +1237,15 @@ void HiveWindow::poll_chat() {
                         m.value("created_at", ""),
                         m.value("attachments", json::array()));
                     last_message_id_ = m.value("id", last_message_id_);
+                }
+                // Phase 55: the initial load (empty `after`) is the
+                // bounded window — record paging state. Live polls carry
+                // no has_more key; leave the state alone there.
+                if (after.empty()) {
+                    has_more_history_ = msgs.value("has_more", false);
+                    if (!arr.empty())
+                        oldest_message_id_ = arr.front().value("id", "");
+                    update_load_earlier_row();
                 }
                 // Sticky-bottom scroll happens via the vadjustment "changed"
                 // handler (fires once the new bubbles are laid out).
@@ -1571,16 +1582,15 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
     live_label_->set_text(partial + " â");
 }
 
-void HiveWindow::append_message_bubble(const std::string& sender_kind,
-                                       const std::string& sender_label,
-                                       const std::string& body,
-                                       const std::string& created_at,
-                                       const nlohmann::json& attachments) {
-    rendered_.push_back({{"sender_kind", sender_kind},
-                         {"sender_label", sender_label},
-                         {"body", body},
-                         {"created_at", created_at},
-                         {"attachments", attachments}});
+// Phase 55: row construction extracted so history page-back can PREPEND
+// older bubbles as well as append new ones. Returns nullptr when there
+// is nothing to show (pure tool transcript). Caller owns placement and
+// rendered_ bookkeeping.
+Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
+                                           const std::string& sender_label,
+                                           const std::string& body,
+                                           const std::string& created_at,
+                                           const nlohmann::json& attachments) {
     // Raw transcript to debug log when HIVEMIND_DEBUG=1
     static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
     if (debug) {
@@ -1597,7 +1607,7 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
     // Older thread history still holds raw hive-brain transcripts (pre-fix
     // server posted those); new messages arrive clean. Filter defensively.
     const std::string clean = sender_kind == "agent" ? strip_tool_transcript(body) : body;
-    if (clean.empty()) return;   // pure tool-call transcript — nothing to show
+    if (clean.empty()) return nullptr;   // pure tool-call transcript — nothing to show
 
     // System messages stay minimal: centered dim line, no avatar.
     if (sender_kind != "user" && sender_kind != "agent") {
@@ -1605,8 +1615,7 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
         sys->add_css_class("hv-msg-system");
         sys->set_wrap(true);
         sys->set_selectable(true);
-        messages_box_.append(*sys);
-        return;
+        return sys;
     }
 
     // Bubble row: avatar | (name + time / content)
@@ -1699,7 +1708,112 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
         if (any_chip) box->append(*chips);
     }
     row->append(*box);
-    messages_box_.append(*row);
+    return row;
+}
+
+// ── Phase 55: history page-back ───────────────────────────────────────
+// The "load earlier…" affordance sits at the top of the message list
+// while the hub reports older messages beyond the current window.
+void HiveWindow::update_load_earlier_row() {
+    if (has_more_history_) {
+        if (!load_earlier_btn_) {
+            load_earlier_btn_ =
+                Gtk::make_managed<Gtk::Button>("\u2B06 load earlier messages\u2026");
+            load_earlier_btn_->add_css_class("flat");
+            load_earlier_btn_->add_css_class("hv-time");
+            load_earlier_btn_->signal_clicked().connect(
+                [this] { load_earlier(); });
+            messages_box_.prepend(*load_earlier_btn_);
+        }
+        load_earlier_btn_->set_sensitive(!loading_earlier_);
+    } else if (load_earlier_btn_) {
+        messages_box_.remove(*load_earlier_btn_);
+        load_earlier_btn_ = nullptr;
+    }
+}
+
+void HiveWindow::load_earlier() {
+    if (current_thread_.empty() || oldest_message_id_.empty() ||
+        loading_earlier_ || !has_more_history_)
+        return;
+    loading_earlier_ = true;
+    if (load_earlier_btn_) load_earlier_btn_->set_sensitive(false);
+    const std::string tid = current_thread_;
+    const std::string before = oldest_message_id_;
+    run_async([this, tid, before] {
+        json msgs = api_.list_messages_before(tid, before);
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, tid, msgs] {
+                loading_earlier_ = false;
+                if (!alive_ || tid != current_thread_) return;
+                auto arr = msgs.value("messages", json::array());
+                // Detach the button first: the page's bubbles prepend
+                // ABOVE the previous oldest, then the button returns to
+                // the very top (still more) or is gone (reached the start).
+                auto* btn = load_earlier_btn_;
+                if (btn) messages_box_.remove(*btn);
+                // Transcript bookkeeping stays chronological — collect
+                // the page ASC and splice at the front.
+                std::vector<nlohmann::json> page_records;
+                for (const auto& m : arr)
+                    page_records.push_back(
+                        {{"sender_kind", m.value("sender_kind", "")},
+                         {"sender_label", ""},
+                         {"body", m.value("body", "")},
+                         {"created_at", m.value("created_at", "")},
+                         {"attachments", m.value("attachments",
+                                                 nlohmann::json::array())}});
+                rendered_.insert(rendered_.begin(),
+                                 page_records.begin(), page_records.end());
+                // Prepend in REVERSE page order so the final on-screen
+                // order is chronological.
+                for (auto it = arr.rbegin(); it != arr.rend(); ++it) {
+                    const auto& m = *it;
+                    const std::string mid = m.value("id", "");
+                    if (!mid.empty() &&
+                        !rendered_msg_ids_.insert(mid).second)
+                        continue;
+                    const std::string sk = m.value("sender_kind", "");
+                    if (auto* w = build_message_row(
+                            sk,
+                            sk == "agent"
+                                ? agent_name_of(agents_,
+                                                m.value("sender_id", ""))
+                                : (sk == "user" ? user_label() : "system"),
+                            m.value("body", ""),
+                            m.value("created_at", ""),
+                            m.value("attachments", nlohmann::json::array())))
+                        messages_box_.prepend(*w);
+                }
+                if (!arr.empty())
+                    oldest_message_id_ =
+                        arr.front().value("id", oldest_message_id_);
+                has_more_history_ = msgs.value("has_more", false);
+                if (btn) {   // restore on top; update_ decides visibility
+                    messages_box_.prepend(*btn);
+                    load_earlier_btn_ = btn;
+                }
+                update_load_earlier_row();
+            });
+        }
+        dispatcher_.emit();
+    });
+}
+
+void HiveWindow::append_message_bubble(const std::string& sender_kind,
+                                       const std::string& sender_label,
+                                       const std::string& body,
+                                       const std::string& created_at,
+                                       const nlohmann::json& attachments) {
+    rendered_.push_back({{"sender_kind", sender_kind},
+                         {"sender_label", sender_label},
+                         {"body", body},
+                         {"created_at", created_at},
+                         {"attachments", attachments}});
+    if (auto* w = build_message_row(sender_kind, sender_label, body,
+                                    created_at, attachments))
+        messages_box_.append(*w);
 }
 
 // ── Phase 34: inline image attachments ──────────────────────────────────────
@@ -1968,6 +2082,8 @@ void HiveWindow::on_agent_selected() {
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
                     live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
                 rendered_.clear();
                 refresh_threads();
                 poll_chat();
@@ -2012,6 +2128,8 @@ void HiveWindow::on_thread_selected() {
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);
         live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
     rendered_.clear();
     poll_chat();
 }
@@ -3490,6 +3608,8 @@ void HiveWindow::on_new_thread() {
                             while (auto* c = messages_box_.get_first_child())
                                 messages_box_.remove(*c);
                                 live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
                             rendered_.clear();
                             refresh_threads();
                         });
@@ -3616,6 +3736,8 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
         while (auto* c = messages_box_.get_first_child())
             messages_box_.remove(*c);
             live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
         rendered_.clear();
         refresh_threads();
         return nt;
@@ -3633,6 +3755,8 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
                     live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
+                        load_earlier_btn_ = nullptr; has_more_history_ = false;
+                        oldest_message_id_.clear(); loading_earlier_ = false;
                 rendered_.clear();
                 poll_chat();
                 return nlohmann::json{{"selected", id}};

@@ -82,6 +82,20 @@ export function initSettings() {
       : tzSel.value);
   });
 
+  // Phase 55: server-side message window (initial thread load size).
+  $('set-msg-window-save').addEventListener('click', async () => {
+    const n = parseInt($('set-msg-window').value, 10);
+    const status = $('set-msg-window-status');
+    if (!Number.isInteger(n) || n < 10 || n > 5000) {
+      status.textContent = ' — must be 10–5000'; return;
+    }
+    try {
+      await API.put('/api/config', { message_window: n });
+      status.textContent = ' — saved ✓';
+      setTimeout(() => { status.textContent = ''; }, 3000);
+    } catch (err) { status.textContent = ' — ' + err.message; }
+  });
+
 }
 
 // ─── Settings page ──────────────────────────────────────────────────────
@@ -120,5 +134,9 @@ async function loadSettingsPage() {
     ['hub data', '<code>~/.local/share/hivemind/</code> (threads, roster, keys)'],
     ['models/keys', 'worker-side: <code>~/.local/share/hive-worker/</code>'],
     ['theme', 'dark (only theme)']]);
+  try {
+    const cfg = await API.get('/api/config');
+    $('set-msg-window').value = cfg.message_window ?? 200;
+  } catch { /* leave default */ }
 }
 

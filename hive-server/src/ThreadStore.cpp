@@ -403,6 +403,56 @@ std::string ThreadStore::add_message(const std::string& thread_id,
     return id;
 }
 
+std::vector<ThreadMessage> ThreadStore::list_messages_window(
+        const std::string& thread_id, const std::string& before_id,
+        int limit, bool& has_more) {
+    has_more = false;
+    sqlite3* db = open_conn();
+    std::vector<ThreadMessage> out;
+
+    std::string before_ts;
+    if (!before_id.empty()) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT created_at FROM messages WHERE id = ?",
+                -1, &st, nullptr) == SQLITE_OK) {
+            bind_text(st, 1, before_id);
+            if (sqlite3_step(st) == SQLITE_ROW) before_ts = col_text(st, 0);
+            sqlite3_finalize(st);
+        }
+    }
+
+    // Newest-first tail of (everything | everything older than before),
+    // fetching limit+1 so a surplus row flags has_more; reversed to ASC
+    // for the caller.
+    const char* sql = before_ts.empty()
+        ? "SELECT id, thread_id, sender_kind, sender_id, body,"
+          " attachments_json, created_at"
+          " FROM messages WHERE thread_id = ?"
+          " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        : "SELECT id, thread_id, sender_kind, sender_id, body,"
+          " attachments_json, created_at"
+          " FROM messages WHERE thread_id = ? AND created_at < ?"
+          " ORDER BY created_at DESC, rowid DESC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        if (!before_ts.empty()) bind_text(st, 2, before_ts);
+        sqlite3_bind_int(st, before_ts.empty() ? 2 : 3, limit + 1);
+        while (sqlite3_step(st) == SQLITE_ROW)
+            out.push_back(row_to_message(st));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+
+    if (static_cast<int>(out.size()) > limit) {
+        has_more = true;
+        out.resize(limit);
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
 std::vector<ThreadMessage> ThreadStore::list_messages(const std::string& thread_id,
                                                       const std::string& after_id) {
     sqlite3* db = open_conn();

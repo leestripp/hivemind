@@ -81,6 +81,8 @@ public:
                                  bool reuse_dm = false);
     nlohmann::json list_messages(const std::string& thread_id,
                                  const std::string& after_id = "");
+    nlohmann::json list_messages_before(const std::string& thread_id,
+                                        const std::string& before_id);
     nlohmann::json post_message(const std::string& thread_id,
                                 const std::string& body,
                                 const nlohmann::json& attachments

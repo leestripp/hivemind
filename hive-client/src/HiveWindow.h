@@ -119,6 +119,14 @@ private:
     /// Phase 52: render/remove the live streaming bubble from the
     /// activity poll's turns[] (partial text of the first active turn).
     void update_live_bubble(const nlohmann::json& turns);
+    // Phase 55: bounded history — page-back through older messages.
+    Gtk::Widget* build_message_row(const std::string& sender_kind,
+                                   const std::string& sender_label,
+                                   const std::string& body,
+                                   const std::string& created_at,
+                                   const nlohmann::json& attachments);
+    void update_load_earlier_row();
+    void load_earlier();
     void append_message_bubble(const std::string& sender_kind,
                                const std::string& sender_label,
                                const std::string& body,
@@ -213,6 +221,11 @@ private:
     // Phase 52: live streaming bubble (managed children of messages_box_;
     // raw pointers, nulled on remove / messages_box_ clears).
     Gtk::Box* live_row_ = nullptr;
+    // Phase 55: bounded history paging state.
+    Gtk::Button* load_earlier_btn_ = nullptr;
+    bool has_more_history_ = false;
+    bool loading_earlier_ = false;
+    std::string oldest_message_id_;
     Gtk::Label* live_label_ = nullptr;
     std::string live_agent_key_;         // agent_id owning the bubble
     Gtk::Box composer_{Gtk::Orientation::HORIZONTAL};
