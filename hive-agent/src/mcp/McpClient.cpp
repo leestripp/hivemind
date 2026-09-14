@@ -182,7 +182,11 @@ bool McpClient::connect(const std::string& command,
         // If PATH is not set, use a default that includes ~/.local/bin (where uvx lives)
         char* current_path = getenv("PATH");
         if (current_path == nullptr || strlen(current_path) == 0) {
-            setenv("PATH", "/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin", 1);
+            const char* home = getenv("HOME");
+            const std::string fallback = home && *home
+                ? std::string(home) + "/.local/bin:/usr/local/bin:/usr/bin:/bin"
+                : "/usr/local/bin:/usr/bin:/bin";
+            setenv("PATH", fallback.c_str(), 1);
         }
         
         // Parse command - inline parsing logic

@@ -6,3 +6,13 @@ build-*/
 lint-results.yaml
 compile_commands.json
 
+# Local data/secrets — never commit host state (pre-public-repo insurance;
+# these live under ~/.local/share on hosts, this guards against accidents)
+secrets.json
+models.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+

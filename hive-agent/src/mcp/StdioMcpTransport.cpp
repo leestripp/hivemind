@@ -118,9 +118,14 @@ std::expected<void, TransportError> StdioMcpTransport::connect() {
         for (const auto& [k, v] : env_) {
             setenv(k.c_str(), v.c_str(), 1);
         }
-        // Ensure PATH
+        // Ensure PATH — fallback built from $HOME (the hardcoded
+        // /home/user leaked a username and broke on every other host).
         if (!getenv("PATH")) {
-            setenv("PATH", "/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin", 1);
+            const char* home = getenv("HOME");
+            const std::string fallback = home && *home
+                ? std::string(home) + "/.local/bin:/usr/local/bin:/usr/bin:/bin"
+                : "/usr/local/bin:/usr/bin:/bin";
+            setenv("PATH", fallback.c_str(), 1);
         }
 
         // Build command
