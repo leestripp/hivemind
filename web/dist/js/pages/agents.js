@@ -10,16 +10,12 @@ import { $, esc } from '../util.js';
 // the client shows in the roster/bubbles. Order must match the client's
 // avatar_names() (department pairs: male, then female).
 const AVATARS = [
-  'executive', 'executive-female',
-  'engineering', 'engineering-female',
-  'marketing', 'marketing-female',
-  'sales', 'sales-female',
-  'hr', 'hr-female',
-  'finance', 'finance-female',
-  'it-support', 'it-support-female',
-  'design', 'design-female',
-  'legal', 'legal-female',
-  'operations', 'operations-female',
+  // Hive-garden creature set (hexagon badges) — bees first.
+  // Order must match the GTK client's avatar_names().
+  'queen-bee', 'worker-bee', 'drone-bee', 'honey-bee', 'bumblebee',
+  'ladybug', 'butterfly', 'blue-butterfly', 'dragonfly', 'firefly',
+  'caterpillar', 'snail', 'ant', 'beetle', 'spider',
+  'moth', 'grasshopper', 'worm', 'mantis', 'cricket',
 ];
 
 function murmur64a(str) {
@@ -46,6 +42,12 @@ function murmur64a(str) {
 // "Auto" avatar for agents/templates without an explicit choice: stable
 // name hash into the dept-head set (same pick as the client).
 const autoAvatar = (name) => AVATARS[Number(murmur64a(name) % BigInt(AVATARS.length))];
+// Stale stored choices (old department set) fall back to the hash pick —
+// a missing file must never render a broken image.
+const avatarSrc = (t) => {
+  const a = t.avatar && AVATARS.includes(t.avatar) ? t.avatar : autoAvatar(t.name);
+  return '/avatars/' + esc(a) + '.svg';
+};
 
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -74,7 +76,7 @@ async function refresh() {
         card.className = 'agent-card';
         card.innerHTML = `
           <div class="agent-top">
-            <div class="agent-avatar"><img src="/avatars/${esc(t.avatar || autoAvatar(t.name))}.svg" width="44" height="44" alt=""></div>
+            <div class="agent-avatar"><img src="${avatarSrc(t)}" width="44" height="44" alt=""></div>
             <div class="agent-id-block">
               <div class="agent-name">${esc(t.name)}</div>
               <div class="agent-role">${esc(t.role)}</div>
@@ -116,7 +118,7 @@ async function refresh() {
       card.className = 'agent-card status-' + status;
       card.innerHTML = `
         <div class="agent-top">
-          <div class="agent-avatar"><img src="/avatars/${esc(a.avatar || autoAvatar(a.name))}.svg" width="44" height="44" alt=""></div>
+          <div class="agent-avatar"><img src="${avatarSrc(a)}" width="44" height="44" alt=""></div>
           <div class="agent-id-block">
             <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>

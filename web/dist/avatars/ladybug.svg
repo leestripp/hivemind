@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Ladybug — HiveMind hex badge</title>
+  <desc>Round red ladybug on a fresh leaf-green hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16A34A"/>
+      <stop offset="1" stop-color="#A3E635"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- red dome body -->
+  <path d="M56 148 C56 100 84 74 120 74 C156 74 184 100 184 148 C184 162 180 176 172 186 L68 186 C60 176 56 162 56 148 Z" fill="#EF4444" stroke="#2E2A38" stroke-width="5"/>
+  <!-- wing split -->
+  <path d="M120 74 L120 186" fill="none" stroke="#2E2A38" stroke-width="4.5"/>
+  <!-- spots -->
+  <circle cx="88" cy="118" r="10" fill="#2E2A38"/>
+  <circle cx="152" cy="118" r="10" fill="#2E2A38"/>
+  <circle cx="80" cy="156" r="8" fill="#2E2A38"/>
+  <circle cx="160" cy="156" r="8" fill="#2E2A38"/>
+  <circle cx="104" cy="146" r="7" fill="#2E2A38"/>
+  <circle cx="136" cy="146" r="7" fill="#2E2A38"/>
+
+  <!-- black head -->
+  <circle cx="120" cy="82" r="34" fill="#2E2A38"/>
+  <!-- big eyes on the head -->
+  <ellipse cx="106" cy="80" rx="11" ry="14" fill="#FFFFFF"/>
+  <ellipse cx="134" cy="80" rx="11" ry="14" fill="#FFFFFF"/>
+  <circle cx="108" cy="82" r="5.5" fill="#2E2A38"/>
+  <circle cx="136" cy="82" r="5.5" fill="#2E2A38"/>
+  <circle cx="110" cy="78" r="2.4" fill="#FFFFFF"/>
+  <circle cx="138" cy="78" r="2.4" fill="#FFFFFF"/>
+  <!-- cheek dots + smile (light on dark head) -->
+  <circle cx="96" cy="94" r="3.5" fill="#F2A58C"/>
+  <circle cx="144" cy="94" r="3.5" fill="#F2A58C"/>
+  <path d="M112 94 C116 99 124 99 128 94" fill="none" stroke="#FFFFFF" stroke-width="3.5"/>
+
+  <!-- antennae -->
+  <path d="M104 52 C100 44 94 40 88 38" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M136 52 C140 44 146 40 152 38" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="88" cy="38" r="5.5" fill="#2E2A38"/>
+  <circle cx="152" cy="38" r="5.5" fill="#2E2A38"/>
+
+  <!-- little legs -->
+  <path d="M64 190 l-8 10 M84 194 l-5 11 M156 194 l5 11 M176 190 l8 10" stroke="#2E2A38" stroke-width="5" fill="none"/>
+</svg>

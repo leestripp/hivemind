@@ -264,10 +264,27 @@ static std::string resource_text(const std::string& path) {
     return {data, sz};
 }
 
-static Glib::RefPtr<Gdk::Pixbuf> svg_pixbuf(const std::string& svg, int size) {
+static Glib::RefPtr<Gdk::Pixbuf> svg_pixbuf(std::string svg, int size) {
+    // A corrupt/missing avatar must NEVER crash the app: render a
+    // transparent square when the input is empty or unparseable.
+    static const char* kBlank =
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/>";
+    if (svg.empty()) svg = kBlank;
     auto stream = Gio::MemoryInputStream::create();
     stream->add_bytes(Glib::Bytes::create(svg.data(), svg.size()));
-    return Gdk::Pixbuf::create_from_stream_at_scale(stream, size, size, true);
+    try {
+        return Gdk::Pixbuf::create_from_stream_at_scale(stream, size, size,
+                                                        true);
+    } catch (const Glib::Error&) {
+        auto retry = Gio::MemoryInputStream::create();
+        retry->add_bytes(Glib::Bytes::create(kBlank, strlen(kBlank)));
+        try {
+            return Gdk::Pixbuf::create_from_stream_at_scale(retry, size,
+                                                            size, true);
+        } catch (...) {
+            return Glib::RefPtr<Gdk::Pixbuf>();   // image clears; no crash
+        }
+    }
 }
 
 static Glib::RefPtr<Gdk::Pixbuf> themed_icon_pixbuf(const std::string& name,
@@ -327,10 +344,17 @@ Gtk::Widget* make_avatar(const std::string& name, bool is_user,
                          int logical = AVATAR_LOGICAL,
                          const std::string& avatar = "") {
     // Chosen avatar wins; "" = user silhouette for the human, stable
-    // name-hash into the dept-head set for agents.
-    const std::string res = avatar.empty()
+    // name-hash into the set for agents. Fallback chain for STALE choices
+    // (stored avatar names from a replaced set, e.g. old department heads
+    // after the hive-garden redesign): missing resource -> auto hash ->
+    // user silhouette. Never render nothing — and never crash.
+    std::string res = avatar.empty()
         ? (is_user ? "user" : auto_avatar(name))
         : avatar;
+    if (resource_text("/com/hivemind/client/avatars/" + res + ".svg").empty())
+        res = is_user ? "user" : auto_avatar(name);
+    if (resource_text("/com/hivemind/client/avatars/" + res + ".svg").empty())
+        res = "user";
     auto* img = Gtk::make_managed<Gtk::Image>();
     img->set(avatar_pixbuf(res, logical * AVATAR_SUPERSAMPLE));
     img->set_pixel_size(logical);

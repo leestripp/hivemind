@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Queen Bee — HiveMind hex badge</title>
+  <desc>Royal queen bee with a gold crown on a purple-to-gold hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- hexagon badge -->
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <!-- honeycomb texture -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- wings (behind body) -->
+  <ellipse cx="76" cy="112" rx="30" ry="16" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(-24 76 112)"/>
+  <ellipse cx="164" cy="112" rx="30" ry="16" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(24 164 112)"/>
+
+  <!-- striped body -->
+  <path d="M84 158 C84 138 100 128 120 128 C140 128 156 138 156 158 C156 188 142 214 120 214 C98 214 84 188 84 158 Z" fill="#FFD84D" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M88 168 C104 176 136 176 152 168" fill="none" stroke="#2E2A38" stroke-width="9"/>
+  <path d="M94 192 C108 199 132 199 146 192" fill="none" stroke="#2E2A38" stroke-width="9"/>
+
+  <!-- head -->
+  <circle cx="120" cy="104" r="42" fill="#FFD84D" stroke="#2E2A38" stroke-width="5"/>
+
+  <!-- antennae -->
+  <path d="M104 66 C100 54 94 48 86 46" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M136 66 C140 54 146 48 154 46" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="86" cy="46" r="6" fill="#F59E0B" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="154" cy="46" r="6" fill="#F59E0B" stroke="#2E2A38" stroke-width="3.5"/>
+
+  <!-- crown -->
+  <path d="M96 66 L96 48 L108 58 L120 42 L132 58 L144 48 L144 66 Z" fill="#FFC53D" stroke="#2E2A38" stroke-width="4.5"/>
+  <circle cx="120" cy="42" r="4.5" fill="#EF4444" stroke="#2E2A38" stroke-width="3"/>
+
+  <!-- eyes -->
+  <ellipse cx="104" cy="102" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="136" cy="102" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="106" cy="104" r="6" fill="#2E2A38"/>
+  <circle cx="138" cy="104" r="6" fill="#2E2A38"/>
+  <circle cx="108" cy="100" r="2.6" fill="#FFFFFF"/>
+  <circle cx="140" cy="100" r="2.6" fill="#FFFFFF"/>
+
+  <!-- blush + smile -->
+  <ellipse cx="92" cy="122" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="148" cy="122" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <path d="M110 124 C116 131 124 131 130 124" fill="none" stroke="#2E2A38" stroke-width="4"/>
+</svg>

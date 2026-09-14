@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Bumblebee — HiveMind hex badge</title>
+  <desc>Chubby fuzzy bumblebee on a warm amber hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F97316"/>
+      <stop offset="1" stop-color="#FDE047"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- tiny wings -->
+  <ellipse cx="80" cy="100" rx="26" ry="13" fill="#FFFFFF" opacity="0.7" stroke="#2E2A38" stroke-width="3.5" transform="rotate(-20 80 100)"/>
+  <ellipse cx="160" cy="100" rx="26" ry="13" fill="#FFFFFF" opacity="0.7" stroke="#2E2A38" stroke-width="3.5" transform="rotate(20 160 100)"/>
+
+  <!-- chubby fuzzy body -->
+  <ellipse cx="120" cy="142" rx="62" ry="58" fill="#FFD84D" stroke="#2E2A38" stroke-width="5"/>
+  <!-- fuzz scallops -->
+  <path d="M62 132 q-6 6 0 12 M58 152 q-6 6 0 12 M178 132 q6 6 0 12 M182 152 q6 6 0 12" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- thick stripes -->
+  <path d="M64 148 C90 160 150 160 176 148" fill="none" stroke="#2E2A38" stroke-width="13"/>
+  <path d="M72 176 C96 187 144 187 168 176" fill="none" stroke="#2E2A38" stroke-width="13"/>
+
+  <!-- face -->
+  <ellipse cx="100" cy="120" rx="13" ry="16" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="140" cy="120" rx="13" ry="16" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="102" cy="122" r="6.5" fill="#2E2A38"/>
+  <circle cx="142" cy="122" r="6.5" fill="#2E2A38"/>
+  <circle cx="104" cy="118" r="2.8" fill="#FFFFFF"/>
+  <circle cx="144" cy="118" r="2.8" fill="#FFFFFF"/>
+  <ellipse cx="88" cy="140" rx="9" ry="5.5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="152" cy="140" rx="9" ry="5.5" fill="#F2A58C" opacity="0.7"/>
+  <path d="M112 140 C117 146 123 146 128 140" fill="none" stroke="#2E2A38" stroke-width="4"/>
+
+  <!-- antennae -->
+  <path d="M100 84 C96 74 90 68 82 66" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M140 84 C144 74 150 68 158 66" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="82" cy="66" r="6" fill="#B45309" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="158" cy="66" r="6" fill="#B45309" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

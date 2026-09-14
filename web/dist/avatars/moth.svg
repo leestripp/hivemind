@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Moth — HiveMind hex badge</title>
+  <desc>Dusty pink moth with feather antennae on a rose hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#BE185D"/>
+      <stop offset="1" stop-color="#F9A8D4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- broad wings -->
+  <path d="M114 116 C86 80 48 76 46 108 C44 140 84 152 114 138 Z" fill="#F9A8D4" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M126 116 C154 80 192 76 194 108 C196 140 156 152 126 138 Z" fill="#F9A8D4" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M114 142 C92 158 70 180 88 194 C104 206 116 186 118 164 Z" fill="#FBCFE8" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M126 142 C148 158 170 180 152 194 C136 206 124 186 122 164 Z" fill="#FBCFE8" stroke="#2E2A38" stroke-width="5"/>
+  <!-- wing eyes -->
+  <circle cx="72" cy="112" r="8" fill="#FDF2F8" stroke="#2E2A38" stroke-width="3"/>
+  <circle cx="168" cy="112" r="8" fill="#FDF2F8" stroke="#2E2A38" stroke-width="3"/>
+  <!-- fuzzy body -->
+  <ellipse cx="120" cy="146" rx="15" ry="32" fill="#FDE68A" stroke="#2E2A38" stroke-width="4.5"/>
+  <path d="M108 136 l24 0 M108 148 l24 0 M110 160 l20 0" stroke="#B45309" stroke-width="3" fill="none"/>
+  <!-- head -->
+  <circle cx="120" cy="102" r="22" fill="#FDE68A" stroke="#2E2A38" stroke-width="4.5"/>
+  <ellipse cx="111" cy="100" rx="8" ry="11" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <ellipse cx="129" cy="100" rx="8" ry="11" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="112" cy="102" r="4" fill="#2E2A38"/>
+  <circle cx="130" cy="102" r="4" fill="#2E2A38"/>
+  <circle cx="114" cy="98" r="1.8" fill="#FFFFFF"/>
+  <circle cx="132" cy="98" r="1.8" fill="#FFFFFF"/>
+    <ellipse cx="104" cy="114" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="136" cy="114" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M113 112 C117 118 123 118 127 112" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- feather antennae -->
+  <path d="M110 84 C104 72 96 64 86 60 M110 84 C106 74 100 66 92 62 M130 84 C136 72 144 64 154 60 M130 84 C134 74 140 66 148 62" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

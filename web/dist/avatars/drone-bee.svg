@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Drone Bee — HiveMind hex badge</title>
+  <desc>Cool drone bee in sunglasses on a teal hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D9488"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <ellipse cx="76" cy="110" rx="28" ry="14" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(-22 76 110)"/>
+  <ellipse cx="164" cy="110" rx="28" ry="14" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(22 164 110)"/>
+  <path d="M82 158 C82 138 98 128 120 128 C142 128 158 138 158 158 C158 188 144 214 120 214 C96 214 82 188 82 158 Z" fill="#FFC53D" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M86 168 C102 176 138 176 154 168" fill="none" stroke="#2E2A38" stroke-width="10"/>
+  <path d="M92 192 C106 199 134 199 148 192" fill="none" stroke="#2E2A38" stroke-width="10"/>
+  <circle cx="120" cy="104" r="44" fill="#FFC53D" stroke="#2E2A38" stroke-width="5"/>
+    <path d="M104 82 C100 70 82 50 88 46" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M136 82 C140 70 158 50 152 46" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="88" cy="46" r="6" fill="#0D9488" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="152" cy="46" r="6" fill="#0D9488" stroke="#2E2A38" stroke-width="3.5"/>
+  <!-- sunglasses -->
+  <path d="M84 96 C84 88 92 84 102 84 L138 84 C148 84 156 88 156 96 C156 106 148 112 138 112 C130 112 124 106 120 100 C116 106 110 112 102 112 C92 112 84 106 84 96 Z" fill="#2E2A38"/>
+  <path d="M92 90 C96 88 102 88 106 90" fill="none" stroke="#7DD3FC" stroke-width="3"/>
+  <path d="M134 90 C138 88 144 88 148 90" fill="none" stroke="#7DD3FC" stroke-width="3"/>
+    <ellipse cx="90" cy="126" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="150" cy="126" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M108 128 C114 134 126 134 132 128" fill="none" stroke="#2E2A38" stroke-width="4"/>
+</svg>
