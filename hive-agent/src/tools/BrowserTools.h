@@ -96,7 +96,13 @@ public:
                    {{"type", "string"},
                     {"description",
                      "Name of a secret granted to you "
-                     "(e.g. GITHUB_TOKEN)."}}}}},
+                     "(e.g. GITHUB_TOKEN)."}},
+                  {"field",
+                   {{"type", "string"},
+                    {"enum", json::array({"username", "password"})},
+                    {"description",
+                     "Login secrets only: which field to fill. Omit for "
+                     "api_key/note secrets (the value fills directly)."}}}}}},
                 {"required", json::array({"selector", "secret_name"})}}}}},
         };
     }

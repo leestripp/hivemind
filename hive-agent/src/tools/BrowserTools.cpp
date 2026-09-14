@@ -153,12 +153,19 @@ json BrowserFillSecretTool::execute(const json& args, HostToolContext& /*ctx*/) 
     if (!valid_secret_name(name))
         return {{"status", "error"}, {"error", "invalid secret name"}};
 
-    // Grant check: the hub injects HIVE_SECRET_<NAME> at container create
-    // for granted secrets only — absence means "not granted to you".
-    const std::string env_name = "HIVE_SECRET_" + name;
+    // Grant check: the hub injects HIVE_SECRET_<NAME> at spawn for
+    // granted secrets only — absence means "not granted to you".
+    // Login secrets arrive as _USER/_PASS/_URL suffixes (Phase 60); the
+    // optional `field` arg picks which, defaulting to the bare value for
+    // api_key/note secrets.
+    const std::string field = args.value("field", "");
+    std::string env_name = "HIVE_SECRET_" + name;
+    if (field == "username")      env_name += "_USER";
+    else if (field == "password") env_name += "_PASS";
     if (std::getenv(env_name.c_str()) == nullptr)
         return {{"status", "error"},
                 {"error", "secret '" + name +
+                              (field.empty() ? "" : "' field '" + field) +
                               "' is not granted to you"}};
 
     // The value rides into the driver via the inherited environment —
