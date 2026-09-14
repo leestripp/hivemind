@@ -292,20 +292,16 @@ int palette_index(const std::string& name) {
     return (int)(std::hash<std::string>{}(name) % 6);
 }
 
-// Department-head avatar set (data/avatars): 10 departments, each with a
-// male (<dept>.svg) and female (<dept>-female.svg) variant. Ordered as
-// male/female pairs so picker grids keep teammates together.
+// Hive-garden avatar set (data/avatars): 20 cartoon creatures on hexagon
+// badges — five bees first (they are the HiveMind brand), then the garden
+// friends. Ordered so picker grids open with the bees.
 const std::vector<std::string>& avatar_names() {
-    static const std::vector<std::string> names = [] {
-        std::vector<std::string> v;
-        for (const char* d : {"executive", "engineering", "marketing", "sales",
-                              "hr", "finance", "it-support", "design", "legal",
-                              "operations"}) {
-            v.emplace_back(d);
-            v.push_back(std::string(d) + "-female");
-        }
-        return v;
-    }();
+    static const std::vector<std::string> names = {
+        "queen-bee", "worker-bee", "drone-bee", "honey-bee", "bumblebee",
+        "ladybug", "butterfly", "blue-butterfly", "dragonfly", "firefly",
+        "caterpillar", "snail", "ant", "beetle", "spider",
+        "moth", "grasshopper", "worm", "mantis", "cricket",
+    };
     return names;
 }
 

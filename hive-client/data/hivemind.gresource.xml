@@ -13,26 +13,26 @@
     <file>icons/thread-add.svg</file>
     <file>icons/task-add.svg</file>
     <file>icons/trash.svg</file>
-    <file>avatars/design.svg</file>
-    <file>avatars/design-female.svg</file>
-    <file>avatars/engineering.svg</file>
-    <file>avatars/engineering-female.svg</file>
-    <file>avatars/executive.svg</file>
-    <file>avatars/executive-female.svg</file>
-    <file>avatars/finance.svg</file>
-    <file>avatars/finance-female.svg</file>
-    <file>avatars/hr.svg</file>
-    <file>avatars/hr-female.svg</file>
-    <file>avatars/it-support.svg</file>
-    <file>avatars/it-support-female.svg</file>
-    <file>avatars/legal.svg</file>
-    <file>avatars/legal-female.svg</file>
-    <file>avatars/marketing.svg</file>
-    <file>avatars/marketing-female.svg</file>
-    <file>avatars/operations.svg</file>
-    <file>avatars/operations-female.svg</file>
-    <file>avatars/sales.svg</file>
-    <file>avatars/sales-female.svg</file>
     <file>avatars/user.svg</file>
+    <file>avatars/queen-bee.svg</file>
+    <file>avatars/worker-bee.svg</file>
+    <file>avatars/drone-bee.svg</file>
+    <file>avatars/honey-bee.svg</file>
+    <file>avatars/bumblebee.svg</file>
+    <file>avatars/ladybug.svg</file>
+    <file>avatars/butterfly.svg</file>
+    <file>avatars/blue-butterfly.svg</file>
+    <file>avatars/dragonfly.svg</file>
+    <file>avatars/firefly.svg</file>
+    <file>avatars/caterpillar.svg</file>
+    <file>avatars/snail.svg</file>
+    <file>avatars/ant.svg</file>
+    <file>avatars/beetle.svg</file>
+    <file>avatars/spider.svg</file>
+    <file>avatars/moth.svg</file>
+    <file>avatars/grasshopper.svg</file>
+    <file>avatars/worm.svg</file>
+    <file>avatars/mantis.svg</file>
+    <file>avatars/cricket.svg</file>
   </gresource>
 </gresources>

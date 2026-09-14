@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Jumping Spider — HiveMind hex badge</title>
+  <desc>Cute four-eyed jumping spider on a lilac hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6D28D9"/>
+      <stop offset="1" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- legs -->
+  <path d="M74 118 C58 108 50 96 48 84 M70 136 C54 132 44 124 40 112 M74 156 C60 158 50 164 46 174 M166 118 C182 108 190 96 192 84 M170 136 C186 132 196 124 200 112 M166 156 C180 158 190 164 194 174" fill="none" stroke="#2E2A38" stroke-width="6"/>
+  <!-- round fuzzy body -->
+  <circle cx="120" cy="138" r="56" fill="#A78BFA" stroke="#2E2A38" stroke-width="5"/>
+  <!-- fuzz -->
+  <path d="M68 120 q-7 4 -5 11 M66 150 q-7 4 -5 11 M172 120 q7 4 5 11 M174 150 q7 4 5 11" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- 4 eyes: two big front, two small above -->
+  <ellipse cx="102" cy="132" rx="13" ry="16" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="138" cy="132" rx="13" ry="16" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="104" cy="134" r="6" fill="#2E2A38"/>
+  <circle cx="140" cy="134" r="6" fill="#2E2A38"/>
+  <circle cx="106" cy="130" r="2.6" fill="#FFFFFF"/>
+  <circle cx="142" cy="130" r="2.6" fill="#FFFFFF"/>
+  <circle cx="108" cy="108" r="7" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="132" cy="108" r="7" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="109" cy="109" r="3" fill="#2E2A38"/>
+  <circle cx="133" cy="109" r="3" fill="#2E2A38"/>
+    <ellipse cx="90" cy="156" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="150" cy="156" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M111 158 C116 164 124 164 129 158" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- tiny fangs -->
+  <path d="M112 166 l-3 8 M128 166 l3 8" stroke="#FFFFFF" stroke-width="3.5" fill="none"/>
+</svg>

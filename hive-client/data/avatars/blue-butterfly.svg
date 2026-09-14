@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Blue Butterfly — HiveMind hex badge</title>
+  <desc>Blue morpho butterfly on a deep indigo hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#312E81"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <path d="M112 118 C80 84 40 84 40 118 C40 152 80 158 112 138 Z" fill="#38BDF8" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M128 118 C160 84 200 84 200 118 C200 152 160 158 128 138 Z" fill="#38BDF8" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M112 142 C84 156 56 172 72 192 C86 208 108 190 114 162 Z" fill="#0EA5E9" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M128 142 C156 156 184 172 168 192 C154 208 132 190 126 162 Z" fill="#0EA5E9" stroke="#2E2A38" stroke-width="5"/>
+  <circle cx="66" cy="112" r="7" fill="#E0F2FE"/>
+  <circle cx="174" cy="112" r="7" fill="#E0F2FE"/>
+  <circle cx="84" cy="182" r="5" fill="#E0F2FE"/>
+  <circle cx="156" cy="182" r="5" fill="#E0F2FE"/>
+  <ellipse cx="120" cy="140" rx="13" ry="34" fill="#2E2A38"/>
+  <circle cx="120" cy="100" r="20" fill="#2E2A38"/>
+  <ellipse cx="112" cy="98" rx="7" ry="10" fill="#FFFFFF"/>
+  <ellipse cx="128" cy="98" rx="7" ry="10" fill="#FFFFFF"/>
+  <circle cx="113" cy="100" r="3.4" fill="#2E2A38"/>
+  <circle cx="129" cy="100" r="3.4" fill="#2E2A38"/>
+  <circle cx="114" cy="97" r="1.5" fill="#FFFFFF"/>
+  <circle cx="130" cy="97" r="1.5" fill="#FFFFFF"/>
+    <path d="M115 106 C118 112 122 112 125 106" fill="none" stroke="#FFFFFF" stroke-width="2.5"/>
+    <path d="M108 96 C104 84 90 64 96 60" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M132 96 C136 84 150 64 144 60" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="96" cy="60" r="6" fill="#38BDF8" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="144" cy="60" r="6" fill="#38BDF8" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>
