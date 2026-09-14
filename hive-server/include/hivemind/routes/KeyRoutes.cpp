@@ -63,7 +63,9 @@ void register_key_routes(OmniNet::HTTP::Server& server, AuthStore& auth) {
             }
         });
 
-    server.delete_("/api/keys/:id",
+    // Phase 59: explicit lifecycle. Revoke/reactivate are state flips;
+    // DELETE is now a TRUE delete (was: revoke in disguise).
+    server.post("/api/keys/:id/revoke",
         [&auth](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -71,5 +73,26 @@ void register_key_routes(OmniNet::HTTP::Server& server, AuthStore& auth) {
                 send_error(resp, 404, "key not found or already revoked"); return;
             }
             send_json(resp, json{{"revoked", seg[2]}});
+        });
+
+    server.post("/api/keys/:id/reactivate",
+        [&auth](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            if (!auth.reactivate(seg[2])) {
+                send_error(resp, 404, "key not found or not revoked"); return;
+            }
+            send_json(resp, json{{"reactivated", seg[2]}});
+        });
+
+    server.delete_("/api/keys/:id",
+        [&auth](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            if (!auth.delete_key(seg[2])) {
+                send_error(resp, 404,
+                           "key not found, not revoked, or is master"); return;
+            }
+            send_json(resp, json{{"deleted", seg[2]}});
         });
 }

@@ -165,6 +165,41 @@ AuthStore::validate(const std::string& raw_key) {
     return out;
 }
 
+bool AuthStore::reactivate(const std::string& id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    bool ok = false;
+    if (sqlite3_prepare_v2(db,
+            "UPDATE api_keys SET revoked = 0 WHERE id = ? AND revoked = 1",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db) > 0;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+bool AuthStore::delete_key(const std::string& id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    bool ok = false;
+    // Revoked-only + never master: deleting an ACTIVE key by accident is
+    // exactly the two-step flow this lifecycle exists to prevent, and a
+    // deleted master is unrecoverable (it mints only when the store is
+    // EMPTY — deleting the last admin is a lockout).
+    if (sqlite3_prepare_v2(db,
+            "DELETE FROM api_keys WHERE id = ? AND revoked = 1"
+            " AND name != 'master'",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db) > 0;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
 bool AuthStore::revoke(const std::string& id) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;

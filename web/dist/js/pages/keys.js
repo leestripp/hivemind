@@ -38,19 +38,43 @@ async function loadKeys() {
               ? '<span class="badge badge-revoked">revoked</span>'
               : '<span class="badge badge-active">active</span>'}</td>
         <td class="col-actions"></td>`;
-      if (!k.revoked && k.name !== 'master') {
-        const btn = document.createElement('button');
-        btn.className = 'icon-btn icon-danger';
-        btn.title = `Revoke "${k.name}"`;
-        btn.innerHTML = TRASH_SVG;
-        btn.onclick = async () => {
-          if (!confirm(`Revoke key "${k.name}" (${k.id})?\nClients using it stop working immediately.`)) return;
-          try {
-            await API.del('/api/keys/' + encodeURIComponent(k.id));
-            loadKeys();
-          } catch (e) { alert('Revoke failed: ' + e.message); }
-        };
-        tr.querySelector('.col-actions').appendChild(btn);
+      const actions = tr.querySelector('.col-actions');
+      const mkbtn = (label, title, danger, fn) => {
+        const b = document.createElement('button');
+        b.className = 'icon-btn' + (danger ? ' icon-danger' : '');
+        b.title = title;
+        b.textContent = label;
+        b.onclick = fn;
+        actions.appendChild(b);
+      };
+      if (k.name === 'master') {
+        // no actions — the master key is untouchable
+      } else if (!k.revoked) {
+        mkbtn('Revoke', `Revoke "${k.name}" — clients stop working immediately (reversible)`, true,
+          async () => {
+            if (!confirm(`Revoke key "${k.name}" (${k.id})?\nClients using it stop working immediately.\nYou can reactivate it later.`)) return;
+            try {
+              await API.post('/api/keys/' + encodeURIComponent(k.id) + '/revoke');
+              loadKeys();
+            } catch (e) { alert('Revoke failed: ' + e.message); }
+          });
+      } else {
+        // Revoked keys keep their actions: undo, or remove for good.
+        mkbtn('Reactivate', `Reactivate "${k.name}" — it works again immediately`, false,
+          async () => {
+            try {
+              await API.post('/api/keys/' + encodeURIComponent(k.id) + '/reactivate');
+              loadKeys();
+            } catch (e) { alert('Reactivate failed: ' + e.message); }
+          });
+        mkbtn('Delete', `Delete "${k.name}" permanently — this cannot be undone`, true,
+          async () => {
+            if (!confirm(`DELETE key "${k.name}" (${k.id}) permanently?\nThis cannot be undone.`)) return;
+            try {
+              await API.del('/api/keys/' + encodeURIComponent(k.id));
+              loadKeys();
+            } catch (e) { alert('Delete failed: ' + e.message); }
+          });
       }
       list.appendChild(tr);
     }

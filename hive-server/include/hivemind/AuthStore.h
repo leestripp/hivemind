@@ -50,6 +50,12 @@ public:
     std::string create_key(const std::string& name, const std::string& scopes);
 
     bool revoke(const std::string& id);
+    /// Phase 59: revoked keys are a state, not a tombstone — they can be
+    /// reactivated (undo) or permanently deleted.
+    bool reactivate(const std::string& id);
+    /// True row removal. Revoked-only by design (two-step safety) and the
+    /// master key can never be deleted (unrecoverable).
+    bool delete_key(const std::string& id);
     std::vector<ApiKeyEntry> list();
 
     /// Scope helpers.
