@@ -1207,6 +1207,18 @@ bool AgentImpl::switch_model(const std::string& model_name)
         opt = discovered;
     }
 
+    // §Phase 62 / §MODEL-SWITCH-AMNESIA (2026-09-15): Phase 43 rides the
+    // hub-owned llm config on EVERY task frame, so main.cpp calls
+    // switch_model() once per user message. An unconditional
+    // clear_messages() here erased the ENTIRE conversation history one
+    // message later — every agent's messages.json held exactly one user
+    // turn. Only a genuine model change justifies wiping history; the
+    // same-model re-apply still runs set_config() so endpoint/key
+    // rotation stays live. cfg_.model_name empty = first apply this
+    // process (history was just reloaded from disk) — never clear then.
+    const bool model_changed =
+        !cfg_.model_name.empty() && cfg_.model_name != model_name;
+
     body_->store->set_default_model_name(model_name);
     cfg_.model_name = model_name;
 
@@ -1216,7 +1228,8 @@ bool AgentImpl::switch_model(const std::string& model_name)
     if (body_->client) {
         AppConfig new_app = make_app_config(cfg_, *body_->store);
         body_->client->set_config(new_app);
-        body_->client->clear_messages();
+        if (model_changed)
+            body_->client->clear_messages();
     } else if (initialized_) {
         // §MODEL-SWITCH-CREATE: no LLMClient was created at startup (no
         // resolvable default model), so there is nothing to reconfigure —

@@ -158,6 +158,59 @@ TEST_CASE("switch_model clears conversation history") {
     fs::remove_all(home);
 }
 
+TEST_CASE("switch_model same-model re-apply preserves history (Phase 62 regression)") {
+    // §Phase 62 / §MODEL-SWITCH-AMNESIA: the hub rides llm config on every
+    // task frame, so main.cpp calls switch_model() per user message with
+    // the SAME model. That must not clear conversation history — before
+    // the fix, every agent forgot the whole thread one message later.
+    fs::path home = make_temp_home("same-model");
+    write_settings(home);
+
+    fs::path project = home / "project";
+    fs::create_directories(project);
+
+    // Pre-seed a transcript (as if a previous session/turn saved it).
+    fs::path agent_dir = project / ".hive-agent" / "default";
+    fs::create_directories(agent_dir);
+    fs::path messages_file = agent_dir / "messages.json";
+    {
+        json history = json::array();
+        history.push_back({{"role", "system"}, {"content", "you are a test assistant"}});
+        history.push_back({{"role", "user"}, {"content", "hello"}});
+        history.push_back({{"role", "assistant"}, {"content", "hi"}});
+        std::ofstream f(messages_file);
+        f << history.dump(2);
+    }
+
+    hive::AgentConfig cfg;
+    cfg.project_root = project;
+    cfg.agent_home   = home;
+    cfg.session_id   = "switch-same";
+
+    auto sink = std::make_shared<NullSink>();
+    hive::Agent agent(std::move(cfg), sink);
+    agent.initialize();
+
+    REQUIRE(agent.stats().message_count == 3);
+
+    // First re-apply of the ACTIVE model (per-task llm frame path).
+    CHECK(agent.switch_model("small"));
+    CHECK(agent.stats().message_count == 3);
+    CHECK(agent.last_assistant_text() == "hi");
+
+    // And again — this is the steady-state per-message path in production.
+    CHECK(agent.switch_model("small"));
+    CHECK(agent.stats().message_count == 3);
+    CHECK(fs::exists(messages_file));
+
+    // A genuine model change still clears (existing §MODEL-SWITCH rule).
+    CHECK(agent.switch_model("large"));
+    CHECK(agent.stats().message_count == 0);
+
+    agent.shutdown();
+    fs::remove_all(home);
+}
+
 TEST_CASE("switch_model updates compression config for new context size") {
     fs::path home = make_temp_home("ctx");
     write_settings(home);
