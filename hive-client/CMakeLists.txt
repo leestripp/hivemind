@@ -16,6 +16,15 @@ if(WEBKIT_FOUND)
 endif()
 find_package(nlohmann_json REQUIRED)
 
+# Pure, GTK-loop-free helpers shared by the app and the unit tests.
+pkg_check_modules(GLIBMM REQUIRED IMPORTED_TARGET glibmm-2.68)
+add_library(hive_client_core STATIC src/text_utils.cpp)
+target_include_directories(hive_client_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hive_client_core PUBLIC
+    PkgConfig::GLIBMM
+    nlohmann_json::nlohmann_json
+)
+
 # Bundle the SVG icon/avatar set into the binary so the client is
 # self-contained (no runtime data-dir lookup). CurrentColor icons are
 # re-tinted at load time to match the active dark/light theme.
@@ -44,6 +53,7 @@ add_executable(hive-client
 
 target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
+    hive_client_core
     PkgConfig::GTKMM
     nlohmann_json::nlohmann_json
     OmniNet

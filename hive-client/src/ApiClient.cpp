@@ -1,4 +1,5 @@
 #include "ApiClient.h"
+#include "text_utils.h"
 
 #include <OmniNet.h>
 
@@ -6,21 +7,6 @@
 #include <cstdio>
 
 namespace hive {
-namespace {
-
-// Minimal percent-encoder for query values.
-std::string url_escape(const std::string& s) {
-    static const char* hex = "0123456789ABCDEF";
-    std::string out;
-    for (unsigned char ch : s) {
-        if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~')
-            out += (char)ch;
-        else { out += '%'; out += hex[ch >> 4]; out += hex[ch & 15]; }
-    }
-    return out;
-}
-
-} // namespace
 
 nlohmann::json ApiClient::request(const std::string& method, const std::string& path,
                                   const nlohmann::json* body) {
@@ -56,10 +42,14 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
                                  response.substr(0, 200));
     }
     if (http_code >= 400) {
-        std::string msg = j.value("error", "HTTP " + std::to_string(http_code));
+        std::string msg = "HTTP " + std::to_string(http_code);
+        if (j.contains("error") && j["error"].is_string())
+            msg = j["error"].get<std::string>();
         // Phase 19: carry the server's request id so users can quote it.
-        const std::string rid = j.value("request_id", "");
-        if (!rid.empty()) msg += "  [" + rid + "]";
+        if (j.contains("request_id") && j["request_id"].is_string()) {
+            const std::string rid = j["request_id"].get<std::string>();
+            if (!rid.empty()) msg += "  [" + rid + "]";
+        }
         throw std::runtime_error(msg);
     }
     return j;
@@ -109,7 +99,8 @@ nlohmann::json ApiClient::list_workers() { return request("GET", "/api/workers")
 nlohmann::json ApiClient::delete_agent(const std::string& id,
                                        const std::string& reassign_to) {
     std::string path = "/api/agents/" + id;
-    if (!reassign_to.empty()) path += "?reassign_to=" + reassign_to;
+    if (!reassign_to.empty())
+        path += "?reassign_to=" + text::url_escape(reassign_to);
     return request("DELETE", path);
 }
 
@@ -251,7 +242,7 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
     ClientRequest req;
     req.method("POST")
        .url(base_ + "/api/threads/" + thread_id +
-            "/attachments?name=" + url_escape(filename));
+            "/attachments?name=" + text::url_escape(filename));
     if (!api_key_.empty())
         req.header("Authorization", "Bearer " + api_key_);
     req.header("Content-Type", "application/octet-stream");
@@ -266,7 +257,11 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
     if (http_code < 200 || http_code >= 300)
         throw std::runtime_error("upload failed: HTTP " +
                                  std::to_string(http_code) + " " + response);
-    return nlohmann::json::parse(response);
+    try { return nlohmann::json::parse(response); }
+    catch (...) {
+        throw std::runtime_error("upload: bad JSON in response: " +
+                                 response.substr(0, 200));
+    }
 }
 
 nlohmann::json ApiClient::activity(const std::string& thread_id) {

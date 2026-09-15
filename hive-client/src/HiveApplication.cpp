@@ -1,5 +1,6 @@
 #include "HiveApplication.h"
 #include <gio/gio.h>
+#include <cstdlib>
 extern "C" { GResource* hivemind_get_resource(void); }
 #include "HiveWindow.h"
 #include "UiApi.h"
@@ -7,8 +8,13 @@ extern "C" { GResource* hivemind_get_resource(void); }
 namespace hive {
 
 HiveApplication::HiveApplication()
+    // HIVEMIND_MULTI_INSTANCE=1 opts out of single-instance forwarding so a
+    // second client can run alongside the user's for UiApi testing (without
+    // it a test launch signals the running instance and exits silently).
     : Gtk::Application("org.hivemind.Client",
-                       Gio::Application::Flags::DEFAULT_FLAGS) {}
+                       std::getenv("HIVEMIND_MULTI_INSTANCE")
+                           ? Gio::Application::Flags::NON_UNIQUE
+                           : Gio::Application::Flags::DEFAULT_FLAGS) {}
 
 Glib::RefPtr<HiveApplication> HiveApplication::create() {
     return Glib::RefPtr<HiveApplication>(new HiveApplication());

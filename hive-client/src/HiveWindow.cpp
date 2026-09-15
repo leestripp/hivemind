@@ -1,4 +1,5 @@
 #include "HiveWindow.h"
+#include "text_utils.h"
 
 #include <thread>
 
@@ -24,6 +25,8 @@
 using nlohmann::json;
 
 namespace hive {
+
+using namespace text;   // factored pure helpers (unit-testable)
 
 namespace {
 
@@ -103,11 +106,6 @@ const char* kCss = R"(
   background: alpha(@window_fg_color, 0.08); color: alpha(@window_fg_color, 0.5); }
 )";
 
-std::string agent_name_of(const json& agents, const std::string& id) {
-    for (auto& a : agents)
-        if (a.value("id", "") == id) return a.value("name", id);
-    return id;
-}
 
 
 // ── chat message rendering ──────────────────────────────────────────────────
@@ -116,139 +114,7 @@ std::string agent_name_of(const json& agents, const std::string& id) {
 // lines. Strip the transcript plumbing for display; the raw body can still be
 // dumped to a debug log (HIVEMIND_DEBUG=1 → ~/.local/share/hivemind/client-raw.log).
 
-bool starts_with(const std::string& s, const std::string& p) {
-    return s.compare(0, p.size(), p) == 0;
-}
 
-// Remove "[tool: …]" call lines and "→ {…}" result lines, collapse the blank
-// runs they leave behind.
-std::string strip_tool_transcript(const std::string& body) {
-    std::string out;
-    std::istringstream in(body);
-    std::string line;
-    int blank_run = 0;
-    while (std::getline(in, line)) {
-        std::string trimmed = line;
-        const auto ws = trimmed.find_first_not_of(" \t");
-        if (ws != std::string::npos) trimmed = trimmed.substr(ws);
-        if (starts_with(trimmed, "[tool:")) continue;
-        if (starts_with(trimmed, "\xe2\x86\x92")) continue;   // "→" result line
-        if (trimmed.empty()) { ++blank_run; if (blank_run > 1) continue; }
-        else blank_run = 0;
-        out += line;
-        out += '\n';
-    }
-    // trim trailing blank space
-    while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) out.pop_back();
-    return out;
-}
-
-// Split text on ``` fences into prose / code segments.
-struct Seg { bool code; std::string text; };
-
-std::vector<Seg> split_segments(const std::string& text) {
-    std::vector<Seg> segs;
-    std::istringstream in(text);
-    std::string line, buf;
-    bool code = false;
-    auto flush = [&] {
-        while (!buf.empty() && buf.back() == '\n') buf.pop_back();
-        if (!buf.empty()) segs.push_back({code, buf});
-        buf.clear();
-    };
-    while (std::getline(in, line)) {
-        if (starts_with(line, "```")) {
-            flush();
-            code = !code;
-            continue;
-        }
-        buf += line;
-        buf += '\n';
-    }
-    flush();
-    return segs;
-}
-
-// Minimal inline markdown → Pango markup: **bold**, *italic*, `code`.
-// Line-level: # / ## / ### headers, "- " bullets.
-std::string inline_markup(const std::string& line) {
-    std::string out;
-    size_t i = 0;
-    while (i < line.size()) {
-        if (starts_with(line.substr(i), "**")) {
-            auto j = line.find("**", i + 2);
-            if (j != std::string::npos) {
-                out += "<b>" + Glib::Markup::escape_text(line.substr(i + 2, j - i - 2)) + "</b>";
-                i = j + 2;
-                continue;
-            }
-        }
-        if (line[i] == '`') {
-            auto j = line.find('`', i + 1);
-            if (j != std::string::npos) {
-                out += "<span font_family='monospace' background='#88888830'>"
-                     + Glib::Markup::escape_text(line.substr(i + 1, j - i - 1)) + "</span>";
-                i = j + 1;
-                continue;
-            }
-        }
-        if (line[i] == '*' && i + 1 < line.size() && line[i + 1] != '*' && line[i + 1] != ' ') {
-            auto j = line.find('*', i + 1);
-            if (j != std::string::npos) {
-                out += "<i>" + Glib::Markup::escape_text(line.substr(i + 1, j - i - 1)) + "</i>";
-                i = j + 1;
-                continue;
-            }
-        }
-        out += Glib::Markup::escape_text(std::string(1, line[i]));
-        ++i;
-    }
-    return out;
-}
-
-std::string prose_to_markup(const std::string& text) {
-    std::string out;
-    std::istringstream in(text);
-    std::string line;
-    bool first = true;
-    while (std::getline(in, line)) {
-        if (!first) out += '\n';
-        first = false;
-        if (starts_with(line, "### ")) {
-            out += "<span size='large' weight='bold'>" + inline_markup(line.substr(4)) + "</span>";
-        } else if (starts_with(line, "## ")) {
-            out += "<span size='large' weight='bold'>" + inline_markup(line.substr(3)) + "</span>";
-        } else if (starts_with(line, "# ")) {
-            out += "<span size='x-large' weight='bold'>" + inline_markup(line.substr(2)) + "</span>";
-        } else if (starts_with(line, "- ")) {
-            out += "\xe2\x80\xa2 " + inline_markup(line.substr(2));   // "• "
-        } else {
-            out += inline_markup(line);
-        }
-    }
-    return out;
-}
-
-// "2026-08-23T06:09:43.6Z" → "06:09 UTC" (today) or "Aug 22, 22:14 UTC".
-// All timestamps are UTC by design (2026-08-27 decision: no local-time
-// conversion, no TZ setting) — the "UTC" suffix makes that explicit so
-// nobody mistakes chat times for local time.
-std::string format_msg_time(const std::string& iso) {
-    if (iso.size() < 16) return {};
-    std::string hm = iso.substr(11, 5);
-    std::string date = iso.substr(0, 10);
-    std::time_t t = std::time(nullptr);
-    std::tm* lt = std::localtime(&t);
-    char today[11];
-    std::strftime(today, sizeof today, "%Y-%m-%d", lt);
-    if (date == today) return hm + " UTC";
-    // older: short date + time
-    std::tm tm{};
-    strptime(date.c_str(), "%Y-%m-%d", &tm);
-    char buf[32];
-    std::strftime(buf, sizeof buf, "%b %d", &tm);
-    return std::string(buf) + ", " + hm + " UTC";
-}
 
 // ── GResource SVG icons ───────────────────────────────────────────────────
 // Icons ship as currentColor-stroked SVGs bundled into the binary. GTK's
@@ -312,11 +178,6 @@ static Glib::RefPtr<Gdk::Pixbuf> avatar_pixbuf(const std::string& name, int size
                       size);
 }
 
-// Stable per-agent palette index — the name label color, so an agent is
-// identifiable by color across a busy multi-agent thread.
-int palette_index(const std::string& name) {
-    return (int)(std::hash<std::string>{}(name) % 6);
-}
 
 // Hive-garden avatar set (data/avatars): 20 cartoon creatures on hexagon
 // badges — five bees first (they are the HiveMind brand), then the garden
@@ -881,7 +742,18 @@ HiveWindow::HiveWindow() {
             std::lock_guard<std::mutex> lk(queue_m_);
             jobs.swap(done_queue_);
         }
-        for (auto& j : jobs) j();
+        for (auto& j : jobs) {
+            // Per-job guard: one throwing job must not kill the rest of
+            // the batch — an exception escaping a GTK handler silently
+            // kills the callback (2026-09-14 empty-roster incident).
+            try { j(); }
+            catch (const std::exception& e) {
+                std::fprintf(stderr, "[hive-client] UI job threw: %s\n",
+                             e.what());
+            } catch (...) {
+                std::fprintf(stderr, "[hive-client] UI job threw (unknown)\n");
+            }
+        }
     });
 
     // 1.5 s poll: chat stream + approvals badge.
@@ -889,9 +761,13 @@ HiveWindow::HiveWindow() {
         // While the connect dialog is up, every request would 401 and (pre-fix)
         // spawn yet another modal dialog. Skip polling until we're connected.
         if (connect_dialog_ || api_.api_key().empty()) return alive_;
-        poll_chat();
-        poll_approvals();
-        poll_roster();
+        try {
+            poll_chat();
+            poll_approvals();
+            poll_roster();
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[hive-client] poll threw: %s\n", e.what());
+        } catch (...) {}
         return alive_;
     }, 1500);
 
@@ -901,7 +777,11 @@ HiveWindow::HiveWindow() {
     // so this only rebuilds the list when something actually changed.
     threads_timer_ = Glib::signal_timeout().connect([this] {
         if (connect_dialog_ || api_.api_key().empty()) return alive_;
-        refresh_threads();
+        try { refresh_threads(); }
+        catch (const std::exception& e) {
+            std::fprintf(stderr, "[hive-client] threads poll threw: %s\n",
+                         e.what());
+        } catch (...) {}
         return alive_;
     }, 10000);
 
@@ -1213,7 +1093,7 @@ void HiveWindow::refresh_threads() {
                     bool dm_still_exists = false;
                     for (const auto& t : threads_) {
                         auto ids = t.value("agent_ids", json::array());
-                        if (ids.size() == 1 &&
+                        if (ids.size() == 1 && ids[0].is_string() &&
                             ids[0].get<std::string>() == current_dm_agent_) {
                             dm_still_exists = true; break;
                         }
