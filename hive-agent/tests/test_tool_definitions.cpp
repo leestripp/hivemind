@@ -13,6 +13,7 @@
 // Include ToolHandler after doctest
 #include "tools/ToolHandler.h"
 #include "tools/ToolFactory.h"
+#include "tools/BrowserTools.h"
 #include "tools/SkillTool.h"
 #include "core/SkillManager.h"
 #include "core/FileIO.h"
@@ -106,10 +107,56 @@ TEST_SUITE("ToolDefinitions") {
             // If parameters exist, they should be an object
             if (func.contains("parameters")) {
                 CHECK(func["parameters"].is_object());
+                // §MOONSHOT-SCHEMA: providers validate strictly — a
+                // mis-braced nlohmann literal silently turns properties
+                // into an ARRAY and Moonshot 400s EVERY turn with
+                // "properties must be an object" (Buzz mute incident,
+                // 2026-09-15). Catch the class, not the instance.
+                if (func["parameters"].contains("properties"))
+                    CHECK(func["parameters"]["properties"].is_object());
+                if (func["parameters"].contains("required"))
+                    CHECK(func["parameters"]["required"].is_array());
             }
         }
     }
     
+    TEST_CASE("browser tool schemas are provider-valid (§MOONSHOT-SCHEMA)") {
+        // 2026-09-15: browser_fill_secret's mis-braced definition made
+        // parameters.properties a LIST — Moonshot rejected every request
+        // and the agent silently died turn after turn. Validate the shape
+        // of every browser tool (specs + fill_secret) directly.
+        std::vector<json> defs;
+        for (const auto& spec : hive::BrowserTool::specs())
+            defs.push_back(hive::BrowserTool(spec).get_definition());
+        defs.push_back(hive::BrowserFillSecretTool().get_definition());
+
+        REQUIRE(defs.size() > 5);
+        for (const auto& def : defs) {
+            const json& func = def["function"];
+            CAPTURE(func["name"].get<std::string>());
+            REQUIRE(func.contains("parameters"));
+            const json& params = func["parameters"];
+            CHECK(params.is_object());
+            CHECK(params.value("type", "") == "object");
+            REQUIRE(params.contains("properties"));
+            CHECK(params["properties"].is_object());
+            for (const auto& [key, prop] : params["properties"].items()) {
+                CAPTURE(key);
+                CHECK(prop.is_object());
+                CHECK(prop.contains("type"));
+            }
+            if (params.contains("required"))
+                CHECK(params["required"].is_array());
+        }
+        // The exact regression: fill_secret must expose all three fields.
+        const json& fill = defs.back()["function"]["parameters"];
+        CHECK(fill["properties"].contains("selector"));
+        CHECK(fill["properties"].contains("secret_name"));
+        CHECK(fill["properties"].contains("field"));
+        CHECK(fill["properties"]["field"]["enum"] ==
+              json::array({"username", "password"}));
+    }
+
     TEST_CASE("compress_context tool definition is well-formed (§COMPRESS-TOOL)") {
         std::string defs = ToolHandler::get_tool_definitions();
         json parsed = json::parse(defs);

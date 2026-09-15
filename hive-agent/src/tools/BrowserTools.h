@@ -81,30 +81,35 @@ public:
                "The value never appears to you or in any output.";
     }
     [[nodiscard]] json get_definition() const override {
-        return {
-            {"type", "function"},
-            {"function",
-             {{"name", get_name()},
-              {"description", get_description()},
-              {"parameters",
-               {{"type", "object"},
-                {"properties",
-                 {{"selector",
-                   {{"type", "string"},
-                    {"description", "CSS selector of the field."}}},
-                  {"secret_name",
-                   {{"type", "string"},
-                    {"description",
-                     "Name of a secret granted to you "
-                     "(e.g. GITHUB_TOKEN)."}},
-                  {"field",
-                   {{"type", "string"},
-                    {"enum", json::array({"username", "password"})},
-                    {"description",
-                     "Login secrets only: which field to fill. Omit for "
-                     "api_key/note secrets (the value fills directly)."}}}}}},
-                {"required", json::array({"selector", "secret_name"})}}}}},
-        };
+        // Named json variables, NOT one nested literal: a brace mis-count
+        // in a deep nlohmann initializer list silently flips an object
+        // into an ARRAY (2026-09-15: secret_name's missing '}' made
+        // properties a list; Moonshot 400'd every turn with
+        // "properties must be an object" and Buzz went mute).
+        const json selector = {{"type", "string"},
+                               {"description", "CSS selector of the field."}};
+        const json secret_name = {
+            {"type", "string"},
+            {"description",
+             "Name of a secret granted to you (e.g. GITHUB_TOKEN)."}};
+        const json field = {{"type", "string"},
+                            {"enum", json::array({"username", "password"})},
+                            {"description",
+                             "Login secrets only: which field to fill. Omit "
+                             "for api_key/note secrets (the value fills "
+                             "directly)."}};
+        const json params = {
+            {"type", "object"},
+            {"properties",
+             {{"selector", selector},
+              {"secret_name", secret_name},
+              {"field", field}}},
+            {"required", json::array({"selector", "secret_name"})}};
+        return {{"type", "function"},
+                {"function",
+                 {{"name", get_name()},
+                  {"description", get_description()},
+                  {"parameters", params}}}};
     }
 
     json execute(const json& args, HostToolContext& ctx) override;
