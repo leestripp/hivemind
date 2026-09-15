@@ -321,10 +321,15 @@ void HubRouter::on_worker_frame(const std::string& worker,
                 atts = arr.dump();
             }
         }
+        // Phase 64: stats object (agent → worker passthrough). Same
+        // type-guard discipline as attachments above — dump if object.
+        std::string stats;
+        if (frame.contains("stats") && frame["stats"].is_object())
+            stats = frame["stats"].dump();
         if (chat_) chat_->complete_turn(task, frame.value("body", ""),
                                         frame.value("error", ""), atts,
                                         frame.value("thread_id", ""),
-                                        agent_id);
+                                        agent_id, stats);
         return;
     }
     if (op == "approval_req") {

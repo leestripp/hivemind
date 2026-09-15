@@ -17,6 +17,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <utility>
 
@@ -1254,7 +1255,8 @@ void HiveWindow::poll_chat() {
                             : (m.value("sender_kind", "") == "user" ? user_label() : "system"),
                         m.value("body", ""),
                         m.value("created_at", ""),
-                        m.value("attachments", json::array()));
+                        m.value("attachments", json::array()),
+                        m.value("stats", json::object()));
                     last_message_id_ = m.value("id", last_message_id_);
                 }
                 // Phase 55: the initial load (empty `after`) is the
@@ -1617,7 +1619,8 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                                            const std::string& sender_label,
                                            const std::string& body,
                                            const std::string& created_at,
-                                           const nlohmann::json& attachments) {
+                                           const nlohmann::json& attachments,
+                                           const nlohmann::json& stats) {
     // Raw transcript to debug log when HIVEMIND_DEBUG=1
     static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
     if (debug) {
@@ -1693,6 +1696,34 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
             text->set_markup(prose_to_markup(seg.text));
         }
         box->append(*text);
+    }
+
+    // Phase 64: per-turn stats footer on agent bubbles — context usage,
+    // prompt-cache hits and iteration count for the turn that produced
+    // this message. Small dim line, same style class as the timestamp.
+    if (sender_kind == "agent" && stats.is_object() && !stats.empty()) {
+        const int total   = stats.value("total_tokens", 0);
+        const int maxctx  = stats.value("max_context_size", 0);
+        const int cached  = stats.value("cached_tokens", 0);
+        const int iters   = stats.value("iterations", 0);
+        const int comp    = stats.value("completion_tokens", 0);
+        if (total > 0) {
+            const double pct =
+                maxctx > 0 ? (100.0 * total / maxctx) : 0.0;
+            std::ostringstream line;
+            line << "ctx " << total << "/" << maxctx << " ("
+                 << std::fixed << std::setprecision(1) << pct << "%)"
+                 << " · +" << comp << " out";
+            if (cached > 0)
+                line << " · cache " << cached << "/"
+                     << stats.value("prompt_tokens", 0);
+            line << " · " << iters << " iter" << (iters == 1 ? "" : "s");
+            auto* foot = Gtk::make_managed<Gtk::Label>(line.str());
+            foot->set_halign(Gtk::Align::START);
+            foot->add_css_class("hv-time");   // reuse the dim small style
+            foot->set_selectable(true);
+            box->append(*foot);
+        }
     }
 
     // Phase 18 + 34: attachments. Images render inline (downloaded via
@@ -1790,7 +1821,9 @@ void HiveWindow::load_earlier() {
                          {"body", m.value("body", "")},
                          {"created_at", m.value("created_at", "")},
                          {"attachments", m.value("attachments",
-                                                 nlohmann::json::array())}});
+                                                 nlohmann::json::array())},
+                         {"stats", m.value("stats",
+                                           nlohmann::json::object())}});
                 rendered_.insert(rendered_.begin(),
                                  page_records.begin(), page_records.end());
                 // Prepend in REVERSE page order so the final on-screen
@@ -1810,7 +1843,8 @@ void HiveWindow::load_earlier() {
                                 : (sk == "user" ? user_label() : "system"),
                             m.value("body", ""),
                             m.value("created_at", ""),
-                            m.value("attachments", nlohmann::json::array())))
+                            m.value("attachments", nlohmann::json::array()),
+                            m.value("stats", nlohmann::json::object())))
                         messages_box_.prepend(*w);
                 }
                 if (!arr.empty())
@@ -1832,14 +1866,16 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
                                        const std::string& sender_label,
                                        const std::string& body,
                                        const std::string& created_at,
-                                       const nlohmann::json& attachments) {
+                                       const nlohmann::json& attachments,
+                                       const nlohmann::json& stats) {
     rendered_.push_back({{"sender_kind", sender_kind},
                          {"sender_label", sender_label},
                          {"body", body},
                          {"created_at", created_at},
-                         {"attachments", attachments}});
+                         {"attachments", attachments},
+                         {"stats", stats}});
     if (auto* w = build_message_row(sender_kind, sender_label, body,
-                                    created_at, attachments))
+                                    created_at, attachments, stats))
         messages_box_.append(*w);
 }
 

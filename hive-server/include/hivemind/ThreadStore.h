@@ -43,6 +43,9 @@ struct ThreadMessage {
     // attached; they live under <workspace>/attachments/<thread_id>/.
     // "[]" when the message has none.
     std::string attachments_json;
+    // Phase 64: per-turn agent stats (tokens, prompt-cache hits,
+    // iterations, context size) as a JSON object; "" when absent.
+    std::string stats_json;
     std::string created_at;
 };
 
@@ -93,7 +96,8 @@ public:
                             const std::string& sender_kind,
                             const std::string& sender_id,
                             const std::string& body,
-                            const std::string& attachments_json = "[]");
+                            const std::string& attachments_json = "[]",
+                            const std::string& stats_json = "");
 
     /// Messages in chronological order. If after_id is non-empty, only
     /// messages created after that message (exclusive) are returned.

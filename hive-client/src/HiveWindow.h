@@ -129,7 +129,9 @@ private:
                                    const std::string& sender_label,
                                    const std::string& body,
                                    const std::string& created_at,
-                                   const nlohmann::json& attachments);
+                                   const nlohmann::json& attachments,
+                                   const nlohmann::json& stats
+                                       = nlohmann::json::object());
     void update_load_earlier_row();
     void load_earlier();
     void append_message_bubble(const std::string& sender_kind,
@@ -137,7 +139,9 @@ private:
                                const std::string& body,
                                const std::string& created_at = "",
                                const nlohmann::json& attachments
-                                   = nlohmann::json::array());
+                                   = nlohmann::json::array(),
+                               const nlohmann::json& stats
+                                   = nlohmann::json::object());
     /// Phase 34: render one image attachment inline (download + cache if
     /// needed, then Gtk::Picture). holder is a vertical box in the bubble.
     void load_image_attachment(Gtk::Box* holder, const nlohmann::json& att);

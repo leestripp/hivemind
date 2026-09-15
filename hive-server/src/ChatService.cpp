@@ -185,7 +185,8 @@ void ChatService::complete_turn(const std::string& task_id,
                                 const std::string& error,
                                 const std::string& attachments_json,
                                 const std::string& frame_thread_id,
-                                const std::string& frame_agent_id) {
+                                const std::string& frame_agent_id,
+                                const std::string& stats_json) {
     std::shared_ptr<LiveTurn> live;
     {
         std::lock_guard<std::mutex> lk(m_);
@@ -216,7 +217,7 @@ void ChatService::complete_turn(const std::string& task_id,
             if (!error.empty()) out += "\n\n*(turn ended with errors)*";
             out += "\n\n*(recovered after hub restart)*";
             threads_.add_message(frame_thread_id, "agent", frame_agent_id,
-                                 out, attachments_json);
+                                 out, attachments_json, stats_json);
             std::fprintf(stderr,
                 "[chat] recovered orphaned turn %.16s → thread %.8s "
                 "(hub restart)\n", task_id.c_str(), frame_thread_id.c_str());
@@ -266,7 +267,7 @@ void ChatService::complete_turn(const std::string& task_id,
         for (int attempt = 0; attempt < 2 && !posted; ++attempt) {
             try {
                 threads_.add_message(thread_id, "agent", agent_id, out,
-                                     attachments_json);
+                                     attachments_json, stats_json);
                 posted = true;
             } catch (const std::exception& e) {
                 std::fprintf(stderr,

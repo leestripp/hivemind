@@ -59,12 +59,16 @@ json message_json(const ThreadMessage& m) {
     // attachments (Phase 18): pass through as parsed JSON; "[]" default.
     json atts = json::parse(m.attachments_json, nullptr, false);
     if (!atts.is_array()) atts = json::array();
-    return {
+    // stats (Phase 64): parsed object; omitted when the turn recorded none.
+    json stats = json::parse(m.stats_json, nullptr, false);
+    json out = {
         {"id", m.id}, {"thread_id", m.thread_id},
         {"sender_kind", m.sender_kind}, {"sender_id", m.sender_id},
         {"body", m.body}, {"created_at", m.created_at},
         {"attachments", atts},
     };
+    if (stats.is_object() && !stats.empty()) out["stats"] = stats;
+    return out;
 }
 
 } // namespace

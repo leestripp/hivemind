@@ -822,11 +822,23 @@ int main(int argc, char** argv) {
             std::string body = sink->user_output();
             if (body.empty() && err.empty() && !sink->errored())
                 body = "(agent produced no output)";
+            // Phase 64: per-turn stats ride the message frame so the hub
+            // can store them on the reply and clients can render context
+            // usage / prompt-cache / iteration info per message.
+            const auto st = agent.stats();
             emit({{"ev", "message"},
                   {"task", t.id},
                   {"thread_id", t.thread_id},
                   {"body", body},
-                  {"error", err}});
+                  {"error", err},
+                  {"stats",
+                   {{"prompt_tokens", st.prompt_tokens},
+                    {"completion_tokens", st.completion_tokens},
+                    {"total_tokens", st.total_tokens},
+                    {"cached_tokens", st.cached_tokens},
+                    {"max_context_size", st.max_context_size},
+                    {"iterations", st.iteration},
+                    {"message_count", st.message_count}}}});
         }
     });
 

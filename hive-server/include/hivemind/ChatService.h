@@ -91,7 +91,10 @@ public:
                        // frame still carries thread_id/agent_id — post the
                        // reply to the thread instead of dropping it.
                        const std::string& frame_thread_id = "",
-                       const std::string& frame_agent_id = "");
+                       const std::string& frame_agent_id = "",
+                       // Phase 64: per-turn agent stats (tokens, cache,
+                       // iterations) — stored on the posted message.
+                       const std::string& stats_json = "");
 
     /// Snapshot of in-progress (and just-finished) turns for a thread.
     std::vector<LiveTurn> activity(const std::string& thread_id);

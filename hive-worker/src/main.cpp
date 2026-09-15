@@ -143,6 +143,10 @@ int main(int argc, char* argv[]) {
                      {"body",ev.value("body","")},
                      {"error",ev.value("error","")},
                      {"attachments", std::move(atts)}};
+                // Phase 64: per-turn stats (tokens/cache/iterations)
+                // pass through untouched when the agent sent them.
+                if (ev.contains("stats") && ev["stats"].is_object())
+                    f["stats"] = ev["stats"];
             }
             else if (kind == "approval_request")
                 f = {{"op","approval_req"},{"agent",agent_id},
