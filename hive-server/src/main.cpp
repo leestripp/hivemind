@@ -350,6 +350,18 @@ int main(int argc, char* argv[]) {
                         case hm::RoutineFireAction::Fire:
                             break;
                         }
+                        // Self-heal: the owned thread may have been
+                        // deleted (2026-09-16 incident) — recreate and
+                        // rebind instead of failing into disable.
+                        if (!thread_store.get_thread(r.thread_id)) {
+                            auto t = thread_store.create_thread(
+                                r.name, "dm", {r.agent_id});
+                            routine_store.rebind_thread(r.id, t.id);
+                            r.thread_id = t.id;
+                            std::cout << "[scheduler] rebound routine "
+                                      << r.id << " to fresh thread "
+                                      << t.id << "\n";
+                        }
                         chat_service.post_user_message(r.thread_id, r.prompt);
                         auto next = once ? std::nullopt
                             : hm::compute_next_fire(sched, now, r.created_at);

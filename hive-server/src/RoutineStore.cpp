@@ -288,6 +288,23 @@ int RoutineStore::remove_for_agent(const std::string& agent_id) {
     return n;
 }
 
+bool RoutineStore::rebind_thread(const std::string& id,
+                                 const std::string& thread_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    bool ok = sqlite3_prepare_v2(db,
+            "UPDATE routines SET thread_id = ? WHERE id = ?",
+            -1, &st, nullptr) == SQLITE_OK;
+    if (ok) {
+        bind_text(st, 1, thread_id);
+        bind_text(st, 2, id);
+        ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db) > 0;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return ok;
+}
+
 bool RoutineStore::remove(const std::string& id) {
     sqlite3* db = open_conn();
     sqlite3_stmt* st = nullptr;

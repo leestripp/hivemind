@@ -65,6 +65,11 @@ public:
                 const std::string& prompt, const std::string& schedule_json,
                 const std::string& next_fire_at);
     bool set_enabled(const std::string& id, bool enabled);
+    /// Re-point the routine at a different thread (self-heal after the
+    /// owned thread was deleted out from under it — 2026-09-16: deleting
+    /// a routine's thread made manual run 500 and the scheduler then
+    /// DISABLED the routine on its next fire).
+    bool rebind_thread(const std::string& id, const std::string& thread_id);
     bool remove(const std::string& id);
     /// Move every routine owned by old_agent to new_agent. Returns count.
     int reassign_agent(const std::string& old_agent_id,

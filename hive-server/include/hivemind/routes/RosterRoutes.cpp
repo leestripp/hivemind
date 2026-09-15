@@ -523,7 +523,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.delete_("/api/threads/:id",
-        [&threads, &chat](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&threads, &chat, &routines](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
             // Phase 44: the User Inbox is the one thread that must always
@@ -531,6 +531,17 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             if (ThreadStore::is_user_thread(seg[2])) {
                 send_error(resp, 400, "cannot delete the user inbox");
                 return;
+            }
+            // A routine owns its thread: deleting it orphaned the routine
+            // (manual run 500'd, scheduler then disabled it — 2026-09-16).
+            // Block with a pointer at the owning routine instead.
+            for (const auto& r : routines.list()) {
+                if (r.thread_id == seg[2]) {
+                    send_error(resp, 409,
+                        "thread belongs to scheduled task '" + r.name +
+                        "' — delete the task instead (it removes the thread)");
+                    return;
+                }
             }
             chat.cancel_thread(seg[2]);   // stop live turns before deleting
             if (!threads.delete_thread(seg[2])) {

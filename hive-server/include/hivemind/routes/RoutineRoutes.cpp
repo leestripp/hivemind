@@ -104,12 +104,24 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
 
     // ── POST /api/routines/:id/run ────────────────────────────────────────
     server.post("/api/routines/:id/run",
-        [&routines, &chat](const OmniNet::HTTP::Request& req,
+        [&routines, &threads, &chat](const OmniNet::HTTP::Request& req,
                            OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
             auto r = routines.get(seg[2]);
             if (!r) { send_error(resp, 404, "routine not found"); return; }
+            // Self-heal: the routine's owned thread may have been deleted
+            // from the client (2026-09-16 — manual run 500'd "thread not
+            // found" and the scheduler DISABLED the routine next fire).
+            // Recreate and rebind instead of failing.
+            if (!threads.get_thread(r->thread_id)) {
+                auto t = threads.create_thread(r->name, "dm", {r->agent_id});
+                routines.rebind_thread(r->id, t.id);
+                r->thread_id = t.id;
+                std::fprintf(stderr,
+                    "[routines] rebound %.8s to fresh thread %.8s\n",
+                    r->id.c_str(), t.id.c_str());
+            }
             try {
                 chat.post_user_message(r->thread_id, r->prompt);
                 send_json(resp, json{{"fired", true}, {"thread_id", r->thread_id}}, 202);
