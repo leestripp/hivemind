@@ -41,6 +41,7 @@
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
 #include "tools/BrowserTools.h"
+#include "tools/SecretTools.h"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -775,6 +776,12 @@ int main(int argc, char** argv) {
     for (auto& spec : hive::BrowserTool::specs())
         agent.register_tool(std::make_unique<hive::BrowserTool>(std::move(spec)));
     agent.register_tool(std::make_unique<hive::BrowserFillSecretTool>());
+
+    // secrets_* (Phase 61): the hub brokers granted secrets into the
+    // container environment at spawn (Phase 60); these tools let the
+    // agent discover (secrets_list) and read (secrets_get) them.
+    agent.register_tool(std::make_unique<hive::SecretsListTool>());
+    agent.register_tool(std::make_unique<hive::SecretsGetTool>());
     try {
         agent.initialize();
     } catch (const std::exception& e) {
