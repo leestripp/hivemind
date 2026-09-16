@@ -60,7 +60,11 @@ if ! alive x11vnc; then
     nohup x11vnc -display :99 -forever -shared -passwd "$PW" \
         -localhost -wait 50 >/tmp/x11vnc.log 2>&1 &
     nohup bash -c 'while true; do
-        pgrep -x x11vnc >/dev/null || exec x11vnc -display :99 -forever \
+        up=0
+        for p in $(pgrep -x x11vnc 2>/dev/null); do
+            [ "$(cut -d" " -f3 /proc/$p/stat 2>/dev/null)" != "Z" ] && up=1
+        done
+        [ "$up" -eq 0 ] && exec x11vnc -display :99 -forever \
             -shared -passwd "'"$PW"'" -localhost -wait 50 \
             >>/tmp/x11vnc.log 2>&1
         sleep 5

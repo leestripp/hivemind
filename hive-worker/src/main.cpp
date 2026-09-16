@@ -269,6 +269,24 @@ int main(int argc, char* argv[]) {
                 }
                 if (!listening) { idle_min.erase(cname); continue; }
                 if (viewers > 0) { idle_min[cname] = 0; continue; }
+                // 2026-09-16: don't yank the display while the AGENT is
+                // working — computer use drives Chrome via CDP :9222 and
+                // never opens a VNC viewer, so a long browsing turn read
+                // as "idle" and stop killed Xvfb under a live Chrome
+                // (orphaned on a dead display = frozen browser + spinning
+                // gpu-process). Same busy check as the DNS probe above.
+                {
+                    const std::string aid = cname.substr(5);
+                    std::string st;
+                    if (g_fleet) {
+                        auto sts = g_fleet->statuses();
+                        st = sts.value(aid, "");
+                    }
+                    if (!st.empty() && st != "ready") {
+                        idle_min[cname] = 0;
+                        continue;
+                    }
+                }
                 const int streak = ++idle_min[cname];
                 if (streak >= idle_limit) {
                     std::cerr << "worker: screen idle " << streak
