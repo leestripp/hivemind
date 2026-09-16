@@ -8,6 +8,7 @@
 #include "hivemind/ThreadStore.h"
 #include "hivemind/ContainerManager.h"
 #include "hivemind/ExecAuditStore.h"
+#include "hivemind/FanInPolicy.h"
 
 #include <nlohmann/json.hpp>
 
@@ -89,6 +90,39 @@ void ChatService::fan_in(const std::string& thread_id,
                          const std::string& sender_label,
                          const std::string& body,
                          int generation) {
+    if (stopping_) return;
+
+    // Phase 65a/65b: agent-triggered fan-in (generation > 0) respects
+    // mutes and the circuit breaker. Generation-0 (user/nudge) fan-in is
+    // never gated — post_user_message already lifted both.
+    if (generation > 0) {
+        bool just_tripped = false;
+        bool allowed = true;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            if (is_muted_locked(thread_id, agent.id)) {
+                std::fprintf(stderr,
+                    "[chat] fan-in dropped (muted): thread %.8s agent %.8s\n",
+                    thread_id.c_str(), agent.id.c_str());
+                return;
+            }
+            allowed = circuit_allow_locked(thread_id, &just_tripped);
+        }
+        // Lock released before posting (Phase 52 lock ordering:
+        // m_ never held across ThreadStore calls).
+        if (!allowed) {
+            if (just_tripped) {
+                try {
+                    threads_.add_message(thread_id, "system", "hivemind",
+                        "*(circuit breaker tripped — too many agent turns "
+                        "in this thread; agent fan-in paused. Send a "
+                        "message to resume.)*");
+                } catch (...) {}
+            }
+            return;
+        }
+    }
+
     // The agent's hive-brain conversation (persisted on the worker's
     // /workspace volume) IS the context - each task carries ONLY the new
     // message. DO NOT add a thread-history backlog here (v1 lesson).
@@ -141,6 +175,14 @@ std::string ChatService::post_user_message(const std::string& thread_id,
 
     std::string msg_id =
         threads_.add_message(thread_id, "user", "", body, attachments_json);
+
+    // Phase 65a/65b: a user message is the explicit "speak now" signal —
+    // lift the thread mute, every participant's agent mute, and reset the
+    // circuit breaker BEFORE the generation-0 fan-in below.
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        unmute_thread_locked(thread_id, thread->agent_ids);
+    }
 
     const std::string prompt_body = body + attachment_refs(attachments_json);
 
@@ -278,16 +320,45 @@ void ChatService::complete_turn(const std::string& task_id,
         }
         if (!posted)
             live->error = "reply generated but could not be posted";
-        else if (generation < kMaxFanInGenerations) {
+        else if (generation < kMaxFanInGenerations &&
+                 !hivemind::fanin_is_ack_only(out)) {   // 65c: acks post
+                                                        // but never fan
             try {
                 auto thread = threads_.get_thread(thread_id);
                 if (thread) {
-                    for (const auto& peer_id : thread->agent_ids) {
-                        if (peer_id == agent_id) continue;
-                        auto peer = agents_.get_agent(peer_id);
-                        if (peer)
-                            fan_in(thread_id, *peer, agent_name, out,
-                                   generation + 1);
+                    if (thread->agent_ids.size() > 2) {
+                        // 65h: >2-agent threads — fan in ONLY to peers
+                        // explicitly addressed (@Name / [to:Name]).
+                        // Undirected replies are visible in the thread
+                        // but task nobody (storm fix 2026-09-16: N-1
+                        // branching made broadcast exponential).
+                        std::vector<std::pair<std::string, std::string>>
+                            candidates;
+                        for (const auto& peer_id : thread->agent_ids) {
+                            if (peer_id == agent_id) continue;
+                            auto peer = agents_.get_agent(peer_id);
+                            if (peer)
+                                candidates.emplace_back(peer->id,
+                                                        peer->name);
+                        }
+                        for (const auto& pid :
+                                 hivemind::fanin_mentioned_ids(out,
+                                                               candidates)) {
+                            auto peer = agents_.get_agent(pid);
+                            if (peer)
+                                fan_in(thread_id, *peer, agent_name, out,
+                                       generation + 1);
+                        }
+                    } else {
+                        // 2-agent threads: broadcast is self-damping
+                        // (branching factor 1) — keep it.
+                        for (const auto& peer_id : thread->agent_ids) {
+                            if (peer_id == agent_id) continue;
+                            auto peer = agents_.get_agent(peer_id);
+                            if (peer)
+                                fan_in(thread_id, *peer, agent_name, out,
+                                       generation + 1);
+                        }
                     }
                 }
             } catch (...) { /* thread deleted mid-turn */ }
@@ -477,6 +548,12 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
             }
         }
     }
+    // 65a: Stop = MUTE. Even when count == 0 (agent idle) the user's
+    // intent is "do not let fan-in start new work for this agent".
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        mute_agent_locked(agent_id);
+    }
     // Same ordering as cancel_thread: cancels out of the lock, then
     // flush so the interrupt note lands after any in-flight text.
     for (const auto& [a, tid] : to_cancel) hub_.cancel_agent(a, tid);
@@ -501,9 +578,87 @@ void ChatService::cancel_thread(const std::string& thread_id) {
             to_flush.push_back(t);   // Phase 52: keep the commentary
         }
     }
+    // 65a: Stop = MUTE for the whole thread.
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        mute_thread_locked(thread_id);
+    }
     for (const auto& a : to_cancel) hub_.cancel_agent(a, thread_id);
     // Phase 52: flush AFTER the lock (ThreadStore lock ordering) and
     // after cancel_agent so the interrupt note lands after any in-flight
     // text. Late results are tombstoned — this is the surviving record.
     for (auto& t : to_flush) flush_partial(*t);
+}
+
+// -- Phase 65a/65b helpers ------------------------------------------------
+
+int ChatService::mute_s() {
+    const char* e = std::getenv("HIVEMIND_MUTE_S");
+    if (e && *e) { try { return std::max(0, std::stoi(e)); } catch (...) {} }
+    return 600;   // 10 min default
+}
+
+int ChatService::cb_max_turns() {
+    const char* e = std::getenv("HIVEMIND_CB_MAX_TURNS");
+    if (e && *e) { try { return std::max(1, std::stoi(e)); } catch (...) {} }
+    return 20;
+}
+
+int ChatService::cb_window_s() {
+    const char* e = std::getenv("HIVEMIND_CB_WINDOW_S");
+    if (e && *e) { try { return std::max(1, std::stoi(e)); } catch (...) {} }
+    return 300;
+}
+
+bool ChatService::is_muted_locked(const std::string& thread_id,
+                                  const std::string& agent_id) {
+    const auto now = std::chrono::steady_clock::now();
+    auto check = [&](auto& map, const std::string& key) {
+        auto it = map.find(key);
+        if (it == map.end()) return false;
+        if (now >= it->second) { map.erase(it); return false; }  // expired
+        return true;
+    };
+    return check(muted_threads_, thread_id) ||
+           check(muted_agents_, agent_id);
+}
+
+void ChatService::mute_agent_locked(const std::string& agent_id) {
+    muted_agents_[agent_id] =
+        std::chrono::steady_clock::now() + std::chrono::seconds(mute_s());
+}
+
+void ChatService::mute_thread_locked(const std::string& thread_id) {
+    muted_threads_[thread_id] =
+        std::chrono::steady_clock::now() + std::chrono::seconds(mute_s());
+}
+
+void ChatService::unmute_thread_locked(
+        const std::string& thread_id,
+        const std::vector<std::string>& agent_ids) {
+    muted_threads_.erase(thread_id);
+    throttle_.erase(thread_id);   // breaker resets too
+    for (const auto& id : agent_ids)
+        muted_agents_.erase(id);
+}
+
+bool ChatService::circuit_allow_locked(const std::string& thread_id,
+                                       bool* just_tripped) {
+    *just_tripped = false;
+    auto& th = throttle_[thread_id];
+    if (th.tripped) return false;
+    const auto now = std::chrono::steady_clock::now();
+    const auto cutoff = now - std::chrono::seconds(cb_window_s());
+    while (!th.fanins.empty() && th.fanins.front() < cutoff)
+        th.fanins.pop_front();
+    th.fanins.push_back(now);
+    if (static_cast<int>(th.fanins.size()) > cb_max_turns()) {
+        th.tripped = true;
+        if (!th.announced) { th.announced = true; *just_tripped = true; }
+        std::fprintf(stderr,
+            "[chat] circuit breaker TRIPPED for thread %.8s (%d fan-ins in "
+            "%ds)\n", thread_id.c_str(), cb_max_turns(), cb_window_s());
+        return false;
+    }
+    return true;
 }

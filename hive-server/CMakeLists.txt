@@ -22,6 +22,7 @@ set(CORE_SOURCES
     src/ApprovalStore.cpp
     src/AgentTools.cpp
     src/ChatService.cpp
+    src/FanInPolicy.cpp
     src/HubRouter.cpp
     src/RoutineStore.cpp
     src/AuthStore.cpp

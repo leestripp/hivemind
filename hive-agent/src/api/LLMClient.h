@@ -178,6 +178,12 @@ private:
     // Reset at turn start, on any non-set_status tool call, and on
     // plain-text responses.
     int consecutive_status_only_count_ = 0;
+    // Phase 65e: voluntary compress_context rate limit — Honey habitually
+    // self-compressed at 49% mid-storm (2026-09-16), wiping working memory
+    // and re-answering echoes. Refuse below 70% real pressure and at most
+    // one voluntary compress per kVoluntaryCompressCooldownS.
+    std::chrono::steady_clock::time_point last_voluntary_compress_{};
+    static constexpr int kVoluntaryCompressCooldownS = 600;
 
     // §BUG-COMPRESS-LOOP (2026-08-10): consecutive compression attempts
     // that did NOT get the context back below the auto-compress threshold.

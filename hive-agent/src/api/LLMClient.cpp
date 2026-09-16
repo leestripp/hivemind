@@ -1103,6 +1103,46 @@ bool LLMClient::handle_compress_context_result(const json& result) {
         return false;
     }
     const std::string reason = result.value("reason", "");
+
+    // Phase 65e: gate voluntary self-compression. During the 2026-09-16
+    // storm Honey compressed at 49% "to arrive fresh", wiping memory of
+    // already-answered messages and re-answering echoes — compression
+    // amnesia fed the ack loop. Rules: unknown token counts (usage null)
+    // can't be judged → allow; below 70% real pressure → refuse; at most
+    // one voluntary compress per cooldown window. The >=90% auto path is
+    // unaffected (it never comes through here).
+    if (messages_ && last_total_tokens_ > 0) {
+        const float ratio =
+            messages_->get_compression_ratio(last_total_tokens_);
+        if (ratio < 0.70f) {
+            LOG_WARNING("[COMPRESS] Voluntary compress_context REFUSED: "
+                        "real pressure " +
+                        std::to_string(static_cast<int>(ratio * 100)) +
+                        "% is below 70%. Context is healthy — keep working.");
+            if (messages_) messages_->add_system(
+                "[SYSTEM] Your compress_context request was declined: "
+                "context pressure is below 70%. Self-compression is only "
+                "available under real pressure — it discards working "
+                "memory of this conversation. Continue your work; the "
+                "system auto-compresses at 90%.");
+            return true;
+        }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (last_voluntary_compress_.time_since_epoch().count() != 0 &&
+        now - last_voluntary_compress_ <
+            std::chrono::seconds(kVoluntaryCompressCooldownS)) {
+        LOG_WARNING("[COMPRESS] Voluntary compress_context REFUSED: "
+                    "cooldown (one per " +
+                    std::to_string(kVoluntaryCompressCooldownS / 60) +
+                    " min).");
+        if (messages_) messages_->add_system(
+            "[SYSTEM] Your compress_context request was declined: "
+            "voluntary compression is rate-limited. Continue your work.");
+        return true;
+    }
+    last_voluntary_compress_ = now;
+
     compress_requested_.store(true, std::memory_order_relaxed);
     LOG_INFO("[COMPRESS] Agent requested context compression"
              + (reason.empty() ? std::string(".")
@@ -1159,6 +1199,11 @@ bool LLMClient::status_only_breaker_should_end_turn() {
                   " times consecutively - model is trying to exit the "
                   "loop; ending turn instead of looping. "
                   "(To end a turn explicitly, call the stop tool.)");
+        // Phase 65g: the force-ended turn's narration must NOT post to
+        // the thread — hub-side, posted output fans in to peers and the
+        // 2026-09-16 storm ran on exactly this text. Empty output posts
+        // nothing and fans nothing.
+        if (sink_) sink_->suppress_turn_output();
         return true;
     }
     return false;
@@ -3282,7 +3327,14 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
                 }
             }
             iteration_count_ = 0;
-            last_total_tokens_ = 0;
+            // Phase 65d: do NOT zero the meter — the first turn after a
+            // compression displayed "0/x (0.0%)" regardless of real size
+            // ("Context fresh at 0% (194 messages)" — impossible; the
+            // counter was just reset), and the model narrated that fake
+            // reading into the thread all storm long. Re-estimate from
+            // the compressed chain instead.
+            last_total_tokens_ =
+                messages_ ? messages_->estimate_tokens() : 0;
             last_cached_tokens_ = 0;
             continue;
         }

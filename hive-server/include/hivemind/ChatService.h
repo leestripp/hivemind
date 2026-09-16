@@ -7,6 +7,7 @@
 // peer participants (generation-capped).
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <chrono>
@@ -143,6 +144,45 @@ private:
     // Grace for a cancel to be confirmed by the worker before the watchdog
     // force-retires the turn. env HIVEMIND_CANCEL_GRACE_S, def 90.
     static int cancel_grace_s();
+
+    // ── Phase 65a — Stop = MUTE ────────────────────────────────────────
+    // The 2026-09-16 storm proved cancel-per-turn useless against fan-in:
+    // peers mid-turn completed and immediately re-dispatched to the
+    // just-cancelled agent. Cancel now also sets a mute deadline; fan_in
+    // (generation > 0) drops tasks for muted agents/threads. A user
+    // message in the thread lifts all its mutes; otherwise they expire.
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+        muted_agents_;    // agent_id  → muted until
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+        muted_threads_;   // thread_id → muted until
+    bool is_muted_locked(const std::string& thread_id,
+                         const std::string& agent_id);  // lazy expiry
+    void mute_agent_locked(const std::string& agent_id);
+    void mute_thread_locked(const std::string& thread_id);
+    /// Lift thread mute + participant agent mutes + breaker reset.
+    /// Caller passes the participant ids so no ThreadStore call happens
+    /// under m_ (Phase 52 lock ordering: never call into ThreadStore
+    /// while holding m_).
+    void unmute_thread_locked(const std::string& thread_id,
+                              const std::vector<std::string>& agent_ids);
+    static int mute_s();   // env HIVEMIND_MUTE_S, def 600
+
+    // ── Phase 65b — thread circuit breaker ─────────────────────────────
+    // Sliding window over agent-triggered fan-ins (generation > 0). Trip
+    // at HIVEMIND_CB_MAX_TURNS within HIVEMIND_CB_WINDOW_S: fan_in drops
+    // and ONE system message is posted; a user message resets.
+    struct ThreadThrottle {
+        std::deque<std::chrono::steady_clock::time_point> fanins;
+        bool tripped = false;
+        bool announced = false;   // post the trip message only once
+    };
+    std::unordered_map<std::string, ThreadThrottle> throttle_;
+    /// Returns false when the breaker is tripped. Sets *just_tripped on
+    /// the transition so the caller can post the system message unlocked.
+    bool circuit_allow_locked(const std::string& thread_id,
+                              bool* just_tripped);
+    static int cb_max_turns();   // env HIVEMIND_CB_MAX_TURNS, def 20
+    static int cb_window_s();    // env HIVEMIND_CB_WINDOW_S, def 300
 
     static constexpr std::size_t kMaxLivePerThread = 32;
     static constexpr int kMaxFanInGenerations = 3;

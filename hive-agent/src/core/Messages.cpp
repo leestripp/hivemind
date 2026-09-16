@@ -1494,7 +1494,15 @@ std::string Messages::call_llm_for_summary(const std::string& prompt) {
     // Timeout sequence: base, 2x base, 4x base (2x growth per retry).
     // The base comes from config_.compression_timeout (default 30s →
     // 30s/60s/120s). DO NOT CHANGE WITHOUT READING THE COMMENT BLOCK ABOVE
-    const int base_timeout = std::max(1, config_.compression_timeout);
+    // Phase 65f: scale the base with prompt size — a 30s timeout is
+    // hopeless when Kimi must summarize a storm-bloated context (3
+    // attempt-1 timeouts observed 2026-09-16; the 70%-delete fallback
+    // nearly fired). +1s per 4KB of prompt, capped at 4x the base.
+    const int size_scale = static_cast<int>(
+        std::min<size_t>(prompt.size() / 4096, 3 *
+            static_cast<size_t>(std::max(1, config_.compression_timeout))));
+    const int base_timeout = std::max(1, config_.compression_timeout) +
+        size_scale;
     const int timeouts[] = {base_timeout, base_timeout * 2, base_timeout * 4};
     const int num_attempts = sizeof(timeouts) / sizeof(timeouts[0]);
 
@@ -1515,7 +1523,7 @@ std::string Messages::call_llm_for_summary(const std::string& prompt) {
         req.timeout_seconds = timeouts[attempt];  // 30s, 60s, 120s
         req.follow_redirects = true;
 
-        LOG_CERR(INFO,  "[Messages] Compression attempt " << (attempt + 1) << "/"
+        LOG_CERR(WARNING,  "[Messages] Compression attempt " << (attempt + 1) << "/"
                   << num_attempts << " (timeout=" << timeouts[attempt]
                   << "s, prompt_size=" << prompt.size() << " bytes)" << '\n');
 
@@ -1524,7 +1532,7 @@ std::string Messages::call_llm_for_summary(const std::string& prompt) {
 
         if (result && result->status_code >= 200 && result->status_code < 300) {
             // SUCCESS — extract summary text AND usage for token reporting
-            LOG_CERR(INFO,  "[Messages] Compression attempt " << (attempt + 1)
+            LOG_CERR(WARNING,  "[Messages] Compression attempt " << (attempt + 1)
                       << " succeeded" << '\n');
             // §Phase 9.10: extract usage from compression response so the main
             // agent's token bar is accurate. (MiniMax SSE is always usage=null.)
@@ -1739,6 +1747,20 @@ CompressResult Messages::compress() {
 
         messages_.erase(messages_.begin() + delete_start,
                         messages_.begin() + delete_start + actual_delete_count);
+        // Phase 65f: the silent 70% deletion was an invisible amnesia
+        // event (2026-09-16 storm amplifier). Leave an unmistakable
+        // marker in the chain so the model KNOWS history was destroyed
+        // and must not re-answer old thread traffic from memory.
+        messages_.insert(messages_.begin() + delete_start, json{
+            {"role", "system"},
+            {"content", "[SYSTEM] EMERGENCY CONTEXT SHED: the compression "
+                        "summary call failed repeatedly, so the oldest " +
+                        std::to_string(actual_delete_count) +
+                        " messages of this conversation were DELETED "
+                        "without summarization to prevent overflow. You "
+                        "have lost that history permanently — do NOT "
+                        "re-answer or re-process older thread messages; "
+                        "only respond to messages dated after this marker."}});
         // §PERSIST-RACE: the fallback rewrite was never marked dirty,
         // so the reduced chain could be lost if the process died before
         // the next add_*(). Publish it now (lock held above).
