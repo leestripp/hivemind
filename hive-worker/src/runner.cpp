@@ -437,8 +437,13 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         std::error_code ec;
         fs::create_directories(ws, ec);
         fs::create_directories(home, ec);
+        // MUST match ensure_container's userns: without keep-id the
+        // recreated container maps hive->subuid, every keep-id-written
+        // file appears root-owned, and /workspace goes read-only for the
+        // agent (2026-09-16 flip-flop incident — "perms fix not holding").
         std::vector<std::string> cargs{"create", "--name", cname,
                            "--memory", "4g", "--cpus", "2", "--shm-size", "1g",
+                           "--userns=keep-id",
                            "-p", "127.0.0.1::6080"};
         if (gpu)   // same passthrough contract as ensure_container
             cargs.insert(cargs.end(), {"--device", "/dev/kfd",
