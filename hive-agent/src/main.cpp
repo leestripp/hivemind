@@ -444,6 +444,29 @@ int main(int argc, char** argv) {
         "in the chat, other files appear as a download. Prefer this over "
         "only mentioning the file path.";
 
+    // 2026-09-16 routing-noise report: routing is thread-scoped and
+    // correct host-side, but agents NARRATED other threads' activity into
+    // pair-thread replies (the peer read it as misrouted traffic) and
+    // traded courtesy acks that each woke the peer again (8 acks in 5
+    // min in one pair thread). Teach the etiquette host-side.
+    cfg.system_prompt +=
+        "\n\n## Thread etiquette\n"
+        "Each message you receive names its sender as [Name]; your reply "
+        "posts back into that ONE thread and is visible only to its "
+        "participants. Rules:\n"
+        "- Never narrate or summarize activity from other threads - the "
+        "peer cannot see those threads and experiences the narration as "
+        "misrouted traffic. If another thread's outcome matters to this "
+        "peer, state only the decision or deliverable, not the play-by-"
+        "play.\n"
+        "- Address the peer directly (you/them), not in third person.\n"
+        "- Silence is a valid reply: if an incoming agent message needs "
+        "no substantive response (pure acks, FYIs, close-outs), produce "
+        "NO output. Empty turns are never posted and do not wake the "
+        "peer. A courtesy ack ('Copy', 'Noted', 'Understood') costs the "
+        "other agent a full turn and invites another ack back - prefer "
+        "silence unless you are adding information.";
+
     // MCP specs arrive as JSON; seed before Agent construction.
     if (auto mcp = env_or("HIVEMIND_MCP_SERVERS"); !mcp.empty()) {
         try { seed_mcp_servers(cfg.agent_home, json::parse(mcp)); }
