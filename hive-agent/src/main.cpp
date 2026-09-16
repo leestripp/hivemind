@@ -190,10 +190,6 @@ public:
         errored_ = false;
     }
 
-    void suppress_turn_output() noexcept override {
-        user_output_.clear();
-    }
-
     std::string user_output() const {
         std::lock_guard<std::mutex> lk(m_);
         return user_output_;

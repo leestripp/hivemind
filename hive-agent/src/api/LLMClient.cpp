@@ -1198,12 +1198,16 @@ bool LLMClient::status_only_breaker_should_end_turn() {
                   std::to_string(consecutive_status_only_count_) +
                   " times consecutively - model is trying to exit the "
                   "loop; ending turn instead of looping. "
-                  "(To end a turn explicitly, call the stop tool.)");
-        // Phase 65g: the force-ended turn's narration must NOT post to
-        // the thread — hub-side, posted output fans in to peers and the
-        // 2026-09-16 storm ran on exactly this text. Empty output posts
-        // nothing and fans nothing.
-        if (sink_) sink_->suppress_turn_output();
+                  "(To end a turn explicitly, call the stop tool.) "
+                  "Turn output is kept and posts normally.");
+        // Phase 65g REVERTED (65i, same day): wiping the accumulated turn
+        // output destroyed legitimate replies — an iteration carrying
+        // reply text + a lone set_status(Done) counts as "status-only",
+        // so ordinary turn endings tripped this and the reply the user
+        // had just watched stream in VANISHED from the thread. Storm
+        // containment lives hub-side (65a mutes, 65b circuit breaker,
+        // 65c acks-never-fan, 65h mention-gated fan-in); the wipe was
+        // never load-bearing for it.
         return true;
     }
     return false;

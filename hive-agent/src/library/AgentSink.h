@@ -47,13 +47,6 @@ public:
         (void)text;
     }
 
-    /// @brief Phase 65g: discard everything accumulated for the current
-    /// turn so NOTHING posts to the thread. Called when the agent loop
-    /// force-ends a turn whose iterations were set_status-only (the
-    /// model trying to exit) — that narration used to post to the
-    /// thread and fan out to peers, feeding ack storms (2026-09-16).
-    /// Default: no-op.
-    virtual void suppress_turn_output() noexcept {}
 
     // ------------------------------------------------------------------
     // Tool lifecycle
