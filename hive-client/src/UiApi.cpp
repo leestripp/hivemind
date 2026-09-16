@@ -86,6 +86,14 @@ void UiApi::start() {
             else send_json(resp, r);
         });
 
+    server_->post("/ui/action/select-agent",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json b = body_json(req);
+            std::string target = b.value("agent", "");
+            if (target.empty()) { send_err(resp, 400, "agent required"); return; }
+            send_json(resp, w.ui_select_agent(target));
+        });
+
     server_->post("/ui/action/send",
         [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             json b = body_json(req);

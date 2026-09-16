@@ -37,6 +37,7 @@ public:
     nlohmann::json ui_create_thread(const std::string& title,
                                     const std::vector<std::string>& ids);
     nlohmann::json ui_select_thread(const std::string& id);
+    nlohmann::json ui_select_agent(const std::string& name_or_id);
     nlohmann::json ui_send(const std::string& body);
     /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
     void connect_with_credentials(const std::string& url, const std::string& key,
@@ -121,6 +122,11 @@ private:
     // ── rendering helpers ─────────────────────────────────────────────────
     void rebuild_roster();
     void rebuild_thread_list();
+    /// Select `id`'s row in the Threads sidebar (no-op when absent).
+    void select_thread_row(const std::string& id);
+    /// Single switch for the composer (entry/send/attach/learn). Two
+    /// call sites used to set these independently and drifted apart.
+    void set_composer_enabled(bool enabled);
     /// Phase 52: render/remove the live streaming bubble from the
     /// activity poll's turns[] (partial text of the first active turn).
     void update_live_bubble(const nlohmann::json& turns);

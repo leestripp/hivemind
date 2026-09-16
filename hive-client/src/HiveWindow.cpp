@@ -2003,6 +2003,27 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
 
 // ── callbacks ───────────────────────────────────────────────────────────────
 
+void HiveWindow::set_composer_enabled(bool enabled) {
+    learn_btn_.set_sensitive(enabled);
+    entry_.set_sensitive(enabled);
+    send_btn_.set_sensitive(enabled);
+    attach_btn_.set_sensitive(enabled);
+}
+
+void HiveWindow::select_thread_row(const std::string& id) {
+    if (id.empty()) return;
+    for (auto* child = threads_list_.get_first_child(); child;
+         child = child->get_next_sibling()) {
+        auto* row = dynamic_cast<Gtk::ListBoxRow*>(child);
+        if (!row) continue;
+        auto* rid = static_cast<std::string*>(row->get_data("thread_id"));
+        if (rid && *rid == id) {
+            threads_list_.select_row(*row);   // on_thread_selected early-
+            return;                           // returns: id == current_
+        }
+    }
+}
+
 void HiveWindow::on_agent_selected() {
     auto* row = roster_list_.get_selected_row();
     if (!row) return;
@@ -2020,6 +2041,20 @@ void HiveWindow::on_agent_selected() {
             done_queue_.push_back([this, t] {
                 if (!alive_) return;
                 current_thread_ = t.value("id", "");
+                // 2026-09-16: only on_thread_selected() set composer
+                // sensitivity, and it early-returns once current_thread_
+                // is already set — so clicking an agent after viewing the
+                // User Inbox left the composer greyed out. A DM is never
+                // the inbox: always re-enable.
+                set_composer_enabled(true);
+                entry_.set_placeholder_text(
+                    "Message the team\u2026  (Enter to send)");
+                chat_stick_bottom_ = true;
+                // Sidebar: light up this thread's row. refresh_threads()
+                // is signature-gated and reusing an existing DM changes
+                // no server data, so without this the Threads highlight
+                // stayed on whatever row was selected before.
+                select_thread_row(current_thread_);
                 last_message_id_.clear();
                 rendered_msg_ids_.clear();
                 while (auto* c = messages_box_.get_first_child())
@@ -2050,10 +2085,7 @@ void HiveWindow::on_thread_selected() {
     // never be deleted, and the composer is disabled — the inbox has zero
     // agent participants, so a reply here would dispatch to nobody.
     const bool is_inbox = (*id == "user");
-    learn_btn_.set_sensitive(!is_inbox);
-    entry_.set_sensitive(!is_inbox);
-    send_btn_.set_sensitive(!is_inbox);
-    attach_btn_.set_sensitive(!is_inbox);
+    set_composer_enabled(!is_inbox);
     entry_.set_placeholder_text(is_inbox
         ? "Agents message you here — reply in an agent's own thread"
         : "Message the team…  (Enter to send)");
@@ -3777,6 +3809,7 @@ nlohmann::json HiveWindow::ui_state() {
             {"agents", agents_},
             {"threads", threads_},
             {"rendered_count", rendered_.size()},
+            {"entry_sensitive", entry_.get_sensitive()},
             {"connected", !api_.api_key().empty()},
         };
     });
@@ -3821,11 +3854,38 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
                         load_earlier_btn_ = nullptr; has_more_history_ = false;
                         oldest_message_id_.clear(); loading_earlier_ = false;
                 rendered_.clear();
+                set_composer_enabled(id != "user");
+                select_thread_row(id);
                 poll_chat();
                 return nlohmann::json{{"selected", id}};
             }
         }
         return nlohmann::json{{"error", "thread not found: " + id}};
+    });
+}
+
+nlohmann::json HiveWindow::ui_select_agent(const std::string& name_or_id) {
+    return invoke_on_ui([this, name_or_id] {
+        // Resolve display names (how agents/users refer to each other).
+        std::string id = name_or_id;
+        for (auto& a : agents_)
+            if (a.value("name", "") == name_or_id) {
+                id = a.value("id", "");
+                break;
+            }
+        // Select the roster row so the real on_agent_selected() path
+        // runs (DM reuse, composer re-enable, sidebar sync).
+        for (auto* child = roster_list_.get_first_child(); child;
+             child = child->get_next_sibling()) {
+            auto* row = dynamic_cast<Gtk::ListBoxRow*>(child);
+            if (!row) continue;
+            auto* aid = static_cast<std::string*>(row->get_data("agent_id"));
+            if (aid && *aid == id) {
+                roster_list_.select_row(*row);
+                return nlohmann::json{{"selected", id}};
+            }
+        }
+        return nlohmann::json{{"error", "agent not found: " + name_or_id}};
     });
 }
 
