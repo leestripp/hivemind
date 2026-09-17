@@ -2164,17 +2164,37 @@ void HiveWindow::update_attach_row() {
 }
 
 void HiveWindow::on_attach() {
-    if (current_thread_.empty()) return;
+    if (current_thread_.empty()) {
+        // 2026-09-17: this used to return silently — the click looked dead.
+        set_status("Select an agent or thread first — nothing to attach to.");
+        return;
+    }
     auto dialog = Gtk::FileDialog::create();   // refcounted — kept by capture
     dialog->set_title("Attach a file");
     dialog->open(*this, [this, dialog](Glib::RefPtr<Gio::AsyncResult>& result) {
         Glib::RefPtr<Gio::File> file;
         try { file = dialog->open_finish(result); }
-        catch (...) { return; }                // user cancelled
+        catch (const Glib::Error& e) {
+            // Cancel/dismiss is normal; anything else deserves feedback
+            // (the old catch(...) swallowed real portal errors silently).
+            if (e.domain() != GTK_DIALOG_ERROR)
+                set_status(std::string{"File dialog error: "} + e.what());
+            return;
+        }
+        catch (...) { return; }
         if (!file) return;
         const std::string path = file->get_path();
-        const std::string tid = current_thread_;
-        if (path.empty() || tid.empty()) return;
+        if (path.empty()) return;
+        attach_picked_file(path);
+    });
+}
+
+void HiveWindow::attach_picked_file(const std::string& path) {
+    const std::string tid = current_thread_;
+    if (path.empty() || tid.empty()) return;
+    set_status("Uploading " + path.substr(path.find_last_of("/\\") + 1) +
+               "\u2026");
+    {
         run_async([this, tid, path] {
             std::ifstream in(path, std::ios::binary);
             std::string bytes{std::istreambuf_iterator<char>(in),
@@ -2196,7 +2216,7 @@ void HiveWindow::on_attach() {
             }
             dispatcher_.emit();
         });
-    });
+    }
 }
 
 void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
@@ -3810,6 +3830,8 @@ nlohmann::json HiveWindow::ui_state() {
             {"threads", threads_},
             {"rendered_count", rendered_.size()},
             {"entry_sensitive", entry_.get_sensitive()},
+            {"attach_sensitive", attach_btn_.get_sensitive()},
+            {"pending_attachments", pending_attachments_.size()},
             {"connected", !api_.api_key().empty()},
         };
     });
@@ -3896,6 +3918,20 @@ nlohmann::json HiveWindow::ui_send(const std::string& body) {
         entry_.set_text(body);
         on_send();   // exact button path: reads entry_, clears, posts async
         return nlohmann::json{{"sent", true}, {"thread", current_thread_}};
+    });
+}
+
+nlohmann::json HiveWindow::ui_attach(const std::string& path) {
+    return invoke_on_ui([this, path] {
+        if (current_thread_.empty())
+            return nlohmann::json{{"error", "no thread selected"}};
+        if (path.empty()) {
+            on_attach();   // real dialog (needs a human to pick)
+            return nlohmann::json{{"dialog", true}};
+        }
+        attach_picked_file(path);   // headless: skip the dialog
+        return nlohmann::json{{"attaching", path},
+                              {"thread", current_thread_}};
     });
 }
 

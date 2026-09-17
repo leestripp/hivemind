@@ -129,6 +129,15 @@ void UiApi::start() {
             else send_json(resp, json{{"ok", false}, {"error", err_out}});
         });
 
+    // Attach flow: {"path": "/abs/file"} runs the post-dialog upload path
+    // headlessly; {"path": ""} opens the real file dialog (needs a human).
+    server_->post("/ui/action/attach",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json r = w.ui_attach(body_json(req).value("path", ""));
+            if (r.contains("error")) send_err(resp, 400, r["error"]);
+            else send_json(resp, r);
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());

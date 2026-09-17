@@ -39,6 +39,7 @@ public:
     nlohmann::json ui_select_thread(const std::string& id);
     nlohmann::json ui_select_agent(const std::string& name_or_id);
     nlohmann::json ui_send(const std::string& body);
+    nlohmann::json ui_attach(const std::string& path);  // POST /ui/action/attach
     /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
     void connect_with_credentials(const std::string& url, const std::string& key,
                                   std::function<void(std::string)> done);
@@ -85,6 +86,9 @@ private:
     void on_agent_selected();
     void on_thread_selected();
     void on_attach();   // Phase 18: pick + upload files
+    /// Post-dialog half of on_attach (upload + pending row). The UiApi
+    /// test hook drives this directly so the flow is headlessly testable.
+    void attach_picked_file(const std::string& path);
 
     void on_send();
     void on_new_agent();
