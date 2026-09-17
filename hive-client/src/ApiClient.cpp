@@ -248,15 +248,34 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
     req.header("Content-Type", "application/octet-stream");
     req.body(bytes);
 
+    // Mirror the hub's kMaxUpload (FileRoutes.cpp) — fail fast with a
+    // clear message instead of shipping 10 MB+ into a proxy rejection.
+    if (bytes.size() > 10 * 1024 * 1024)
+        throw std::runtime_error("file too large (10 MB max): " + filename);
+
     auto result = Client::get_instance().send_blocking(req, cfg);
     if (!result.has_value())
         throw std::runtime_error(std::string{"upload failed: "} +
                                  clientErrorName(result.error()));
     const int http_code = result->statusCode();
     const std::string response = result->bodyAsString();
-    if (http_code < 200 || http_code >= 300)
+    if (http_code < 200 || http_code >= 300) {
+        // A proxy (nginx) answers with an HTML error page, not the hub's
+        // JSON — don't dump markup into the status bar, and name the
+        // likely cause for the two size-related codes.
+        if (response.find("<html") != std::string::npos ||
+            response.find("<!DOCTYPE") != std::string::npos) {
+            std::string msg = "upload rejected by proxy: HTTP " +
+                              std::to_string(http_code);
+            if (http_code == 413 ||
+                (http_code == 400 && bytes.size() >= 1024 * 1024))
+                msg += " — file over the proxy's size limit "
+                       "(nginx client_max_body_size, default 1 MB)";
+            throw std::runtime_error(msg);
+        }
         throw std::runtime_error("upload failed: HTTP " +
                                  std::to_string(http_code) + " " + response);
+    }
     try { return nlohmann::json::parse(response); }
     catch (...) {
         throw std::runtime_error("upload: bad JSON in response: " +
