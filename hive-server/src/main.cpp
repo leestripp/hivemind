@@ -113,6 +113,11 @@ int main(int argc, char* argv[]) {
     cfg.logRequests   = false;
     cfg.requestTimeout = std::chrono::seconds(60);
     cfg.workerCount    = 4;
+    // 2026-09-17: OmniNet defaults maxRequestSize to 1 MB — the hub
+    // dropped every upload over 1 MB at the socket (nginx saw a reset
+    // and returned 502) once nginx's own 1 MB cap was raised. 16 MB
+    // covers the 10 MB kMaxUpload (FileRoutes) with headroom.
+    cfg.maxRequestSize = 16 * 1024 * 1024;
 
     OmniNet::HTTP::Server server{cfg};
 
