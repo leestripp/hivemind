@@ -267,10 +267,12 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
             response.find("<!DOCTYPE") != std::string::npos) {
             std::string msg = "upload rejected by proxy: HTTP " +
                               std::to_string(http_code);
-            if (http_code == 413 ||
-                (http_code == 400 && bytes.size() >= 1024 * 1024))
+            // Only 413 is certainly the size limit — a 400 here once sent
+            // us chasing client_max_body_size for hours when the real bug
+            // was a locale-corrupted Content-Length (omninet bc2adc4).
+            if (http_code == 413)
                 msg += " — file over the proxy's size limit "
-                       "(nginx client_max_body_size, default 1 MB)";
+                       "(nginx client_max_body_size)";
             throw std::runtime_error(msg);
         }
         throw std::runtime_error("upload failed: HTTP " +

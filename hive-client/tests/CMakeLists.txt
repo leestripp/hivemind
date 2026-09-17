@@ -16,3 +16,15 @@ macro(hive_client_test name)
 endmacro()
 
 hive_client_test(test_text_utils)
+
+# Upload wire-format regression (2026-09-17 locale/Content-Length bug) —
+# needs ApiClient + an in-process OmniNet server, so not the pure-helper
+# macro.
+add_executable(test_upload_wire_format test_upload_wire_format.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../src/ApiClient.cpp)
+target_include_directories(test_upload_wire_format PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(test_upload_wire_format PRIVATE
+    hive_client_core OmniNet nlohmann_json::nlohmann_json)
+target_compile_options(test_upload_wire_format PRIVATE -UNDEBUG)
+add_test(NAME test_upload_wire_format COMMAND test_upload_wire_format)
