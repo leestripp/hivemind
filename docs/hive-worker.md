@@ -1,4 +1,4 @@
-# hive-worker (v2) -- fleet manager + comms router
+# hive-worker — fleet manager + comms router
 
 A hive-worker runs on any Linux machine (including the hive-server host
 itself, for always-online agents) and owns everything compute: podman

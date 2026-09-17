@@ -1,4 +1,4 @@
-# hive-server API (v2)
+# hive-server API
 
 The hub is a comms router. Its API serves the client (GTK app and web UI)
 and the workers' control plane. All endpoints require a Bearer API key
@@ -12,6 +12,7 @@ except `/api/health`.
 | `GET /api/threads/:id/messages?after=` | incremental poll |
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
+| `POST /api/threads/:id/cancel` | cancel in-flight turns + mute agent fan-in on the thread (~10 min) — the right-click Stop path |
 | `POST /api/threads/:id/attachments` | user upload into the shared attachment store |
 | `GET /api/files/download?path=[&worker=]` | attachment/file download (image MIME inline — Phase 34); `worker` routes to a worker-hosted store (Phase 35 agent attachments) |
 

@@ -1,4 +1,4 @@
-# ⚡ HiveMind 2.0
+# ⚡ HiveMind
 
 ![HiveMind](resources/banner.png)
 
@@ -11,6 +11,7 @@ and only come back when they need your approval.
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2026.04)-orange)
+![Version](https://img.shields.io/badge/version-0.9.5-green)
 
 ---
 
@@ -86,7 +87,7 @@ automatically.
 
 ### Models
 
-LLM config is **worker-owned** in v2: each hive-worker keeps its own
+LLM config is **worker-owned**: each hive-worker keeps its own
 `~/.local/share/hive-worker/models.json` (catalog) + `secrets.json`
 (credentials, 0600) and injects them into agents as spawn env. The hub
 holds no keys; `GET /api/models` returns the union of connected workers'

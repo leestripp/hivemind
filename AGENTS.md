@@ -9,14 +9,14 @@ the HiveMind repository. Read it before making changes.
 
 ## Project Overview
 
-**HiveMind 2.0** is a self-hosted team of always-on AI agents for Linux.
+**HiveMind** is a self-hosted team of always-on AI agents for Linux.
 Users create named, persistent agent "teammates," chat with them in
 threads, and hand off real work. Agents run inside rootless **podman**
 containers (with passwordless sudo as user `hive`), remember everything,
 share files, and park commands in an approval queue when
 `require_approval` is set.
 
-**v2 architecture (see `docs/design.md`):**
+**Architecture (see `docs/design.md`):**
 
 - **The brain lives where the work is** — agents (hive-brain) run *inside*
   containers on worker machines; skills, MCP servers, shell access and
@@ -89,7 +89,7 @@ cmake --build build --target lint-fix   # auto-fix
 Install: `cmake --install build` (default prefix `~/.local`).
 
 Runtime: server API on **:8421**, worker WebSocket channel on **:8423**
-(MCP servers run in-container in v2 — there is no hub-side bridge).
+(MCP servers run in-container — there is no hub-side bridge).
 Enroll a worker with
 `hive-server enroll-worker <name>`; connect with
 `hive-worker --server wss://<server> --key hmwk_… --name <name>`
@@ -186,7 +186,7 @@ Key architectural mapping:
 
 | File | Contents |
 |---|---|
-| `docs/design.md` | v2 architecture deep-dive (read first for big changes) |
+| `docs/design.md` | Architecture deep-dive (read first for big changes) |
 | `docs/api.md` | REST API reference |
 | `docs/hive-worker.md` | Worker enrollment, channel protocol, exec/screen ops |
 | `docs/deploy.md` | VPS deployment, systemd, TLS, lockdown |

@@ -1,4 +1,4 @@
-# Deployment (v2)
+# Deployment
 
 > Operational runbook (per-rig commands, verification gates, pitfalls):
 > the `deploy-hivemind` agent skill (`.agents/skills/deploy-hivemind/SKILL.md`).
@@ -27,7 +27,7 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
 - Config `server.json`: port, worker channel port, auth keys.
 - TLS: terminate at the reverse proxy in front (the client speaks HTTPS
   to the proxy; the hub itself is plain HTTP on localhost).
-- v2: no hive-brain, no LLM keys, no podman on the hub host (unless it
+- The hub runs no hive-brain, holds no LLM keys, needs no podman (unless it
   also runs a worker).
 
 ## hive-worker

@@ -131,8 +131,8 @@ curl -s http://127.0.0.1:8481/ui/messages    # poll until the reply renders
 (The `/ui/action/theme` endpoint was removed in Phase 37 — the client
 now follows the GNOME system style and has no in-app toggle.)
 
-## v2 note
+## Note
 
-The UiApi is unchanged in v2 — it drives the local client UI for headless
+The UiApi drives the local client UI for headless
 tests (xvfb). The client's SERVER-side API surface also keeps its v1
 shape (threads/messages/roster); only the hub's internals changed.

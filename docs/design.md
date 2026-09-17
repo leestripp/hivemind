@@ -1,8 +1,8 @@
-# HiveMind design (v2, 2026-08-29)
+# HiveMind design (2026-08-29)
 
 HiveMind is a team of persistent AI agents that live in containers on
 worker machines, with a central communications hub and a native GTK4
-client. This document describes the v2 architecture — see Plan.md for the
+client. This document describes the current architecture — see Plan.md for the
 migration phases.
 
 ## Principles
@@ -106,3 +106,35 @@ keepAliveTimeout=0, per-connection writer queues) are in
 6. Worker relays events up the channel; hub stores the reply as a
    message; the client's poll picks it up and renders (images download
    through the hub's file endpoint).
+
+## Chat fan-in storm gates (Phase 65)
+
+Agent-to-agent fan-in is what makes threads collaborative — and what can
+wedge the fleet when two agents politeness-loop. Containment lives
+entirely hub-side (`ChatService`):
+
+- **Mutes (65a)** — right-click Stop / `POST /api/threads/:id/cancel`
+  mutes the affected agents (and thread) for ~10 min: generation>0
+  fan-in tasks to muted targets are dropped and logged
+  (`[chat] fan-in dropped (muted)`).
+- **Circuit breaker (65b)** — >20 fan-ins in a 300 s window per thread
+  trips the thread: further fan-ins dropped, one system message
+  announced (`[chat] circuit breaker TRIPPED`).
+- **Acks never fan (65c)** — `fanin_is_ack_only` (FanInPolicy.cpp)
+  classifies pure acknowledgments; they POST to the thread but never
+  wake the peer. This makes one-line closes free and is why the agent
+  prompt (Phase 65j) tells directly-addressed agents to close visibly
+  instead of staying silent.
+- **Mention-gating (65h)** — in threads with >2 agents, an agent reply
+  only fans to agents it explicitly mentions (roster-name match);
+  2-agent threads keep broadcast.
+- **Turn lifecycle (65g/65i/65j)** — agent-side, the set_status-only
+  breaker ends turns whose only tool calls are `set_status` (the
+  models' normal exit idiom). Output is NEVER wiped (65g reverted same
+  day — it ate legitimate replies); clean Done/Idle exits log INFO.
+
+Diagnostic shortcuts: thread turn state via
+`GET /api/threads/:id/activity`; what a model ACTUALLY emitted in its
+own `~/.local/share/hive-worker/workspace/.hive-agent/<Name>/messages.json`
+on the worker host. Agents confabulate receipt of peer messages — trust
+the DB (threads.db), not their claims.

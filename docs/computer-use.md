@@ -1,4 +1,4 @@
-# Computer use (v2)
+# Computer use
 
 Agents that need a real browser (logins, JS-heavy sites, captchas a human
 must pass) get one on their WORKER: an on-demand desktop stack in the
@@ -45,5 +45,24 @@ desktop state from automation.
 Implementation detail from v1 that carries over: the browser container
 runs on the same podman host as the agent's container and shares its
 network namespace, so the agent's browser automation tools connect
-directly (localhost CDP) — in v2 the agent IS in that container, making
+directly (localhost CDP) — here the agent IS in that container, making
 this even simpler.
+
+## Screen image pinning (operational)
+
+`screen_ctl start` writes a marker file `screen-<agent-uuid>` in the
+worker's data dir (`~/.local/share/hive-worker/`); `stop` removes it.
+`ensure_container` honours the marker so the fleet drift-check never
+"corrects" a screen container back onto `:latest` mid-session, and a
+stopped screen container comes back on the desktop image after a worker
+restart.
+
+Gotcha (2026-09-17): if the marker vanishes while the container is
+running (e.g. a watchdog cleans the session when containers are
+stopped externally), the next drift-recreate silently puts the agent on
+`:latest` — and self-perpetuates via the container's `Config.Image`.
+Symptom: the agent's screen/browser tools break. Restore with
+`POST /api/agents/:id/screen/start` (rewrites the marker, recreates on
+`:browser`); the call can 502 mid-recreate when the port check races
+the recreate — the marker is already written at that point, so just
+call it again.

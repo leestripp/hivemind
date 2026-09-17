@@ -1,4 +1,4 @@
-# Containers (v2) — the agent's home
+# Containers — the agent's home
 
 Every HiveMind agent lives in a podman container on its worker. The
 container is not a sandbox we reach into — it is where the agent (the

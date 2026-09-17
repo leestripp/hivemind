@@ -1,7 +1,7 @@
-# Skills (v2) — one library, everywhere
+# Skills — one library, everywhere
 
 Skills are Anthropic-style capability packages (SKILL.md + scripts and
-resources). In v2 the hub owns the canonical library and every agent sees
+resources). The hub owns the canonical library and every agent sees
 the same skills — because the skill files sit at hive-brain' known global
 location inside every container.
 
@@ -33,6 +33,6 @@ location inside every container.
 ## Why this just works now
 
 In v1 the brain was on the server and skill SCRIPTS had to execute in a
-remote container — hence streaming sync and symlink surgery. In v2 the
+remote container — hence streaming sync and symlink surgery. The
 brain is in the container, next to `/skills`. A skill that says "run
 `render.sh`" works: the script, the shell, and the agent are one place.

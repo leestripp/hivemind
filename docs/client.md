@@ -1,4 +1,4 @@
-# hive-client (v2) — GTK4/gtkmm4 native app
+# hive-client — GTK4/gtkmm4 native app
 
 The client design is solid and carries over from v1 unchanged in shape:
 it talks ONLY to the hive-server hub over HTTPS (Bearer key from
@@ -40,4 +40,4 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
 - UiApi (`HIVEMIND_UI_PORT`, default 8481): headless control for tests —
   see client_api.md.
 - The client never sees containers, MCP, or LLM credentials — those live
-  on the worker side in v2.
+  on the worker side.
