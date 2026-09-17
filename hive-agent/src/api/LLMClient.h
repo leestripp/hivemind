@@ -207,7 +207,7 @@ private:
      * return AgentState::DONE WITHOUT injecting another recovery message.
      */
     bool fatal_breaker_should_end_turn(const std::string& signature);
-    bool status_only_breaker_should_end_turn();  // §IdleExitBreaker
+    bool status_only_breaker_should_end_turn(bool exit_requested);  // §IdleExitBreaker
 
     // §State Machine: LLM-driven transitions (via the `set_status` tool)
     // are reported through this callback so the owning AgentImpl can keep

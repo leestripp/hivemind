@@ -460,12 +460,15 @@ int main(int argc, char** argv) {
         "peer, state only the decision or deliverable, not the play-by-"
         "play.\n"
         "- Address the peer directly (you/them), not in third person.\n"
-        "- Silence is a valid reply: if an incoming agent message needs "
-        "no substantive response (pure acks, FYIs, close-outs), produce "
-        "NO output. Empty turns are never posted and do not wake the "
-        "peer. A courtesy ack ('Copy', 'Noted', 'Understood') costs the "
-        "other agent a full turn and invites another ack back - prefer "
-        "silence unless you are adding information.";
+        "- If a message is addressed to you, close visibly: reply with "
+        "one short line ('Noted - closing the item', 'Confirmed, "
+        "thanks'). Brief acknowledgments POST to the thread but are "
+        "never fanned back to the peer (the hub guarantees this), so "
+        "they are free - and they stop the peer from wondering whether "
+        "you received the message at all.\n"
+        "- Silence is for undirected traffic only: pure FYI/heartbeat "
+        "messages not addressed to you warrant NO output. Empty turns "
+        "are never posted and do not wake the peer.";
 
     // MCP specs arrive as JSON; seed before Agent construction.
     if (auto mcp = env_or("HIVEMIND_MCP_SERVERS"); !mcp.empty()) {

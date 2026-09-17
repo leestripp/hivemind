@@ -1190,16 +1190,26 @@ bool LLMClient::fatal_breaker_should_end_turn(const std::string& signature) {
 // replying set_status("Done") every iteration). Threshold 2 mirrors the
 // fatal breaker: one status-only iteration is a legitimate UI update,
 // two in a row means the model is done and forgot how to say so.
-bool LLMClient::status_only_breaker_should_end_turn() {
+bool LLMClient::status_only_breaker_should_end_turn(bool exit_requested) {
     static constexpr int kMaxConsecutiveStatusOnly = 2;
     ++consecutive_status_only_count_;
     if (consecutive_status_only_count_ >= kMaxConsecutiveStatusOnly) {
-        LOG_ERROR("set_status-only iterations repeated " +
-                  std::to_string(consecutive_status_only_count_) +
-                  " times consecutively - model is trying to exit the "
-                  "loop; ending turn instead of looping. "
-                  "(To end a turn explicitly, call the stop tool.) "
-                  "Turn output is kept and posts normally.");
+        // Phase 65j: set_status(Done) is the models' normal exit idiom —
+        // it fired on nearly every turn fleet-wide at ERROR level,
+        // drowning real errors in the journals. A Done/Idle exit is a
+        // clean turn end (INFO); only a loop of non-exit set_status
+        // calls (state never reaches Done) is worth a warning.
+        if (exit_requested) {
+            LOG_INFO("Model ended turn via set_status(Done) - clean "
+                     "exit; turn output posts normally.");
+        } else {
+            LOG_WARNING("set_status-only iterations repeated " +
+                        std::to_string(consecutive_status_only_count_) +
+                        " times consecutively without reaching Done - "
+                        "model may be stuck exiting the loop; ending "
+                        "turn. (To end a turn explicitly, call the stop "
+                        "tool.) Turn output is kept and posts normally.");
+        }
         // Phase 65g REVERTED (65i, same day): wiping the accumulated turn
         // output destroyed legitimate replies — an iteration carrying
         // reply text + a lone set_status(Done) counts as "status-only",
@@ -2627,6 +2637,7 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
         // If execute_bash was called, we just completed BUILD_TEST
         bool has_build_test = false;
         bool status_only = !tool_calls.empty();
+        bool status_exit_requested = false;   // 65j: set_status(Done/Idle)
         for (const auto& tool_call : tool_calls) {
             // §fix (2026-07-18): guarded lookup — malformed tool_calls
             // (missing function/name) must not throw here.
@@ -2638,6 +2649,26 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
             if (fn == "execute_bash") {
                 has_build_test = true;
             }
+            if (fn == "set_status") {
+                // 65j: is the model asking to exit (state Done/Idle)?
+                // arguments may be a JSON string or an object.
+                try {
+                    json args;
+                    const auto& f = tool_call["function"];
+                    if (f.contains("arguments")) {
+                        if (f["arguments"].is_string())
+                            args = json::parse(
+                                f["arguments"].get<std::string>());
+                        else if (f["arguments"].is_object())
+                            args = f["arguments"];
+                    }
+                    std::string st = args.value("state", "");
+                    for (auto& ch : st) ch = static_cast<char>(
+                        std::tolower(static_cast<unsigned char>(ch)));
+                    if (st == "done" || st == "idle")
+                        status_exit_requested = true;
+                } catch (...) {}
+            }
             if (fn != "set_status") {
                 status_only = false;
             }
@@ -2648,7 +2679,8 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
         // a model stuck trying to exit — end the turn like `stop` would.
         // Tool results were already appended to the history above.
         if (status_only) {
-            if (status_only_breaker_should_end_turn()) {
+            if (status_only_breaker_should_end_turn(
+                    status_exit_requested)) {
                 return AgentState::DONE;
             }
         } else {
