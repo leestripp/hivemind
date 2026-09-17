@@ -1632,14 +1632,17 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                 load_video_attachment(holder, a);
                 continue;
             }
-            const std::string host = a.value("host_path", "");
+            // 2026-09-17: the old chip opened file://host_path — the
+            // WORKER's path, meaningless on this machine, and empty for
+            // agent-originated records (no click handler at all → dead
+            // button). Download via the hub API instead, same as images.
             auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
             chip->add_css_class("flat");
-            chip->set_tooltip_text(host.empty() ? name : host);
-            if (!host.empty())
-                chip->signal_clicked().connect([host] {
-                    Gio::AppInfo::launch_default_for_uri("file://" + host);
-                });
+            chip->set_tooltip_text("Download " + name);
+            const std::string tid = current_thread_;
+            chip->signal_clicked().connect([this, a, tid, chip] {
+                open_file_attachment(chip, a, tid);
+            });
             chips->append(*chip);
             any_chip = true;
         }
@@ -1878,6 +1881,112 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
             }
         });
     });
+}
+
+namespace {
+
+/// Resolve an attachment record to its workspace-relative path, the
+/// producing worker, and the client-side cache file (shared by the image
+/// path, the generic-file chip, and the UiApi download hook).
+void resolve_attachment(const nlohmann::json& att, const std::string& tid,
+                        std::string& rel, std::string& worker,
+                        std::filesystem::path& cache) {
+    const std::string name = att.value("name", "file");
+    worker = att.value("worker", "");
+    rel = att.value("path", "");
+    if (rel.rfind("/workspace/", 0) == 0) rel.erase(0, 11);
+    if (rel.empty()) rel = "attachments/" + tid + "/" + name;
+    cache = std::filesystem::path(Glib::get_user_cache_dir()) /
+            "hivemind-client" / "attachments" / tid / name;
+}
+
+/// Blocking download via the hub API into the client cache.
+/// Returns "" on success, the error otherwise. Call OFF the GTK thread.
+std::string download_to_cache(ApiClient& api, const std::string& rel,
+                              const std::string& worker,
+                              const std::filesystem::path& cache) {
+    namespace fs = std::filesystem;
+    try {
+        std::string bytes = api.download(
+            "/api/files/download?path=" + ApiClient::url_encode(rel) +
+            (worker.empty() ? "" :
+             "&worker=" + ApiClient::url_encode(worker)));
+        std::error_code ec;
+        fs::create_directories(cache.parent_path(), ec);
+        std::ofstream out(cache, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), (std::streamsize)bytes.size());
+        out.close();
+        if (!out || bytes.empty()) return "write failed";
+        return "";
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+}
+
+} // namespace
+
+void HiveWindow::open_file_attachment(Gtk::Button* chip,
+                                      const nlohmann::json& att,
+                                      const std::string& tid) {
+    namespace fs = std::filesystem;
+    std::string rel, worker;
+    fs::path cache;
+    resolve_attachment(att, tid, rel, worker, cache);
+    const std::string name = att.value("name", "file");
+
+    std::error_code ec;
+    if (fs::is_regular_file(cache, ec) && fs::file_size(cache, ec) > 0) {
+        Gio::AppInfo::launch_default_for_uri("file://" + cache.string());
+        return;
+    }
+    chip->set_sensitive(false);
+    chip->set_label("\u23F3 " + name);   // hourglass while downloading
+    set_status("Downloading " + name + "\u2026");
+    auto weak = std::make_shared<Gtk::Button*>(chip);
+    chip->signal_destroy().connect([weak] { *weak = nullptr; });
+    const std::string cache_s = cache.string();
+    run_async([this, rel, worker, cache, cache_s, name, weak] {
+        const std::string err = download_to_cache(api_, rel, worker, cache);
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, cache_s, name, weak, err] {
+            if (!alive_) return;
+            if (*weak) {
+                (*weak)->set_sensitive(true);
+                (*weak)->set_label("\U0001F4CE " + name);
+            }
+            if (err.empty()) {
+                set_status("Downloaded " + name);
+                Gio::AppInfo::launch_default_for_uri("file://" + cache_s);
+            } else {
+                set_status("Download failed: " + err);
+            }
+        });
+        dispatcher_.emit();
+    });
+}
+
+nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
+    // UiApi thread: find the record on the GTK thread, then block on the
+    // download HERE (never network on the GTK thread).
+    auto found = invoke_on_ui([this, name] {
+        for (auto it = rendered_.rbegin(); it != rendered_.rend(); ++it)
+            if ((*it)["attachments"].is_array())
+                for (auto& a : (*it)["attachments"])
+                    if (a.value("name", "") == name)
+                        return nlohmann::json{{"att", a},
+                                              {"tid", current_thread_}};
+        return nlohmann::json{{"error", "no attachment named: " + name}};
+    });
+    if (found.contains("error")) return found;
+    std::string rel, worker;
+    std::filesystem::path cache;
+    resolve_attachment(found["att"], found.value("tid", ""), rel, worker,
+                       cache);
+    const std::string err = download_to_cache(api_, rel, worker, cache);
+    if (!err.empty()) return nlohmann::json{{"error", err}};
+    return nlohmann::json{{"cache", cache.string()},
+                          {"rel", rel},
+                          {"size", std::filesystem::file_size(cache)}};
 }
 
 // -- Phase E: inline video attachments -----------------------------------

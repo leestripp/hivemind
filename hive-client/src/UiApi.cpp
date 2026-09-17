@@ -138,6 +138,17 @@ void UiApi::start() {
             else send_json(resp, r);
         });
 
+    // Download an attachment from the current thread into the client
+    // cache — the generic-file chip's path, minus the open-in-app step.
+    server_->post("/ui/action/download-attachment",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            std::string name = body_json(req).value("name", "");
+            if (name.empty()) { send_err(resp, 400, "name required"); return; }
+            json r = w.ui_download_attachment(name);
+            if (r.contains("error")) send_err(resp, 404, r["error"]);
+            else send_json(resp, r);
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());

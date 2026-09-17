@@ -40,6 +40,7 @@ public:
     nlohmann::json ui_select_agent(const std::string& name_or_id);
     nlohmann::json ui_send(const std::string& body);
     nlohmann::json ui_attach(const std::string& path);  // POST /ui/action/attach
+    nlohmann::json ui_download_attachment(const std::string& name);
     /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
     void connect_with_credentials(const std::string& url, const std::string& key,
                                   std::function<void(std::string)> done);
@@ -159,6 +160,10 @@ private:
                             const std::string& caption);
     // Phase E: video attachments (thumbnail + click-to-play + external open)
     void load_video_attachment(Gtk::Box* holder, const nlohmann::json& att);
+    /// Generic (non-image/video) attachment chip: download via the hub
+    /// API into the client cache, then open locally.
+    void open_file_attachment(Gtk::Button* chip, const nlohmann::json& att,
+                          const std::string& tid);
     void show_video_widget(Gtk::Box* holder, const std::string& file,
                            const std::string& name);
     void set_status(const std::string& text);
