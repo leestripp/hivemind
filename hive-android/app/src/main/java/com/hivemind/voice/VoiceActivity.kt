@@ -56,6 +56,10 @@ class VoiceActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_voice)
 
+        // A voice session must never let the screen time out: locking
+        // pauses us, which cancels recording / kills the audio reply.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         agentId = intent.getStringExtra(EXTRA_AGENT_ID).orEmpty()
         findViewById<TextView>(R.id.agentNameText).text =
             intent.getStringExtra(EXTRA_AGENT_NAME).orEmpty()
@@ -69,8 +73,14 @@ class VoiceActivity : Activity() {
         stt = SttEngine(
             this,
             onLevel = { if (phase == Phase.LISTENING) sphere.setLevel(it) },
-            onStateChange = { },
-            onError = { msg ->
+            onTranscript = { text ->
+                if (phase == Phase.LISTENING) {
+                    // Live transcript (tail) so the user sees capture is alive.
+                    status.text = if (text.isEmpty()) "Listening…"
+                    else "…" + text.takeLast(160)
+                }
+            },
+            onFatal = { msg ->
                 if (phase == Phase.LISTENING) toIdle(msg)
             },
         )
@@ -137,7 +147,7 @@ class VoiceActivity : Activity() {
         talk.text = "SEND"
         talk.setBackgroundResource(R.drawable.btn_talk_active)
         cancel.visibility = View.VISIBLE
-        status.text = "Listening… tap SEND when done"
+        status.text = "Listening…"
         stt.start()
     }
 

@@ -26,10 +26,13 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──re
                      └──── ✕ cancel anywhere ────────┴──▶ IDLE
 ```
 
-- LISTENING: partial transcript accumulates; recognizer may auto-end on
-  silence — the transcript is kept, tap SEND to use it.
+- LISTENING: continuous capture — the recognizer re-arms itself on every
+  silence auto-end, so recording runs until YOU tap SEND (send it) or ✕
+  (discard it). Live transcript tail shows in the status line.
 - THINKING: polls activity+messages every 700 ms (3 min watchdog).
 - SPEAKING: ✕ stops TTS and posts thread cancel.
+- The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
+  the phone can't lock mid-rant, mid-think, or mid-reply.
 
 ## Build
 
