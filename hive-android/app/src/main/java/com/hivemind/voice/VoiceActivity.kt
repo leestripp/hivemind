@@ -53,6 +53,7 @@ class VoiceActivity : Activity() {
     private val replyParts = StringBuilder()
     private var turnDeadline = 0L
     private var speakAnimator: Runnable? = null
+    private var lastStatusUpdate = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,14 +78,18 @@ class VoiceActivity : Activity() {
             onLevel = { if (phase == Phase.LISTENING) sphere.setLevel(it) },
             onTranscript = { text ->
                 if (phase == Phase.LISTENING) {
-                    // Live transcript (tail) so the user sees capture is alive.
-                    status.text = if (text.isEmpty()) "Listening…"
-                    else "…" + text.takeLast(160)
+                    // Live transcript (tail) so the user sees capture is
+                    // alive — throttled: rapid TextView churn feeds
+                    // accessibility services (TalkBack) event storms.
+                    val now = System.currentTimeMillis()
+                    if (now - lastStatusUpdate > 300) {
+                        lastStatusUpdate = now
+                        status.text = if (text.isEmpty()) "Listening…"
+                        else "…" + text.takeLast(160)
+                    }
                 }
             },
-            onFatal = { msg ->
-                if (phase == Phase.LISTENING) toIdle(msg)
-            },
+            onStopped = { msg -> onEngineStopped(msg) },
         )
         tts = TtsEngine(this) { ui.post { if (phase == Phase.SPEAKING) toIdle("") } }
 
@@ -253,6 +258,21 @@ class VoiceActivity : Activity() {
     private fun stopSpeakAnimator() {
         speakAnimator?.let { ui.removeCallbacks(it) }
         speakAnimator = null
+    }
+
+    /**
+     * The engine stopped itself (hard error). Never strand the user:
+     * a captured transcript stays sendable; with nothing captured we
+     * just return to idle with the reason on screen.
+     */
+    private fun onEngineStopped(msg: String) {
+        if (phase != Phase.LISTENING) return
+        if (stt.transcript.isNotEmpty()) {
+            status.text = "⚠ $msg — SEND keeps what you have, TALK restarts"
+            // Phase stays LISTENING: SEND posts stt.transcript as-is.
+        } else {
+            toIdle(msg)
+        }
     }
 
     /** Cut the agent's reply short and immediately start recording. */
