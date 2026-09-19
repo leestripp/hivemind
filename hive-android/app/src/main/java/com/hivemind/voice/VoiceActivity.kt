@@ -54,6 +54,7 @@ class VoiceActivity : Activity() {
     private var turnDeadline = 0L
     private var speakAnimator: Runnable? = null
     private var lastStatusUpdate = 0L
+    private var lastTalkClick = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,6 +98,11 @@ class VoiceActivity : Activity() {
         status.text = "Connecting…"
 
         talk.setOnClickListener {
+            // Debounce: a double-fired click (gesture/accessibility
+            // pipeline quirks) would instantly TALK->SEND an empty take.
+            val now = System.currentTimeMillis()
+            if (now - lastTalkClick < 500) return@setOnClickListener
+            lastTalkClick = now
             when (phase) {
                 Phase.IDLE -> maybeStartListening()
                 Phase.LISTENING -> sendTranscript()
@@ -151,7 +157,8 @@ class VoiceActivity : Activity() {
         talk.text = "SEND"
         talk.setBackgroundResource(R.drawable.btn_talk_active)
         cancel.visibility = View.VISIBLE
-        status.text = "Listening…"
+        status.text = if (stt.engineReady) "Listening…"
+        else "Loading speech model…"
         stt.start()
     }
 
@@ -263,12 +270,15 @@ class VoiceActivity : Activity() {
      * just return to idle with the reason on screen.
      */
     private fun onEngineStopped(msg: String) {
-        if (phase != Phase.LISTENING) return
-        if (stt.transcript.isNotEmpty()) {
-            status.text = "⚠ $msg — SEND keeps what you have, TALK restarts"
-            // Phase stays LISTENING: SEND posts stt.transcript as-is.
-        } else {
-            toIdle(msg)
+        when {
+            phase != Phase.LISTENING ->
+                status.text = msg  // e.g. model load failure at idle —
+                                    // never swallow it silently
+            stt.transcript.isNotEmpty() -> {
+                status.text = "⚠ $msg — SEND keeps what you have, TALK restarts"
+                // Phase stays LISTENING: SEND posts stt.transcript as-is.
+            }
+            else -> toIdle(msg)
         }
     }
 

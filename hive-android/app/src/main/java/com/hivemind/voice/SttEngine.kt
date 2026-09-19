@@ -38,6 +38,7 @@ class SttEngine(
 
     @Volatile var transcript: String = ""
         private set
+    val engineReady: Boolean get() = ready
     @Volatile var listening: Boolean = false
         private set
 
@@ -47,6 +48,8 @@ class SttEngine(
 
     @Volatile private var ready = false
     @Volatile private var wantListen = false
+    /** Bumped on every start/stop/discard — stale queued starts no-op. */
+    @Volatile private var session = 0
 
     private var recognizer: OnlineRecognizer? = null
     private var stream: OnlineStream? = null
@@ -83,7 +86,7 @@ class SttEngine(
             recognizer = OnlineRecognizer(config = config)
             ready = true
             Log.i(TAG, "model ready (${dir})")
-            if (wantListen) startCapture()
+            if (wantListen) arm()
         } catch (e: Exception) {
             Log.e(TAG, "model init failed", e)
             ui.post { onStopped("Speech model failed to load: ${e.message}") }
@@ -103,24 +106,32 @@ class SttEngine(
         }
     }
 
-    /** User tapped TALK. */
+    /** User tapped TALK. NEVER a silent no-op: a stale/zombie capture
+     *  gets reset, a not-yet-ready engine (re)loads and arms when done. */
     fun start() {
         wantListen = true
-        if (!ready || listening) return
-        bg.post { startCapture() }
+        if (listening) {
+            Log.w(TAG, "start() found stale capture — resetting")
+            teardownCapture()
+        }
+        if (!ready) {
+            bg.post { if (!ready) initEngine() }
+            return
+        }
+        arm()
+    }
+
+    private fun arm() {
+        val s = ++session
+        bg.post { if (wantListen && s == session && !listening) startCapture() }
     }
 
     /** User tapped SEND: stop capturing, finalize, keep the transcript. */
     fun stop() {
         wantListen = false
+        session++
         if (!listening) return
-        listening = false
-        try {
-            captureThread?.join(2_000)
-        } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
-        captureThread = null
-        record?.let { r -> runCatching { r.stop() }; r.release() }
-        record = null
+        teardownCapture()
         // Decode whatever is still buffered, then take the final result.
         val rec = recognizer; val st = stream
         if (rec != null && st != null) {
@@ -134,11 +145,8 @@ class SttEngine(
         Log.i(TAG, "stop (user) — transcript ${transcript.length} chars")
     }
 
-    /** User tapped CANCEL: abort and discard. */
-    fun discard() {
-        wantListen = false
-        transcript = ""
-        if (!listening) return
+    /** Kill the capture thread + mic. Idempotent. */
+    private fun teardownCapture() {
         listening = false
         try {
             captureThread?.join(2_000)
@@ -146,6 +154,15 @@ class SttEngine(
         captureThread = null
         record?.let { r -> runCatching { r.stop() }; r.release() }
         record = null
+    }
+
+    /** User tapped CANCEL: abort and discard. */
+    fun discard() {
+        wantListen = false
+        session++
+        transcript = ""
+        if (!listening) return
+        teardownCapture()
         Log.i(TAG, "discard (user)")
     }
 
