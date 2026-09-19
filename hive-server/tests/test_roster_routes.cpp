@@ -55,7 +55,7 @@ int main() {
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
-    HubRouter hub{agents, threads, wchannel, approvals};
+    HubRouter hub{agents, threads, wchannel, approvals, routines};
     ChatService chat{agents, threads, hub};
 
     OmniNet::HTTP::Server::Config cfg;
