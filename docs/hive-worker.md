@@ -50,7 +50,7 @@ Hub -> worker:
 | op | payload | purpose |
 |----|---------|---------|
 | `welcome` / `error` | | handshake reply |
-| `task` | id, agent_id, thread_id, text | run one agent turn |
+| `task` | id, agent_id, thread_id, text, roster, user_inbox, disabled_skills, llm | run one agent turn (roster/user_inbox feed the agent's list_agents and read_user_inbox tools) |
 | `cancel` | agent_id | abort the in-flight turn |
 | `approval_resp` | id, allow | user's approve/deny for a pending tool call |
 | `agent_spawn` | agent_id, name, model, system_prompt, auto_approve, mcp_servers | create/ensure container + exec hive-agent (idempotent: "already running") |

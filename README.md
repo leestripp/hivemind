@@ -102,7 +102,10 @@ catalogs, which is what the client's New Agent dialog offers. Blank model
 ```
 hive-server/   C++23 + OmniNet server: roster, threads, approvals,
                routines, containers, worker channel, web UI (web/dist)
+hive-agent/    the agent runtime itself (runs in worker containers)
 hive-client/   GTK4/gtkmm4 native client
+hive-android/  voice-only Android client — NDK GL sphere, on-device
+               STT, streaming TTS, inbox watch (docs/android.md)
 hive-worker/   Remote executor daemon — runs agent containers on other
                machines, driven over a WebSocket channel (Phase 30)
 */tests/       per-app ctest suites
@@ -149,6 +152,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Global skill library design — symlinks, local/global split |
 | `docs/client.md` | GTK4 native client — dialogs, menus, theming |
+| `docs/android.md` | Voice-only Android app — sphere, on-device STT, streaming TTS, inbox watch |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
 | `docs/containers.md` | Podman sandboxing |
 | `docs/hive-worker.md` | Distributed workers — enroll, channel protocol, exec/screen ops |
