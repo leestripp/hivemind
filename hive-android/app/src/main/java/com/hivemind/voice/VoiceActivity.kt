@@ -178,7 +178,7 @@ class VoiceActivity : Activity() {
 
         io.execute {
             try {
-                api.postMessage(threadId, text)
+                api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
                 ui.post {
                     status.text = "Thinking…"
                     ui.postDelayed(pollTick, POLL_MS)
@@ -224,8 +224,9 @@ class VoiceActivity : Activity() {
     }
 
     private fun speakReply() {
-        val text = replyParts.toString()
+        val text = SpeechText.forSpeech(replyParts.toString())
         replyParts.clear()
+        if (text.isEmpty()) { toIdle(""); return }
         phase = Phase.SPEAKING
         sphere.setSphereState(SphereState.SPEAKING)
         status.text = ""

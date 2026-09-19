@@ -30,6 +30,9 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──re
   silence auto-end, so recording runs until YOU tap SEND (send it) or ✕
   (discard it). Live transcript tail shows in the status line.
 - THINKING: polls activity+messages every 700 ms (3 min watchdog).
+- Every message carries a voice-style instruction (plain flowing prose,
+  no markdown/lists/code/links — it is read aloud); replies pass a
+  speech sanitizer (SpeechText.forSpeech) as a safety net before TTS.
 - SPEAKING: big button = interrupt — cuts the reply, cancels the turn,
   and drops straight back into recording; ✕ stops to idle.
 - The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
