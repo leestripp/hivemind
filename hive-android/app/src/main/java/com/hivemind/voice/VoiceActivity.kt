@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -14,14 +15,18 @@ import java.util.concurrent.Executors
 /**
  * Voice session with one agent.
  *
- * Big round button: tap once to talk, tap again to send.
- * Small side button: cancel (discard the recording / stop the turn).
+ * Big round button: tap once to talk, tap again to send; while the agent
+ * speaks it becomes an interrupt (cut off → straight back to recording).
+ * Small side button: cancel / do not send.
  *
- * IDLE ──tap──▶ LISTENING ──tap──▶ THINKING ──reply──▶ SPEAKING ──done──▶ IDLE
- *                  │                  │                  │ tap: cut off
- *                  └─────── cancel (✕) anywhere ───────┴───▶ IDLE   │
- *                                                                   ▼
- *                                                              LISTENING
+ * The reply is STREAMED to TTS: while the turn runs, the hub's live
+ * partial (task_delta stream, same source as the desktop client's live
+ * chunks) is sentence-chunked and queued to TextToSpeech, so the agent
+ * starts speaking from its first sentence.
+ *
+ * IDLE ──tap──▶ LISTENING ──tap──▶ THINKING ──first sentence──▶ STREAMING ──speech done──▶ IDLE
+ *                  │                    │                          │ tap: cut off
+ *                  └────── ✕ cancel anywhere ──────────────────────┴──▶ IDLE
  */
 class VoiceActivity : Activity() {
 
@@ -29,12 +34,13 @@ class VoiceActivity : Activity() {
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_AGENT_NAME = "agent_name"
         const val EXTRA_AGENT_AVATAR = "agent_avatar"
+        private const val TAG = "HiveVoice"
         private const val REQ_AUDIO = 42
         private const val POLL_MS = 700L
         private const val TURN_TIMEOUT_MS = 180_000L
     }
 
-    private enum class Phase { SETUP, IDLE, LISTENING, THINKING, SPEAKING }
+    private enum class Phase { SETUP, IDLE, LISTENING, THINKING, STREAMING }
 
     private val io = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
@@ -51,8 +57,16 @@ class VoiceActivity : Activity() {
     private var agentId = ""
     private var threadId = ""
     private var lastMessageId = ""
-    private val replyParts = StringBuilder()
+    private val finalReply = StringBuilder()
+
+    // -- streaming-speech state ---------------------------------------------
+    /** The reply text [spokenLen] refers to (live partial while busy). */
+    private var streamText = ""
+    /** Chars of [streamText] already queued to TTS. */
+    private var spokenLen = 0
+    private var turnDone = false
     private var turnDeadline = 0L
+
     private var speakAnimator: Runnable? = null
     private var lastStatusUpdate = 0L
     private var lastTalkClick = 0L
@@ -84,8 +98,7 @@ class VoiceActivity : Activity() {
             onTranscript = { text ->
                 if (phase == Phase.LISTENING) {
                     // Live transcript (tail) so the user sees capture is
-                    // alive — throttled: rapid TextView churn feeds
-                    // accessibility services (TalkBack) event storms.
+                    // alive — throttled to cut accessibility event churn.
                     val now = System.currentTimeMillis()
                     if (now - lastStatusUpdate > 300) {
                         lastStatusUpdate = now
@@ -96,21 +109,24 @@ class VoiceActivity : Activity() {
             },
             onStopped = { msg -> onEngineStopped(msg) },
         )
-        tts = TtsEngine(this) { ui.post { if (phase == Phase.SPEAKING) toIdle("") } }
+        tts = TtsEngine(this) {
+            ui.post {
+                if (phase == Phase.STREAMING && turnDone) toIdle("")
+            }
+        }
 
         talk.isEnabled = false
         status.text = "Connecting…"
 
         talk.setOnClickListener {
-            // Debounce: a double-fired click (gesture/accessibility
-            // pipeline quirks) would instantly TALK->SEND an empty take.
+            // Debounce: a double-fired click would TALK->SEND an empty take.
             val now = System.currentTimeMillis()
             if (now - lastTalkClick < 500) return@setOnClickListener
             lastTalkClick = now
             when (phase) {
                 Phase.IDLE -> maybeStartListening()
                 Phase.LISTENING -> sendTranscript()
-                Phase.SPEAKING -> interruptAndTalk()
+                Phase.STREAMING -> interruptAndTalk()
                 else -> Unit  // SETUP/THINKING: disabled
             }
         }
@@ -139,7 +155,10 @@ class VoiceActivity : Activity() {
 
     private fun toIdle(message: String) {
         phase = Phase.IDLE
-        replyParts.clear()
+        finalReply.clear()
+        streamText = ""
+        spokenLen = 0
+        turnDone = false
         sphere.setSphereState(SphereState.IDLE)
         sphere.setLevel(0f)
         stopSpeakAnimator()
@@ -196,9 +215,23 @@ class VoiceActivity : Activity() {
         }
     }
 
+    /** First chunk of the reply is being spoken: go green, stay receiving. */
+    private fun enterStreaming() {
+        phase = Phase.STREAMING
+        sphere.setSphereState(SphereState.SPEAKING)
+        talk.text = "TALK"          // interrupt-into-recording
+        talk.setBackgroundResource(R.drawable.btn_talk)
+        talk.isEnabled = true
+        cancel.visibility = View.VISIBLE
+        status.text = ""
+        startSpeakAnimator()
+    }
+
+    // -- Turn polling + streamed speech ---------------------------------------
+
     private val pollTick = object : Runnable {
         override fun run() {
-            if (phase != Phase.THINKING) return
+            if (phase != Phase.THINKING && phase != Phase.STREAMING) return
             if (System.currentTimeMillis() > turnDeadline) {
                 toIdle("Timed out waiting for the agent")
                 return
@@ -209,19 +242,16 @@ class VoiceActivity : Activity() {
                     for (m in api.messagesAfter(threadId, lastMessageId)) {
                         lastMessageId = m.id
                         if (m.senderKind == "agent" && m.body.isNotBlank()) {
-                            if (replyParts.isNotEmpty()) replyParts.append(' ')
-                            replyParts.append(m.body.trim())
+                            if (finalReply.isNotEmpty()) finalReply.append(' ')
+                            finalReply.append(m.body.trim())
                         }
                     }
-                    val err = act.error
-                    when {
-                        err.isNotEmpty() ->
-                            ui.post { toIdle("Agent error: $err") }
-                        !act.busy && replyParts.isNotEmpty() ->
-                            ui.post { speakReply() }
-                        else ->
-                            ui.postDelayed(this, POLL_MS)
-                    }
+                    // finalReply + activity state converge on this thread;
+                    // hand a snapshot to the UI side.
+                    val busy = act.busy
+                    val error = act.error
+                    val partial = act.partial
+                    ui.post { handleTick(busy, error, partial) }
                 } catch (e: Exception) {
                     // Transient hub/network blip — keep polling until deadline.
                     ui.postDelayed(this, POLL_MS)
@@ -230,54 +260,79 @@ class VoiceActivity : Activity() {
         }
     }
 
-    private fun speakReply() {
-        val text = SpeechText.forSpeech(replyParts.toString())
-        replyParts.clear()
-        if (text.isEmpty()) { toIdle(""); return }
-        phase = Phase.SPEAKING
-        sphere.setSphereState(SphereState.SPEAKING)
-        status.text = ""
-        // Big button is live during the reply: tap to cut the agent off
-        // and go straight back to recording.
-        talk.text = "TALK"
-        talk.setBackgroundResource(R.drawable.btn_talk)
-        talk.isEnabled = true
-        cancel.visibility = View.VISIBLE
-        startSpeakAnimator()
-        tts.speak(text)
-    }
-
-    /** While the agent talks, feed the sphere a synthetic voice envelope. */
-    private fun startSpeakAnimator() {
-        stopSpeakAnimator()
-        val start = System.nanoTime()
-        val r = object : Runnable {
-            override fun run() {
-                if (phase != Phase.SPEAKING) return
-                val t = (System.nanoTime() - start) / 1_000_000_000f
-                sphere.setLevel(tts.level(t))
-                ui.postDelayed(this, 50)
-            }
+    private fun handleTick(busy: Boolean, error: String, partial: String) {
+        if (phase != Phase.THINKING && phase != Phase.STREAMING) return
+        if (error.isNotEmpty()) {
+            toIdle("Agent error: $error")
+            return
         }
-        speakAnimator = r
-        ui.post(r)
-    }
-
-    private fun stopSpeakAnimator() {
-        speakAnimator?.let { ui.removeCallbacks(it) }
-        speakAnimator = null
+        // The text the spoken length refers to: the live partial while the
+        // turn runs, the final message body once it's stored.
+        var next = if (busy) partial
+        else finalReply.toString().ifEmpty { partial }
+        if (!next.startsWith(streamText)) {
+            // Source changed identity (new turn / divergent text) — start
+            // its speech tracking over rather than losing text.
+            if (streamText.isNotEmpty() && spokenLen > 0) {
+                Log.d(TAG, "stream source changed (${streamText.length} -> ${next.length})")
+            }
+            streamText = next
+            spokenLen = 0
+        } else {
+            streamText = next
+        }
+        drainSpeech(flush = !busy)
+        if (busy) {
+            ui.postDelayed(pollTick, POLL_MS)
+        } else {
+            turnDone = true
+            if (tts.outstanding == 0) toIdle("")
+        }
     }
 
     /**
-     * The engine stopped itself (hard error). Never strand the user:
-     * a captured transcript stays sendable; with nothing captured we
-     * just return to idle with the reason on screen.
+     * Queue newly-completed sentences of [streamText] to TTS. While the
+     * turn is still running only text up to a SAFE sentence boundary is
+     * spoken (the tail may be mid-sentence and still change); [flush]
+     * speaks the remainder once the turn is done.
      */
+    private fun drainSpeech(flush: Boolean) {
+        if (flush) {
+            val tail = streamText.substring(spokenLen).trim()
+            if (tail.isNotEmpty()) queueSpeech(tail)
+            spokenLen = streamText.length
+            return
+        }
+        var end = -1
+        for (i in streamText.length - 1 downTo spokenLen + 1) {
+            val ch = streamText[i - 1]
+            if ((ch == '.' || ch == '!' || ch == '?' || ch == ':' ||
+                        ch == ';' || ch == '\n') && streamText[i].isWhitespace()) {
+                end = i
+                break
+            }
+        }
+        if (end > spokenLen) {
+            val chunk = streamText.substring(spokenLen, end).trim()
+            if (chunk.isNotEmpty()) queueSpeech(chunk)
+            spokenLen = end
+        }
+    }
+
+    private fun queueSpeech(text: String) {
+        val clean = SpeechText.forSpeech(text)
+        if (clean.isEmpty()) return
+        Log.d(TAG, "speak chunk: ${clean.take(40)}…")
+        tts.speakQueued(clean)
+        if (phase == Phase.THINKING) enterStreaming()
+    }
+
+    // -- Interrupt / cancel ---------------------------------------------------
+
     private fun onEngineStopped(msg: String) {
         when {
             phase != Phase.LISTENING ->
-                status.text = msg  // e.g. model load failure at idle —
-                                    // never swallow it silently
+                status.text = msg  // never swallow an idle-phase failure
             stt.transcript.isNotEmpty() -> {
                 status.text = "⚠ $msg — SEND keeps what you have, TALK restarts"
                 // Phase stays LISTENING: SEND posts stt.transcript as-is.
@@ -297,8 +352,7 @@ class VoiceActivity : Activity() {
     private fun cancelCurrent() {
         when (phase) {
             Phase.LISTENING -> stt.discard()
-            Phase.THINKING -> io.execute { api.cancel(threadId) }
-            Phase.SPEAKING -> {
+            Phase.THINKING, Phase.STREAMING -> {
                 tts.stop()
                 io.execute { api.cancel(threadId) }
             }
@@ -307,7 +361,29 @@ class VoiceActivity : Activity() {
         if (phase != Phase.SETUP) toIdle("Cancelled")
     }
 
-    // -- Permission ---------------------------------------------------------
+    // -- Sphere level while speaking ------------------------------------------
+
+    private fun startSpeakAnimator() {
+        stopSpeakAnimator()
+        val start = System.nanoTime()
+        val r = object : Runnable {
+            override fun run() {
+                if (phase != Phase.STREAMING) return
+                val t = (System.nanoTime() - start) / 1_000_000_000f
+                sphere.setLevel(tts.level(t))
+                ui.postDelayed(this, 50)
+            }
+        }
+        speakAnimator = r
+        ui.post(r)
+    }
+
+    private fun stopSpeakAnimator() {
+        speakAnimator?.let { ui.removeCallbacks(it) }
+        speakAnimator = null
+    }
+
+    // -- Permission -----------------------------------------------------------
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
@@ -322,7 +398,7 @@ class VoiceActivity : Activity() {
         }
     }
 
-    // -- Lifecycle ----------------------------------------------------------
+    // -- Lifecycle --------------------------------------------------------------
 
     override fun onResume() {
         super.onResume()
@@ -331,7 +407,7 @@ class VoiceActivity : Activity() {
 
     override fun onPause() {
         sphere.onPause()
-        if (phase == Phase.LISTENING || phase == Phase.SPEAKING) cancelCurrent()
+        if (phase == Phase.LISTENING || phase == Phase.STREAMING) cancelCurrent()
         super.onPause()
     }
 

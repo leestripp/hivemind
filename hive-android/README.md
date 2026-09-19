@@ -37,19 +37,22 @@ in `assets/avatars/` (regenerate:
 
 ```
 agent list → tap agent → voice screen
-IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──reply──▶ SPEAKING ──▶ IDLE
-                     │                │             │
-                     └──── ✕ cancel anywhere ────────┴──▶ IDLE
+IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──first sentence──▶ STREAMING ──▶ IDLE
+                     │                   │                    │ tap: cut off → LISTENING
+                     └────────── ✕ cancel anywhere ───────────┴──▶ IDLE
 ```
 
 - LISTENING: one continuous capture with no silence detection at all —
   pause to think as long as you like; it ends only when YOU tap SEND
   (send it) or ✕ (discard it). Live transcript tail in the status line.
-- THINKING: polls activity+messages every 700 ms (3 min watchdog).
+- THINKING → STREAMING: the hub's live turn partial (same task_delta
+  stream the desktop client's live chunks come from) is sentence-chunked
+  and queued to TextToSpeech every 700 ms, so the agent starts speaking
+  from its first sentence; the remainder is flushed at turn end.
 - Every message carries a voice-style instruction (plain flowing prose,
   no markdown/lists/code/links — it is read aloud); replies pass a
   speech sanitizer (SpeechText.forSpeech) as a safety net before TTS.
-- SPEAKING: big button = interrupt — cuts the reply, cancels the turn,
+- STREAMING: big button = interrupt — cuts the reply, cancels the turn,
   and drops straight back into recording; ✕ stops to idle.
 - The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
   the phone can't lock mid-rant, mid-think, or mid-reply.

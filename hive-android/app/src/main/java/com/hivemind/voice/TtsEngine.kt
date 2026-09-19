@@ -3,47 +3,59 @@ package com.hivemind.voice
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 
 /**
- * Android platform TextToSpeech wrapper. Speaks the agent reply in one
- * queued utterance; exposes a synthetic level envelope while speaking so
- * the sphere keeps moving with the agent's voice.
+ * Queued-utterance TextToSpeech wrapper for streamed replies.
+ *
+ * VoiceActivity feeds it sentence chunks AS THE AGENT STREAMS THEM
+ * ([speakQueued] → QUEUE_ADD), so the user hears the reply from its
+ * first sentence instead of waiting for the full turn. [onQueueEmpty]
+ * fires once when every queued chunk has finished playing — the signal
+ * to return to idle. Chunks queued before the engine is ready are held
+ * and flushed on init.
  */
 class TtsEngine(
     context: Context,
-    private val onDone: () -> Unit,
+    private val onQueueEmpty: () -> Unit,
 ) : UtteranceProgressListener() {
 
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
     @Volatile var speaking = false
         private set
-    private var pending: String? = null
+    @Volatile var outstanding = 0
+        private set
+    private var seq = 0
+    private val pending = mutableListOf<String>()
 
     init {
         TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setOnUtteranceProgressListener(this)
                 ready = true
-                pending?.let { speak(it) }
-                pending = null
+                val p = pending.toList()
+                pending.clear()
+                p.forEach { speakQueued(it) }
             }
         }.also { tts = it }
     }
 
-    fun speak(text: String) {
+    /** Queue a chunk for speech. Call on the main thread. */
+    fun speakQueued(text: String) {
         val engine = tts
-        if (!ready || engine == null) { pending = text; return }
-        speaking = true
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
+        if (!ready || engine == null) { pending += text; return }
+        outstanding++
+        Log.d(TAG, "queue +${text.length} chars (out=$outstanding)")
+        engine.speak(text, TextToSpeech.QUEUE_ADD, null, "$UTTER_PREFIX${seq++}")
     }
 
+    /** Interrupt: drop everything queued + playing. */
     fun stop() {
-        pending = null
-        if (speaking) {
-            speaking = false
-            tts?.stop()
-        }
+        pending.clear()
+        outstanding = 0
+        speaking = false
+        tts?.stop()
     }
 
     fun destroy() {
@@ -63,21 +75,29 @@ class TtsEngine(
     override fun onStart(utteranceId: String?) { speaking = true }
 
     override fun onDone(utteranceId: String?) {
-        if (utteranceId == UTTERANCE_ID) {
+        if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
+            outstanding--
+            Log.d(TAG, "done (out=$outstanding)")
+        }
+        if (outstanding == 0) {
             speaking = false
-            onDone()
+            onQueueEmpty()
         }
     }
 
     @Deprecated("deprecated in TTS API")
     override fun onError(utteranceId: String?) {
-        if (utteranceId == UTTERANCE_ID) {
+        if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
+            outstanding--
+        }
+        if (outstanding == 0) {
             speaking = false
-            onDone()
+            onQueueEmpty()
         }
     }
 
     companion object {
-        private const val UTTERANCE_ID = "hive-reply"
+        private const val TAG = "HiveTts"
+        private const val UTTER_PREFIX = "hive-"
     }
 }

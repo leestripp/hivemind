@@ -27,7 +27,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         val id: String, val senderKind: String, val body: String
     )
 
-    data class Activity(val busy: Boolean, val error: String)
+    data class Activity(val busy: Boolean, val error: String, val partial: String)
 
     private fun request(method: String, path: String, body: JSONObject? = null): String {
         val conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
@@ -114,14 +114,18 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
     fun activity(threadId: String): Activity {
         val obj = JSONObject(request("GET", "/api/threads/$threadId/activity"))
         var error = ""
+        var partial = ""
         val turns = obj.optJSONArray("turns")
         if (turns != null) {
             for (i in 0 until turns.length()) {
-                val e = turns.getJSONObject(i).optString("error", "")
+                val t = turns.getJSONObject(i)
+                val e = t.optString("error", "")
                 if (e.isNotEmpty()) { error = e; break }
+                if (partial.isEmpty()) partial = t.optString("partial", "")
             }
         }
-        return Activity(busy = obj.optBoolean("busy", false), error = error)
+        return Activity(busy = obj.optBoolean("busy", false), error = error,
+                        partial = partial)
     }
 
     /** POST /api/threads/:id/cancel — best effort. */
