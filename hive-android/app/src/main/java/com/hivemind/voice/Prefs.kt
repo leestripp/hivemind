@@ -24,4 +24,17 @@ object Prefs {
     }
 
     fun isConfigured(ctx: Context): Boolean = apiKey(ctx).isNotEmpty()
+
+    // Per-agent TTS voice ("en-us-x-tpf-local"); "" = engine default.
+    private const val KEY_VOICE_PREFIX = "voice_"
+
+    fun voiceFor(ctx: Context, agentId: String): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_VOICE_PREFIX + agentId, "") ?: ""
+
+    fun setVoice(ctx: Context, agentId: String, voiceName: String) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putString(KEY_VOICE_PREFIX + agentId, voiceName)
+            .apply()
+    }
 }

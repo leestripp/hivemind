@@ -22,6 +22,7 @@
         </activity>
 
         <activity android:name=".VoiceActivity" android:exported="false" />
+        <activity android:name=".VoicePickerActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
     </application>
 </manifest>

@@ -46,6 +46,11 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   `read_user_inbox` tools this makes "ask PA to consult Bob and get
   back to me" work end-to-end: pair-thread consultation, inbox
   report-back, spoken delivery.
+- **Per-agent voices** — long-press an agent card for the voice picker:
+  single tap samples a voice ("Hi, I'm PA — this is my voice."), double
+  tap selects it for that agent (Prefs `voice_<agentId>`; applied when
+  the session's TtsEngine boots). English embedded voices only
+  (offline, q400) — 23 on the test device.
 - **State machine** — IDLE / LISTENING / THINKING / STREAMING. The
   sphere shows a per-state palette (dim cyan idle, cyan listening,
   amber fast-spin thinking, green speaking) and rides mic RMS while

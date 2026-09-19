@@ -119,10 +119,14 @@ class VoiceActivity : Activity() {
             },
             onStopped = { msg -> onEngineStopped(msg) },
         )
-        tts = TtsEngine(this) {
+        tts = TtsEngine(this, onQueueEmpty = {
             ui.post {
                 if (phase == Phase.STREAMING && turnDone) toIdle("")
             }
+        })
+        // Per-agent voice (chosen in VoicePickerActivity); "" = default.
+        Prefs.voiceFor(this, agentId).ifEmpty { null }?.let {
+            tts.preferredVoiceName = it
         }
 
         talk.isEnabled = false

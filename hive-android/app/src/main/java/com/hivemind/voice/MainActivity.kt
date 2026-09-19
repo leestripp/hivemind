@@ -43,6 +43,16 @@ class MainActivity : Activity() {
                 putExtra(VoiceActivity.EXTRA_AGENT_AVATAR, agent.avatar)
             })
         }
+        // Long-press a card: per-agent voice picker.
+        list.setOnItemLongClickListener { _, _, position, _ ->
+            val agent = agents.getOrNull(position)
+                ?: return@setOnItemLongClickListener false
+            startActivity(Intent(this, VoicePickerActivity::class.java).apply {
+                putExtra(VoicePickerActivity.EXTRA_AGENT_ID, agent.id)
+                putExtra(VoicePickerActivity.EXTRA_AGENT_NAME, agent.name)
+            })
+            true
+        }
     }
 
     override fun onResume() {
@@ -60,7 +70,7 @@ class MainActivity : Activity() {
                 ui.post {
                     list.adapter = AgentAdapter(roster)
                     status.text = if (roster.isEmpty()) "No agents on the hub"
-                    else "Tap an agent to talk"
+                    else "Tap to talk · long-press for voice"
                 }
             } catch (e: Exception) {
                 ui.post {

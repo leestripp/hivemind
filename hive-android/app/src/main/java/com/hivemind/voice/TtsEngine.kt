@@ -18,7 +18,11 @@ import android.util.Log
 class TtsEngine(
     context: Context,
     private val onQueueEmpty: () -> Unit,
+    private val onReady: (() -> Unit)? = null,
 ) : UtteranceProgressListener() {
+
+    /** Applied once the engine is ready (per-agent voice selection). */
+    var preferredVoiceName: String? = null
 
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
@@ -33,10 +37,13 @@ class TtsEngine(
         TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setOnUtteranceProgressListener(this)
+                Log.i(TAG, "voices available: ${tts?.voices?.size}")
                 ready = true
+                preferredVoiceName?.let { setVoiceByName(it) }
                 val p = pending.toList()
                 pending.clear()
                 p.forEach { speakQueued(it) }
+                onReady?.invoke()
             }
         }.also { tts = it }
     }
@@ -48,6 +55,41 @@ class TtsEngine(
         outstanding++
         Log.d(TAG, "queue +${text.length} chars (out=$outstanding)")
         engine.speak(text, TextToSpeech.QUEUE_ADD, null, "$UTTER_PREFIX${seq++}")
+    }
+
+    data class VoiceOption(val name: String, val label: String)
+
+    /** English EMBEDDED voices for the picker — network twins excluded. */
+    fun englishVoiceOptions(): List<VoiceOption> {
+        val engine = tts ?: return emptyList()
+        return (engine.voices ?: emptySet())
+            .filter {
+                it.locale.language == "en" &&
+                it.name.endsWith("-local") &&
+                !it.isNetworkConnectionRequired
+            }
+            .sortedWith(compareBy({ it.locale.toString() }, { it.name }))
+            .map { v ->
+                // "en-us-x-tpf-local" -> "TPF"
+                val code = v.name.split('-').dropLast(1).last().uppercase()
+                VoiceOption(v.name, "${v.locale.displayCountry} · $code")
+            }
+    }
+
+    /** Select a voice by engine name ("en-us-x-tpf-local"). */
+    fun setVoiceByName(name: String): Boolean {
+        val engine = tts ?: return false
+        val match = engine.voices?.firstOrNull { it.name == name } ?: return false
+        engine.voice = match
+        Log.i(TAG, "voice set to $name")
+        return true
+    }
+
+    /** One-off sample playback (voice picker); interrupts any prior sample. */
+    fun preview(text: String) {
+        val engine = tts
+        if (!ready || engine == null) return
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${UTTER_PREFIX}preview")
     }
 
     /** Interrupt: drop everything queued + playing. */
