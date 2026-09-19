@@ -62,6 +62,22 @@ json disabled_skills_for(const std::string& agent_id) {
 }
 }  // namespace
 
+nlohmann::json user_inbox_snapshot(ThreadStore& threads,
+                                   AgentStore& agents, int limit) {
+    nlohmann::json out = nlohmann::json::array();
+    bool has_more = false;
+    auto msgs = threads.list_messages_window(kUserThreadId, "", limit,
+                                             has_more);
+    for (const auto& m : msgs) {
+        std::string who = m.sender_id;
+        if (auto a = agents.get_agent(m.sender_id)) who = a->name;
+        out.push_back({{"sender", who},
+                       {"text", m.body},
+                       {"created_at", m.created_at}});
+    }
+    return out;
+}
+
 std::string HubRouter::dispatch(const RosterAgent& agent,
                                 const std::string& thread_id,
                                 const std::string& text) {
@@ -82,6 +98,7 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
                {"id", task_id},
                {"thread_id", thread_id},
                {"roster", roster},
+               {"user_inbox", user_inbox_snapshot(threads_, agents_)},
                {"disabled_skills", disabled_skills_for(agent.id)},
                {"text", text}};
     // Phase 43: the hub owns provider/model config. Resolve the agent's

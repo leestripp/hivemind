@@ -348,6 +348,12 @@ static std::string g_thread_id;
 static json g_roster = json::array();
 static std::mutex g_roster_mu;
 
+// User Inbox snapshot, cached from each task frame (hub injects recent
+// messages). read_user_inbox answers from it — the inbox was write-only
+// for agents before this; they could message_user but never read back.
+static json g_user_inbox = json::array();
+static std::mutex g_inbox_mu;
+
 int main(int argc, char** argv) {
     // -- config ----------------------------------------------------------
     const fs::path project_root =
@@ -593,6 +599,36 @@ int main(int argc, char** argv) {
         }
     };
     agent.register_tool(std::make_unique<ListAgentsTool>());
+
+    // read_user_inbox: the inbox is the agent's direct line to the human
+    // (message_user) — and now readable, so an agent can check what the
+    // user has actually been sent (its own notes included) before writing
+    // more. Answers from the hub's task-frame snapshot, so it is fresh at
+    // task start; anything newer arrives as a new task by design.
+    class ReadUserInboxTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "read_user_inbox"; }
+        std::string get_description() const override {
+            return "Read recent messages in the human user's inbox - notes "
+                   "agents (including you via message_user) have delivered "
+                   "to the user, with sender name and timestamp. Use it "
+                   "before writing to the user to see what they have "
+                   "already been told, or to confirm your own message_user "
+                   "note landed. Snapshot from the start of this task.";
+        }
+        json get_definition() const override {
+            return {{"type","function"},
+                    {"function",{{"name","read_user_inbox"},
+                                 {"description", get_description()},
+                                 {"parameters",{{"type","object"},
+                                                {"properties",json::object()}}}}}};
+        }
+        json execute(const json&, hive::HostToolContext&) override {
+            std::lock_guard<std::mutex> lk(g_inbox_mu);
+            return {{"status","success"}, {"messages", g_user_inbox}};
+        }
+    };
+    agent.register_tool(std::make_unique<ReadUserInboxTool>());
 
     // attach_file (Phase 35): agent → chat attachments. Copies a
     // workspace file into the thread's outgoing dir; the worker ships it
@@ -878,6 +914,10 @@ int main(int argc, char** argv) {
 
         const std::string kind = op.value("op", "");
         if (kind == "task") {
+            if (op.contains("user_inbox") && op["user_inbox"].is_array()) {
+                std::lock_guard<std::mutex> lk(g_inbox_mu);
+                g_user_inbox = op["user_inbox"];
+            }
             if (op.contains("roster") && op["roster"].is_array()) {
                 std::lock_guard<std::mutex> lk(g_roster_mu);
                 g_roster = op["roster"];

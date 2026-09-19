@@ -31,6 +31,14 @@ class ChatService;
 struct RosterAgent;
 class LlmStore;
 
+/// Recent User Inbox messages as a task-frame payload: sender display
+/// name, text, created_at — chronological, capped at kUserInboxWindow.
+/// Agents read it via the read_user_inbox tool (the inbox was write-only
+/// for agents before this; they could message_user but never read back).
+nlohmann::json user_inbox_snapshot(ThreadStore& threads,
+                                   AgentStore& agents,
+                                   int limit = 10);
+
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,

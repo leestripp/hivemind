@@ -36,6 +36,7 @@ hivemind_test(test_worker_channel)
 # Phase 65: loop-storm fan-in policy + mute/breaker
 hivemind_test(test_fanin_policy)
 hivemind_test(test_chat_throttle)
+hivemind_test(test_user_inbox)
 
 # Phase 43: hub LlmStore (provider/model registry, dispatch resolution).
 hivemind_test(test_llmstore)
