@@ -20,3 +20,4 @@ models.json
 # Local ops diary — never commit (public repo)
 Plan.md
 .agents/
+prompt.txt
