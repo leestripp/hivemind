@@ -2,8 +2,7 @@
 
 HiveMind is a team of persistent AI agents that live in containers on
 worker machines, with a central communications hub and a native GTK4
-client. This document describes the current architecture — see Plan.md for the
-migration phases.
+client. This document describes the current architecture.
 
 ## Principles
 

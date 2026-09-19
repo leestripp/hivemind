@@ -97,10 +97,6 @@ Enroll a worker with
 on the hub machine uses plain `ws://127.0.0.1:8423` — loopback, no TLS
 needed).
 
-> Note: the README references a `hivemindctl` helper script and `Plan.md`;
-> neither is currently committed to this repo. Use the raw cmake/ctest
-> commands above.
-
 ## Project Structure
 
 ```
@@ -144,7 +140,7 @@ Key architectural mapping:
   (`AgentStore`, `RosterAgent`), trailing `_` for members (`db_path_`),
   `kCamelCase` for constants (`kSelectCols`).
 - Header banner comments (`// ====…`) at the top of files referencing the
-  relevant doc/phase (e.g. "Plan.md Phase 30").
+  relevant doc (e.g. "docs/hive-worker.md").
 - Headers use `#pragma once`; Doxygen-style `/** … */` class docs and
   `///` member docs.
 - **SQLite pattern**: fresh connection per operation (thread-safety),

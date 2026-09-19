@@ -74,10 +74,13 @@ sudo apt install -y cmake g++ nlohmann-json3-dev \
     sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev \
     libgtkmm-4.0-dev podman   # no libcurl — OmniNet is the only HTTP stack
 
-# 2. Build & run
-./hivemindctl build
-./hivemindctl start          # server on :8421
-./hivemindctl client         # native GTK client
+# 2. Configure & build
+cmake -S . -B build
+cmake --build build -j$(nproc)
+
+# 3. Run
+./build/hive-server/hive-server    # hub on :8421
+./build/hive-client/hive-client    # native GTK client
 # or the web UI: xdg-open http://localhost:8421/
 ```
 
@@ -103,7 +106,6 @@ hive-client/   GTK4/gtkmm4 native client
 hive-worker/   Remote executor daemon — runs agent containers on other
                machines, driven over a WebSocket channel (Phase 30)
 */tests/       per-app ctest suites
-hivemindctl    build/start/stop/status/logs/client/test
 ```
 
 ## Security
@@ -152,9 +154,8 @@ GET                   /api/models           union of connected workers' catalogs
 | `docs/hive-worker.md` | Distributed workers — enroll, channel protocol, exec/screen ops |
 | `docs/computer-use.md` | Live screen share (Xvfb/noVNC) design |
 | `docs/design.md` | Architecture deep-dive |
-| `Plan.md` | Roadmap & phase status |
 
-See `docs/api.md` and `Plan.md` (roadmap, phases 0–38) for details.
+See `docs/api.md` for the endpoint reference.
 
 Current release line: **0.6.x** — on-demand desktops, chat attachments,
 GNOME-adaptive client.
