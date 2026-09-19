@@ -56,6 +56,15 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──fi
   and drops straight back into recording; ✕ stops to idle.
 - The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
   the phone can't lock mid-rant, mid-think, or mid-reply.
+- INBOX WATCH: at idle the app also polls the DM and the hub's User
+  Inbox (thread "user") for new agent messages and reads them out —
+  attributed ("PA says: …") for inbox notes, which can come from any
+  agent. Notes that arrive mid-recording or mid-reply queue silently
+  and play only at idle boundaries, in order — voices never interleave.
+  This is the voice-side answer to "ask PA to consult Bob and get back
+  to me": PA messages Bob (pair thread), then reports back with
+  message_user → the app speaks it. The outgoing prefix tells agents
+  exactly this flow.
 
 ## Build
 

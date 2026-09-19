@@ -17,7 +17,9 @@ object SpeechText {
         "aloud by text-to-speech, so answer in plain flowing prose: no " +
         "markdown, lists, tables, code blocks, links, or emoji; write " +
         "numbers, dates and abbreviations the way they should be spoken; " +
-        "keep it conversational and concise unless I ask for detail.)\n\n"
+        "keep it conversational and concise unless I ask for detail. " +
+        "If you need another agent's input, use message_agent to consult " +
+        "them, then report the answer back to me via message_user.)\n\n"
 
     /** Make an agent reply safe for TextToSpeech. */
     fun forSpeech(text: String): String {

@@ -24,7 +24,8 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
     )
 
     data class Message(
-        val id: String, val senderKind: String, val body: String
+        val id: String, val senderKind: String, val body: String,
+        val senderId: String
     )
 
     data class Activity(val busy: Boolean, val error: String, val partial: String)
@@ -140,6 +141,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
                 id = m.getString("id"),
                 senderKind = m.optString("sender_kind", ""),
                 body = m.optString("body", ""),
+                senderId = m.optString("sender_id", ""),
             ))
         }
     }

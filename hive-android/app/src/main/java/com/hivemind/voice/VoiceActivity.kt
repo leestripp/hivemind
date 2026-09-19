@@ -37,7 +37,9 @@ class VoiceActivity : Activity() {
         private const val TAG = "HiveVoice"
         private const val REQ_AUDIO = 42
         private const val POLL_MS = 700L
+        private const val IDLE_POLL_MS = 2_500L
         private const val TURN_TIMEOUT_MS = 180_000L
+        private const val INBOX_THREAD = "user"   // hub's User Inbox (kUserThreadId)
     }
 
     private enum class Phase { SETUP, IDLE, LISTENING, THINKING, STREAMING }
@@ -58,6 +60,14 @@ class VoiceActivity : Activity() {
     private var threadId = ""
     private var lastMessageId = ""
     private val finalReply = StringBuilder()
+
+    // -- inbox watch ----------------------------------------------------------
+    /** Agent id -> display name, for "PA says: …" inbox attribution. */
+    private var agentNames = mapOf<String, String>()
+    private var inboxLastId = ""
+    /** Whole messages awaiting speech — only ever drained at IDLE, so an
+     *  arriving note can never interleave with recording or a live reply. */
+    private val pendingSpeech = ArrayDeque<String>()
 
     // -- streaming-speech state ---------------------------------------------
     /** The reply text [spokenLen] refers to (live partial while busy). */
@@ -142,7 +152,17 @@ class VoiceActivity : Activity() {
             try {
                 threadId = api.openDm(agentId)
                 lastMessageId = api.latestMessageId(threadId)
-                ui.post { toIdle("Tap TALK and speak") }
+                agentNames = runCatching {
+                    api.listAgents().associate { it.id to it.name }
+                }.getOrDefault(emptyMap())
+                // Inbox may not exist yet (no agent has ever posted) — the
+                // hub 404s; treat as empty rather than failing setup.
+                inboxLastId = runCatching { api.latestMessageId(INBOX_THREAD) }
+                    .getOrDefault("")
+                ui.post {
+                    toIdle("Tap TALK and speak")
+                    ui.postDelayed(inboxWatch, IDLE_POLL_MS)
+                }
             } catch (e: Exception) {
                 ui.post {
                     status.text = "Couldn't open conversation:\n${e.message}"
@@ -167,6 +187,8 @@ class VoiceActivity : Activity() {
         talk.isEnabled = true
         cancel.visibility = View.INVISIBLE
         if (message.isNotEmpty()) status.text = message
+        // Notes that arrived mid-turn wait for exactly this moment.
+        if (pendingSpeech.isNotEmpty()) speakPending()
     }
 
     private fun maybeStartListening() {
@@ -213,6 +235,63 @@ class VoiceActivity : Activity() {
                 ui.post { toIdle("Send failed: ${e.message}") }
             }
         }
+    }
+
+    // -- Inbox + DM idle watch -------------------------------------------------
+
+    /**
+     * At IDLE, poll the DM and the User Inbox for anything new. Agent
+     * messages become pending speech — spoken ONLY at idle boundaries,
+     * in arrival order, one after another (TTS is itself a serial
+     * queue). While the user records or a reply streams, arriving notes
+     * wait silently: voices never mix.
+     */
+    private val inboxWatch = object : Runnable {
+        override fun run() {
+            if (phase != Phase.IDLE) {
+                ui.postDelayed(this, IDLE_POLL_MS)
+                return
+            }
+            io.execute {
+                try {
+                    val fresh = mutableListOf<String>()
+                    for (m in api.messagesAfter(threadId, lastMessageId)) {
+                        lastMessageId = m.id
+                        if (m.senderKind == "agent" && m.body.isNotBlank())
+                            fresh.add(m.body.trim())
+                    }
+                    val inbox = runCatching {
+                        api.messagesAfter(INBOX_THREAD, inboxLastId)
+                    }.getOrDefault(emptyList())
+                    for (m in inbox) {
+                        inboxLastId = m.id
+                        if (m.senderKind == "agent" && m.body.isNotBlank()) {
+                            val who = agentNames[m.senderId] ?: "An agent"
+                            fresh.add("$who says: ${m.body.trim()}")
+                        }
+                    }
+                    ui.post {
+                        if (fresh.isNotEmpty()) {
+                            pendingSpeech.addAll(fresh)
+                            speakPending()
+                        }
+                        ui.postDelayed(this, IDLE_POLL_MS)
+                    }
+                } catch (e: Exception) {
+                    ui.postDelayed(this, IDLE_POLL_MS)
+                }
+            }
+        }
+    }
+
+    /** Speak the next pending note — IDLE only. */
+    private fun speakPending() {
+        if (phase != Phase.IDLE || pendingSpeech.isEmpty()) return
+        val text = pendingSpeech.removeFirst()
+        turnDone = true            // standalone note: nothing more coming
+        streamText = text
+        spokenLen = 0
+        drainSpeech(flush = true)  // queues it whole → STREAMING via queueSpeech
     }
 
     /** First chunk of the reply is being spoken: go green, stay receiving. */
@@ -324,7 +403,7 @@ class VoiceActivity : Activity() {
         if (clean.isEmpty()) return
         Log.d(TAG, "speak chunk: ${clean.take(40)}…")
         tts.speakQueued(clean)
-        if (phase == Phase.THINKING) enterStreaming()
+        if (phase == Phase.THINKING || phase == Phase.IDLE) enterStreaming()
     }
 
     // -- Interrupt / cancel ---------------------------------------------------
