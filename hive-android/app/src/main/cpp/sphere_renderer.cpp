@@ -32,6 +32,7 @@ uniform float uTime;
 uniform float uLevel;   // 0..1 smoothed voice level
 uniform float uState;   // 0 idle, 1 listening, 2 thinking, 3 speaking
 uniform float uPointScale;
+uniform float uCamDist; // camera distance — widens for portrait screens
 
 varying vec4 vColor;
 
@@ -122,14 +123,14 @@ void main(){
     float radius = 1.0 + n1 * amp + n2 * uLevel * 0.18;
     vec3 world = p * radius;
 
-    vec4 view = vec4(world.xy, world.z - 3.1, 1.0);
+    vec4 view = vec4(world.xy, world.z - uCamDist, 1.0);
     gl_Position = uProj * view;
 
     float ps = uPointScale * (1.6 + uLevel * 2.6 + n1 * 0.9 + thinkAmt * 0.6);
     gl_PointSize = clamp(ps / max(0.6, -view.z), 1.0, 64.0);
 
     // Per-state palette.
-    vec3 cIdle   = vec3(0.10, 0.38, 0.48);
+    vec3 cIdle   = vec3(0.14, 0.46, 0.58);
     vec3 cListen = vec3(0.20, 0.85, 0.95);
     vec3 cThink  = vec3(0.95, 0.70, 0.25);
     vec3 cSpeak  = vec3(0.25, 0.95, 0.60);
@@ -139,7 +140,7 @@ void main(){
     col = mix(col, cSpeak,  speakAmt);
 
     float bright = 0.55 + 0.45 * n1 + uLevel * 0.9;
-    vColor = vec4(col * max(0.15, bright), 1.0);
+    vColor = vec4(col * max(0.30, bright), 1.0);
 }
 )GLSL";
 
@@ -160,8 +161,10 @@ struct Renderer {
     GLuint vbo = 0;
     GLint aPos = -1;
     GLint uProj = -1, uTime = -1, uLevel = -1, uState = -1, uPointScale = -1;
+    GLint uCamDist = -1;
     float proj[16] = {0};
     float pointScale = 8.0f;
+    float camDist = 3.1f;
     bool ready = false;
 };
 
@@ -229,6 +232,7 @@ Java_com_hivemind_voice_SphereNative_nativeInit(JNIEnv*, jclass) {
     g.uLevel      = glGetUniformLocation(g.program, "uLevel");
     g.uState      = glGetUniformLocation(g.program, "uState");
     g.uPointScale = glGetUniformLocation(g.program, "uPointScale");
+    g.uCamDist    = glGetUniformLocation(g.program, "uCamDist");
 
     // Fibonacci lattice — even point distribution over the sphere.
     std::vector<float> pts(kPointCount * 3);
@@ -256,7 +260,12 @@ Java_com_hivemind_voice_SphereNative_nativeResize(JNIEnv*, jclass,
     glViewport(0, 0, w, h);
     float aspect = h > 0 ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
     perspective(g.proj, 0.832f /* ~47.7deg */, aspect, 0.1f, 20.0f);
-    g.pointScale = static_cast<float>(w < h ? w : h) * 0.009f;
+    // Visible half-extent of the sphere must stay < ~75% of the smaller
+    // frustum half-extent at the camera plane. aspect >= 0.75 is fine at
+    // the default distance; narrower pulls the camera back.
+    g.camDist = 3.1f / std::min(1.0f, aspect / 0.75f);
+    g.pointScale = static_cast<float>(w < h ? w : h) * 0.011f *
+                   (g.camDist / 3.1f);
 }
 
 JNIEXPORT void JNICALL
@@ -277,6 +286,7 @@ Java_com_hivemind_voice_SphereNative_nativeRender(JNIEnv*, jclass,
     glUniform1f(g.uLevel, level < 0.f ? 0.f : (level > 1.f ? 1.f : level));
     glUniform1f(g.uState, state);
     glUniform1f(g.uPointScale, g.pointScale);
+    glUniform1f(g.uCamDist, g.camDist);
 
     glBindBuffer(GL_ARRAY_BUFFER, g.vbo);
     glEnableVertexAttribArray(static_cast<GLuint>(g.aPos));

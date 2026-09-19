@@ -58,9 +58,12 @@ class MainActivity : Activity() {
                         a.state.isNotEmpty() -> a.state
                         else -> ""
                     }
+                    // Roles can be paragraphs — keep the row to one line.
+                    val shortRole = a.role.lineSequence().firstOrNull().orEmpty()
+                        .let { if (it.length > 48) it.take(48).trimEnd() + "…" else it }
                     buildString {
                         append(a.name)
-                        if (a.role.isNotEmpty()) append("  ·  ").append(a.role)
+                        if (shortRole.isNotEmpty()) append("  ·  ").append(shortRole)
                         if (live.isNotEmpty()) append("  (").append(live).append(')')
                     }
                 }
