@@ -18,8 +18,10 @@ import java.util.concurrent.Executors
  * Small side button: cancel (discard the recording / stop the turn).
  *
  * IDLE ──tap──▶ LISTENING ──tap──▶ THINKING ──reply──▶ SPEAKING ──done──▶ IDLE
- *                  │                  │                  │
- *                  └─────── cancel (✕) anywhere ───────┴───▶ IDLE
+ *                  │                  │                  │ tap: cut off
+ *                  └─────── cancel (✕) anywhere ───────┴───▶ IDLE   │
+ *                                                                   ▼
+ *                                                              LISTENING
  */
 class VoiceActivity : Activity() {
 
@@ -93,7 +95,8 @@ class VoiceActivity : Activity() {
             when (phase) {
                 Phase.IDLE -> maybeStartListening()
                 Phase.LISTENING -> sendTranscript()
-                else -> Unit  // THINKING/SPEAKING: disabled
+                Phase.SPEAKING -> interruptAndTalk()
+                else -> Unit  // SETUP/THINKING: disabled
             }
         }
         cancel.setOnClickListener { cancelCurrent() }
@@ -221,6 +224,11 @@ class VoiceActivity : Activity() {
         phase = Phase.SPEAKING
         sphere.setSphereState(SphereState.SPEAKING)
         status.text = ""
+        // Big button is live during the reply: tap to cut the agent off
+        // and go straight back to recording.
+        talk.text = "TALK"
+        talk.setBackgroundResource(R.drawable.btn_talk)
+        talk.isEnabled = true
         cancel.visibility = View.VISIBLE
         startSpeakAnimator()
         tts.speak(text)
@@ -245,6 +253,14 @@ class VoiceActivity : Activity() {
     private fun stopSpeakAnimator() {
         speakAnimator?.let { ui.removeCallbacks(it) }
         speakAnimator = null
+    }
+
+    /** Cut the agent's reply short and immediately start recording. */
+    private fun interruptAndTalk() {
+        tts.stop()
+        io.execute { api.cancel(threadId) }
+        toIdle("")
+        maybeStartListening()
     }
 
     private fun cancelCurrent() {
