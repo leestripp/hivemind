@@ -23,6 +23,14 @@ the reply.
   Auth: `Authorization: Bearer <key>` (mint one via the hub's
   `/api/keys` — `agent` scope is enough).
 
+## Per-agent voices
+
+Long-press an agent card → voice picker: single tap samples a voice
+("Hi, I'm PA — this is my voice."), double tap selects it for that
+agent (Prefs `voice_<agentId>`, applied when the session's TTS engine
+boots). English embedded voices only (offline, q400; 23 on the test
+device). Selections are per-agent — every agent can sound different.
+
 ## Avatars
 
 Roster rows and the voice screen show the same creature avatars as the
