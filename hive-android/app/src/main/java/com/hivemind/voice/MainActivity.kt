@@ -57,24 +57,9 @@ class MainActivity : Activity() {
             try {
                 val roster = api.listAgents()
                 agents = roster
-                val rows = roster.map { a ->
-                    val live = when {
-                        a.busy -> "busy"
-                        a.state.isNotEmpty() -> a.state
-                        else -> ""
-                    }
-                    // Roles can be paragraphs — keep the row to one line.
-                    val shortRole = a.role.lineSequence().firstOrNull().orEmpty()
-                        .let { if (it.length > 48) it.take(48).trimEnd() + "…" else it }
-                    buildString {
-                        append(a.name)
-                        if (shortRole.isNotEmpty()) append("  ·  ").append(shortRole)
-                        if (live.isNotEmpty()) append("  (").append(live).append(')')
-                    }
-                }
                 ui.post {
-                    list.adapter = AgentAdapter(roster, rows)
-                    status.text = if (rows.isEmpty()) "No agents on the hub"
+                    list.adapter = AgentAdapter(roster)
+                    status.text = if (roster.isEmpty()) "No agents on the hub"
                     else "Tap an agent to talk"
                 }
             } catch (e: Exception) {
@@ -85,13 +70,12 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Roster rows: creature avatar + one-line name/role/status. */
+    /** Roster info cards: creature avatar, name, role, live-state pill. */
     private inner class AgentAdapter(
         private val agents: List<ApiClient.Agent>,
-        private val rows: List<String>,
     ) : BaseAdapter() {
-        override fun getCount() = rows.size
-        override fun getItem(position: Int) = rows[position]
+        override fun getCount() = agents.size
+        override fun getItem(position: Int) = agents[position]
         override fun getItemId(position: Int) = position.toLong()
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
@@ -100,7 +84,29 @@ class MainActivity : Activity() {
             val a = agents[position]
             v.findViewById<ImageView>(R.id.avatarImage)
                 .setImageBitmap(Avatars.bitmap(this@MainActivity, a.name, a.avatar))
-            v.findViewById<TextView>(R.id.agentText).text = rows[position]
+            v.findViewById<TextView>(R.id.agentName).text = a.name
+            v.findViewById<TextView>(R.id.agentRole).text =
+                a.role.lineSequence().firstOrNull().orEmpty()
+            val state = v.findViewById<TextView>(R.id.agentState)
+            when {
+                a.busy -> {
+                    state.text = "● busy"
+                    state.setTextColor(0xFFFFB74D.toInt())
+                }
+                a.state == "ready" -> {
+                    state.text = "● ready"
+                    state.setTextColor(0xFF3DDC84.toInt())
+                }
+                a.state.isNotEmpty() -> {
+                    state.text = "● ${a.state}"
+                    state.setTextColor(0xFF7A8A99.toInt())
+                }
+                else -> {
+                    state.text = ""
+                    state.visibility = View.GONE
+                }
+            }
+            if (state.text.isNotEmpty()) state.visibility = View.VISIBLE
             return v
         }
     }

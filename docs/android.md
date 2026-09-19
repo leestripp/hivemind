@@ -7,8 +7,9 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
 
 ## What it does
 
-- **Roster** — agents with the same creature avatars as the GTK client
-  and web UI. Resolution is identical: the stored `avatar` field when it
+- **Roster** — agent info cards: 64 dp creature avatar, large name,
+  two-line role, and a live-state pill (ready/busy) on a rounded dark
+  card. Avatar resolution is identical to the other clients: the stored `avatar` field when it
   is in the set, else a stable MurmurHash64A of the agent name into the
   20-name list (bit-for-bit parity with the client's
   `std::hash<string>`), else the user silhouette. PNGs are 192 px
