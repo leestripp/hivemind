@@ -62,6 +62,12 @@ and only come back when they need your approval.
   live chat, approvals inbox, scheduled-task dialog, right-click agent
   management. Plus the **web dashboard**: Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
+- **Voice-only Android app** (`hive-android`) — pick an agent from the
+  info-card roster and just talk: Jarvis-style voice-reactive sphere,
+  hands-free-length takes (on-device streaming STT, no silence cutoffs),
+  replies spoken sentence-by-sentence as the agent streams (queued TTS,
+  per-agent selectable voices), and anything landing in your inbox read
+  out at idle. See docs/android.md.
 - **Any model** — providers/models live in HiveMind's own store
   (`llm.db`, managed on the web Models page) and are injected into agents
   at spawn; pick per agent. No vendor lock-in.
