@@ -16,3 +16,7 @@ models.json
 *.db-shm
 .env
 
+
+# Local ops diary — never commit (public repo)
+Plan.md
+.agents/
