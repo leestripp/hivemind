@@ -115,11 +115,14 @@ int main() {
 
     // root redirects into noVNC — send_blocking FOLLOWS the 302, landing on
     // vnc.html which itself proxies to the dummy upstream (full loop).
+    // X-Forwarded-Proto: http — the redirect builder defaults to https
+    // (production is TLS-only); this test server is plaintext.
     {
         ClientRequest creq;
         creq.method("GET")
             .url("http://127.0.0.1:" + std::to_string(port) + "/screen/" + aid +
-                 "?key=" + admin_key);
+                 "?key=" + admin_key)
+            .header("X-Forwarded-Proto", "http");
         auto cres = OmniNet::HTTP::Client::get_instance().send_blocking(creq);
         assert(cres->bodyAsString() == "upstream-bytes");
     }

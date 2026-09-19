@@ -17,7 +17,7 @@ class AuthStore;
  *   POST /api/agents/:id/screen/stop     stop the display stack
  *
  * Browser-facing proxy (noVNC can't send Authorization headers, so these
- * live OUTSIDE /api/* and do their own auth — Bearer, ?key= query, or an
+ * live OUTSIDE the /api/ prefix and do their own auth — Bearer, ?key= query, or an
  * HttpOnly cookie set on first ?key= access):
  *
  *   GET  /screen/:id/                    set cookie, redirect to vnc.html

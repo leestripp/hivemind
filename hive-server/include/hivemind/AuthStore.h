@@ -9,7 +9,7 @@
 /**
  * AuthStore — API key authentication (HiveMind 2.0, Plan.md Phase 9).
  *
- * Token-based auth for every /api/* route (except /api/health). Keys are
+ * Token-based auth for every /api/ route (except /api/health). Keys are
  * generated with OmniNet's TokenUtils (CSPRNG) and only the SHA-256 hash is
  * stored — the raw key is shown exactly once at creation.
  *

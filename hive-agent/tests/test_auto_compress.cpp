@@ -953,15 +953,17 @@ TEST_CASE("Agent::compress_context reports fallback delete via on_compaction") {
 
 // ---------------------------------------------------------------------------
 // §COMPRESS-TOOL (2026-08-14): model-facing compress_context tool, restored.
-// The model emits a compress_context tool call on cycle 1 (usage LOW —
-// 100/100000, so the 90% auto-trigger can never fire). The run loop must
-// turn the tool result into the same deferred compress request as
+// The model emits a compress_context tool call on cycle 1. Usage sits at
+// 80% (80000/100000): above the Phase-65e 70% voluntary-compress gate (so
+// the request is ACCEPTED) but below the 90% auto-trigger (so the test
+// proves the TOOL did it, not the threshold). The run loop must turn the
+// tool result into the same deferred compress request as
 // Agent::compress_context(): compression runs at the cycle-boundary
 // checkpoint, on_compaction fires once, and the turn completes DONE on
 // cycle 2.
 // ---------------------------------------------------------------------------
 TEST_CASE("model-facing compress_context tool triggers compression below threshold") {
-    CompressionFakeServer server(/*first_total=*/100, /*later_total=*/100,
+    CompressionFakeServer server(/*first_total=*/80000, /*later_total=*/80000,
                                  /*fail_compression=*/false,
                                  /*emit_compress_tool_call=*/true);
     fs::path home = make_temp_home("tool-trigger");
@@ -1010,11 +1012,75 @@ TEST_CASE("model-facing compress_context tool triggers compression below thresho
     {
         std::lock_guard<std::mutex> lk(sink->mu);
         REQUIRE(sink->compactions.size() == 1);
-        CHECK(sink->compactions[0].before == 100);
+        CHECK(sink->compactions[0].before == 80000);
         CHECK(sink->errors.empty());
     }
     CHECK(server.compression_requests() == 1);
     CHECK(server.main_requests() == 2);   // cycle 1 (tool call) → compress → cycle 2 (DONE)
+
+    fs::remove_all(home);
+}
+
+
+// ---------------------------------------------------------------------------
+// §Phase-65e gate: voluntary compress_context at LOW pressure is REFUSED.
+// Same harness as above but at 10% (10000/100000) — the model asks for
+// compression on cycle 1, the gate declines (<70% real pressure), a SYSTEM
+// refusal message is injected, and the turn completes with NO compaction
+// and NO compression summary request. Pins the 2026-09-16 storm fix.
+// ---------------------------------------------------------------------------
+TEST_CASE("voluntary compress_context below 70% pressure is refused") {
+    CompressionFakeServer server(/*first_total=*/10000, /*later_total=*/10000,
+                                 /*fail_compression=*/false,
+                                 /*emit_compress_tool_call=*/true);
+    fs::path home = make_temp_home("tool-refused");
+
+    {
+        auto store = hive::SettingsStore::for_home(home);
+        hive::ProviderConfig p;
+        p.name          = "fake";
+        p.host          = server.base_url();
+        p.api_key       = "test-key";
+        p.chat_endpoint = "/v1/chat/completions";
+        p.plugin        = "openai-compatible";
+        store.upsert_provider(p);
+
+        hive::ModelConfig m;
+        m.name             = "big";
+        m.provider         = "fake";
+        m.model_id         = "fake-model";
+        m.max_context_size = 100000;   // 10000 tokens = 10% — below the 70% gate
+        m.temperature      = 0.0;
+        store.upsert_model(m);
+        store.set_default_model_name("big");
+    }
+
+    fs::path project = home / "project";
+    fs::create_directories(project);
+
+    hive::AgentConfig cfg;
+    cfg.project_root   = project;
+    cfg.agent_home     = home;
+    cfg.session_id     = "tool-refused-e2e";
+    cfg.stream         = false;
+    cfg.memory_enabled = false;
+    cfg.mcp_enabled    = false;
+
+    auto sink = std::make_shared<CompactionSink>();
+    hive::Agent agent(std::move(cfg), sink);
+    agent.initialize();
+
+    agent.submit_user_message("hello");
+    agent.run_one_turn();
+    agent.shutdown();
+
+    {
+        std::lock_guard<std::mutex> lk(sink->mu);
+        CHECK(sink->compactions.empty());   // refused — no compaction
+        CHECK(sink->errors.empty());
+    }
+    CHECK(server.compression_requests() == 0);   // no summary call either
+    CHECK(server.main_requests() == 2);          // cycle 1 (tool call) → refusal → cycle 2 (DONE)
 
     fs::remove_all(home);
 }
