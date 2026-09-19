@@ -19,8 +19,9 @@ android {
                 cppFlags += " -std=c++17"
             }
         }
-        // x86_64: Waydroid/emulator; arm64-v8a: phones.
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        // x86_64: Waydroid/emulator; arm64-v8a: phones. (sherpa-onnx
+        // native libs are vendored for these two ABIs only.)
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildTypes {

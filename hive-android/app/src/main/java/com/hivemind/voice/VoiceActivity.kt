@@ -146,10 +146,6 @@ class VoiceActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
             return
         }
-        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
-            status.text = "No speech-recognition service on this device"
-            return
-        }
         phase = Phase.LISTENING
         sphere.setSphereState(SphereState.LISTENING)
         talk.text = "SEND"
