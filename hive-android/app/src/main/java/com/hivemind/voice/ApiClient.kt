@@ -1,0 +1,141 @@
+package com.hivemind.voice
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+class ApiException(val code: Int, message: String) : Exception("HTTP $code: $message")
+
+/**
+ * Minimal REST client for the hive-server hub. Blocking — call from a
+ * background thread. Mirrors the endpoints documented in docs/api.md.
+ */
+class ApiClient(baseUrl: String, private val apiKey: String) {
+
+    private val base = baseUrl.trimEnd('/')
+
+    data class Agent(
+        val id: String, val name: String, val role: String,
+        val state: String, val busy: Boolean
+    )
+
+    data class Message(
+        val id: String, val senderKind: String, val body: String
+    )
+
+    data class Activity(val busy: Boolean, val error: String)
+
+    private fun request(method: String, path: String, body: JSONObject? = null): String {
+        val conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 10_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Accept", "application/json")
+            if (body != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+        }
+        try {
+            if (body != null) {
+                OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+            if (code !in 200..299) {
+                val err = runCatching { JSONObject(text).optString("error", text) }
+                    .getOrDefault(text)
+                throw ApiException(code, err.ifEmpty { "request failed" })
+            }
+            return text
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** GET /api/agents → roster with live state. */
+    fun listAgents(): List<Agent> {
+        val arr = JSONObject(request("GET", "/api/agents")).getJSONArray("agents")
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val a = arr.getJSONObject(i)
+                add(Agent(
+                    id = a.getString("id"),
+                    name = a.getString("name"),
+                    role = a.optString("role", ""),
+                    state = a.optString("state", ""),
+                    busy = a.optBoolean("busy", false),
+                ))
+            }
+        }
+    }
+
+    /** POST /api/threads with reuse_dm — opens (or reopens) the 1:1. */
+    fun openDm(agentId: String): String {
+        val body = JSONObject()
+            .put("agent_ids", JSONArray().put(agentId))
+            .put("title", "Voice")
+            .put("kind", "dm")
+            .put("reuse_dm", true)
+        return JSONObject(request("POST", "/api/threads", body)).getString("id")
+    }
+
+    /** POST /api/threads/:id/messages → message id (202 Accepted). */
+    fun postMessage(threadId: String, text: String): String {
+        val body = JSONObject().put("body", text)
+        return JSONObject(request("POST", "/api/threads/$threadId/messages", body))
+            .getString("message_id")
+    }
+
+    /** GET /api/threads/:id/messages?after= — incremental poll. */
+    fun messagesAfter(threadId: String, afterId: String): List<Message> {
+        val after = URLEncoder.encode(afterId, "UTF-8")
+        val arr = JSONObject(request("GET", "/api/threads/$threadId/messages?after=$after"))
+            .getJSONArray("messages")
+        return parseMessages(arr)
+    }
+
+    /** Latest message id in the thread ("" when empty) — poll baseline. */
+    fun latestMessageId(threadId: String): String {
+        val obj = JSONObject(request("GET", "/api/threads/$threadId/messages?limit=1"))
+        val arr = obj.getJSONArray("messages")
+        if (arr.length() == 0) return ""
+        return arr.getJSONObject(arr.length() - 1).getString("id")
+    }
+
+    /** GET /api/threads/:id/activity → busy + first error, if any. */
+    fun activity(threadId: String): Activity {
+        val obj = JSONObject(request("GET", "/api/threads/$threadId/activity"))
+        var error = ""
+        val turns = obj.optJSONArray("turns")
+        if (turns != null) {
+            for (i in 0 until turns.length()) {
+                val e = turns.getJSONObject(i).optString("error", "")
+                if (e.isNotEmpty()) { error = e; break }
+            }
+        }
+        return Activity(busy = obj.optBoolean("busy", false), error = error)
+    }
+
+    /** POST /api/threads/:id/cancel — best effort. */
+    fun cancel(threadId: String) {
+        runCatching { request("POST", "/api/threads/$threadId/cancel", JSONObject()) }
+    }
+
+    private fun parseMessages(arr: JSONArray): List<Message> = buildList {
+        for (i in 0 until arr.length()) {
+            val m = arr.getJSONObject(i)
+            add(Message(
+                id = m.getString("id"),
+                senderKind = m.optString("sender_kind", ""),
+                body = m.optString("body", ""),
+            ))
+        }
+    }
+}
