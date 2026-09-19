@@ -28,6 +28,7 @@ class VoiceActivity : Activity() {
     companion object {
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_AGENT_NAME = "agent_name"
+        const val EXTRA_AGENT_AVATAR = "agent_avatar"
         private const val REQ_AUDIO = 42
         private const val POLL_MS = 700L
         private const val TURN_TIMEOUT_MS = 180_000L
@@ -65,8 +66,11 @@ class VoiceActivity : Activity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         agentId = intent.getStringExtra(EXTRA_AGENT_ID).orEmpty()
-        findViewById<TextView>(R.id.agentNameText).text =
-            intent.getStringExtra(EXTRA_AGENT_NAME).orEmpty()
+        val agentName = intent.getStringExtra(EXTRA_AGENT_NAME).orEmpty()
+        findViewById<TextView>(R.id.agentNameText).text = agentName
+        findViewById<android.widget.ImageView>(R.id.agentAvatar).setImageBitmap(
+            Avatars.bitmap(this, agentName,
+                intent.getStringExtra(EXTRA_AGENT_AVATAR).orEmpty()))
 
         sphere = findViewById(R.id.sphereView)
         status = findViewById(R.id.statusText)

@@ -5,8 +5,12 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.widget.ArrayAdapter
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
 import java.util.concurrent.Executors
@@ -36,6 +40,7 @@ class MainActivity : Activity() {
             startActivity(Intent(this, VoiceActivity::class.java).apply {
                 putExtra(VoiceActivity.EXTRA_AGENT_ID, agent.id)
                 putExtra(VoiceActivity.EXTRA_AGENT_NAME, agent.name)
+                putExtra(VoiceActivity.EXTRA_AGENT_AVATAR, agent.avatar)
             })
         }
     }
@@ -68,8 +73,7 @@ class MainActivity : Activity() {
                     }
                 }
                 ui.post {
-                    list.adapter = ArrayAdapter(
-                        this, android.R.layout.simple_list_item_1, rows)
+                    list.adapter = AgentAdapter(roster, rows)
                     status.text = if (rows.isEmpty()) "No agents on the hub"
                     else "Tap an agent to talk"
                 }
@@ -78,6 +82,26 @@ class MainActivity : Activity() {
                     status.text = "Hub error: ${e.message}\n(check URL/key in ⚙ settings)"
                 }
             }
+        }
+    }
+
+    /** Roster rows: creature avatar + one-line name/role/status. */
+    private inner class AgentAdapter(
+        private val agents: List<ApiClient.Agent>,
+        private val rows: List<String>,
+    ) : BaseAdapter() {
+        override fun getCount() = rows.size
+        override fun getItem(position: Int) = rows[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val v = convertView ?: LayoutInflater.from(this@MainActivity)
+                .inflate(R.layout.agent_row, parent, false)
+            val a = agents[position]
+            v.findViewById<ImageView>(R.id.avatarImage)
+                .setImageBitmap(Avatars.bitmap(this@MainActivity, a.name, a.avatar))
+            v.findViewById<TextView>(R.id.agentText).text = rows[position]
+            return v
         }
     }
 

@@ -20,7 +20,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
 
     data class Agent(
         val id: String, val name: String, val role: String,
-        val state: String, val busy: Boolean
+        val state: String, val busy: Boolean, val avatar: String
     )
 
     data class Message(
@@ -71,6 +71,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
                     role = a.optString("role", ""),
                     state = a.optString("state", ""),
                     busy = a.optBoolean("busy", false),
+                    avatar = a.optString("avatar", ""),
                 ))
             }
         }

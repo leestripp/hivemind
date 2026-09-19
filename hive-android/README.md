@@ -23,6 +23,16 @@ the reply.
   Auth: `Authorization: Bearer <key>` (mint one via the hub's
   `/api/keys` — `agent` scope is enough).
 
+## Avatars
+
+Roster rows and the voice screen show the same creature avatars as the
+GTK client / web UI. Resolution mirrors hive-client exactly: the stored
+`avatar` field when it's in the set, else a stable MurmurHash64A of the
+agent name (bit-for-bit parity with the client's std::hash<string>),
+else the user silhouette. PNGs are 192px rasters of the client's SVGs
+in `assets/avatars/` (regenerate:
+`for f in ../hive-client/data/avatars/*.svg; do rsvg-convert -w 192 -h 192 -o app/src/main/assets/avatars/$(basename $f .svg).png $f; done`).
+
 ## UI flow
 
 ```

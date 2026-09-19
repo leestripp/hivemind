@@ -214,6 +214,11 @@ class SttEngine(
             val shorts = ShortArray(SAMPLE_RATE / 10)   // 100 ms chunks
             val floats = FloatArray(SAMPLE_RATE / 10)
             var lastPublish = 0L
+            // Adaptive level reference (fast attack, slow release): mic
+            // gain varies wildly across devices/sources, so a fixed RMS
+            // divisor leaves the sphere dead on quiet mics. Normal
+            // speech sits ~0.7; the loudest recent sound ~1.0.
+            var rmsRef = 400.0
             try {
                 while (listening) {
                     val n = ar.read(shorts, 0, shorts.size)
@@ -225,7 +230,9 @@ class SttEngine(
                         floats[i] = v / 32768f
                     }
                     val rms = sqrt(sum / n)
-                    onLevel((rms / 2000.0).coerceIn(0.0, 1.0).toFloat())
+                    rmsRef = if (rms > rmsRef) rms
+                    else rmsRef * 0.999 + rms * 0.001
+                    onLevel((rms / (rmsRef * 1.3)).coerceIn(0.0, 1.0).toFloat())
                     st.acceptWaveform(
                         if (n == floats.size) floats else floats.copyOf(n),
                         SAMPLE_RATE)
