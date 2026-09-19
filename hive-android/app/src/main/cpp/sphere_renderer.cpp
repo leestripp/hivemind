@@ -202,7 +202,13 @@ extern "C" {
 
 JNIEXPORT void JNICALL
 Java_com_hivemind_voice_SphereNative_nativeInit(JNIEnv*, jclass) {
-    if (g.ready) return;
+    // onSurfaceCreated means a NEW GL context (first run, activity
+    // re-entered after back, or context loss). The previous context's
+    // program/VBO died with it — always rebuild for THIS context.
+    // (Do not glDelete* the stale handles; they belong to a dead
+    // context. g.ready must NOT gate this: a second VoiceActivity got
+    // an early-return here and drew with dead handles -> black sphere.)
+    g = Renderer{};
 
     GLuint vs = compileShader(GL_VERTEX_SHADER, kVertexShader);
     GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFragmentShader);
