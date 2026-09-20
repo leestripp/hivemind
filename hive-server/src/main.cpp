@@ -146,8 +146,9 @@ int main(int argc, char* argv[]) {
     agent_tools::install_worker_access(&worker_store, &worker_channel);
     // Phase C: pure hub. Turns run on workers (hive-agent); the HubRouter
     // dispatches task ops over the worker channel and feeds results back.
+    hivemind::SecretStore secret_store;   // hoisted: hub handles secret_req
     HubRouter hub{agent_store, thread_store, worker_channel, approval_store,
-                  routine_store};
+                  routine_store, secret_store};
     hub.set_llm_store(&llm_store);
     ChatService chat_service{agent_store, thread_store, hub};
     hub.set_chat_service(&chat_service);
@@ -179,7 +180,6 @@ int main(int argc, char* argv[]) {
         worker_channel.send(wname,
                             {{"op","skills_prune"},{"keep",keep}});
     };
-    hivemind::SecretStore secret_store;
     ConnectorStore connector_store;
 
     // ─── Auth (Phase 9) ─────────────────────────────────────────────

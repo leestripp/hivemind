@@ -22,9 +22,9 @@ using nlohmann::json;
 
 HubRouter::HubRouter(AgentStore& agents, ThreadStore& threads,
                      WorkerChannel& channel, ApprovalStore& approvals,
-                     RoutineStore& routines)
+                     RoutineStore& routines, hivemind::SecretStore& secrets)
     : agents_(agents), threads_(threads), channel_(channel),
-      approvals_(approvals), routines_(routines) {}
+      approvals_(approvals), routines_(routines), secrets_(secrets) {}
 
 namespace {
 
@@ -61,6 +61,37 @@ json disabled_skills_for(const std::string& agent_id) {
     return out;
 }
 }  // namespace
+
+nlohmann::json secret_create_apply(hivemind::SecretStore& secrets,
+                                   const std::string& name,
+                                   const std::string& type,
+                                   const nlohmann::json& payload,
+                                   const std::string& agent_id) {
+    if (!hivemind::SecretStore::valid_name(name))
+        return {{"ok", false},
+                {"error", "name must be [A-Za-z0-9_], start with a "
+                          "letter/underscore, <=64 chars"}};
+    if (!hivemind::SecretStore::valid_type(type))
+        return {{"ok", false},
+                {"error", "type must be api_key | login | note"}};
+    // Required material per type (mirrors SecretRoutes validation).
+    if (type == "login" &&
+        payload.value("password", "").empty())
+        return {{"ok", false}, {"error", "login requires a password"}};
+    if (type == "note" && payload.value("text", "").empty())
+        return {{"ok", false}, {"error", "note requires text"}};
+    if (type == "api_key" && payload.value("value", "").empty())
+        return {{"ok", false}, {"error", "api_key requires a value"}};
+    if (secrets.exists(name))
+        return {{"ok", false},
+                {"error", "name taken — choose another (delete/recreate "
+                          "is an admin action via the web UI)"}};
+    if (!secrets.put_payload(name, type, payload))
+        return {{"ok", false}, {"error", "store rejected the secret"}};
+    // Auto-grant to the creator ONLY — sharing is a deliberate admin act.
+    secrets.grant(name, agent_id);
+    return {{"ok", true}, {"created", name}, {"type", type}};
+}
 
 nlohmann::json user_inbox_snapshot(ThreadStore& threads,
                                    AgentStore& agents, int limit) {
@@ -223,6 +254,39 @@ void HubRouter::handle_routine_req(const std::string& worker,
     channel_.send(worker, resp);
 }
 
+// secrets_create bridge: an agent minting its own credential into the
+// broker. The VALUE only ever lives inside `frame` here — it is never
+// logged, never echoed in the response, and lands encrypted at rest
+// (SecretStore, AES-256-GCM). Auto-granted to the creator only.
+void HubRouter::handle_secret_req(const std::string& worker,
+                                  const std::string& agent_id,
+                                  const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "secret_resp"}, {"agent_id", agent_id}, {"id", id}};
+    try {
+        const std::string action = frame.value("action", "");
+        if (action != "create") {
+            resp["ok"] = false;
+            resp["error"] = "unknown action: " + action;
+        } else {
+            json r = secret_create_apply(
+                secrets_, frame.value("name", ""),
+                frame.value("type", "api_key"),
+                frame.value("payload", json::object()), agent_id);
+            resp["ok"] = r.value("ok", false);
+            if (resp["ok"].get<bool>())
+                resp["result"] = {{"created", r.value("created", "")},
+                                  {"type", r.value("type", "")}};
+            else
+                resp["error"] = r.value("error", "create failed");
+        }
+    } catch (const std::exception& e) {
+        resp["ok"] = false;
+        resp["error"] = std::string{"secret_req failed: "} + e.what();
+    }
+    channel_.send(worker, resp);
+}
+
 void HubRouter::cancel_agent(const RosterAgent& agent,
                              const std::string& thread_id) {
     (void)thread_id;   // cancel is per-agent (hive-agent cancels its
@@ -312,6 +376,10 @@ void HubRouter::on_worker_frame(const std::string& worker,
     }
     if (op == "routine_req") {   // Phase 53
         handle_routine_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "secret_req") {    // secrets_create tool bridge
+        handle_secret_req(worker, agent_id, frame);
         return;
     }
     if (op == "task_result") {

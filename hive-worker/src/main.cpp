@@ -169,6 +169,15 @@ int main(int argc, char* argv[]) {
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
+            // secrets_create tool -> hub SecretStore (request/response,
+            // secret_resp back). The frame carries secret material — it
+            // must never be logged here.
+            else if (kind == "secret_req") {
+                f = ev;
+                f["op"] = "secret_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},

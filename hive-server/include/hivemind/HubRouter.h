@@ -25,6 +25,7 @@
 class AgentStore;
 class RoutineStore;
 class ThreadStore;
+namespace hivemind { class SecretStore; }
 class WorkerChannel;
 class ApprovalStore;
 class ChatService;
@@ -39,11 +40,22 @@ nlohmann::json user_inbox_snapshot(ThreadStore& threads,
                                    AgentStore& agents,
                                    int limit = 10);
 
+/// secrets_create op core (unit-testable): validate + store + auto-grant
+/// to the creating agent. Returns {"ok":true,"created":name} or
+/// {"ok":false,"error":...}. The VALUE never appears in the result or
+/// any log line. `type` payload shapes mirror SecretRoutes:
+///   api_key {"value"} | login {"username","password","url"} | note {"text"}
+nlohmann::json secret_create_apply(hivemind::SecretStore& secrets,
+                                   const std::string& name,
+                                   const std::string& type,
+                                   const nlohmann::json& payload,
+                                   const std::string& agent_id);
+
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,
               WorkerChannel& channel, ApprovalStore& approvals,
-              RoutineStore& routines);
+              RoutineStore& routines, hivemind::SecretStore& secrets);
     ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
@@ -71,6 +83,9 @@ public:
     void handle_routine_req(const std::string& worker,
                             const std::string& agent_id,
                             const nlohmann::json& frame);
+    void handle_secret_req(const std::string& worker,
+                           const std::string& agent_id,
+                           const nlohmann::json& frame);
 
     /// WorkerChannel::on_heartbeat hook: per-agent states map.
     void on_heartbeat(const std::string& worker,
@@ -105,6 +120,7 @@ private:
     WorkerChannel& channel_;
     ApprovalStore& approvals_;
     RoutineStore& routines_;
+    hivemind::SecretStore& secrets_;
     ChatService* chat_ = nullptr;
     LlmStore* llm_ = nullptr;
 

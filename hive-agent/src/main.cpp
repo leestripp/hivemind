@@ -133,6 +133,51 @@ private:
 };
 RoutineBridge g_routines;
 
+// Secret bridge: request/response to the hub for secrets_create. Tools
+// emit {"ev":"secret_req",...}; the worker forwards it as an op frame;
+// the hub applies it against SecretStore and replies with
+// {"op":"secret_resp","id":...,"ok":bool,"result"|"error"} on stdin.
+// Same blocking pattern as RoutineBridge, 30s timeout.
+class SecretBridge {
+public:
+    json call(const std::string& action, const json& payload) {
+        const std::string id = "s" + std::to_string(++seq_);
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pending_[id] = std::nullopt;
+        }
+        json ev = {{"ev", "secret_req"}, {"id", id}, {"action", action}};
+        for (auto& [k, v] : payload.items()) ev[k] = v;
+        emit(ev);
+        std::unique_lock<std::mutex> lk(m_);
+        const bool got = cv_.wait_for(lk, std::chrono::seconds(30), [&] {
+            return pending_[id].has_value();
+        });
+        json out = got
+            ? *pending_[id]
+            : json{{"ok", false},
+                   {"error", "secret request timed out (hub offline?)"}};
+        pending_.erase(id);
+        return out;
+    }
+
+    void resolve(const std::string& id, const json& frame) {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = pending_.find(id);
+        if (it != pending_.end()) {
+            it->second = frame;
+            cv_.notify_all();
+        }
+    }
+
+private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::map<std::string, std::optional<json>> pending_;
+    int seq_ = 0;
+};
+SecretBridge g_secrets;
+
 // Approval broker: hive-brain' sink hook blocks until an approval_resp
 // arrives on stdin (or a 10-minute safety timeout denies).
 class ApprovalBroker {
@@ -840,6 +885,86 @@ int main(int argc, char** argv) {
     agent.register_tool(std::make_unique<hive::BrowserFillSecretTool>());
 
     // secrets_* (Phase 61): the hub brokers granted secrets into the
+    // secrets_create: mint a NEW credential into the broker instead of
+    // writing it to a plaintext file in the container. The value crosses
+    // the LLM context once (the agent generated it — unavoidable), then
+    // lives encrypted hub-side (AES-256-GCM) and returns to tools on
+    // future spawns as HIVE_SECRET_<NAME> — never in context again.
+    class SecretsCreateTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "secrets_create"; }
+        std::string get_description() const override {
+            return "Create a NEW secret in the hive broker, granted to "
+                   "you. Use this to store credentials you generate — a "
+                   "password or API key for a new account — instead of "
+                   "writing them to files in your container. Types: "
+                   "api_key (give 'value'), login (give 'password' plus "
+                   "optional 'username'/'url'), note (give 'text'). Names "
+                   "are unique hive-wide; you get an error if taken. The "
+                   "stored secret is usable by secrets_get and "
+                   "browser_fill_secret after your next restart (env "
+                   "secrets load at spawn); this session you already have "
+                   "the value in context.";
+        }
+        json get_definition() const override {
+            json name = {{"type","string"},
+                         {"description","Secret name [A-Za-z0-9_], <=64 "
+                                        "chars, e.g. myservice_login"}};
+            json type = {{"type","string"},
+                         {"description","api_key | login | note"},
+                         {"default","api_key"}};
+            json value = {{"type","string"},
+                          {"description","api_key material"}};
+            json username = {{"type","string"},
+                             {"description","login only: username"}};
+            json password = {{"type","string"},
+                             {"description","login only: password "
+                                            "(required for login)"}};
+            json url = {{"type","string"},
+                        {"description","login only: site URL"}};
+            json text = {{"type","string"},
+                         {"description","note only: free text"}};
+            json params = {
+                {"type","object"},
+                {"properties",{{"name",name},{"type",type},{"value",value},
+                               {"username",username},{"password",password},
+                               {"url",url},{"text",text}}},
+                {"required",{"name"}}};
+            return {{"type","function"},
+                    {"function",{{"name","secrets_create"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string name = args.value("name","");
+            const std::string type = args.value("type","api_key");
+            if (name.empty())
+                return {{"status","error"},{"error","name required"}};
+            json payload = json::object();
+            if (type == "login") {
+                payload = {{"username", args.value("username","")},
+                           {"password", args.value("password","")},
+                           {"url",      args.value("url","")}};
+            } else if (type == "note") {
+                payload = {{"text", args.value("text","")}};
+            } else {
+                payload = {{"value", args.value("value","")}};
+            }
+            json r = g_secrets.call("create", {{"name",name},
+                                               {"type",type},
+                                               {"payload",payload}});
+            if (!r.value("ok", false))
+                return {{"status","error"},
+                        {"error", r.value("error","create failed")}};
+            return {{"status","success"},
+                    {"note","secret '" + name + "' created in the broker "
+                            "and granted to you. It will reach tools "
+                            "after your next restart; you still have the "
+                            "value in this session's context."}};
+        }
+    };
+    agent.register_tool(std::make_unique<SecretsCreateTool>());
+
     // container environment at spawn (Phase 60); these tools let the
     // agent discover (secrets_list) and read (secrets_get) them.
     agent.register_tool(std::make_unique<hive::SecretsListTool>());
@@ -986,6 +1111,8 @@ int main(int argc, char** argv) {
             approvals.resolve(op.value("id", ""), op.value("allow", false));
         } else if (kind == "routine_resp") {
             g_routines.resolve(op.value("id", ""), op);
+        } else if (kind == "secret_resp") {
+            g_secrets.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
         } else if (kind == "shutdown") {
