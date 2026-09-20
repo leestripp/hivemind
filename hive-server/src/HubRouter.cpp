@@ -262,6 +262,8 @@ void HubRouter::handle_secret_req(const std::string& worker,
                                   const std::string& agent_id,
                                   const json& frame) {
     const std::string id = frame.value("id", "");
+    std::cerr << "[hub] secret_req from " << agent_id
+              << " action=" << frame.value("action", "") << "\n";
     json resp = {{"op", "secret_resp"}, {"agent_id", agent_id}, {"id", id}};
     try {
         const std::string action = frame.value("action", "");
