@@ -10,6 +10,7 @@
 #include "tools/WebSearchTool.h"
 #include "tools/PDFTool.h"
 #include "tools/TodoListTool.h"
+#include "tools/ListToolsTool.h"
 #include "mcp/McpServerManager.h"
 #include "core/FileIO.h"
 #include "core/ThreadPool.h"
@@ -74,6 +75,11 @@ void ToolFactory::initialize_tools() {
 
     // §State Machine: agent-driven state transitions.
     register_tool(std::make_shared<SetStatusTool>());
+
+    // §LIST-TOOLS (2026-09-20): ground-truth introspection — models asked
+    // "what tools do you have?" answer from (possibly stale) conversation
+    // history otherwise.
+    register_tool(std::make_shared<ListToolsTool>());
 
     // Bash tool
     register_tool(std::make_shared<BashTool>());
@@ -162,7 +168,18 @@ json ToolFactory::execute_tool(const std::string& tool_name,
             {"message", "Tool '" + tool_name + "' is disabled by host policy"}
         });
     }
-    return execute_tool(tool_name, args, file_io, progress);
+    // §LIST-TOOLS (2026-09-20): hand the per-agent filter to tools that
+    // ask for it (FilterAwareTool) so e.g. list_tools answers reflect what
+    // THIS agent may call. Per-call injection, no process-global state —
+    // the factory is shared across Agent instances.
+    if (auto tool = get_tool(tool_name)) {
+        if (auto* aware = dynamic_cast<FilterAwareTool*>(tool.get())) {
+            aware->set_active_filter(&filter);
+        }
+        return tool->execute(args, file_io, progress);
+    }
+    return json::object({{"status", "error"},
+                         {"message", "Unknown tool: " + tool_name}});
 }
 
 void ToolFactory::refresh_mcp_tools() {

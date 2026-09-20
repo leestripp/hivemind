@@ -35,3 +35,22 @@ public:
     [[nodiscard]] static std::string extract_mcp_server(
         const std::string& tool_name);
 };
+
+/**
+ * @brief Interface for tools that need the calling agent's ToolFilter at
+ *        execution time (§LIST-TOOLS 2026-09-20).
+ *
+ * ToolFactory's filter-aware execute_tool() overload dynamic_casts the
+ * resolved tool to this interface and hands it the filter for the duration
+ * of the call. This avoids process-global filter state — the global
+ * ToolFactory is shared across Agent instances, so a static "current
+ * filter" would leak one agent's policy into another agent's answers.
+ */
+class FilterAwareTool {
+public:
+    virtual ~FilterAwareTool() = default;
+
+    /// Called immediately before execute(); pointer is valid only for the
+    /// duration of that call. Never invoked on the unfiltered overloads.
+    virtual void set_active_filter(const ToolFilter* filter) = 0;
+};

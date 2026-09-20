@@ -296,3 +296,63 @@ TEST_CASE("discover_skills reports the skill directories (§SKILL-DIRS)") {
     CHECK(saw_user);
     CHECK(saw_project);
 }
+
+// §LIST-TOOLS (2026-09-20): ground-truth tool introspection.
+TEST_CASE("list_tools is registered and reports the live registry") {
+    auto factory = ToolHandler::get_tool_factory();
+    REQUIRE(factory != nullptr);
+    CHECK(factory->has_tool("list_tools"));
+
+    FileIO file_io(".");
+    const json result = factory->execute_tool("list_tools", json::object(), file_io);
+    REQUIRE(result["status"] == "success");
+    REQUIRE(result.contains("tools"));
+    REQUIRE(result["tools"].is_array());
+    CHECK(result["count"].get<size_t>() == result["tools"].size());
+
+    // It must list itself plus the well-known core tools.
+    std::vector<std::string> names;
+    for (const auto& t : result["tools"]) {
+        REQUIRE(t.contains("name"));
+        names.push_back(t["name"].get<std::string>());
+    }
+    const auto has = [&](const char* n) {
+        return std::find(names.begin(), names.end(), n) != names.end();
+    };
+    CHECK(has("list_tools"));
+    CHECK(has("execute_bash"));
+    CHECK(has("tell_user"));
+    CHECK(has("stop"));
+
+    // Unfiltered call: nothing reported disabled.
+    CHECK(!result.contains("disabled_by_host"));
+}
+
+TEST_CASE("list_tools honours the per-agent ToolFilter via execute_tool(filter)") {
+    auto factory = ToolHandler::get_tool_factory();
+    REQUIRE(factory != nullptr);
+
+    ToolFilter filter;
+    filter.disabled_tools.insert("execute_bash");
+
+    FileIO file_io(".");
+    const json result = factory->execute_tool("list_tools", json::object(),
+                                              file_io, nullptr, filter);
+    REQUIRE(result["status"] == "success");
+
+    std::vector<std::string> names;
+    for (const auto& t : result["tools"]) {
+        names.push_back(t["name"].get<std::string>());
+    }
+    CHECK(std::find(names.begin(), names.end(), "execute_bash") == names.end());
+    CHECK(std::find(names.begin(), names.end(), "tell_user") != names.end());
+
+    REQUIRE(result.contains("disabled_by_host"));
+    const auto& disabled = result["disabled_by_host"];
+    CHECK(std::find(disabled.begin(), disabled.end(), "execute_bash") != disabled.end());
+
+    // And the filter still blocks direct execution of the disabled tool.
+    const json blocked = factory->execute_tool("execute_bash", json::object(),
+                                               file_io, nullptr, filter);
+    CHECK(blocked["status"] == "error");
+}
