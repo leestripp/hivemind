@@ -451,7 +451,7 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 if (op == "task" || op == "approval_resp" || op == "cancel" ||
-                    op == "routine_resp") {
+                    op == "routine_resp" || op == "secret_resp") {
                     const std::string aid = frame.value("agent_id","");
                     if (!g_fleet || !g_fleet->send_to(aid, frame)) {
                         try {
