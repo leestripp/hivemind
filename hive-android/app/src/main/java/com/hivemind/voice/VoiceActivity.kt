@@ -38,7 +38,9 @@ class VoiceActivity : Activity() {
         private const val REQ_AUDIO = 42
         private const val POLL_MS = 700L
         private const val IDLE_POLL_MS = 2_500L
-        private const val TURN_TIMEOUT_MS = 180_000L
+        private const val STALL_TIMEOUT_MS = 240_000L  // no text growth
+        private const val NET_FAIL_TIMEOUT_MS = 45_000L  // consecutive poll failures
+        private const val MAX_UTTER_CHARS = 2000  // TTS rejects very long utterances
         private const val INBOX_THREAD = "user"   // hub's User Inbox (kUserThreadId)
     }
 
@@ -75,7 +77,13 @@ class VoiceActivity : Activity() {
     /** Chars of [streamText] already queued to TTS. */
     private var spokenLen = 0
     private var turnDone = false
-    private var turnDeadline = 0L
+    /** Last time the reply visibly grew (partial or stored messages) —
+     *  a turn only times out when it STALLS, never for being long. */
+    private var lastProgressMs = 0L
+    private var lastPartialLen = 0
+    /** First consecutive poll-failure time (0 = polls healthy). Written on
+     *  the io thread, read on the UI thread. */
+    @Volatile private var netFailSince = 0L
     /** Invalidates in-flight poll ticks: a tick fetched under an older
      *  generation is dropped in [handleTick], so a cancelled turn's stale
      *  partial can never resurrect speech inside the NEXT turn. */
@@ -232,7 +240,9 @@ class VoiceActivity : Activity() {
         talk.isEnabled = false
         cancel.visibility = View.VISIBLE
         status.text = "Sending…"
-        turnDeadline = System.currentTimeMillis() + TURN_TIMEOUT_MS
+        lastProgressMs = System.currentTimeMillis()
+        lastPartialLen = 0
+        netFailSince = 0L
 
         io.execute {
             try {
@@ -294,6 +304,19 @@ class VoiceActivity : Activity() {
         }
     }
 
+    /**
+     * Speak a short status notice aloud — voice-first UX: the user is not
+     * watching the screen, so abnormal endings must be HEARD. Call AFTER
+     * toIdle; re-enters STREAMING for the notice and returns to IDLE via
+     * onQueueEmpty when it has played.
+     */
+    private fun speakNotice(text: String) {
+        turnDone = true            // standalone utterance: nothing more coming
+        streamText = text
+        spokenLen = 0
+        drainSpeech(flush = true)
+    }
+
     /** Speak the next pending note — IDLE only. */
     private fun speakPending() {
         if (phase != Phase.IDLE || pendingSpeech.isEmpty()) return
@@ -321,30 +344,48 @@ class VoiceActivity : Activity() {
     private val pollTick = object : Runnable {
         override fun run() {
             if (phase != Phase.THINKING && phase != Phase.STREAMING) return
-            if (System.currentTimeMillis() > turnDeadline) {
+            val now = System.currentTimeMillis()
+            if (netFailSince != 0L && now - netFailSince > NET_FAIL_TIMEOUT_MS) {
                 tts.stop()
-                toIdle("Timed out waiting for the agent")
+                toIdle("Connection lost")
+                speakNotice("I lost the connection to the hub. " +
+                            "Check your network, then ask again.")
+                return
+            }
+            if (now - lastProgressMs > STALL_TIMEOUT_MS) {
+                tts.stop()
+                toIdle("Agent stopped responding")
+                speakNotice("The agent stopped responding partway through. " +
+                            "I'll read the full reply out when it arrives.")
                 return
             }
             val gen = turnGen
             io.execute {
                 try {
                     val act = api.activity(threadId)
+                    var appended = false
                     for (m in api.messagesAfter(threadId, lastMessageId)) {
                         lastMessageId = m.id
                         if (m.senderKind == "agent" && m.body.isNotBlank()) {
                             if (finalReply.isNotEmpty()) finalReply.append(' ')
                             finalReply.append(m.body.trim())
+                            appended = true
                         }
                     }
+                    netFailSince = 0L
                     // finalReply + activity state converge on this thread;
                     // hand a snapshot to the UI side.
                     val busy = act.busy
                     val error = act.error
                     val partial = act.partial
-                    ui.post { handleTick(busy, error, partial, gen) }
+                    val grew = appended || partial.length > lastPartialLen
+                    if (partial.isNotEmpty()) lastPartialLen = partial.length
+                    ui.post { handleTick(busy, error, partial, gen, grew) }
                 } catch (e: Exception) {
-                    // Transient hub/network blip — keep polling until deadline.
+                    // Transient hub/network blip — keep polling until the
+                    // failure streak itself times out (checked above).
+                    if (netFailSince == 0L)
+                        netFailSince = System.currentTimeMillis()
                     ui.postDelayed(this, POLL_MS)
                 }
             }
@@ -352,12 +393,15 @@ class VoiceActivity : Activity() {
     }
 
     private fun handleTick(busy: Boolean, error: String, partial: String,
-                           gen: Int) {
+                           gen: Int, grew: Boolean) {
         if (gen != turnGen) return  // stale tick from a cancelled turn
         if (phase != Phase.THINKING && phase != Phase.STREAMING) return
+        if (grew) lastProgressMs = System.currentTimeMillis()
         if (error.isNotEmpty()) {
             tts.stop()
             toIdle("Agent error: $error")
+            speakNotice("Sorry, the agent hit an error and stopped. " +
+                        "Please try again.")
             return
         }
         // The text the spoken length refers to: the live partial while the
@@ -424,8 +468,23 @@ class VoiceActivity : Activity() {
     private fun queueSpeech(text: String) {
         val clean = SpeechText.forSpeech(text)
         if (clean.isEmpty()) return
-        Log.d(TAG, "speak chunk: ${clean.take(40)}…")
-        tts.speakQueued(clean)
+        // TextToSpeech silently REJECTS very long utterances (typical cap
+        // ~4000 chars) — a single oversized sentence would vanish from the
+        // spoken reply. Split on word boundaries so nothing is dropped.
+        var rest = clean
+        while (rest.length > MAX_UTTER_CHARS) {
+            var cut = rest.lastIndexOf(' ', MAX_UTTER_CHARS)
+            if (cut < MAX_UTTER_CHARS / 2) cut = MAX_UTTER_CHARS
+            queueSpeechChunk(rest.substring(0, cut))
+            rest = rest.substring(cut).trimStart()
+        }
+        queueSpeechChunk(rest)
+    }
+
+    private fun queueSpeechChunk(text: String) {
+        if (text.isEmpty()) return
+        Log.d(TAG, "speak chunk: ${text.take(40)}…")
+        tts.speakQueued(text)
         if (phase == Phase.THINKING || phase == Phase.IDLE) enterStreaming()
     }
 
