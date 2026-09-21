@@ -8,6 +8,7 @@
 #include "tools/ReadImageTool.h"
 #include "tools/WebFetchTool.h"
 #include "tools/WebSearchTool.h"
+#include "tools/SearxngSearchTool.h"
 #include "tools/PDFTool.h"
 #include "tools/TodoListTool.h"
 #include "tools/ListToolsTool.h"
@@ -115,6 +116,14 @@ void ToolFactory::initialize_tools() {
     // retired. DuckDuckGo HTML endpoint, no API key required.
     register_tool(std::make_shared<WebSearchTool>());
     register_tool(std::make_shared<WebFetchTool>());
+
+    // §SEARXNG-CORE (2026-09-21): preferred search — our self-hosted
+    // SearXNG metasearch on the leestrippai.com droplet (nginx :8443,
+    // HTTP Basic). Credentials arrive as a hub-granted login secret named
+    // "searxng" (HIVE_SECRET_SEARXNG_{USER,PASS,URL}, Phase 60); the tool
+    // reports a descriptive error until the grant exists. web_search
+    // (DuckDuckGo) stays as the credential-free fallback.
+    register_tool(std::make_shared<SearxngSearchTool>());
 
     // Todo list tools
     register_tool(std::make_shared<TodoAddTool>());

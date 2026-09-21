@@ -2,6 +2,8 @@
 
 #include <expected>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Synchronous HTTP(S) GET for the web_fetch agent tool, built on OmniNet's
 // HttpClient (the project's HTTP stack — no separate libcurl usage here).
@@ -20,4 +22,10 @@ public:
     // Only http:// and https:// URLs are accepted; non-2xx statuses are
     // errors.
     static std::expected<Result, std::string> get(const std::string& url);
+
+    // Same as get(url) with extra request headers (e.g. Authorization
+    // for the private SearXNG endpoint).
+    static std::expected<Result, std::string>
+    get(const std::string& url,
+        const std::vector<std::pair<std::string, std::string>>& headers);
 };

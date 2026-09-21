@@ -6,6 +6,12 @@
 #include <cctype>
 
 std::expected<WebFetch::Result, std::string> WebFetch::get(const std::string& url) {
+    return get(url, {});
+}
+
+std::expected<WebFetch::Result, std::string>
+WebFetch::get(const std::string& url,
+              const std::vector<std::pair<std::string, std::string>>& headers) {
     if (!url.starts_with("http://") && !url.starts_with("https://"))
         return std::unexpected("only http:// and https:// URLs are supported");
 
@@ -18,6 +24,7 @@ std::expected<WebFetch::Result, std::string> WebFetch::get(const std::string& ur
 
     OmniNet::HTTP::ClientRequest req;
     req.method("GET").url(url);
+    for (const auto& [name, value] : headers) req.header(name, value);
 
     auto resp = OmniNet::HTTP::Client::get_instance().send_blocking(req, cfg);
     if (!resp)

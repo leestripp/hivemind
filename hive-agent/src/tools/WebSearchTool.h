@@ -12,9 +12,10 @@ public:
 
     std::string get_description() const override {
         return "Search the web (DuckDuckGo, no API key) and return result "
-               "titles, URLs, and snippets. Use for research, inspiration, "
-               "and finding documentation; then call web_fetch on a result "
-               "URL to read the page.";
+               "titles, URLs, and snippets. Fallback for searxng_search "
+               "(our private instance) when it errors or returns thin "
+               "results; then call web_fetch on a result URL to read the "
+               "page.";
     }
 
     json get_definition() const override {
