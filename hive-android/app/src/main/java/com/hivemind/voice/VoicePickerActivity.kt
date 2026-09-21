@@ -90,6 +90,7 @@ class VoicePickerActivity : Activity() {
             val gd = GestureDetector(this@VoicePickerActivity,
                 object : GestureDetector.SimpleOnGestureListener() {
                     override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                        v.performClick()   // accessibility contract
                         sample(opt); return true
                     }
                     override fun onDoubleTap(e: MotionEvent): Boolean {
