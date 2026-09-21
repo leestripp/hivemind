@@ -93,15 +93,24 @@ class SttEngine(
         }
     }
 
-    /** Copy bundled models out of assets on first run (native needs paths). */
+    /** Copy bundled models out of assets on first run (native needs paths).
+     *  Extraction is ATOMIC (.tmp + rename): a process killed mid-copy used
+     *  to leave a truncated .onnx that every later launch trusted and the
+     *  native loader then rejected — the app stayed broken forever. */
     private fun extractModels(dir: File) {
         dir.mkdirs()
         for (name in MODEL_FILES) {
             val out = File(dir, name)
+            val tmp = File(dir, "$name.tmp")
+            if (tmp.exists()) tmp.delete()   // stale partial from a crash
             if (out.exists() && out.length() > 0) continue
             Log.i(TAG, "extracting $name")
             context.assets.open("models/stt/$name").use { input ->
-                out.outputStream().use { input.copyTo(it) }
+                tmp.outputStream().use { input.copyTo(it) }
+            }
+            if (!tmp.renameTo(out)) {
+                tmp.delete()
+                throw java.io.IOException("could not install model $name")
             }
         }
     }
@@ -168,10 +177,13 @@ class SttEngine(
 
     fun destroy() {
         discard()
-        worker.quitSafely()
+        // quitSafely() drops anything posted AFTER it, so the release must
+        // be queued FIRST and the quit issued from inside that same block —
+        // the old order leaked the native recognizer on every destroy.
         bg.post {
             stream?.release(); stream = null
             recognizer?.release(); recognizer = null
+            worker.quitSafely()
         }
     }
 

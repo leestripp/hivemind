@@ -135,6 +135,9 @@ class VoiceActivity : Activity() {
             ui.post {
                 if (phase == Phase.STREAMING && turnDone) toIdle("")
             }
+        }, onInitFailed = {
+            status.text = "No text-to-speech engine on this device — " +
+                          "replies will be silent"
         })
         // Per-agent voice (chosen in VoicePickerActivity); "" = default.
         Prefs.voiceFor(this, agentId).ifEmpty { null }?.let {
@@ -252,7 +255,11 @@ class VoiceActivity : Activity() {
                     ui.postDelayed(pollTick, POLL_MS)
                 }
             } catch (e: Exception) {
-                ui.post { toIdle("Send failed: ${e.message}") }
+                ui.post {
+                    toIdle("Send failed: ${e.message}")
+                    speakNotice("Your message didn't send. " +
+                                "Check the connection and try again.")
+                }
             }
         }
     }

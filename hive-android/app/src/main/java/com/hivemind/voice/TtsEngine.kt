@@ -19,6 +19,7 @@ class TtsEngine(
     context: Context,
     private val onQueueEmpty: () -> Unit,
     private val onReady: (() -> Unit)? = null,
+    private val onInitFailed: ((Int) -> Unit)? = null,
 ) : UtteranceProgressListener() {
 
     /** Applied once the engine is ready (per-agent voice selection). */
@@ -44,6 +45,12 @@ class TtsEngine(
                 pending.clear()
                 p.forEach { speakQueued(it) }
                 onReady?.invoke()
+            } else {
+                // No usable engine on this device — without this the
+                // session would swallow every reply into `pending` and
+                // stay SILENT forever with no explanation.
+                Log.e(TAG, "TTS init failed, status=$status")
+                onInitFailed?.invoke(status)
             }
         }.also { tts = it }
     }
