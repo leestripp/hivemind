@@ -8,7 +8,8 @@
 
     <application
         android:label="@string/app_name"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.HiveVoice"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true">
