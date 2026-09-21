@@ -76,6 +76,10 @@ class VoiceActivity : Activity() {
     private var spokenLen = 0
     private var turnDone = false
     private var turnDeadline = 0L
+    /** Invalidates in-flight poll ticks: a tick fetched under an older
+     *  generation is dropped in [handleTick], so a cancelled turn's stale
+     *  partial can never resurrect speech inside the NEXT turn. */
+    private var turnGen = 0
 
     private var speakAnimator: Runnable? = null
     private var lastStatusUpdate = 0L
@@ -178,6 +182,7 @@ class VoiceActivity : Activity() {
     // -- Phase transitions --------------------------------------------------
 
     private fun toIdle(message: String) {
+        turnGen++
         phase = Phase.IDLE
         finalReply.clear()
         streamText = ""
@@ -220,6 +225,7 @@ class VoiceActivity : Activity() {
             return
         }
         phase = Phase.THINKING
+        turnGen++
         sphere.setSphereState(SphereState.THINKING)
         talk.text = "···"
         talk.setBackgroundResource(R.drawable.btn_talk)
@@ -316,9 +322,11 @@ class VoiceActivity : Activity() {
         override fun run() {
             if (phase != Phase.THINKING && phase != Phase.STREAMING) return
             if (System.currentTimeMillis() > turnDeadline) {
+                tts.stop()
                 toIdle("Timed out waiting for the agent")
                 return
             }
+            val gen = turnGen
             io.execute {
                 try {
                     val act = api.activity(threadId)
@@ -334,7 +342,7 @@ class VoiceActivity : Activity() {
                     val busy = act.busy
                     val error = act.error
                     val partial = act.partial
-                    ui.post { handleTick(busy, error, partial) }
+                    ui.post { handleTick(busy, error, partial, gen) }
                 } catch (e: Exception) {
                     // Transient hub/network blip — keep polling until deadline.
                     ui.postDelayed(this, POLL_MS)
@@ -343,24 +351,35 @@ class VoiceActivity : Activity() {
         }
     }
 
-    private fun handleTick(busy: Boolean, error: String, partial: String) {
+    private fun handleTick(busy: Boolean, error: String, partial: String,
+                           gen: Int) {
+        if (gen != turnGen) return  // stale tick from a cancelled turn
         if (phase != Phase.THINKING && phase != Phase.STREAMING) return
         if (error.isNotEmpty()) {
+            tts.stop()
             toIdle("Agent error: $error")
             return
         }
         // The text the spoken length refers to: the live partial while the
         // turn runs, the final message body once it's stored.
-        var next = if (busy) partial
+        val next = if (busy) partial
         else finalReply.toString().ifEmpty { partial }
+        if (busy && next.isEmpty()) {
+            // Transient empty partial (tool call / turn hand-over): keep
+            // the speech cursor — an empty source must NOT reset it.
+            ui.postDelayed(pollTick, POLL_MS)
+            return
+        }
         if (!next.startsWith(streamText)) {
-            // Source changed identity (new turn / divergent text) — start
-            // its speech tracking over rather than losing text.
-            if (streamText.isNotEmpty() && spokenLen > 0) {
-                Log.d(TAG, "stream source changed (${streamText.length} -> ${next.length})")
+            // Source diverged (the stored reply is normalized vs the live
+            // partial, or a genuinely new reply): re-speak only from the
+            // first differing character, never the whole message again.
+            val lcp = next.commonPrefixWith(streamText).length
+            if (streamText.isNotEmpty() && lcp < spokenLen) {
+                Log.d(TAG, "stream diverged at $lcp (spoken=$spokenLen)")
             }
+            spokenLen = minOf(spokenLen, lcp)
             streamText = next
-            spokenLen = 0
         } else {
             streamText = next
         }
@@ -427,21 +446,46 @@ class VoiceActivity : Activity() {
     /** Cut the agent's reply short and immediately start recording. */
     private fun interruptAndTalk() {
         tts.stop()
-        io.execute { api.cancel(threadId) }
+        cancelTurnRemote()
         toIdle("")
         maybeStartListening()
     }
 
     private fun cancelCurrent() {
+        // Stop means STOP: queued inbox notes must not start playing the
+        // moment the cancel lands (toIdle would otherwise drain them).
+        pendingSpeech.clear()
         when (phase) {
             Phase.LISTENING -> stt.discard()
             Phase.THINKING, Phase.STREAMING -> {
                 tts.stop()
-                io.execute { api.cancel(threadId) }
+                cancelTurnRemote()
             }
             else -> {}
         }
         if (phase != Phase.SETUP) toIdle("Cancelled")
+    }
+
+    /**
+     * Hub-side cancel + baseline resync. Anything the cancelled turn still
+     * STORES after the cancel is swallowed (the poll baseline moves past
+     * it), so its ghost can't be picked up by inboxWatch and spoken as a
+     * "note" later. Bounded wait: a queued postMessage for the user's next
+     * utterance sits behind this on the single io thread.
+     */
+    private fun cancelTurnRemote() {
+        io.execute {
+            api.cancel(threadId)
+            val deadline = System.currentTimeMillis() + 3_000
+            while (System.currentTimeMillis() < deadline) {
+                val act = runCatching { api.activity(threadId) }.getOrNull()
+                    ?: break
+                if (!act.busy) break
+                Thread.sleep(300)
+            }
+            runCatching { api.latestMessageId(threadId) }.getOrNull()
+                ?.let { if (it.isNotEmpty()) lastMessageId = it }
+        }
     }
 
     // -- Sphere level while speaking ------------------------------------------
