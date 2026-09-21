@@ -614,7 +614,11 @@ class VoiceActivity : Activity() {
 
     override fun onPause() {
         sphere.onPause()
-        if (phase == Phase.LISTENING || phase == Phase.STREAMING) cancelCurrent()
+        // Backgrounding cancels ANY active turn: LISTENING/STREAMING were
+        // always cancelled, but a THINKING turn's reply would arrive and
+        // start SPEAKING while the app is in the background (pocket audio).
+        if (phase == Phase.LISTENING || phase == Phase.STREAMING ||
+            phase == Phase.THINKING) cancelCurrent()
         super.onPause()
     }
 

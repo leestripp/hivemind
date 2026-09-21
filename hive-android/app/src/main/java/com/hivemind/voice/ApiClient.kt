@@ -44,7 +44,11 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         }
         try {
             if (body != null) {
-                OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+                // Explicit UTF-8: the platform default is UTF-8 on Android
+                // today, but a voice transcript is user speech — never let
+                // a charset default corrupt it.
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8)
+                    .use { it.write(body.toString()) }
             }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
