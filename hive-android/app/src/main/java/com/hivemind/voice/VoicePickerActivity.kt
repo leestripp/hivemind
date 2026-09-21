@@ -48,6 +48,8 @@ class VoicePickerActivity : Activity() {
 
         tts = TtsEngine(this, onQueueEmpty = {}, onReady = {
             ui.post { populate() }
+        }, onInitFailed = {
+            status.text = "No text-to-speech engine on this device"
         })
         status.text = "Loading voices…"
     }
@@ -94,7 +96,9 @@ class VoicePickerActivity : Activity() {
                         select(opt); return true
                     }
                 })
-            v.setOnTouchListener { _, ev -> gd.onTouchEvent(ev); true }
+            // Return the detector's verdict, NOT always true: consuming
+            // every MotionEvent made the ListView unable to scroll.
+            v.setOnTouchListener { _, ev -> gd.onTouchEvent(ev) }
             return v
         }
     }

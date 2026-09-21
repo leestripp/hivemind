@@ -32,6 +32,11 @@ class TtsEngine(
     @Volatile var outstanding = 0
         private set
     private var seq = 0
+    /** Utterances with seq below this were killed by [stop] — their late
+     *  callbacks must not touch speaking/outstanding (already accounted),
+     *  or they flicker the sphere mid-next-reply and double-fire
+     *  onQueueEmpty. */
+    @Volatile private var epochBase = 0
     private val pending = mutableListOf<String>()
 
     init {
@@ -58,7 +63,10 @@ class TtsEngine(
     /** Queue a chunk for speech. Call on the main thread. */
     fun speakQueued(text: String) {
         val engine = tts
-        if (!ready || engine == null) { pending += text; return }
+        if (!ready || engine == null) {
+            if (pending.size < 20) pending += text  // never-ready cap
+            return
+        }
         outstanding++
         Log.d(TAG, "queue +${text.length} chars (out=$outstanding)")
         engine.speak(text, TextToSpeech.QUEUE_ADD, null, "$UTTER_PREFIX${seq++}")
@@ -104,6 +112,7 @@ class TtsEngine(
         pending.clear()
         outstanding = 0
         speaking = false
+        epochBase = seq
         tts?.stop()
     }
 
@@ -124,6 +133,7 @@ class TtsEngine(
     override fun onStart(utteranceId: String?) { speaking = true }
 
     override fun onDone(utteranceId: String?) {
+        if (isPreStop(utteranceId)) return
         if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
             outstanding--
             Log.d(TAG, "done (out=$outstanding)")
@@ -136,6 +146,7 @@ class TtsEngine(
 
     @Deprecated("deprecated in TTS API")
     override fun onError(utteranceId: String?) {
+        if (isPreStop(utteranceId)) return
         if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
             outstanding--
         }
@@ -143,6 +154,14 @@ class TtsEngine(
             speaking = false
             onQueueEmpty()
         }
+    }
+
+    /** True for callbacks of utterances killed by a [stop] call. */
+    private fun isPreStop(utteranceId: String?): Boolean {
+        if (utteranceId?.startsWith(UTTER_PREFIX) != true) return false
+        val n = utteranceId.removePrefix(UTTER_PREFIX).toIntOrNull()
+            ?: return false   // e.g. "preview" — not sequenced
+        return n < epochBase
     }
 
     companion object {

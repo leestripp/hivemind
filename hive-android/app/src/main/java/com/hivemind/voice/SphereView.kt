@@ -26,6 +26,14 @@ class SphereView @JvmOverloads constructor(
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
+    override fun onPause() {
+        // Free the GL objects while the (possibly preserved) context is
+        // still current — otherwise every pause/resume cycle orphans a
+        // program + VBO inside it. onSurfaceCreated rebuilds on return.
+        queueEvent { SphereNative.nativeDestroy() }
+        super.onPause()
+    }
+
     /** Instantaneous voice level 0..1 (mic RMS or TTS envelope). */
     fun setLevel(level: Float) = renderer.setLevel(level)
 

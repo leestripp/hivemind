@@ -14,15 +14,22 @@
         <!-- cleartext allowed for LAN hubs (http://192.168.x.x:8421);
              the default URL is https and stays TLS. -->
 
-        <activity android:name=".MainActivity" android:exported="true">
+        <!-- configChanges everywhere: the default recreate-on-rotation
+             destroys a live voice session mid-reply (mic, TTS, poll
+             chain). All layouts here are orientation-agnostic. -->
+        <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <activity android:name=".VoiceActivity" android:exported="false" />
-        <activity android:name=".VoicePickerActivity" android:exported="false" />
-        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".VoiceActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+        <activity android:name=".VoicePickerActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+        <activity android:name=".SettingsActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
     </application>
 </manifest>

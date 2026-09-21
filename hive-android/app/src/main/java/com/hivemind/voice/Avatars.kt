@@ -36,10 +36,19 @@ object Avatars {
 
     fun bitmap(ctx: Context, agentName: String, avatarField: String): Bitmap {
         val res = resolve(agentName, avatarField)
-        return cache.getOrPut(res) {
-            ctx.assets.open("avatars/$res.png").use(BitmapFactory::decodeStream)
-        }
+        cache[res]?.let { return it }
+        // decodeStream can return null (corrupt/missing asset) and a null
+        // in the cache NPEs every later lookup — fall back to user.png,
+        // then to a blank 1x1, but NEVER null.
+        val bmp = decode(ctx, res) ?: decode(ctx, "user")
+                  ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        cache[res] = bmp
+        return bmp
     }
+
+    private fun decode(ctx: Context, name: String): Bitmap? = runCatching {
+        ctx.assets.open("avatars/$name.png").use(BitmapFactory::decodeStream)
+    }.getOrNull()
 
     /** MurmurHash64A — verified bit-for-bit against C++ std::hash<string>. */
     private fun murmur64a(s: String, seed: ULong = 0xc70f6907uL): ULong {

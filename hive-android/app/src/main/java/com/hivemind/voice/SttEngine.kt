@@ -116,18 +116,21 @@ class SttEngine(
     }
 
     /** User tapped TALK. NEVER a silent no-op: a stale/zombie capture
-     *  gets reset, a not-yet-ready engine (re)loads and arms when done. */
+     *  gets reset, a not-yet-ready engine (re)loads and arms when done.
+     *  Everything happens on the bg thread — teardownCapture() joins the
+     *  capture thread, which must never block the UI. */
     fun start() {
         wantListen = true
-        if (listening) {
-            Log.w(TAG, "start() found stale capture — resetting")
-            teardownCapture()
+        val s = ++session
+        bg.post {
+            if (!wantListen || s != session) return@post
+            if (listening) {
+                Log.w(TAG, "start() found stale capture — resetting")
+                teardownCapture()
+            }
+            if (!ready) { initEngine(); return@post }  // arms itself on success
+            if (!listening) startCapture()
         }
-        if (!ready) {
-            bg.post { if (!ready) initEngine() }
-            return
-        }
-        arm()
     }
 
     private fun arm() {
@@ -135,23 +138,28 @@ class SttEngine(
         bg.post { if (wantListen && s == session && !listening) startCapture() }
     }
 
-    /** User tapped SEND: stop capturing, finalize, keep the transcript. */
-    fun stop() {
+    /** User tapped SEND: stop capturing, finalize, keep the transcript.
+     *  ASYNC — teardown + tail decode run on the bg thread (joining the
+     *  capture thread on the UI could stall it for ~2s worst case);
+     *  [onFinalized] fires on the UI thread once [transcript] is final. */
+    fun stop(onFinalized: (() -> Unit)? = null) {
         wantListen = false
         session++
-        if (!listening) return
-        teardownCapture()
-        // Decode whatever is still buffered, then take the final result.
-        val rec = recognizer; val st = stream
-        if (rec != null && st != null) {
-            runCatching {
-                st.inputFinished()
-                while (rec.isReady(st)) rec.decode(st)
-                val t = rec.getResult(st).text.trim()
-                if (t.isNotEmpty()) transcript = t
+        bg.post {
+            if (listening) teardownCapture()
+            // Decode whatever is still buffered, then take the final result.
+            val rec = recognizer; val st = stream
+            if (rec != null && st != null) {
+                runCatching {
+                    st.inputFinished()
+                    while (rec.isReady(st)) rec.decode(st)
+                    val t = rec.getResult(st).text.trim()
+                    if (t.isNotEmpty()) transcript = t
+                }
             }
+            Log.i(TAG, "stop (user) — transcript ${transcript.length} chars")
+            if (onFinalized != null) ui.post { onFinalized() }
         }
-        Log.i(TAG, "stop (user) — transcript ${transcript.length} chars")
     }
 
     /** Kill the capture thread + mic. Idempotent. */
@@ -165,13 +173,13 @@ class SttEngine(
         record = null
     }
 
-    /** User tapped CANCEL: abort and discard. */
+    /** User tapped CANCEL: abort and discard. Teardown runs on bg —
+     *  same no-UI-blocking rule as [stop]. */
     fun discard() {
         wantListen = false
         session++
         transcript = ""
-        if (!listening) return
-        teardownCapture()
+        bg.post { if (listening) teardownCapture() }
         Log.i(TAG, "discard (user)")
     }
 

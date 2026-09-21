@@ -184,7 +184,13 @@ class VoiceActivity : Activity() {
                 }
             } catch (e: Exception) {
                 ui.post {
-                    status.text = "Couldn't open conversation:\n${e.message}"
+                    status.text = "Couldn't open conversation:\n${e.message}\n(tap to retry)"
+                    status.setOnClickListener {
+                        if (phase == Phase.SETUP) {
+                            status.text = "Connecting…"
+                            openThread()
+                        }
+                    }
                 }
             }
         }
@@ -228,13 +234,7 @@ class VoiceActivity : Activity() {
     }
 
     private fun sendTranscript() {
-        stt.stop()
         sphere.setLevel(0f)
-        val text = stt.transcript.trim()
-        if (text.isEmpty()) {
-            toIdle("Didn't catch that — tap TALK to retry")
-            return
-        }
         phase = Phase.THINKING
         turnGen++
         sphere.setSphereState(SphereState.THINKING)
@@ -247,18 +247,31 @@ class VoiceActivity : Activity() {
         lastPartialLen = 0
         netFailSince = 0L
 
-        io.execute {
-            try {
-                api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
-                ui.post {
-                    status.text = "Thinking…"
-                    ui.postDelayed(pollTick, POLL_MS)
-                }
-            } catch (e: Exception) {
-                ui.post {
-                    toIdle("Send failed: ${e.message}")
-                    speakNotice("Your message didn't send. " +
-                                "Check the connection and try again.")
+        // Capture teardown + tail decode finish off the UI thread; the
+        // message is posted once the transcript is FINAL (the alternative —
+        // reading it here — would drop the last fraction of a second of
+        // speech, or block the UI on the capture-thread join).
+        stt.stop {
+            if (phase != Phase.THINKING) return@stop  // cancelled meanwhile
+            val text = stt.transcript.trim()
+            if (text.isEmpty()) {
+                toIdle("Didn't catch that — tap TALK to retry")
+                return@stop
+            }
+            io.execute {
+                try {
+                    api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
+                    ui.post {
+                        if (phase != Phase.THINKING) return@post
+                        status.text = "Thinking…"
+                        ui.postDelayed(pollTick, POLL_MS)
+                    }
+                } catch (e: Exception) {
+                    ui.post {
+                        toIdle("Send failed: ${e.message}")
+                        speakNotice("Your message didn't send. " +
+                                    "Check the connection and try again.")
+                    }
                 }
             }
         }
@@ -305,6 +318,7 @@ class VoiceActivity : Activity() {
                         ui.postDelayed(this, IDLE_POLL_MS)
                     }
                 } catch (e: Exception) {
+                    Log.w(TAG, "inbox poll failed: ${e.message}")
                     ui.postDelayed(this, IDLE_POLL_MS)
                 }
             }
