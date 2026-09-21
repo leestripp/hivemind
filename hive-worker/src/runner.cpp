@@ -12,6 +12,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <ifaddrs.h>
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
@@ -43,6 +45,41 @@ std::string container_name(const std::string& agent) {
 std::string worker_dir() {
     return (fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
          / ".local" / "share" / "hive-worker").string();
+}
+
+// Pasta hairpin fix (2026-09-21): under pasta the guest SHARES the host's
+// public IP, so on the droplet itself leestrippai.com resolves IN-GUEST to
+// the listenerless guest address and nginx :443/:8443 is unreachable. When
+// THIS host is the apex, ensure_container maps the name to the podman
+// host-gateway instead. Detected once: does the public name match one of
+// our own non-loopback interfaces?
+static bool self_hosted_apex() {
+    static const bool cached = [] {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* res = nullptr;
+        if (getaddrinfo("leestrippai.com", nullptr, &hints, &res) != 0 || !res)
+            return false;
+        bool match = false;
+        for (auto* a = res; a && !match; a = a->ai_next) {
+            const in_addr pub =
+                reinterpret_cast<sockaddr_in*>(a->ai_addr)->sin_addr;
+            ifaddrs* ifs = nullptr;
+            if (getifaddrs(&ifs) != 0) break;
+            for (auto* i = ifs; i && !match; i = i->ifa_next) {
+                if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
+                const in_addr mine =
+                    reinterpret_cast<sockaddr_in*>(i->ifa_addr)->sin_addr;
+                if ((ntohl(mine.s_addr) >> 24) == 127) continue;  // loopback
+                if (mine.s_addr == pub.s_addr) match = true;
+            }
+            freeifaddrs(ifs);
+        }
+        freeaddrinfo(res);
+        return match;
+    }();
+    return cached;
 }
 
 /// Quick synchronous podman call (no streaming); returns exit code.
@@ -192,6 +229,11 @@ void ensure_container(const std::string& agent, std::string image,
                                  "--device", "/dev/dri",
                                  "--group-add", "keep-groups"});
     }
+    // Pasta hairpin fix (2026-09-21, see self_hosted_apex): on the droplet
+    // the apex self-resolves to the listenerless guest; host-gateway makes
+    // nginx :443/:8443 reachable in-container. Harmless elsewhere.
+    if (self_hosted_apex())
+        args.insert(args.end(), {"--add-host", "leestrippai.com:host-gateway"});
     args.insert(args.end(), {"-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
                        "-v", skills.string() + ":/skills:ro",
