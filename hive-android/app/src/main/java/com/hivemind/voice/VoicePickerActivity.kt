@@ -1,5 +1,6 @@
 package com.hivemind.voice
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
@@ -73,10 +74,15 @@ class VoicePickerActivity : Activity() {
     }
 
     private inner class VoiceAdapter : BaseAdapter() {
+        // Taps are handled via GestureDetector (single=sample, double=
         override fun getCount() = options.size
         override fun getItem(position: Int) = options[position]
         override fun getItemId(position: Int) = position.toLong()
 
+        // Taps go through a GestureDetector (single=sample, double=select)
+        // and onSingleTapConfirmed calls performClick — the accessibility
+        // contract is honored; lint just can't trace into the callback.
+        @SuppressLint("ClickableViewAccessibility")
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val v = convertView ?: LayoutInflater.from(this@VoicePickerActivity)
                 .inflate(R.layout.voice_row, parent, false)
