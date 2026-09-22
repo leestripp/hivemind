@@ -134,7 +134,10 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             static const std::string DRIVE_HINT =
                 " Read /workspace/index.md first — it maps the company "
                 "drive and shows which department folder your work "
-                "belongs in.";
+                "belongs in. /workspace is shared with the agents on "
+                "YOUR worker only — it is NOT synced between workers, "
+                "so cross-rig hand-offs go through the thread, not the "
+                "filesystem.";
             static const json templates = json::array({
                 {{"id", "chief"}, {"name", "Chief"}, {"avatar", "executive"},
                  {"require_approval", false},

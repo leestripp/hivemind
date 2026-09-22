@@ -15,6 +15,11 @@ std::string container_name(const std::string& agent);
 /// ~/.local/share/hive-worker
 std::string worker_dir();
 
+/// First-run seeding of the shared worker workspace (dirs + index.md).
+/// Idempotent and NON-destructive: creates missing layout dirs, writes
+/// index.md ONLY when absent — agents maintain the live map thereafter.
+void seed_workspace(const std::string& workspace_dir);
+
 /// Quick synchronous podman call (no streaming); returns exit code.
 int podman_simple(const std::vector<std::string>& args, std::string* out);
 

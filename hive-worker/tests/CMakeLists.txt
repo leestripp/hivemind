@@ -16,3 +16,6 @@ endmacro()
 # spawning only happens when HIVE_TEST_API_KEY is set (skip = rc 77).
 hive_worker_test(test_fleet)
 set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
+
+# First-run workspace seeding (layout + default index.md, never overwrite).
+hive_worker_test(test_workspace_seed)

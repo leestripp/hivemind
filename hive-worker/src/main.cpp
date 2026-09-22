@@ -87,6 +87,11 @@ int main(int argc, char* argv[]) {
             c["gpu"] = "amd";
         caps = c.dump();
     }
+    // First-run workspace seeding: create the company-drive layout and
+    // the default index.md map BEFORE any agent container mounts it.
+    // Idempotent + never overwrites (agents maintain the live map).
+    hwrunner::seed_workspace(hwrunner::worker_dir() + "/workspace");
+
     const std::string url = server + "/api/workers/channel";
 
     // Phase B (v2): the fleet lives OUTSIDE the reconnect loop - agents

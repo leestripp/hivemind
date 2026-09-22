@@ -9,6 +9,7 @@
 #include "hivemind/WorkerStore.h"
 #include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
+#include "hivemind/SecretStore.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -55,7 +56,10 @@ int main() {
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
-    HubRouter hub{agents, threads, wchannel, approvals, routines};
+    hivemind::SecretStore secrets{tmp / "secrets.db",
+                                  tmp / "secrets.key"};
+    HubRouter hub{agents, threads, wchannel, approvals, routines,
+                  secrets};
     ChatService chat{agents, threads, hub};
 
     OmniNet::HTTP::Server::Config cfg;
