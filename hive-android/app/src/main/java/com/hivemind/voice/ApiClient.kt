@@ -20,8 +20,11 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
 
     data class Agent(
         val id: String, val name: String, val role: String,
-        val state: String, val busy: Boolean, val avatar: String
+        val state: String, val busy: Boolean, val avatar: String,
+        val worker: String
     )
+
+    data class Worker(val name: String, val online: Boolean)
 
     data class Message(
         val id: String, val senderKind: String, val body: String,
@@ -77,6 +80,21 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
                     state = a.optString("state", ""),
                     busy = a.optBoolean("busy", false),
                     avatar = a.optString("avatar", ""),
+                    worker = a.optString("worker", ""),
+                ))
+            }
+        }
+    }
+
+    /** GET /api/workers → enrolled workers with live online flag. */
+    fun listWorkers(): List<Worker> {
+        val arr = JSONObject(request("GET", "/api/workers")).getJSONArray("workers")
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val w = arr.getJSONObject(i)
+                add(Worker(
+                    name = w.getString("name"),
+                    online = w.optBoolean("online", false),
                 ))
             }
         }

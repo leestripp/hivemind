@@ -174,6 +174,11 @@ private:
     // state (GUI thread only)
     nlohmann::json agents_ = nlohmann::json::array();
     nlohmann::json threads_ = nlohmann::json::array();
+    nlohmann::json workers_ = nlohmann::json::array();   // /api/workers
+    // Roster grouping by hive-worker: collapsed state survives the 1.5s
+    // poll rebuilds. Offline workers start collapsed on first sight.
+    std::unordered_set<std::string> collapsed_workers_;
+    std::unordered_set<std::string> known_workers_;
     std::string current_thread_;
     std::string last_message_id_;
     // Message IDs already rendered in the open thread. Overlapping poll_chat

@@ -17,7 +17,11 @@ the reply.
   by simplex noise; amplitude follows mic RMS while listening and a
   synthetic envelope while the agent speaks. States: idle / listening /
   thinking / speaking.
+- **Roster**: agents are grouped by their hive-worker; online workers
+  sort first and expand, offline workers collapse to a greyed-out
+  header (tap to peek — their agents are inert while the worker is down).
 - **Hub**: plain REST (same as hive-client) — `GET /api/agents`,
+  `GET /api/workers` (online flags drive the grouping above),
   `POST /api/threads` (`reuse_dm:true` reopens the 1:1),
   `POST/GET …/messages`, `GET …/activity`, `POST …/cancel`.
   Auth: `Authorization: Bearer <key>` (mint one via the hub's

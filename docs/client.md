@@ -6,7 +6,10 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
 
 ## What it shows
 
-- **Roster** — agents with presence dots and their worker placement.
+- **Roster** — agents grouped by their hive-worker, with presence dots.
+  Online workers sort first and start expanded; offline workers sort last,
+  start collapsed, and render greyed out — click the group header to
+  expand/collapse. Agents on an offline worker are dimmed.
 - **Threads** — DM and group threads; chat with streaming replies.
 - **Chat images** — image attachments (png/jpg/jpeg/gif/webp) render
   inline, scaled to 480px, click for full-size; downloaded via the hub

@@ -10,6 +10,8 @@
 #include <giomm/resource.h>
 #include <gdkmm/pixbuf.h>
 #include <algorithm>
+#include <map>
+#include <unordered_map>
 #include <future>
 
 #include <cctype>
@@ -104,6 +106,14 @@ const char* kCss = R"(
   background: alpha(@success_color, 0.18); color: @success_color; }
 .hv-state-down { font-size: 10px; padding: 1px 8px; border-radius: 8px;
   background: alpha(@window_fg_color, 0.08); color: alpha(@window_fg_color, 0.5); }
+/* Worker group headers in the roster (chevron + name + online pill) */
+.hv-worker-header { font-weight: 600; font-size: 0.85em;
+  color: alpha(@window_fg_color, 0.75); }
+.hv-worker-chevron { color: alpha(@window_fg_color, 0.5);
+  font-size: 0.8em; min-width: 14px; }
+.hv-worker-offline { opacity: 0.55; }
+/* Agents homed on an offline worker — visible but clearly inert */
+.hv-offline { opacity: 0.45; }
 )";
 
 
@@ -1032,12 +1042,15 @@ void HiveWindow::refresh_all() {
     run_async([this] {
         json agents = api_.list_agents();
         json threads = api_.list_threads();
+        json workers = json::object();
+        try { workers = api_.list_workers(); } catch (...) {}
         {
             std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, agents, threads] {
+            done_queue_.push_back([this, agents, threads, workers] {
                 if (!alive_) return;
                 agents_ = agents.value("agents", json::array());
                 threads_ = threads.value("threads", json::array());
+                workers_ = workers.value("workers", json::array());
                 process_thread_activity();
                 rebuild_roster();
                 rebuild_thread_list();
@@ -1175,20 +1188,32 @@ void HiveWindow::poll_chat() {
 void HiveWindow::poll_roster() {
     run_async([this] {
         json agents = api_.list_agents();
+        // Worker online flags drive the roster grouping — a worker going
+        // up/down must rebuild the list even when no agent state changed.
+        json workers = json::object();
+        try { workers = api_.list_workers(); } catch (...) {}
         {
             std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, agents] {
+            done_queue_.push_back([this, agents, workers] {
                 if (!alive_) return;
                 auto arr = agents.value("agents", json::array());
+                auto warr = workers.value("workers", json::array());
                 std::string sig;
                 for (auto& a : arr) {
                     sig += a.value("id", "") + ":" +
                            (a.value("busy", false) ? "1" : "0") + ":" +
-                           a.value("state", "") + ";";
+                           a.value("state", "") + ":" +
+                           a.value("worker", "") + ";";
+                }
+                sig += "|";
+                for (auto& w : warr) {
+                    sig += w.value("name", "") + ":" +
+                           (w.value("online", false) ? "1" : "0") + ";";
                 }
                 if (sig == roster_sig_) return;
                 roster_sig_ = sig;
                 agents_ = arr;
+                workers_ = warr;
                 rebuild_roster();
             });
         }
@@ -1235,73 +1260,156 @@ void HiveWindow::rebuild_roster() {
 
     while (auto* row = roster_list_.get_row_at_index(0))
         roster_list_.remove(*row);
+
+    // ── group agents by hive-worker (mirrors the Android app) ─────────
+    // Online workers sort first (alphabetically), offline workers last.
+    // Offline groups start collapsed and greyed out; the collapsed set
+    // survives poll rebuilds so a manual expand/collapse sticks.
+    std::unordered_map<std::string, bool> online_by_worker;
+    for (auto& w : workers_)
+        online_by_worker[w.value("name", "")] = w.value("online", false);
+
+    struct Group {
+        std::string worker;
+        bool online;
+        std::vector<json> agents;
+    };
+    std::map<std::string, std::vector<json>> by_worker;
     for (auto& a : agents_) {
-        auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
-        row_box->set_margin_top(4);
-        row_box->set_margin_bottom(4);
-        row_box->append(*make_avatar(a.value("name", "?"), false, 40,
-                                     a.value("avatar", "")));
-        auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-        box->set_valign(Gtk::Align::CENTER);
-        auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
-        name->set_halign(Gtk::Align::START);
-        name->add_css_class("heading");
-        // v2 presence: fleet heartbeat states are down / starting / ready /
-        // acting / restarting. Spinner when busy, a colored state tag
-        // always, so "down" agents are visibly offline.
-        std::string st_ = a.value("state", "down");
-        for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
-        // Brain state machine (hive-brain, via worker heartbeats):
-        // understanding/planning/acting/verifying/documenting/compressing
-        // are active phases; awaitingapproval parks on a human.
-        const bool working = a.value("busy", false) ||
-            st_ == "acting" || st_ == "starting" || st_ == "restarting" ||
-            st_ == "understanding" || st_ == "planning" ||
-            st_ == "verifying" || st_ == "documenting" ||
-            st_ == "compressing";
-        if (working) {
-            auto* spin = Gtk::make_managed<Gtk::Spinner>();
-            spin->start();
-            spin->set_valign(Gtk::Align::CENTER);
-            spin->set_tooltip_text("Working...");
-            row_box->append(*spin);
-        }
-        {
-            std::string label = st_;
-            if (label == "awaitingapproval") label = "awaiting approval";
-            auto* tag = Gtk::make_managed<Gtk::Label>(label);
-            tag->add_css_class(
-                st_ == "ready" || st_ == "idle"   ? "hv-state-ready" :
-                st_ == "down"  || st_ == "error" ||
-                st_ == "cancelled"                ? "hv-state-down"  :
-                                                    "hv-state-tag");
-            if (st_ == "awaitingapproval")
-                tag->set_tooltip_text("Waiting on your approval");
-            tag->set_valign(Gtk::Align::CENTER);
-            row_box->append(*tag);
-        }
-        auto* role = Gtk::make_managed<Gtk::Label>(a.value("role", ""));
-        role->set_halign(Gtk::Align::START);
-        role->set_ellipsize(Pango::EllipsizeMode::END);
-        role->set_max_width_chars(28);
-        role->add_css_class("dim-label");
-        box->append(*name);
-        box->append(*role);
-        row_box->append(*box);
-        auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
-        row->set_child(*row_box);
-        row->set_data("agent_id", new std::string(a.value("id", "")),
-                      [](void* p) { delete static_cast<std::string*>(p); });
-        // Right-click → agent context menu (Edit / Delete)
-        auto rc = Gtk::GestureClick::create();
-        rc->set_button(0);   // listen to all buttons, filter in the handler
-        rc->signal_pressed().connect(
-            [this, rc, agent = a](int, double x, double y) {
-                if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
-                    show_agent_menu(*rc->get_widget(), agent, x, y);
+        std::string w = a.value("worker", "");
+        if (w.empty()) w = "hub";
+        by_worker[w].push_back(a);
+    }
+    std::vector<Group> groups;
+    for (auto& [w, list] : by_worker) {
+        // An agent homed on a worker that isn't enrolled any more is
+        // treated as offline — it can't be running.
+        auto it = online_by_worker.find(w);
+        groups.push_back({w, it != online_by_worker.end() && it->second,
+                          std::move(list)});
+    }
+    std::sort(groups.begin(), groups.end(),
+              [](const Group& a, const Group& b) {
+                  if (a.online != b.online) return a.online > b.online;
+                  return a.worker < b.worker;
+              });
+    for (auto& g : groups)
+        if (known_workers_.insert(g.worker).second && !g.online)
+            collapsed_workers_.insert(g.worker);
+
+    for (auto& g : groups) {
+        const bool expanded = !collapsed_workers_.count(g.worker);
+
+        // ── worker group header: chevron + "name · N" + online pill ──
+        auto* hbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+        hbox->set_margin_top(6);
+        hbox->set_margin_bottom(2);
+        hbox->set_margin_start(6);
+        hbox->set_margin_end(6);
+        auto* chevron = Gtk::make_managed<Gtk::Label>(expanded ? "\u25be" : "\u25b8");
+        chevron->add_css_class("hv-worker-chevron");
+        chevron->set_valign(Gtk::Align::CENTER);
+        auto* wname = Gtk::make_managed<Gtk::Label>(
+            g.worker + " \u00b7 " + std::to_string(g.agents.size()));
+        wname->set_halign(Gtk::Align::START);
+        wname->set_hexpand(true);
+        wname->add_css_class("hv-worker-header");
+        wname->set_valign(Gtk::Align::CENTER);
+        auto* wpill = Gtk::make_managed<Gtk::Label>(g.online ? "online" : "offline");
+        wpill->add_css_class(g.online ? "hv-state-ready" : "hv-state-down");
+        wpill->set_valign(Gtk::Align::CENTER);
+        hbox->append(*chevron);
+        hbox->append(*wname);
+        hbox->append(*wpill);
+        auto* hrow = Gtk::make_managed<Gtk::ListBoxRow>();
+        hrow->set_child(*hbox);
+        hrow->set_selectable(false);    // headers never enter agent selection
+        hrow->set_activatable(false);
+        hrow->set_data("worker_name", new std::string(g.worker),
+                       [](void* p) { delete static_cast<std::string*>(p); });
+        if (!g.online) hrow->add_css_class("hv-worker-offline");
+        // Click the header: expand/collapse the group.
+        auto hclick = Gtk::GestureClick::create();
+        hclick->set_button(GDK_BUTTON_PRIMARY);
+        hclick->signal_pressed().connect(
+            [this, worker = g.worker](int, double, double) {
+                if (!collapsed_workers_.erase(worker))
+                    collapsed_workers_.insert(worker);
+                rebuild_roster();
             });
-        row->add_controller(rc);
-        roster_list_.append(*row);
+        hrow->add_controller(hclick);
+        roster_list_.append(*hrow);
+
+        if (!expanded) continue;
+        for (auto& a : g.agents) {
+            auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
+            row_box->set_margin_top(4);
+            row_box->set_margin_bottom(4);
+            row_box->append(*make_avatar(a.value("name", "?"), false, 40,
+                                         a.value("avatar", "")));
+            auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+            box->set_valign(Gtk::Align::CENTER);
+            auto* name = Gtk::make_managed<Gtk::Label>(a.value("name", "?"));
+            name->set_halign(Gtk::Align::START);
+            name->add_css_class("heading");
+            // v2 presence: fleet heartbeat states are down / starting / ready /
+            // acting / restarting. Spinner when busy, a colored state tag
+            // always, so "down" agents are visibly offline.
+            std::string st_ = a.value("state", "down");
+            for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
+            // Brain state machine (hive-brain, via worker heartbeats):
+            // understanding/planning/acting/verifying/documenting/compressing
+            // are active phases; awaitingapproval parks on a human.
+            const bool working = a.value("busy", false) ||
+                st_ == "acting" || st_ == "starting" || st_ == "restarting" ||
+                st_ == "understanding" || st_ == "planning" ||
+                st_ == "verifying" || st_ == "documenting" ||
+                st_ == "compressing";
+            if (working) {
+                auto* spin = Gtk::make_managed<Gtk::Spinner>();
+                spin->start();
+                spin->set_valign(Gtk::Align::CENTER);
+                spin->set_tooltip_text("Working...");
+                row_box->append(*spin);
+            }
+            {
+                std::string label = st_;
+                if (label == "awaitingapproval") label = "awaiting approval";
+                auto* tag = Gtk::make_managed<Gtk::Label>(label);
+                tag->add_css_class(
+                    st_ == "ready" || st_ == "idle"   ? "hv-state-ready" :
+                    st_ == "down"  || st_ == "error" ||
+                    st_ == "cancelled"                ? "hv-state-down"  :
+                                                        "hv-state-tag");
+                if (st_ == "awaitingapproval")
+                    tag->set_tooltip_text("Waiting on your approval");
+                tag->set_valign(Gtk::Align::CENTER);
+                row_box->append(*tag);
+            }
+            auto* role = Gtk::make_managed<Gtk::Label>(a.value("role", ""));
+            role->set_halign(Gtk::Align::START);
+            role->set_ellipsize(Pango::EllipsizeMode::END);
+            role->set_max_width_chars(28);
+            role->add_css_class("dim-label");
+            box->append(*name);
+            box->append(*role);
+            row_box->append(*box);
+            auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
+            row->set_child(*row_box);
+            row->set_data("agent_id", new std::string(a.value("id", "")),
+                          [](void* p) { delete static_cast<std::string*>(p); });
+            // Right-click → agent context menu (Edit / Delete)
+            auto rc = Gtk::GestureClick::create();
+            rc->set_button(0);   // listen to all buttons, filter in the handler
+            rc->signal_pressed().connect(
+                [this, rc, agent = a](int, double x, double y) {
+                    if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
+                        show_agent_menu(*rc->get_widget(), agent, x, y);
+                });
+            row->add_controller(rc);
+            if (!g.online) row->add_css_class("hv-offline");
+            roster_list_.append(*row);
+        }
     }
 
     if (!selected_id.empty()) {
@@ -3942,6 +4050,29 @@ nlohmann::json HiveWindow::ui_state() {
             {"attach_sensitive", attach_btn_.get_sensitive()},
             {"pending_attachments", pending_attachments_.size()},
             {"connected", !api_.api_key().empty()},
+            // Rendered roster rows in visual order: worker group headers
+            // (with online/collapsed flags) interleaved with agent rows.
+            {"roster_rows", [this] {
+                nlohmann::json rows = nlohmann::json::array();
+                for (int i = 0; auto* row = roster_list_.get_row_at_index(i); ++i) {
+                    if (auto* id = static_cast<std::string*>(
+                            row->get_data("agent_id"))) {
+                        rows.push_back({{"type", "agent"}, {"id", *id},
+                            {"offline", row->has_css_class("hv-offline")}});
+                    } else if (auto* w = static_cast<std::string*>(
+                            row->get_data("worker_name"))) {
+                        bool online = false;
+                        for (auto& wi : workers_)
+                            if (wi.value("name", "") == *w)
+                                online = wi.value("online", false);
+                        rows.push_back({{"type", "worker"}, {"name", *w},
+                            {"online", online},
+                            {"collapsed",
+                             collapsed_workers_.count(*w) > 0}});
+                    }
+                }
+                return rows;
+            }()},
         };
     });
 }
