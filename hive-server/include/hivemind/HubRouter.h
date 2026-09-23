@@ -56,7 +56,7 @@ public:
     HubRouter(AgentStore& agents, ThreadStore& threads,
               WorkerChannel& channel, ApprovalStore& approvals,
               RoutineStore& routines, hivemind::SecretStore& secrets);
-    ~HubRouter() = default;
+    virtual ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
 
@@ -66,9 +66,10 @@ public:
 
     /// Dispatch a task to the agent's worker. Returns the task id, or ""
     /// when the worker is offline (caller marks the live turn failed).
-    std::string dispatch(const RosterAgent& agent,
-                         const std::string& thread_id,
-                         const std::string& text);
+    /// virtual: tests subclass with a capturing mock (no worker needed).
+    virtual std::string dispatch(const RosterAgent& agent,
+                                 const std::string& thread_id,
+                                 const std::string& text);
 
     /// Send a cancel for every in-flight task of (thread_id) / agent.
     void cancel_agent(const RosterAgent& agent, const std::string& thread_id);

@@ -119,6 +119,31 @@ private:
                 const std::string& sender_label, const std::string& body,
                 int generation);
 
+    // ── Origin-linked relay (2026-09-23) ─────────────────────────────
+    // Chief asks Honey via message_agent ON THE USER'S BEHALF: Honey's
+    // reply lands in the pair thread, invisible in the user's DM with
+    // Chief, so Chief "never tells me what Honey said". Fix: when
+    // message_agent is sent DURING a live turn in a user DM thread,
+    // record a one-shot link; when the peer's substantive reply posts in
+    // the pair thread, mirror it into the user DM and wake the requester
+    // there to frame it. Agent chatter (link only from user-DM turns)
+    // never mirrors; links expire (HIVEMIND_RELAY_TTL_S, def 900).
+    struct RelayLink {
+        std::string pair_thread_id;
+        std::string requester_id;
+        std::string user_thread_id;
+        std::chrono::steady_clock::time_point created;
+        bool consumed = false;
+    };
+    std::vector<RelayLink> relay_links_;   // guarded by m_
+    void record_relay(const std::string& sender_id,
+                      const std::string& pair_tid);
+    void maybe_fire_relay(const std::string& thread_id,
+                          const std::string& replier_id,
+                          const std::string& replier_name,
+                          const std::string& body, int generation);
+    static std::chrono::seconds relay_ttl();
+
     AgentStore& agents_;
     ThreadStore& threads_;
     HubRouter& hub_;

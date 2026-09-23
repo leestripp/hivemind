@@ -69,8 +69,86 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     }
 
     threads_.add_message(tid, "agent", sender_id, body);
+    record_relay(sender_id, tid);   // user-behalf pair msgs relay back
     fan_in(tid, *target, sender->name, body, /*generation=*/1);
     return tid;
+}
+
+std::chrono::seconds ChatService::relay_ttl() {
+    const char* e = std::getenv("HIVEMIND_RELAY_TTL_S");
+    const int v = e ? std::atoi(e) : 900;
+    return std::chrono::seconds(v > 0 ? v : 900);
+}
+
+void ChatService::record_relay(const std::string& sender_id,
+                               const std::string& pair_tid) {
+    // Which thread is the sender working in RIGHT NOW? message_agent
+    // arrives mid-turn, so the sender has a live turn in by_task_.
+    std::string turn_thread;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        for (const auto& [_, t] : by_task_) {
+            if (t->agent_id == sender_id && !t->done && !t->cancelling) {
+                turn_thread = t->thread_id;
+                break;
+            }
+        }
+    }
+    if (turn_thread.empty()) return;
+    // Lock released before ThreadStore (Phase 52 lock ordering).
+    auto thread = threads_.get_thread(turn_thread);
+    // Only user<->agent DM threads (kind "dm", exactly one agent) get a
+    // relay — pair/group-thread agent chatter must never mirror into DMs.
+    if (!thread || thread->kind != "dm" || thread->agent_ids.size() != 1)
+        return;
+    std::lock_guard<std::mutex> lk(m_);
+    // Latest request wins: drop any stale link for this pair thread.
+    std::erase_if(relay_links_, [&](const RelayLink& l) {
+        return l.pair_thread_id == pair_tid; });
+    relay_links_.push_back({pair_tid, sender_id, turn_thread,
+                            std::chrono::steady_clock::now(), false});
+    std::fprintf(stderr,
+        "[chat] relay armed: pair %.8s -> user dm %.8s (requester %.8s)\n",
+        pair_tid.c_str(), turn_thread.c_str(), sender_id.c_str());
+}
+
+void ChatService::maybe_fire_relay(const std::string& thread_id,
+                                   const std::string& replier_id,
+                                   const std::string& replier_name,
+                                   const std::string& body,
+                                   int generation) {
+    RelayLink hit;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(relay_links_, [&](const RelayLink& l) {
+            return l.consumed || now - l.created > relay_ttl(); });
+        for (auto& l : relay_links_) {
+            if (l.pair_thread_id == thread_id && l.requester_id != replier_id) {
+                l.consumed = true;   // one-shot
+                hit = l;
+                break;
+            }
+        }
+    }
+    if (hit.pair_thread_id.empty()) return;
+    // Lock released before ThreadStore/fan_in (Phase 52 lock ordering).
+    try {
+        if (!threads_.get_thread(hit.user_thread_id)) return;
+        auto requester = agents_.get_agent(hit.requester_id);
+        if (!requester) return;
+        // Mirror the peer's reply into the user DM (attributed to the
+        // peer — every client just sees a new message), then wake the
+        // requester there so it frames the answer for the user.
+        threads_.add_message(hit.user_thread_id, "agent", replier_id, body);
+        std::fprintf(stderr,
+            "[chat] relay fired: %.8s's reply -> user dm %.8s\n",
+            replier_id.c_str(), hit.user_thread_id.c_str());
+        fan_in(hit.user_thread_id, *requester, replier_name, body,
+               generation + 1);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[chat] relay ERROR: %s\n", e.what());
+    }
 }
 
 std::string ChatService::post_user_inbox_message(const std::string& sender_id,
@@ -323,6 +401,8 @@ void ChatService::complete_turn(const std::string& task_id,
         else if (generation < kMaxFanInGenerations &&
                  !hivemind::fanin_is_ack_only(out)) {   // 65c: acks post
                                                         // but never fan
+            maybe_fire_relay(thread_id, agent_id, agent_name, out,
+                             generation);
             try {
                 auto thread = threads_.get_thread(thread_id);
                 if (thread) {

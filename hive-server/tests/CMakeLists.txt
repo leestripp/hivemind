@@ -36,6 +36,7 @@ hivemind_test(test_worker_channel)
 # Phase 65: loop-storm fan-in policy + mute/breaker
 hivemind_test(test_fanin_policy)
 hivemind_test(test_chat_throttle)
+hivemind_test(test_agent_relay)
 hivemind_test(test_user_inbox)
 hivemind_test(test_secret_create)
 
