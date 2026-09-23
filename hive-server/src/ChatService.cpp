@@ -118,18 +118,6 @@ void ChatService::maybe_fire_relay(const std::string& thread_id,
                                    const std::string& body,
                                    int generation) {
     RelayLink hit;
-    // TEMP debug (2026-09-23 probe): why did the 07:00Z relay not fire?
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        std::fprintf(stderr,
-            "[chat] relay probe: thread %.8s replier %.8s links=%zu\n",
-            thread_id.c_str(), replier_id.c_str(), relay_links_.size());
-        for (const auto& l : relay_links_)
-            std::fprintf(stderr,
-                "[chat] relay probe link: pair %.8s req %.8s dm %.8s consumed=%d\n",
-                l.pair_thread_id.c_str(), l.requester_id.c_str(),
-                l.user_thread_id.c_str(), (int)l.consumed);
-    }
     {
         std::lock_guard<std::mutex> lk(m_);
         const auto now = std::chrono::steady_clock::now();
