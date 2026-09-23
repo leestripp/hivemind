@@ -145,6 +145,9 @@ int main() {
     //    Simulate: Chief user turn live again, but this time the
     //    agent_msg comes from Honey whose live turn is the pair thread.
     chat.post_user_message(dm.id, "another question");
+    const auto* t7 = hub.find_last(chief.id, dm.id);
+    assert(t7);
+    const std::string step7_task = t7->task_id;   // left open: Chief busy
     chat.post_agent_message(honey.id, chief.id, "unsolicited FYI");
     // Honey's FYI -> pair thread; Chief's pair reply must not mirror.
     const auto* chief_pair = hub.find_last(chief.id, pair_tid);
@@ -172,6 +175,85 @@ int main() {
         "RELAY-PROBE-OK — acknowledged and answered.", "");   // ack-only!
     assert(count_from(threads, dm.id, honey.id) ==
            honey_in_dm_before + 1);   // ack-only reply STILL mirrored
+
+
+    // 9) BUSY REQUESTER (2026-09-24): the peer's reply arrives while the
+    //    requester still has a live turn — the reply must mirror into
+    //    the DM immediately, but the wake dispatch must be HELD until
+    //    the requester goes idle (previously the queued wake aged out
+    //    under the turn watchdog and was silently tombstoned).
+    // Settle leftovers first: the step-7 "another question" turn never
+    // completed (leaving Chief busy, which is also why step 8's wake
+    // queued instead of dispatching); completing it drains that wake.
+    chat.complete_turn(step7_task, "done with that.", "");
+    // Completing the leftover idled Chief, which drained step 8's held
+    // wake — that wake is itself a live turn; complete it too so Chief
+    // is truly idle before the busy test begins.
+    const auto* step8_wake = hub.find_last(chief.id, dm.id);
+    assert(step8_wake && step8_wake->task_id != step7_task);
+    const std::string step8_wake_task = step8_wake->task_id;
+    chat.complete_turn(step8_wake_task, "framed it for the user.", "");
+    chat.post_user_message(dm.id, "ask Honey for the busy-test word");
+    const auto* t9 = hub.find_last(chief.id, dm.id);
+    assert(t9);
+    const std::string chief_busy_task = t9->task_id;
+    chat.post_agent_message(chief.id, honey.id, "busy-test word please");
+    const auto* honey9 = hub.find_last(honey.id, pair_tid);
+    assert(honey9);
+    const std::string honey9_task = honey9->task_id;
+    // Honey answers while Chief's user-DM turn is STILL live (busy).
+    int chief_dm_dispatches_before = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id)
+            ++chief_dm_dispatches_before;
+    chat.complete_turn(honey9_task, "the busy-test word is ZEBRA.", "");
+    // Mirror lands immediately even though Chief is busy...
+    assert(count_from(threads, dm.id, honey.id) >= 1);
+    // ...but NO new wake dispatch while Chief is busy.
+    int chief_dm_dispatches_busy = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id)
+            ++chief_dm_dispatches_busy;
+    assert(chief_dm_dispatches_busy == chief_dm_dispatches_before &&
+           "wake must not dispatch to a busy requester");
+    // Chief's long turn finally completes. But Honey's pair reply ALSO
+    // continued the pair thread (fan-in to Chief at generation 2), so
+    // Chief is still busy — the drain must STILL hold.
+    chat.complete_turn(chief_busy_task, "sorry, that took a while.", "");
+    {
+        int n = 0;
+        for (const auto& d : hub.dispatches)
+            if (d.agent_id == chief.id && d.thread_id == dm.id) ++n;
+        assert(n == chief_dm_dispatches_before &&
+               "wake must stay held while ANY turn is live (pair too)");
+    }
+    // Settle every remaining live Chief turn with ack-only replies
+    // ("acknowledged" gates the fan-in continuation, 65c) until the
+    // agent is truly idle — the LAST completion drains the held wake.
+    // NB: agent_activity() re-queries each pass; the drained wake shows
+    // up as one final live turn, which we also complete.
+    for (int guard = 0; guard < 16; ++guard) {
+        const auto live = chat.agent_activity();
+        const auto it = live.find(chief.id);
+        if (it == live.end()) break;
+        chat.complete_turn(it->second.task_id, "acknowledged.", "");
+    }
+    assert(chat.agent_activity().count(chief.id) == 0 &&
+           "settle loop should fully idle Chief");
+    int chief_dm_dispatches_after = 0;
+    const Dispatch* wake = nullptr;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id) {
+            ++chief_dm_dispatches_after;
+            wake = &d;
+        }
+    // TWO wakes were held at this point: step 9's (queued above) AND
+    // step 8's (Chief never went idle between steps 8 and 9 — the
+    // pair-thread fan-in kept him busy, so it never drained). Both
+    // must fire, oldest first, exactly once each.
+    assert(chief_dm_dispatches_after == chief_dm_dispatches_before + 2 &&
+           "drain must fire every held wake once idle");
+    assert(wake && wake->task_id != chief_busy_task);
 
     std::cout << "agent relay: all assertions passed\n";
     return 0;

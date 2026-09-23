@@ -144,6 +144,33 @@ private:
                           const std::string& body, int generation);
     static std::chrono::seconds relay_ttl();
 
+    // ── Busy-agent relay queue (2026-09-24) ──────────────────────────
+    // The relay fired while the requester was still busy: the wake task
+    // queued agent-side, but the hub-side LiveTurn aged from DISPATCH —
+    // a requester busy past HIVEMIND_TURN_TIMEOUT_S had the queued wake
+    // force-retired by the watchdog and its result tombstoned, so the
+    // user saw the peer's mirrored reply but the requester never framed
+    // it. Fix: mirror immediately (user sees the raw reply), but hold
+    // the WAKE here while the requester has any live turn; drain when it
+    // goes idle (end of complete_turn / watchdog retirement). Same TTL
+    // as relay links.
+    struct PendingRelay {
+        std::string requester_id;
+        std::string user_thread_id;
+        std::string replier_id;
+        std::string replier_name;
+        std::string body;
+        int generation = 0;
+        std::chrono::steady_clock::time_point created;
+    };
+    std::vector<PendingRelay> relay_queue_;   // guarded by m_, FIFO
+    /// True while the agent has any live (not done, not cancelling)
+    /// turn in any thread. Caller holds m_.
+    bool agent_busy_locked(const std::string& agent_id) const;
+    /// Fire queued wakes for an idle agent (TTL-reaped first). Safe to
+    /// call without holding m_; ThreadStore/fan_in happen outside it.
+    void drain_relay_queue(const std::string& agent_id);
+
     AgentStore& agents_;
     ThreadStore& threads_;
     HubRouter& hub_;

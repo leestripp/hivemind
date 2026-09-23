@@ -141,6 +141,29 @@ void ChatService::maybe_fire_relay(const std::string& thread_id,
         // peer — every client just sees a new message), then wake the
         // requester there so it frames the answer for the user.
         threads_.add_message(hit.user_thread_id, "agent", replier_id, body);
+        // 2026-09-24: never dispatch the wake to a BUSY requester — the
+        // hub-side LiveTurn ages from dispatch, so a long-running turn
+        // let the watchdog retire the queued wake before the agent ever
+        // started it (result tombstoned, relay silently lost). Hold it
+        // in relay_queue_ and drain when the requester goes idle.
+        bool queued = false;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            if (agent_busy_locked(hit.requester_id)) {
+                relay_queue_.push_back({hit.requester_id,
+                                        hit.user_thread_id, replier_id,
+                                        replier_name, body, generation + 1,
+                                        std::chrono::steady_clock::now()});
+                queued = true;
+            }
+        }
+        if (queued) {
+            std::fprintf(stderr,
+                "[chat] relay QUEUED (requester busy): %.8s's reply -> "
+                "user dm %.8s\n",
+                replier_id.c_str(), hit.user_thread_id.c_str());
+            return;
+        }
         std::fprintf(stderr,
             "[chat] relay fired: %.8s's reply -> user dm %.8s\n",
             replier_id.c_str(), hit.user_thread_id.c_str());
@@ -148,6 +171,53 @@ void ChatService::maybe_fire_relay(const std::string& thread_id,
                generation + 1);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[chat] relay ERROR: %s\n", e.what());
+    }
+}
+
+bool ChatService::agent_busy_locked(const std::string& agent_id) const {
+    for (const auto& [_, turns] : live_)
+        for (const auto& t : turns)
+            if (t->agent_id == agent_id && !t->done && !t->cancelling)
+                return true;
+    return false;
+}
+
+void ChatService::drain_relay_queue(const std::string& agent_id) {
+    if (stopping_) return;
+    std::vector<PendingRelay> fire;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(relay_queue_, [&](const PendingRelay& p) {
+            if (now - p.created <= relay_ttl()) return false;
+            std::fprintf(stderr,
+                "[chat] relay queue: expired wake for %.8s dropped\n",
+                p.requester_id.c_str());
+            return true;
+        });
+        if (agent_busy_locked(agent_id)) return;
+        std::vector<PendingRelay> keep;
+        for (auto& p : relay_queue_) {
+            if (p.requester_id == agent_id) fire.push_back(std::move(p));
+            else keep.push_back(std::move(p));
+        }
+        relay_queue_.swap(keep);
+    }
+    // Lock released before ThreadStore/fan_in (Phase 52 lock ordering).
+    for (const auto& p : fire) {
+        try {
+            if (!threads_.get_thread(p.user_thread_id)) continue;
+            auto requester = agents_.get_agent(p.requester_id);
+            if (!requester) continue;
+            std::fprintf(stderr,
+                "[chat] relay drained: %.8s's reply -> user dm %.8s "
+                "(requester idle)\n",
+                p.replier_id.c_str(), p.user_thread_id.c_str());
+            fan_in(p.user_thread_id, *requester, p.replier_name, p.body,
+                   p.generation);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[chat] relay drain ERROR: %s\n", e.what());
+        }
     }
 }
 
@@ -453,6 +523,10 @@ void ChatService::complete_turn(const std::string& task_id,
         }
     }
     live->done = true;
+    // 2026-09-24: this agent may have just gone idle — fire any relay
+    // wakes held while it was busy. No-op when the fan-in continuation
+    // above re-dispatched to the same agent (still busy).
+    drain_relay_queue(agent_id);
 }
 
 // -- polling / control ---------------------------------------------------
@@ -597,6 +671,9 @@ void ChatService::watchdog_loop() {
                     if (t->task_id == v.task_id) t->done = true;
             by_task_.erase(v.task_id);
         }
+        // 2026-09-24: a force-retired turn may have been the only thing
+        // keeping the agent busy — release its queued relay wakes.
+        for (const auto& v : victims) drain_relay_queue(v.agent_id);
     }
 }
 
