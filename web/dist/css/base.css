@@ -118,6 +118,8 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   margin-bottom: 8px;
 }
 .muted { color: #6c7280; font-size: 11px; line-height: 1.5; }
+/* Single-line clipped table cell (tasks prompt preview, long names) */
+.cell-ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ─── Activity bar (VS Code-style left rail) ──────────────────────────── */
 .activity-bar { display:flex; flex-direction:column; align-items:center; background:var(--panel); border-right:1px solid var(--border); padding:8px 0; gap:4px; }

@@ -22,6 +22,13 @@ async function loadAll() {
 
 const agentName = (id) => (agents.find(a => a.id === id) || {}).name || '—';
 
+// Table display only: collapse the prompt to one short line — the full
+// text stays available as the cell's hover tooltip (title attribute).
+function truncate(prompt, max = 140) {
+  const oneLine = String(prompt || '').replace(/\s+/g, ' ').trim();
+  return oneLine.length <= max ? oneLine : oneLine.slice(0, max - 1) + '…';
+}
+
 function isCompleted(t) {
   // A "completed" task is a one-shot that already fired.
   return t.schedule && t.schedule.type === 'once' && !!t.last_fired_at;
@@ -51,7 +58,7 @@ function renderTasks() {
       ? (completed ? '<span class="badge">✓ done</span>' : '<span class="badge">paused</span>')
       : '<span class="badge badge-ok">active</span>';
     tr.innerHTML = `
-      <td><strong>${esc(t.name)}</strong><div class="muted cell-ellip" style="max-width:280px">${esc(t.prompt)}</div></td>
+      <td><strong>${esc(t.name)}</strong><div class="muted cell-ellip" style="max-width:280px" title="${esc(t.prompt)}">${esc(truncate(t.prompt))}</div></td>
       <td>${esc(agentName(t.agent_id))}</td>
       <td>${esc(t.schedule_text || '')}</td>
       <td>${fmtTime(t.next_fire_at)}</td>
