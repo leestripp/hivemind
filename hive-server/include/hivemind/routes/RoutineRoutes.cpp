@@ -86,7 +86,7 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
             }
 
             // Each routine gets its own thread so fires don't spam DMs.
-            auto t = threads.create_thread("routine: " + name, "dm", {agent_id});
+            auto t = threads.create_thread("routine: " + name, "routine", {agent_id});
             auto next = hm::compute_next_fire(schedule, hm::now_iso_local(),
                                               hm::now_iso_local());
             auto r = routines.create(agent_id, t.id, name, prompt,
@@ -115,7 +115,7 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
             // found" and the scheduler DISABLED the routine next fire).
             // Recreate and rebind instead of failing.
             if (!threads.get_thread(r->thread_id)) {
-                auto t = threads.create_thread(r->name, "dm", {r->agent_id});
+                auto t = threads.create_thread(r->name, "routine", {r->agent_id});
                 routines.rebind_thread(r->id, t.id);
                 r->thread_id = t.id;
                 std::fprintf(stderr,

@@ -151,6 +151,19 @@ std::vector<std::string> ThreadStore::participants_of(sqlite3* db,
     return out;
 }
 
+void ThreadStore::set_kind(const std::string& id, const std::string& kind) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "UPDATE threads SET kind=? WHERE id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, kind.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+
 std::optional<Thread> ThreadStore::find_dm(const std::string& agent_id) {
     for (auto& t : list_threads()) {
         if (t.kind != "dm" || t.agent_ids.size() != 1) continue;

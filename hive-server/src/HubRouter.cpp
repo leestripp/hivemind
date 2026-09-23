@@ -195,7 +195,7 @@ void HubRouter::handle_routine_req(const std::string& worker,
                 return fail(err);
             // Same as the HTTP route: each routine gets its own thread so
             // fires don't spam DMs.
-            auto t = threads_.create_thread("routine: " + name, "dm",
+            auto t = threads_.create_thread("routine: " + name, "routine",
                                             {agent_id});
             auto next = hm::compute_next_fire(schedule, hm::now_iso_local(),
                                               hm::now_iso_local());

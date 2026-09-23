@@ -59,6 +59,9 @@ public:
     /// Existing 1:1 dm thread with this agent, if any (Phase 11 dedup:
     /// clicking an agent in the roster must reopen the SAME conversation,
     /// not mint a fresh empty DM every time).
+    /// Change a thread's kind (routine-thread migration 2026-09-23).
+    void set_kind(const std::string& id, const std::string& kind);
+
     std::optional<Thread> find_dm(const std::string& agent_id);
 
     /// Idempotent: create the User Inbox thread if it does not exist

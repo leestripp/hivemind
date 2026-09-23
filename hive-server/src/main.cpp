@@ -134,6 +134,13 @@ int main(int argc, char* argv[]) {
     thread_store.ensure_user_thread();   // Phase 44: User Inbox always exists
     ApprovalStore approval_store;
     RoutineStore routine_store;
+    // 2026-09-23 migration: routine threads were created as kind "dm",
+    // which made find_dm() resolve an agent's user DM to the LAST-created
+    // routine thread (the Android voice app and desktop roster clicks
+    // landed in "routine: daily-team-checkin"). Re-tag them "routine" —
+    // routines store their thread_id, so this is exact, no title guesswork.
+    for (auto& r : routine_store.list())
+        thread_store.set_kind(r.thread_id, "routine");
     AuthStore auth_store;
     WorkerStore worker_store;
     LlmStore llm_store;
@@ -360,7 +367,7 @@ int main(int argc, char* argv[]) {
                         // rebind instead of failing into disable.
                         if (!thread_store.get_thread(r.thread_id)) {
                             auto t = thread_store.create_thread(
-                                r.name, "dm", {r.agent_id});
+                                r.name, "routine", {r.agent_id});
                             routine_store.rebind_thread(r.id, t.id);
                             r.thread_id = t.id;
                             std::cout << "[scheduler] rebound routine "
