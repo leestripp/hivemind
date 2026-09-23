@@ -410,11 +410,18 @@ void ChatService::complete_turn(const std::string& task_id,
         }
         if (!posted)
             live->error = "reply generated but could not be posted";
-        else if (generation < kMaxFanInGenerations &&
-                 !hivemind::fanin_is_ack_only(out)) {   // 65c: acks post
-                                                        // but never fan
+        else {
+            // Relay fires on ANY posted reply — the 2026-09-23 probe
+            // proved the bug: Honey's "RELAY-PROBE-OK … acknowledged"
+            // reply was ack-only, and with the hook behind the ack guard
+            // the answer never reached the user's DM. An ack-looking peer
+            // reply IS the answer the user is waiting for; ack-only must
+            // gate ONLY the fan-in continuation below (65c).
             maybe_fire_relay(thread_id, agent_id, agent_name, out,
                              generation);
+            if (generation < kMaxFanInGenerations &&
+                !hivemind::fanin_is_ack_only(out)) {   // 65c: acks post
+                                                       // but never fan
             try {
                 auto thread = threads_.get_thread(thread_id);
                 if (thread) {
@@ -454,6 +461,7 @@ void ChatService::complete_turn(const std::string& task_id,
                     }
                 }
             } catch (...) { /* thread deleted mid-turn */ }
+            }
         }
     }
     live->done = true;

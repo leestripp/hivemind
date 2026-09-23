@@ -156,6 +156,23 @@ int main() {
     assert(count_from(threads, dm.id, chief.id) == 2);
     assert(count_from(threads, dm.id, honey.id) == 1);
 
+    // 8) REGRESSION (2026-09-23 probe): an ack-only-looking peer reply
+    //    ("acknowledged" + <=600 chars) must STILL relay — ack-only gates
+    //    fan-in continuation, never the relay. Production failure mode.
+    chat.post_user_message(dm.id, "ask Honey for the probe word");
+    const auto* t8 = hub.find_last(chief.id, dm.id);
+    assert(t8);
+    chat.post_agent_message(chief.id, honey.id, "probe word please");
+    const auto* honey8 = hub.find_last(honey.id, pair_tid);
+    assert(honey8 && honey8->task_id != pair_task);
+    const std::string honey8_task = honey8->task_id;
+    chat.complete_turn(t8->task_id, "asking her now.", "");
+    const int honey_in_dm_before = count_from(threads, dm.id, honey.id);
+    chat.complete_turn(honey8_task,
+        "RELAY-PROBE-OK — acknowledged and answered.", "");   // ack-only!
+    assert(count_from(threads, dm.id, honey.id) ==
+           honey_in_dm_before + 1);   // ack-only reply STILL mirrored
+
     std::cout << "agent relay: all assertions passed\n";
     return 0;
 }
