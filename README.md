@@ -167,5 +167,6 @@ GET                   /api/models           union of connected workers' catalogs
 
 See `docs/api.md` for the endpoint reference.
 
-Current release line: **0.6.x** — on-demand desktops, chat attachments,
-GNOME-adaptive client.
+Current release line: **0.9.x** (latest tag `0.9.6`) — distributed GPU
+workers, hub-owned model registry, secrets broker, User Inbox, Android
+voice app.
