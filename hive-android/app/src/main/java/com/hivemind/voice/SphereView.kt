@@ -10,7 +10,7 @@ import kotlin.math.sin
 
 /** Visual states for the sphere — mirror the shader's uState values. */
 enum class SphereState(val v: Float) {
-    IDLE(0f), LISTENING(1f), THINKING(2f), SPEAKING(3f)
+    IDLE(0f), LISTENING(1f), THINKING(2f), SPEAKING(3f), PROCESSING(4f)
 }
 
 class SphereView @JvmOverloads constructor(

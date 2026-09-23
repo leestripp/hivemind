@@ -6,28 +6,24 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
-import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.OnlineModelConfig
-import com.k2fsa.sherpa.onnx.OnlineRecognizer
-import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OnlineStream
-import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import java.io.File
+import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.concurrent.thread
 
 /**
- * On-device streaming STT (sherpa-onnx Zipformer2 transducer, int8).
+ * On-device STT via whisper.cpp (ggml-base.en, CPU+NEON).
  *
- * Unlike the platform SpeechRecognizer there is NO endpointer: the
- * recognizer never stops on silence — recording runs until the user
- * taps SEND ([stop]) or CANCEL ([discard]). No sessions, no throttling,
- * no audio cues, works offline. Mic RMS feeds the sphere; partial
- * results stream to [onTranscript] ~5x/second.
+ * Whisper is non-streaming, so partials are sliding-window
+ * re-transcription: every [PARTIAL_MS] the trailing [WINDOW_MS] of audio
+ * gets a fast single-segment decode; SEND runs the full multi-segment
+ * pass over everything. Same no-endpointer contract as the sherpa engine
+ * it replaced: recording stops only on SEND ([stop]) or CANCEL
+ * ([discard]). Mic RMS feeds the sphere; ASR never touches the UI thread.
  *
- * Same contract as the platform-based engine it replaced.
- * Diagnostics: adb logcat -d | grep HiveStt
+ * Diagnostics: adb logcat -d | grep -E "HiveStt|HiveWhisper"
  */
 class SttEngine(
     private val context: Context,
@@ -51,10 +47,25 @@ class SttEngine(
     /** Bumped on every start/stop/discard — stale queued starts no-op. */
     @Volatile private var session = 0
 
-    private var recognizer: OnlineRecognizer? = null
-    private var stream: OnlineStream? = null
     private var record: AudioRecord? = null
     private var captureThread: Thread? = null
+
+    // Growing PCM buffer (16kHz mono shorts), capped at MAX_SECONDS.
+    // Written by the capture thread, snapshotted by the partial ticker —
+    // all access under pcmLock.
+    private val pcmLock = Any()
+    private var pcm = ShortArray(SAMPLE_RATE * 30)
+    private var pcmLen = 0
+
+    @Volatile private var decodeInFlight = false
+    private val partialTick = object : Runnable {
+        override fun run() {
+            if (listening) {
+                decodePartial()
+                bg.postDelayed(this, PARTIAL_MS)
+            }
+        }
+    }
 
     init {
         bg.post { initEngine() }
@@ -66,26 +77,16 @@ class SttEngine(
         try {
             val dir = File(context.filesDir, "stt")
             extractModels(dir)
-            val config = OnlineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
-                modelConfig = OnlineModelConfig(
-                    transducer = OnlineTransducerModelConfig(
-                        encoder = File(dir, "encoder.onnx").absolutePath,
-                        decoder = File(dir, "decoder.onnx").absolutePath,
-                        joiner = File(dir, "joiner.onnx").absolutePath,
-                    ),
-                    tokens = File(dir, "tokens.txt").absolutePath,
-                    numThreads = 2,
-                    debug = false,
-                    provider = "cpu",
-                    modelType = "zipformer2",
-                ),
-                enableEndpoint = false,   // silence NEVER stops a recording
-                decodingMethod = "greedy_search",
-            )
-            recognizer = OnlineRecognizer(config = config)
+            if (!WhisperNative.nativeInit(
+                    File(dir, MODEL_PARTIAL).absolutePath,
+                    WhisperNative.WHICH_PARTIAL))
+                throw java.io.IOException("whisper.cpp rejected $MODEL_PARTIAL")
+            if (!WhisperNative.nativeInit(
+                    File(dir, MODEL_FINAL).absolutePath,
+                    WhisperNative.WHICH_FINAL))
+                throw java.io.IOException("whisper.cpp rejected $MODEL_FINAL")
             ready = true
-            Log.i(TAG, "model ready (${dir})")
+            Log.i(TAG, "models ready (partial=$MODEL_PARTIAL final=$MODEL_FINAL)")
             if (wantListen) arm()
         } catch (e: Exception) {
             Log.e(TAG, "model init failed", e)
@@ -95,7 +96,7 @@ class SttEngine(
 
     /** Copy bundled models out of assets on first run (native needs paths).
      *  Extraction is ATOMIC (.tmp + rename): a process killed mid-copy used
-     *  to leave a truncated .onnx that every later launch trusted and the
+     *  to leave a truncated model that every later launch trusted and the
      *  native loader then rejected — the app stayed broken forever. */
     private fun extractModels(dir: File) {
         dir.mkdirs()
@@ -138,23 +139,27 @@ class SttEngine(
         bg.post { if (wantListen && s == session && !listening) startCapture() }
     }
 
-    /** User tapped SEND: stop capturing, finalize, keep the transcript.
-     *  ASYNC — teardown + tail decode run on the bg thread (joining the
-     *  capture thread on the UI could stall it for ~2s worst case);
-     *  [onFinalized] fires on the UI thread once [transcript] is final. */
+    /** User tapped SEND: stop capturing, run the full final decode, keep
+     *  the transcript. ASYNC — teardown + final pass run on the bg thread
+     *  (joining the capture thread on the UI could stall it for ~2s worst
+     *  case); [onFinalized] fires on the UI thread once [transcript] is
+     *  final. */
     fun stop(onFinalized: (() -> Unit)? = null) {
         wantListen = false
         session++
         bg.post {
             if (listening) teardownCapture()
-            // Decode whatever is still buffered, then take the final result.
-            val rec = recognizer; val st = stream
-            if (rec != null && st != null) {
-                runCatching {
-                    st.inputFinished()
-                    while (rec.isReady(st)) rec.decode(st)
-                    val t = rec.getResult(st).text.trim()
-                    if (t.isNotEmpty()) transcript = t
+            if (ready) {
+                val snap = synchronized(pcmLock) { pcm.copyOf(pcmLen) }
+                if (snap.isNotEmpty()) {
+                    val t0 = SystemClock.elapsedRealtime()
+                    runCatching {
+                        val t = WhisperNative.nativeTranscribe(
+                            snap, snap.size, THREADS, true).trim()
+                        if (t.isNotEmpty()) transcript = t
+                    }.onFailure { Log.e(TAG, "final decode failed", it) }
+                    Log.i(TAG, "final decode ${SystemClock.elapsedRealtime() - t0}ms " +
+                        "for ${snap.size / SAMPLE_RATE}s audio")
                 }
             }
             Log.i(TAG, "stop (user) — transcript ${transcript.length} chars")
@@ -179,31 +184,64 @@ class SttEngine(
         wantListen = false
         session++
         transcript = ""
+        synchronized(pcmLock) { pcmLen = 0 }
         bg.post { if (listening) teardownCapture() }
         Log.i(TAG, "discard (user)")
     }
 
     fun destroy() {
         discard()
-        // quitSafely() drops anything posted AFTER it, so the release must
-        // be queued FIRST and the quit issued from inside that same block —
-        // the old order leaked the native recognizer on every destroy.
         bg.post {
-            stream?.release(); stream = null
-            recognizer?.release(); recognizer = null
+            WhisperNative.nativeFree()
             worker.quitSafely()
+        }
+    }
+
+    // -- Partial decode ------------------------------------------------------
+
+    /** Sliding-window partial: transcribe the trailing WINDOW_MS of audio
+     *  (single-segment, fast). Skips a tick if the previous decode is
+     *  still running — decode slower than PARTIAL_MS must never pile up. */
+    private fun decodePartial() {
+        if (!ready || decodeInFlight) return
+        val snap = synchronized(pcmLock) {
+            val n = min(pcmLen, WINDOW_SAMPLES)
+            if (n < SAMPLE_RATE / 2) return   // ignore sub-500ms blips
+            pcm.copyOfRange(pcmLen - n, pcmLen)
+        }
+        // VAD gate: a silent window decodes to nothing useful — skip the
+        // CPU/battery cost. Threshold sits well under normal speech RMS.
+        var peak = 0
+        for (v in snap) { val a = kotlin.math.abs(v.toInt()); if (a > peak) peak = a }
+        if (peak < VAD_PEAK_MIN) {
+            Log.d(TAG, "partial skipped (silence, peak=$peak)")
+            return
+        }
+        decodeInFlight = true
+        thread(name = "hive-stt-partial") {
+            try {
+                val t0 = SystemClock.elapsedRealtime()
+                val t = WhisperNative.nativeTranscribe(
+                    snap, snap.size, THREADS, false).trim()
+                Log.i(TAG, "partial decode ${SystemClock.elapsedRealtime() - t0}ms")
+                if (t.isNotEmpty() && listening) {
+                    transcript = t
+                    ui.post { onTranscript(t) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "partial decode failed", e)
+            } finally {
+                decodeInFlight = false
+            }
         }
     }
 
     // -- Capture -------------------------------------------------------------
 
     private fun startCapture() {
-        val rec = recognizer ?: return
-        if (listening) return
+        if (!ready || listening) return
         transcript = ""
-        stream?.release()
-        val st = rec.createStream()
-        stream = st
+        synchronized(pcmLock) { pcmLen = 0 }
 
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, android.media.AudioFormat.CHANNEL_IN_MONO,
@@ -229,11 +267,10 @@ class SttEngine(
         listening = true
         Log.i(TAG, "capture start")
         ar.startRecording()
+        bg.postDelayed(partialTick, PARTIAL_MS)
 
         captureThread = thread(name = "hive-stt-capture") {
             val shorts = ShortArray(SAMPLE_RATE / 10)   // 100 ms chunks
-            val floats = FloatArray(SAMPLE_RATE / 10)
-            var lastPublish = 0L
             // Adaptive level reference (fast attack, slow release): mic
             // gain varies wildly across devices/sources, so a fixed RMS
             // divisor leaves the sphere dead on quiet mics. Normal
@@ -247,24 +284,24 @@ class SttEngine(
                     for (i in 0 until n) {
                         val v = shorts[i].toInt()
                         sum += (v * v).toDouble()
-                        floats[i] = v / 32768f
                     }
                     val rms = sqrt(sum / n)
                     rmsRef = if (rms > rmsRef) rms
                     else rmsRef * 0.999 + rms * 0.001
                     onLevel((rms / (rmsRef * 1.3)).coerceIn(0.0, 1.0).toFloat())
-                    st.acceptWaveform(
-                        if (n == floats.size) floats else floats.copyOf(n),
-                        SAMPLE_RATE)
-                    while (rec.isReady(st)) rec.decode(st)
-                    val now = System.currentTimeMillis()
-                    if (now - lastPublish > 200) {
-                        lastPublish = now
-                        val t = rec.getResult(st).text.trim()
-                        if (t != transcript) {
-                            transcript = t
-                            ui.post { onTranscript(t) }
+                    synchronized(pcmLock) {
+                        if (pcmLen + n > MAX_SAMPLES) {
+                            // Cap reached: drop the oldest half, keep going.
+                            val keep = MAX_SAMPLES / 2
+                            System.arraycopy(pcm, pcmLen - keep, pcm, 0, keep)
+                            pcmLen = keep
                         }
+                        if (pcmLen + n > pcm.size) {
+                            pcm = pcm.copyOf((pcm.size * 2)
+                                .coerceAtMost(MAX_SAMPLES))
+                        }
+                        System.arraycopy(shorts, 0, pcm, pcmLen, n)
+                        pcmLen += n
                     }
                 }
             } catch (e: Exception) {
@@ -277,7 +314,14 @@ class SttEngine(
     companion object {
         private const val TAG = "HiveStt"
         private const val SAMPLE_RATE = 16_000
-        private val MODEL_FILES = listOf(
-            "encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+        private const val THREADS = 4
+        private const val PARTIAL_MS = 2_000L
+        private const val WINDOW_SAMPLES = SAMPLE_RATE * 5   // 5 s window
+        private const val MAX_SECONDS = 120
+        private const val MAX_SAMPLES = SAMPLE_RATE * MAX_SECONDS
+        private const val VAD_PEAK_MIN = 500   // PCM16 peak; speech ~3-20k
+        private const val MODEL_PARTIAL = "ggml-tiny.en-q8_0.bin"
+        private const val MODEL_FINAL = "ggml-base.en-q8_0.bin"
+        private val MODEL_FILES = listOf(MODEL_PARTIAL, MODEL_FINAL)
     }
 }

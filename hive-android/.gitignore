@@ -8,3 +8,4 @@ local.properties
 # vendored sherpa-onnx natives + STT model (fetch via fetch-deps.sh)
 app/src/main/jniLibs/
 app/src/main/assets/models/
+app/src/main/cpp/whisper-cpp/

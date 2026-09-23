@@ -24,6 +24,11 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
+    androidResources {
+        // 225MB of ggml model .bin files don't compress — skip the attempt.
+        noCompress += listOf("bin")
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

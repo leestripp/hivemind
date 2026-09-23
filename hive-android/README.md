@@ -4,12 +4,15 @@ Voice-only Android client for the HiveMind hub. Pick an agent, get a
 Jarvis-style sphere that moves with the voice signal, talk to it, hear
 the reply.
 
-- **STT**: on-device streaming sherpa-onnx (Zipformer2 transducer,
+- **STT**: on-device whisper.cpp (ggml q8_0, NEON+dotprod): tiny.en
+  for live partials (5s sliding window, ~0.5s), base.en for the final
+  pass on SEND (~1s/9s audio). Replaces the old sherpa-onnx zipformer —
+  dramatically better accuracy.
   int8, ~70 MB bundled model) fed by our own AudioRecord capture —
   NO endpointer, so silence never stops a recording: the user is the
   only stop signal. No sessions, no throttling, no audio cues, works
   fully offline. Kotlin API + native libs vendored from
-  [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13.8
+  [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) v1.9.4
   (Apache-2.0), fetched by `./fetch-deps.sh`.
 - **TTS**: Android platform `TextToSpeech`.
 - **Sphere**: OpenGL ES 2.0 point-cloud renderer in C++ (NDK,
@@ -85,7 +88,7 @@ On this rig both live in `~/Android/Sdk`; JDK 21 at
 `/usr/lib/jvm/java-21-openjdk-amd64`.
 
 ```bash
-./fetch-deps.sh   # one-time: sherpa-onnx natives + STT model (~130 MB)
+./fetch-deps.sh   # one-time: whisper.cpp source + ggml models (~125 MB)
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export ANDROID_HOME=~/Android/Sdk
 ./gradlew assembleDebug
@@ -106,13 +109,13 @@ permission when prompted.
 
 ## Notes / caveats
 
-- **Waydroid**: STT is self-contained (sherpa-onnx, x86_64 libs
+- **Waydroid**: STT is self-contained (whisper.cpp, x86_64 libs
   included) so dictation works without GMS; TTS still needs a system
   TTS engine, which stock LineageOS images lack — replies would be
   text-status only there unless you install one.
 - cleartext HTTP is permitted in the manifest for LAN hubs; the default
   URL is TLS.
-- Third-party code: sherpa-onnx Kotlin API + native libs (Apache-2.0,
+- Third-party code: whisper.cpp (MIT,
   (c) k2-fsa) vendored under app/src/main/java/com/k2fsa/ and
   app/src/main/jniLibs/; everything else is framework Views + org.json
   + kotlin-stdlib.

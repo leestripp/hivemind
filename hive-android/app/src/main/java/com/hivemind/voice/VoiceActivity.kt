@@ -237,12 +237,12 @@ class VoiceActivity : Activity() {
         sphere.setLevel(0f)
         phase = Phase.THINKING
         turnGen++
-        sphere.setSphereState(SphereState.THINKING)
+        sphere.setSphereState(SphereState.PROCESSING)
         talk.text = "···"
         talk.setBackgroundResource(R.drawable.btn_talk)
         talk.isEnabled = false
         cancel.visibility = View.VISIBLE
-        status.text = "Sending…"
+        status.text = "Transcribing…"
         lastProgressMs = System.currentTimeMillis()
         lastPartialLen = 0
         netFailSince = 0L
@@ -258,11 +258,13 @@ class VoiceActivity : Activity() {
                 toIdle("Didn't catch that — tap TALK to retry")
                 return@stop
             }
+            ui.post { status.text = "Sending…" }
             io.execute {
                 try {
                     api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
                     ui.post {
                         if (phase != Phase.THINKING) return@post
+                        sphere.setSphereState(SphereState.THINKING)
                         status.text = "Thinking…"
                         ui.postDelayed(pollTick, POLL_MS)
                     }

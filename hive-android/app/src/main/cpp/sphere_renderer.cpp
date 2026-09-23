@@ -30,7 +30,7 @@ attribute vec3 aPos;
 uniform mat4  uProj;
 uniform float uTime;
 uniform float uLevel;   // 0..1 smoothed voice level
-uniform float uState;   // 0 idle, 1 listening, 2 thinking, 3 speaking
+uniform float uState;   // 0 idle, 1 listening, 2 thinking, 3 speaking, 4 processing (STT decode)
 uniform float uPointScale;
 uniform float uCamDist; // camera distance — widens for portrait screens
 
@@ -103,11 +103,17 @@ float snoise(vec3 v){
 void main(){
     float listenAmt = clamp(uState, 0.0, 1.0) * clamp(2.0 - uState, 0.0, 1.0);
     float thinkAmt  = max(0.0, 1.0 - abs(uState - 2.0));
-    float speakAmt  = clamp(uState - 2.0, 0.0, 1.0);
+    float speakAmt  = clamp(uState - 2.0, 0.0, 1.0) * clamp(4.0 - uState, 0.0, 1.0);
+    float procAmt   = clamp(uState - 3.0, 0.0, 1.0);
 
-    // Rotation: idle drift, listening a touch faster, thinking spins hard.
-    float speed = 0.25 + 0.15 * listenAmt + 1.30 * thinkAmt + 0.30 * speakAmt;
-    float a = uTime * speed + aPos.y * thinkAmt * 2.0;  // think: vertical shear
+    // Heartbeat for processing: makes decode duration *visible*.
+    float pulse = 0.5 + 0.5 * sin(uTime * 3.2);
+
+    // Rotation: idle drift, listening a touch faster, thinking spins hard,
+    // processing a steady working spin.
+    float speed = 0.25 + 0.15 * listenAmt + 1.30 * thinkAmt
+                + 0.30 * speakAmt + 0.55 * procAmt;
+    float a = uTime * speed + aPos.y * (thinkAmt + 0.4 * procAmt) * 2.0;  // shear
     float ca = cos(a), sa = sin(a);
     vec3 p = vec3(aPos.x * ca - aPos.z * sa, aPos.y, aPos.x * sa + aPos.z * ca);
 
@@ -119,14 +125,14 @@ void main(){
     // Noise displacement — amplitude follows the voice level.
     float n1 = snoise(p * 2.3 + vec3(0.0, uTime * 0.45, 0.0));
     float n2 = snoise(p * 5.0 - vec3(uTime * 0.8, 0.0, 0.0));
-    float amp = 0.045 + uLevel * 0.40 + thinkAmt * 0.10;
+    float amp = 0.045 + uLevel * 0.40 + thinkAmt * 0.10 + procAmt * 0.14 * pulse;
     float radius = 1.0 + n1 * amp + n2 * uLevel * 0.18;
     vec3 world = p * radius;
 
     vec4 view = vec4(world.xy, world.z - uCamDist, 1.0);
     gl_Position = uProj * view;
 
-    float ps = uPointScale * (1.6 + uLevel * 2.6 + n1 * 0.9 + thinkAmt * 0.6);
+    float ps = uPointScale * (1.6 + uLevel * 2.6 + n1 * 0.9 + thinkAmt * 0.6 + procAmt * 0.4);
     gl_PointSize = clamp(ps / max(0.6, -view.z), 1.0, 64.0);
 
     // Per-state palette.
@@ -134,12 +140,17 @@ void main(){
     vec3 cListen = vec3(0.20, 0.85, 0.95);
     vec3 cThink  = vec3(0.95, 0.70, 0.25);
     vec3 cSpeak  = vec3(0.25, 0.95, 0.60);
+    vec3 cProc   = vec3(0.62, 0.22, 0.95);   // violet = STT decode
     vec3 col = cIdle;
     col = mix(col, cListen, listenAmt);
     col = mix(col, cThink,  thinkAmt);
     col = mix(col, cSpeak,  speakAmt);
+    col = mix(col, cProc,   procAmt);
 
     float bright = 0.55 + 0.45 * n1 + uLevel * 0.9;
+    // Processing owns brightness outright: luminous pulsing violet,
+    // guaranteed readable at zero mic level, never clamping to white.
+    bright = mix(bright, 0.75 + 0.25 * n1 + 0.30 * pulse, procAmt);
     vColor = vec4(col * max(0.30, bright), 1.0);
 }
 )GLSL";
