@@ -60,6 +60,22 @@ int count_from(ThreadStore& threads, const std::string& tid,
     return n;
 }
 
+// Complete every live turn with an ack-only reply ("acknowledged" gates
+// the fan-in continuation, 65c) until all agents are idle. The
+// busy-receiver hold queue (2026-09-25) defers fan-in wakes while the
+// target has any live turn; drained wakes surface as new live turns on
+// later passes. Steps that assume an idle starting state call this
+// first — agent_activity() is re-queried each pass.
+void settle(ChatService& chat) {
+    for (int guard = 0; guard < 32; ++guard) {
+        const auto live = chat.agent_activity();
+        if (live.empty()) return;
+        for (const auto& [_, t] : live)
+            if (!t.task_id.empty())
+                chat.complete_turn(t.task_id, "acknowledged.", "");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -144,6 +160,10 @@ int main() {
     //    the pair thread, not a user DM.)
     //    Simulate: Chief user turn live again, but this time the
     //    agent_msg comes from Honey whose live turn is the pair thread.
+    // 2026-09-25: with the hold queue, Chief's stale pair turn (left
+    //    open by step 5's drain) would hold this user wake instead of
+    //    dispatching it — settle to the intended idle state first.
+    settle(chat);
     chat.post_user_message(dm.id, "another question");
     const auto* t7 = hub.find_last(chief.id, dm.id);
     assert(t7);
@@ -162,6 +182,9 @@ int main() {
     // 8) REGRESSION (2026-09-23 probe): an ack-only-looking peer reply
     //    ("acknowledged" + <=600 chars) must STILL relay — ack-only gates
     //    fan-in continuation, never the relay. Production failure mode.
+    // Held wakes from step 7 (the FYI fan-in found Chief busy) must
+    // drain before this step's relay choreography — settle first.
+    settle(chat);
     chat.post_user_message(dm.id, "ask Honey for the probe word");
     const auto* t8 = hub.find_last(chief.id, dm.id);
     assert(t8);
@@ -182,17 +205,11 @@ int main() {
     //    the DM immediately, but the wake dispatch must be HELD until
     //    the requester goes idle (previously the queued wake aged out
     //    under the turn watchdog and was silently tombstoned).
-    // Settle leftovers first: the step-7 "another question" turn never
-    // completed (leaving Chief busy, which is also why step 8's wake
-    // queued instead of dispatching); completing it drains that wake.
-    chat.complete_turn(step7_task, "done with that.", "");
-    // Completing the leftover idled Chief, which drained step 8's held
-    // wake — that wake is itself a live turn; complete it too so Chief
-    // is truly idle before the busy test begins.
-    const auto* step8_wake = hub.find_last(chief.id, dm.id);
-    assert(step8_wake && step8_wake->task_id != step7_task);
-    const std::string step8_wake_task = step8_wake->task_id;
-    chat.complete_turn(step8_wake_task, "framed it for the user.", "");
+    // 2026-09-25 rework: the hold queue now also defers pair-thread
+    // continuations, so leftover turns from steps 7-8 would hold this
+    // step's wakes — settle to a truly idle state first. Drain ordering
+    // on completion is relay queue first, then one held message wake.
+    settle(chat);
     chat.post_user_message(dm.id, "ask Honey for the busy-test word");
     const auto* t9 = hub.find_last(chief.id, dm.id);
     assert(t9);
@@ -216,44 +233,90 @@ int main() {
             ++chief_dm_dispatches_busy;
     assert(chief_dm_dispatches_busy == chief_dm_dispatches_before &&
            "wake must not dispatch to a busy requester");
-    // Chief's long turn finally completes. But Honey's pair reply ALSO
-    // continued the pair thread (fan-in to Chief at generation 2), so
-    // Chief is still busy — the drain must STILL hold.
+    // Chief's long turn finally completes: idle → the held RELAY wake
+    // drains exactly once (re-busying Chief), while Honey's pair
+    // continuation stays held in the message-wake queue.
     chat.complete_turn(chief_busy_task, "sorry, that took a while.", "");
     {
         int n = 0;
         for (const auto& d : hub.dispatches)
             if (d.agent_id == chief.id && d.thread_id == dm.id) ++n;
-        assert(n == chief_dm_dispatches_before &&
-               "wake must stay held while ANY turn is live (pair too)");
+        assert(n == chief_dm_dispatches_before + 1 &&
+               "idle requester drains the held relay wake exactly once");
     }
-    // Settle every remaining live Chief turn with ack-only replies
-    // ("acknowledged" gates the fan-in continuation, 65c) until the
-    // agent is truly idle — the LAST completion drains the held wake.
-    // NB: agent_activity() re-queries each pass; the drained wake shows
-    // up as one final live turn, which we also complete.
-    for (int guard = 0; guard < 16; ++guard) {
-        const auto live = chat.agent_activity();
-        const auto it = live.find(chief.id);
-        if (it == live.end()) break;
-        chat.complete_turn(it->second.task_id, "acknowledged.", "");
-    }
+    // Completing the drained relay wake idles Chief again, releasing
+    // the held pair continuation; settle until truly idle.
+    settle(chat);
     assert(chat.agent_activity().count(chief.id) == 0 &&
            "settle loop should fully idle Chief");
-    int chief_dm_dispatches_after = 0;
-    const Dispatch* wake = nullptr;
+
+    // 10) BUSY RECEIVER hold queue (2026-09-25, Chief's relay bug
+    //     report): wakes to a mid-turn agent must be held hub-side and
+    //     drained on idle — previously they dispatched into the agent's
+    //     serial queue while the hub-side LiveTurn aged from dispatch
+    //     and was watchdog-tombstoned, silently dropping the answer.
+    // Honey -> Chief while Chief is idle: dispatches immediately.
+    chat.post_agent_message(honey.id, chief.id, "hold-test one");
+    const auto* h10 = hub.find_last(chief.id, pair_tid);
+    assert(h10);
+    const std::string chief10_task = h10->task_id;   // left open: busy
+    int chief_pair_dispatches = 0;
     for (const auto& d : hub.dispatches)
-        if (d.agent_id == chief.id && d.thread_id == dm.id) {
-            ++chief_dm_dispatches_after;
-            wake = &d;
+        if (d.agent_id == chief.id && d.thread_id == pair_tid)
+            ++chief_pair_dispatches;
+
+    // Honey -> Chief while Chief is busy: HELD, no new dispatch.
+    chat.post_agent_message(honey.id, chief.id, "hold-test two");
+    int n_held = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == pair_tid) ++n_held;
+    assert(n_held == chief_pair_dispatches &&
+           "wake must be held while the receiver is busy");
+
+    // Dedup (09-23 double-delivery): the identical body again inside
+    // the window is a retry — dropped BEFORE posting, so the thread
+    // message count must not grow (and no second wake is queued).
+    const int pair_msgs_before =
+        (int)threads.list_messages(pair_tid).size();
+    chat.post_agent_message(honey.id, chief.id, "hold-test two");
+    assert((int)threads.list_messages(pair_tid).size() ==
+               pair_msgs_before &&
+           "identical retry must be deduped");
+
+    // Chief's long turn completes (ack-only gates the continuation) —
+    // the held wake drains exactly once.
+    chat.complete_turn(chief10_task, "acknowledged.", "");
+    n_held = 0;
+    const Dispatch* drained = nullptr;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == pair_tid) {
+            ++n_held;
+            drained = &d;
         }
-    // TWO wakes were held at this point: step 9's (queued above) AND
-    // step 8's (Chief never went idle between steps 8 and 9 — the
-    // pair-thread fan-in kept him busy, so it never drained). Both
-    // must fire, oldest first, exactly once each.
-    assert(chief_dm_dispatches_after == chief_dm_dispatches_before + 2 &&
-           "drain must fire every held wake once idle");
-    assert(wake && wake->task_id != chief_busy_task);
+    assert(n_held == chief_pair_dispatches + 1 &&
+           "held wake must drain exactly once when the receiver idles");
+    assert(drained && drained->task_id != chief10_task);
+
+    // User messages hold too (same serial-agent tombstone): with Chief
+    // busy on the drained wake, a user DM queues instead of dispatching.
+    int dm_before = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id) ++dm_before;
+    chat.post_user_message(dm.id, "hello while you are busy");
+    int dm_now = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id) ++dm_now;
+    assert(dm_now == dm_before && "user wake must hold while busy");
+    // Completing the drained pair turn idles Chief → user wake drains.
+    chat.complete_turn(drained->task_id, "acknowledged.", "");
+    dm_now = 0;
+    for (const auto& d : hub.dispatches)
+        if (d.agent_id == chief.id && d.thread_id == dm.id) ++dm_now;
+    assert(dm_now == dm_before + 1 && "held user wake must drain on idle");
+
+    // Settle everything; both agents fully idle at the end.
+    settle(chat);
+    assert(chat.agent_activity().empty());
 
     std::cout << "agent relay: all assertions passed\n";
     return 0;

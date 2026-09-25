@@ -448,8 +448,15 @@ void HubRouter::on_worker_frame(const std::string& worker,
         return;
     }
     if (op == "agent_status") {
-        std::lock_guard<std::mutex> lk(m_);
-        states_[agent_id] = frame.value("state", "");
+        const std::string st = frame.value("state", "");
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            states_[agent_id] = st;
+        }
+        // 2026-09-25 busy-receiver hold queue: a spawn/reconnect "ready"
+        // is the recovery drain hook for wakes held across a restart.
+        // Called OUTSIDE m_ — draining re-enters dispatch (lock order).
+        if (chat_ && st == "ready") chat_->on_agent_ready(agent_id);
         return;
     }
     if (op == "agent_msg") {

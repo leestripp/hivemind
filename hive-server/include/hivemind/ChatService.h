@@ -80,6 +80,9 @@ public:
 
     // -- HubRouter callbacks (worker channel events) --------------------
     void append_delta(const std::string& task_id, const std::string& text);
+    /// Agent reported "ready" (spawn/reconnect): release one held wake.
+    /// Recovery hook for wakes held across a worker restart.
+    void on_agent_ready(const std::string& agent_id);
     /// Phase 52: post a dying turn's streamed partial into its thread so
     /// user-facing text survives cancel/timeout. No-op when empty or
     /// already flushed. Sets partial_flushed.
@@ -170,6 +173,54 @@ private:
     /// Fire queued wakes for an idle agent (TTL-reaped first). Safe to
     /// call without holding m_; ThreadStore/fan_in happen outside it.
     void drain_relay_queue(const std::string& agent_id);
+
+    // ── Busy-receiver hold queue (2026-09-25) ────────────────────────
+    // Chief's relay bug report: agent→agent pair-thread wakes dispatched
+    // to a BUSY receiver queued fine agent-side (hive-agent runs tasks
+    // serially) but the hub-side LiveTurn ages from DISPATCH — a receiver
+    // busy past HIVEMIND_TURN_TIMEOUT_S had the queued wake watchdog-
+    // tombstoned before the agent ever started it, and the eventual
+    // answer was dropped silently. Same defect for user/nudge wakes.
+    // Fix: fan_in holds the wake here while the receiver has any live
+    // turn; drain_pending_wakes dispatches ONE held wake when the agent
+    // goes idle (the dispatched turn re-busies it; the next drains on
+    // that turn's completion). Hooks: end of complete_turn, watchdog
+    // retirement, agent_status "ready". Entries expire after
+    // HIVEMIND_WAKE_TTL_S (default 86400 — messages outlive relay
+    // links). Drained wakes re-enter fan_in, so mute/circuit-breaker
+    // gates are re-checked at dispatch time (a mute set while the wake
+    // was held still applies).
+    struct PendingWake {
+        std::string thread_id;
+        std::string target_id;
+        std::string sender_label;
+        std::string body;
+        int generation = 0;
+        std::chrono::steady_clock::time_point created;
+    };
+    std::unordered_map<std::string, std::deque<PendingWake>>
+        pending_wakes_;   // by target agent id, guarded by m_, FIFO
+    /// Dispatch ONE held wake when the agent is idle (TTL-reaped first).
+    /// Safe to call without holding m_; ThreadStore/fan_in happen
+    /// outside it. Loops past undeliverable heads (deleted thread/agent)
+    /// so one bad entry never blocks the queue.
+    void drain_pending_wakes(const std::string& agent_id);
+    /// Pop expired entries from the front of the agent's queue.
+    /// Caller holds m_. FIFO => front-sweep is complete.
+    void sweep_pending_wakes_locked(const std::string& agent_id);
+    static int wake_ttl_s();   // env HIVEMIND_WAKE_TTL_S, def 86400
+
+    // ── agent_msg dedup (2026-09-25) ─────────────────────────────────
+    // Chief reported duplicate pair-thread deliveries (09-23): a sender
+    // whose tool result is slow retries message_agent and the identical
+    // body lands twice. Identical (sender, target, body) within
+    // HIVEMIND_MSG_DEDUP_S (default 30) is a retry — drop the repeat.
+    struct RecentMsg {
+        std::string sender, target, body;
+        std::chrono::steady_clock::time_point at;
+    };
+    std::deque<RecentMsg> recent_agent_msgs_;   // guarded by m_, FIFO
+    static int dedup_window_s();   // env HIVEMIND_MSG_DEDUP_S, def 30
 
     AgentStore& agents_;
     ThreadStore& threads_;
