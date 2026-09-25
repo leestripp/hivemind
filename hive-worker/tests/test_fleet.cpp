@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
 
 #include <condition_variable>
 #include <cstdlib>
@@ -55,6 +56,32 @@ int main() {
         b.temperature = 0.5;
         assert(a != b);                          // tuning change -> restart
         std::cout << "test_fleet: AgentSpec equality OK\n";
+    }
+
+    // Phase 65b: a task queued while the exec is down must not wedge its
+    // hub-side turn when the process is stopped — stop() fails pending
+    // task frames with a synthetic error "message" event (regression:
+    // 2026-09-25 PA wedge, exec died mid-turn and the hub turn stuck).
+    {
+        std::vector<json> events;
+        hwfleet::AgentSpec ws;
+        ws.id = "wedgebee"; ws.name = "WedgeBee";
+        hwfleet::AgentProcess proc(
+            ws, [&](const std::string&, const json& ev) {
+                events.push_back(ev);
+            });
+        // stdin down (never started): both frames land in pending_.
+        proc.send({{"op","task"},{"id","tw1"},{"thread_id","thw"},
+                   {"text","hi"}});
+        proc.send({{"op","cancel"}});   // non-task frame: queued, not failed
+        proc.stop();                    // never started: fast path, no child
+        assert(events.size() == 1);     // only the task frame fails
+        assert(events[0].value("ev","") == "message");
+        assert(events[0].value("task","") == "tw1");
+        assert(events[0].value("thread_id","") == "thw");
+        assert(events[0].value("body","x").empty());
+        assert(!events[0].value("error","").empty());
+        std::cout << "test_fleet: pending-task fail-on-stop OK\n";
     }
 
     // (Phase 43: resolve_model + model-registry ops moved to the hub's

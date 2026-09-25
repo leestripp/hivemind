@@ -18,12 +18,14 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 namespace hwfleet {
 
@@ -94,6 +96,15 @@ private:
     void reader_loop(int fd);
     void monitor_loop();
     void kill_child();
+    /// Record a flushed pending_ frame as delivered (task frames only).
+    void note_frame_delivered(const std::string& frame);
+    /// Emit synthetic error "message" events for every delivered-but-
+    /// unanswered task; clears the ledger. exit_status < 0 = signal.
+    void fail_unanswered(const std::string& why, int exit_status);
+    /// Fail any task frames still sitting in pending_ (never delivered)
+    /// and clear the queue — called by stop(), where the frames would
+    /// otherwise die silently with this object.
+    void fail_pending_tasks(const std::string& why);
     std::string build_env_file();   // renders HIVEMIND_* env, returns path
     std::string write_prompt_file(); // -> /workspace/.hivemind/prompts/<id>.txt
 
@@ -108,6 +119,13 @@ private:
     // first task after a cold spawn raced the exec and vanished silently
     // (hit 2026-09-07: Forge's first Phase-43 task dropped mid-boot).
     std::vector<std::string> pending_;
+    // Tasks delivered to the child (direct write or pending_ flush) but
+    // not yet answered by a "message" event. If the exec dies with
+    // entries here the hub-side turn would wedge (cancel unconfirmable,
+    // queued messages stranded) until the watchdog grace — so
+    // monitor_loop/stop() synthesise error "message" events for them
+    // (2026-09-25 PA wedge: exec died mid-turn, thread stuck ~6 min).
+    std::deque<std::pair<std::string, std::string>> unanswered_;  // (task, thread_id)
     std::string state_ = "down";
     std::atomic<bool> stopping_{false};
     int restart_backoff_s_ = 1;

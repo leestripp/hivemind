@@ -165,14 +165,28 @@ void AgentProcess::spawn_exec() {
         stdin_fd_ = to_child[1];
         flush.swap(pending_);
     }
-    for (const auto& pf : flush) {
-        std::string l = pf + "\n";
+    for (size_t fi = 0; fi < flush.size(); ++fi) {
+        std::string l = flush[fi] + "\n";
         const char* q = l.data(); size_t left = l.size();
+        bool ok = true;
         while (left > 0) {
             ssize_t n = ::write(to_child[1], q, left);
-            if (n <= 0) break;
+            if (n <= 0) { ok = false; break; }
             q += n; left -= (size_t)n;
         }
+        if (!ok) {
+            // Pipe died mid-flush: requeue this and all remaining frames
+            // (front, order preserved) for the NEXT respawn — the dead
+            // child took any partial line with it.
+            std::lock_guard<std::mutex> lk(m_);
+            pending_.insert(pending_.begin(), flush.begin() + (ptrdiff_t)fi,
+                            flush.end());
+            std::cerr << "fleet: pipe died mid-flush for " << spec_.id
+                      << " — requeued " << (flush.size() - fi)
+                      << " frame(s)\n";
+            break;
+        }
+        note_frame_delivered(flush[fi]);
     }
     if (!flush.empty())
         std::cerr << "fleet: flushed " << flush.size()
@@ -207,6 +221,19 @@ void AgentProcess::reader_loop(int fd) {
                 set_state(m_, state_, "acting");
             } else if (kind == "message") {
                 set_state(m_, state_, "ready");
+                // Turn answered: drop it from the in-flight ledger.
+                const std::string tid = ev.value("task", "");
+                std::lock_guard<std::mutex> lk(m_);
+                if (!tid.empty()) {
+                    for (auto uit = unanswered_.begin();
+                         uit != unanswered_.end(); ++uit)
+                        if (uit->first == tid) {
+                            unanswered_.erase(uit);
+                            break;
+                        }
+                } else if (!unanswered_.empty()) {
+                    unanswered_.pop_front();   // FIFO fallback
+                }
             } else if (kind == "status") {
                 // Brain state machine (idle/understanding/acting/...) from
                 // hive-agent's on_state_change; lifecycle states
@@ -235,6 +262,14 @@ void AgentProcess::monitor_loop() {
             pid_ = -1;
         }
         if (reader_.joinable()) reader_.join();
+
+        // Any task already delivered to the dead exec will never get its
+        // "message" event — fail it NOW or the hub-side turn wedges
+        // (cancel unconfirmable, queued messages stranded) until the
+        // watchdog grace elapses (2026-09-25 PA voice-message wedge).
+        fail_unanswered("agent process exited before answering; the task "
+                        "did not complete — resend to retry",
+                        WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 
         if (stopping_) {
             set_state(m_, state_, "down");
@@ -284,6 +319,7 @@ void AgentProcess::monitor_loop() {
 }
 
 void AgentProcess::send(const json& op) {
+    const std::string line = op.dump() + "\n";
     std::lock_guard<std::mutex> lk(m_);
     if (stdin_fd_ < 0) {
         pending_.push_back(op.dump());
@@ -291,20 +327,80 @@ void AgentProcess::send(const json& op) {
                   << " — queued (" << pending_.size() << " pending)\n";
         return;
     }
-    const std::string line = op.dump() + "\n";
     const char* p = line.data();
     size_t left = line.size();
     while (left > 0) {
         ssize_t n = ::write(stdin_fd_, p, left);
-        if (n <= 0) break;                 // EPIPE: child gone
+        if (n <= 0) {
+            // EPIPE: child gone. Requeue for the respawn flush instead of
+            // dropping — a lost task wedges the hub-side turn until the
+            // watchdog, and a lost cancel strands a running turn.
+            pending_.push_back(op.dump());
+            std::cerr << "fleet: stdin write failed for " << spec_.id
+                      << " — queued (" << pending_.size() << " pending)\n";
+            return;
+        }
         p += n; left -= (size_t)n;
     }
+    if (op.value("op", "") == "task")
+        unanswered_.emplace_back(op.value("id", ""),
+                                 op.value("thread_id", ""));
 }
 
 void AgentProcess::kill_child() {
     std::lock_guard<std::mutex> lk(m_);
     if (pid_ > 0) ::kill(pid_, SIGKILL);
     if (stdin_fd_ >= 0) { ::close(stdin_fd_); stdin_fd_ = -1; }
+}
+
+void AgentProcess::note_frame_delivered(const std::string& frame) {
+    json op = json::parse(frame, nullptr, false);
+    if (op.is_discarded() || op.value("op", "") != "task") return;
+    std::lock_guard<std::mutex> lk(m_);
+    unanswered_.emplace_back(op.value("id", ""), op.value("thread_id", ""));
+}
+
+void AgentProcess::fail_unanswered(const std::string& why, int exit_status) {
+    std::deque<std::pair<std::string, std::string>> dead;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        dead.swap(unanswered_);
+    }
+    if (dead.empty() || !on_event_) return;
+    std::string err = why;
+    if (exit_status >= 0)
+        err += " (exit status " + std::to_string(exit_status) + ")";
+    for (const auto& [tid, thid] : dead) {
+        std::cerr << "fleet: " << spec_.id << " exited with unanswered task "
+                  << tid << " — failing it hub-side\n";
+        // Synthetic "message" event: main.cpp maps it to task_result,
+        // which closes the hub turn (and confirms any pending cancel).
+        on_event_(spec_.id, {{"ev", "message"},
+                             {"task", tid},
+                             {"thread_id", thid},
+                             {"body", ""},
+                             {"error", err}});
+    }
+}
+
+void AgentProcess::fail_pending_tasks(const std::string& why) {
+    std::vector<std::string> pend;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        pend.swap(pending_);
+    }
+    if (!on_event_) return;
+    for (const auto& pf : pend) {
+        json op = json::parse(pf, nullptr, false);
+        if (op.is_discarded() || op.value("op", "") != "task") continue;
+        std::cerr << "fleet: " << spec_.id << " stopped with queued task "
+                  << op.value("id", "") << " — failing it hub-side\n";
+        on_event_(spec_.id, {{"ev", "message"},
+                             {"task", op.value("id", "")},
+                             {"thread_id", op.value("thread_id", "")},
+                             {"body", ""},
+                             {"error", why}});
+    }
 }
 
 void AgentProcess::stop() {
@@ -325,6 +421,11 @@ void AgentProcess::stop() {
     kill_child();
     if (monitor_.joinable()) monitor_.join();
     if (reader_.joinable()) reader_.join();   // EOFs once the child dies
+    // monitor_loop already failed delivered-but-unanswered tasks; frames
+    // still QUEUED (never delivered) would otherwise die silently with
+    // this object and wedge their hub-side turns the same way.
+    fail_pending_tasks("agent stopped before the task could be delivered "
+                       "— resend to retry");
     set_state(m_, state_, "down");
     const fs::path envf = fs::path(hwrunner::worker_dir()) / "env"
                         / (spec_.id + ".env");
