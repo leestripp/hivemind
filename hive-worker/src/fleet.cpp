@@ -259,6 +259,17 @@ void AgentProcess::monitor_loop() {
             hwrunner::ensure_container(spec_.id, resolved_image(spec_),
                                        spec_.type == "gpu");
             spawn_exec();                // creates a fresh reader_ thread
+            // A stop() that landed mid-respawn (spec-change restart)
+            // couldn't kill a child that didn't exist yet — do it now
+            // and loop into waitpid so the child is reaped before exit.
+            if (stopping_) { kill_child(); continue; }
+            // Crash-respawns reuse the CACHED spec_ — grants/models
+            // changed since the last spawn frame would never arrive
+            // (the 2026-09-25 vault-grant incident). Ask the hub to push
+            // a fresh spawn frame; Fleet::spawn no-ops when nothing
+            // changed, so this is free in the steady state.
+            if (on_event_)
+                on_event_(spec_.id, {{"ev", "spec_refresh_req"}});
         } catch (const std::exception& e) {
             std::cerr << "fleet: respawn failed for " << spec_.id << ": "
                       << e.what() << "\n";
@@ -313,6 +324,7 @@ void AgentProcess::stop() {
     }
     kill_child();
     if (monitor_.joinable()) monitor_.join();
+    if (reader_.joinable()) reader_.join();   // EOFs once the child dies
     set_state(m_, state_, "down");
     const fs::path envf = fs::path(hwrunner::worker_dir()) / "env"
                         / (spec_.id + ".env");
@@ -325,8 +337,24 @@ void AgentProcess::stop() {
 
 void Fleet::spawn(const AgentSpec& spec) {
     std::lock_guard<std::mutex> lk(m_);
-    if (agents_.count(spec.id))
-        throw std::runtime_error("agent already running: " + spec.id);
+    auto it = agents_.find(spec.id);
+    if (it != agents_.end() && it->second->spec() == spec)
+        return;   // unchanged re-spawn (hub restart reconcile replays
+                  // every spawn) — keep the live brain untouched.
+    // New agent, or a CHANGED spec for a running one (fresh secret
+    // grants, model, prompt…): env loads at exec, so the brain must be
+    // restarted for the new spec to take effect. Stop the old process
+    // BEFORE starting the new one — two hive-agent execs sharing one
+    // container/workspace would corrupt brain state.
+    // (Vault-grant incident 2026-09-25: the old "already running" throw
+    // discarded every refreshed spawn frame, so grants never propagated
+    // across restarts.)
+    if (it != agents_.end()) {
+        std::cerr << "fleet: spec changed for " << spec.id
+                  << " — restarting with fresh spec\n";
+        it->second->stop();
+        agents_.erase(it);
+    }
     auto proc = std::make_unique<AgentProcess>(spec, on_event_);
     proc->start();                       // throws on infra failure
     agents_.emplace(spec.id, std::move(proc));

@@ -35,6 +35,28 @@ int main() {
         std::cout << "test_fleet: resolved_image mapping OK\n";
     }
 
+    // Phase 65: whole-spec equality drives Fleet::spawn's respawn dedup —
+    // identical re-spawn no-ops, any env-affecting change restarts.
+    {
+        hwfleet::AgentSpec a;
+        a.id = "agent-1"; a.name = "Bee"; a.model = "kimi-for-coding";
+        a.secret_env = "HIVE_SECRET_ONE=abc\n";
+        hwfleet::AgentSpec b = a;
+        assert(a == b);                          // copy is identical
+        b.secret_env += "HIVE_SECRET_TWO=def\n";
+        assert(a != b);                          // new grant -> restart
+        b = a;
+        b.mcp_servers = json::array({{"command","x"}});
+        assert(a != b);                          // mcp change -> restart
+        b = a;
+        b.disabled_skills.push_back("web");
+        assert(a != b);                          // skill gate -> restart
+        b = a;
+        b.temperature = 0.5;
+        assert(a != b);                          // tuning change -> restart
+        std::cout << "test_fleet: AgentSpec equality OK\n";
+    }
+
     // (Phase 43: resolve_model + model-registry ops moved to the hub's
     // LlmStore — tested by test_llmstore.)
 

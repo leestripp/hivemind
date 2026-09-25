@@ -174,6 +174,11 @@ int main(int argc, char* argv[]) {
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
+            // Crash-respawn spec refresh (Phase 65): the fleet respawned
+            // the brain from its cached spec — ask the hub to push a
+            // fresh spawn frame so grant/model/prompt changes propagate.
+            else if (kind == "spec_refresh_req")
+                f = {{"op","spawn_req"},{"agent",agent_id}};
             // secrets_create tool -> hub SecretStore (request/response,
             // secret_resp back). The frame carries secret material — it
             // must never be logged here.

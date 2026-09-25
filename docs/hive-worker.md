@@ -53,7 +53,7 @@ Hub -> worker:
 | `task` | id, agent_id, thread_id, text, roster, user_inbox, disabled_skills, llm | run one agent turn (roster/user_inbox feed the agent's list_agents and read_user_inbox tools) |
 | `cancel` | agent_id | abort the in-flight turn |
 | `approval_resp` | id, allow | user's approve/deny for a pending tool call |
-| `agent_spawn` | agent_id, name, model, system_prompt, auto_approve, mcp_servers | create/ensure container + exec hive-agent (idempotent: "already running") |
+| `agent_spawn` | agent_id, name, model, system_prompt, auto_approve, mcp_servers, secret_env | create/ensure container + exec hive-agent. Re-spawn of a running agent compares the whole spec: identical = no-op, changed (new secret grants, model, prompt...) = graceful restart with the fresh spec (Phase 65) |
 | `agent_stop` / `agent_remove` | agent_id | stop exec / reap container + home |
 | `exec` | id, agent, argv, env, timeout_s | one-shot command in the agent's container (exec_chunk/exec_done back) |
 | `file_fetch` / `file_push` / `file_list` | | move bytes hub<->worker workspace, list dirs |
@@ -67,6 +67,7 @@ Worker -> hub:
 |----|---------|
 | `hello`, `heartbeat` | handshake; liveness + per-agent state |
 | `agent_status` | ready / error / down per agent |
+| `spawn_req` | ask the hub to re-push `agent_spawn` (sent after a crash-respawn, which reuses the worker's cached spec — keeps secret grants/model/prompt fresh across restarts) |
 | `task_delta` | streamed reply text while a turn runs |
 | `task_result` | final reply body (or error) + any attachment records for a task |
 | `approval_req` | agent asks for human approval (tool call) |

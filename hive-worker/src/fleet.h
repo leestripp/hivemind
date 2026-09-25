@@ -50,6 +50,12 @@ struct AgentSpec {
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
     std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
     std::string secret_env;      // Phase 60: hub-rendered HIVE_SECRET_* lines
+
+    /// Whole-spec compare: a re-sent agent_spawn with an IDENTICAL spec is
+    /// a no-op (hub restart reconcile replays every spawn); a changed one
+    /// (new secret grants, model, prompt…) restarts the brain so the new
+    /// config actually takes effect (Phase 65).
+    bool operator==(const AgentSpec&) const = default;
 };
 
 // Phase 35: explicit image wins; otherwise type selects the image.
@@ -78,6 +84,8 @@ public:
     void send(const nlohmann::json& op);   // NDJSON line -> child stdin
 
     const std::string& id() const { return spec_.id; }
+    /// The spec this process was spawned with (for respawn dedup).
+    const AgentSpec& spec() const { return spec_; }
     /// down | starting | ready | acting | restarting
     std::string state() const;
 
@@ -115,6 +123,10 @@ public:
     explicit Fleet(EventFn on_event) : on_event_(std::move(on_event)) {}
 
     /// agent_spawn op from the server. Throws on error.
+    /// Re-spawn of a RUNNING agent: identical spec = no-op (the hub
+    /// replays every spawn on reconnect); changed spec = graceful restart
+    /// with the new spec so env-affecting updates (Phase 60 secret grants,
+    /// model, prompt) propagate without a worker restart.
     void spawn(const AgentSpec& spec);
     void stop(const std::string& agent_id);
     /// Roster delete: stop the brain AND destroy its container + env file

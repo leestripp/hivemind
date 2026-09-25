@@ -382,6 +382,19 @@ void HubRouter::on_worker_frame(const std::string& worker,
         handle_secret_req(worker, agent_id, frame);
         return;
     }
+    if (op == "spawn_req") {    // Phase 65: worker crash-respawned from a
+        // possibly-stale cached spec — push a fresh spawn frame (freshly
+        // rendered secret_env etc.). The worker no-ops unchanged specs.
+        if (auto a = agents_.get_agent(agent_id)) {
+            try {
+                spawn_agent(*a);
+            } catch (const std::exception& e) {
+                std::cerr << "[hub] spawn_req for " << agent_id
+                          << " failed: " << e.what() << "\n";
+            }
+        }
+        return;
+    }
     if (op == "task_result") {
         const std::string task = frame.value("task", "");
         {
