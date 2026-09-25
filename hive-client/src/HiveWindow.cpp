@@ -3387,7 +3387,16 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                         text->set_hexpand(true);
                         auto* nm = Gtk::make_managed<Gtk::Label>(r.value("name", "?"));
                         nm->set_halign(Gtk::Align::START); nm->add_css_class("heading");
-                        std::string sum = r.value("schedule_text", "");
+                        // Lead with the owning agent — tasks from
+                        // different agents were indistinguishable.
+                        std::string sum = agent_name_of(agents_,
+                                                        r.value("agent_id", ""));
+                        // agent_name_of falls back to the raw id — show a
+                        // readable label for deleted agents instead.
+                        if (sum == r.value("agent_id", ""))
+                            sum = "(former agent)";
+                        if (!r.value("schedule_text", "").empty())
+                            sum += "  ·  " + r.value("schedule_text", "");
                         sum += "  ·  next: " + r.value("next_fire_at", std::string("—"));
                         auto* sub = Gtk::make_managed<Gtk::Label>(sum);
                         sub->set_halign(Gtk::Align::START); sub->add_css_class("dim-label");
