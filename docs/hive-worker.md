@@ -157,6 +157,19 @@ hive-agent stdout events and the channel op the worker maps them to:
 | `status` {state,error} | `agent_status` |
 | anything else | `agent_log` |
 
+Failure semantics (Phase 65b): the worker tracks every `task` frame
+DELIVERED to the exec's stdin until its `message` answer arrives. If the
+exec exits with tasks still unanswered — crash or graceful stop alike —
+the worker synthesises error `message` events for them, so the hub closes
+those turns immediately instead of wedging until the watchdog grace
+(cancel unconfirmable, thread queue stranded; the 2026-09-25 PA wedge).
+Task frames still queued in `pending_` at `stop()` are failed the same
+way rather than dying silently with the process object, and frames whose
+stdin write fails (EPIPE) are requeued for the respawn flush instead of
+being dropped. Net rule: a dispatched task ALWAYS gets exactly one
+`task_result` — from the agent, or from the worker standing in for a
+dead one.
+
 ## LLM config (worker-owned)
 
 `~/.local/share/hive-worker/models.json` (catalog) + `secrets.json`
