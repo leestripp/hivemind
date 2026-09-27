@@ -100,6 +100,8 @@ const char* kCss = R"(
 .hv-prompt-frame textview { padding: 6px; }
 .error { color: @error_color; }
 .hv-unread-dot { color: @accent_color; font-weight: bold; }
+.hv-group-header { font-weight: bold; }
+.hv-group-meta { opacity: 0.65; font-size: 0.9em; }
 .hv-state-tag { font-size: 10px; padding: 1px 8px; border-radius: 8px;
                 background: alpha(@accent_color, 0.15); color: @accent_color; }
 .hv-state-ready { font-size: 10px; padding: 1px 8px; border-radius: 8px;
@@ -1575,15 +1577,17 @@ void HiveWindow::rebuild_thread_list() {
         hb->set_margin(4);
         auto* arrow = Gtk::make_managed<Gtk::Label>(collapsed ? "\u25B8" : "\u25BE");
         hb->append(*arrow);
-        auto* name = Gtk::make_managed<Gtk::Label>("<b>" + b.name + "</b>");
-        name->set_use_markup(true);
+        auto* name = Gtk::make_managed<Gtk::Label>(b.name);
+        name->add_css_class("hv-group-header");
         name->set_halign(Gtk::Align::START);
         name->set_hexpand(true);
         name->set_ellipsize(Pango::EllipsizeMode::END);
         hb->append(*name);
         std::string meta = std::to_string(b.items.size());
         if (unread_sum > 0) meta += " \u00B7 " + std::to_string(unread_sum) + " new";
-        hb->append(*Gtk::make_managed<Gtk::Label>(meta));
+        auto* meta_lbl = Gtk::make_managed<Gtk::Label>(meta);
+        meta_lbl->add_css_class("hv-group-meta");
+        hb->append(*meta_lbl);
         auto* hrow = Gtk::make_managed<Gtk::ListBoxRow>();
         hrow->set_child(*hb);
         hrow->set_activatable(false);
@@ -4136,8 +4140,8 @@ void HiveWindow::show_thread_menu(Gtk::Widget& anchor,
        [this, tid, title] { on_clear_thread(tid, title); });
     // Phase 67: Move to group (folders — one group per thread).
     {
-        auto* lbl = Gtk::make_managed<Gtk::Label>("<small>Move to group</small>");
-        lbl->set_use_markup(true);
+        auto* lbl = Gtk::make_managed<Gtk::Label>("Move to group");
+        lbl->add_css_class("hv-group-meta");
         lbl->set_halign(Gtk::Align::START);
         lbl->set_margin(4);
         box->append(*lbl);

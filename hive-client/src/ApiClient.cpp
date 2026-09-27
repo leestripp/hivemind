@@ -37,9 +37,28 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
     nlohmann::json j;
     try { j = nlohmann::json::parse(response); }
     catch (...) {
+        // The body here is usually an nginx/proxy HTML error page —
+        // never show raw markup in the UI (the status label is plain
+        // text; "<html>…" reads as garbage). Strip tags, collapse
+        // whitespace, truncate.
+        std::string clean;
+        clean.reserve(response.size());
+        bool in_tag = false, pending_space = false;
+        for (char c : response) {
+            if (c == '<') { in_tag = true; continue; }
+            if (c == '>') { in_tag = false; pending_space = true; continue; }
+            if (in_tag) continue;
+            if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
+                pending_space = true; continue;
+            }
+            if (pending_space && !clean.empty()) clean += ' ';
+            pending_space = false;
+            clean += c;
+            if (clean.size() >= 160) { clean += "…"; break; }
+        }
+        if (clean.empty()) clean = "(empty error page)";
         throw std::runtime_error("bad JSON (HTTP " +
-                                 std::to_string(http_code) + "): " +
-                                 response.substr(0, 200));
+                                 std::to_string(http_code) + "): " + clean);
     }
     if (http_code >= 400) {
         std::string msg = "HTTP " + std::to_string(http_code);
