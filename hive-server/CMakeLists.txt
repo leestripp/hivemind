@@ -17,6 +17,7 @@ set(CORE_SOURCES
     src/Settings.cpp
     src/AgentStore.cpp
     src/ThreadStore.cpp
+    src/DeliveryStore.cpp
     src/ContainerManager.cpp
     src/ExecAuditStore.cpp
     src/ApprovalStore.cpp
