@@ -14,6 +14,7 @@ except `/api/health`.
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
 | `POST /api/threads/:id/cancel` | cancel in-flight turns + mute agent fan-in on the thread (~10 min) — the right-click Stop path |
+| `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts |
 | `POST /api/threads/:id/read` | the user viewed the thread → advances ONLY the reserved `user` read mark (202). Never flips agent-addressed delivery receipts — those key off each target agent's own mark; messages addressed to the user (inbox) are the ones this mark governs. Idempotent, monotonic |
 | `POST /api/threads/:id/attachments` | user upload into the shared attachment store |
 | `GET /api/files/download?path=[&worker=]` | attachment/file download (image MIME inline — Phase 34); `worker` routes to a worker-hosted store (Phase 35 agent attachments) |
