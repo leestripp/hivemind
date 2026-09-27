@@ -14,7 +14,12 @@ except `/api/health`.
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
 | `POST /api/threads/:id/cancel` | cancel in-flight turns + mute agent fan-in on the thread (~10 min) — the right-click Stop path |
-| `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts |
+| `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts. Also `group_id`: custom thread-group id or null (= smart group derived from `kind`) |
+| `GET /api/thread-groups` | user's custom thread groups (id/name/position/member_count) |
+| `POST /api/thread-groups` | create group `{name}` → 201 `{id}` |
+| `PATCH /api/thread-groups/:id` | rename `{name}` |
+| `DELETE /api/thread-groups/:id` | delete group; members revert to their smart groups (202) |
+| `PUT /api/threads/:id/group` | move thread: `{"group_id":"…"}` into a custom group, `null`/absent back to smart. Folders — one group per thread |
 | `POST /api/threads/:id/read` | the user viewed the thread → advances ONLY the reserved `user` read mark (202). Never flips agent-addressed delivery receipts — those key off each target agent's own mark; messages addressed to the user (inbox) are the ones this mark governs. Idempotent, monotonic |
 | `POST /api/threads/:id/attachments` | user upload into the shared attachment store |
 | `GET /api/files/download?path=[&worker=]` | attachment/file download (image MIME inline — Phase 34); `worker` routes to a worker-hosted store (Phase 35 agent attachments) |

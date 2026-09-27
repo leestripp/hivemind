@@ -242,3 +242,11 @@ carries `unread` = non-user messages newer than that mark — the
 client's badge count, persisted across restarts (the old in-memory
 `last_seen_activity_` badge died on every launch; do not reintroduce
 client-side read state).
+
+Thread groups (Phase 67) are FOLDERS, not labels: a thread lives in at
+most one custom group (`thread_group_members.thread_id` PK in
+threads.db; no row = its smart group derived from `kind` — smart
+groups `smart:you`/`smart:chatter`/`smart:routines` are computed
+client-side, never stored). Deleting a group reverts members. The
+list route reads membership via ONE `thread_group_map()` query —
+never per-row in a list route.
