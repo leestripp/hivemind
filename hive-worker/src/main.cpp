@@ -461,24 +461,55 @@ int main(int argc, char* argv[]) {
                             // websockify. Best-effort — a screen
                             // failure must never fail the spawn.
                             if (!hwrunner::screen_pinned_image(aid).empty()) {
-                                try {
-                                    auto cur = hwrunner::screen_ctl(
-                                        aid, "status", spec.type, "");
-                                    if (!cur.running) {
+                                // This handler body runs on a detached
+                                // thread — a grace sleep here is safe.
+                                // First attempt races the fresh
+                                // container's desktop boot (Xvfb not
+                                // ready yet): retry once after 30s
+                                // before declaring failure. (Acid test
+                                // 2026-09-27: Forge's first restore
+                                // errored, the in-container watchdog
+                                // saved it — don't rely on that.)
+                                for (int attempt = 0; attempt < 2;
+                                     ++attempt) {
+                                    if (attempt > 0) {
+                                        std::this_thread::sleep_for(
+                                            std::chrono::seconds(30));
+                                    }
+                                    try {
+                                        auto cur = hwrunner::screen_ctl(
+                                            aid, "status", spec.type, "");
+                                        if (cur.running) {
+                                            if (attempt > 0)
+                                                std::cerr << "worker: "
+                                                    "screen auto-restored "
+                                                    "for " << aid
+                                                          << " (attempt "
+                                                          << attempt + 1
+                                                          << ")\n";
+                                            break;
+                                        }
                                         auto sr = hwrunner::screen_ctl(
                                             aid, "start", spec.type, "");
+                                        if (sr.running) {
+                                            std::cerr << "worker: screen "
+                                                "auto-restored for "
+                                                      << aid << " port="
+                                                      << sr.port << "\n";
+                                            break;
+                                        }
                                         std::cerr << "worker: screen "
-                                            "auto-restored for " << aid
-                                                  << " port=" << sr.port
-                                                  << (sr.error.empty()
-                                                      ? "" : " error=" + sr.error)
-                                                  << "\n";
+                                            "auto-restore attempt "
+                                                  << attempt + 1 << " for "
+                                                  << aid << ": "
+                                                  << sr.error << "\n";
+                                    } catch (const std::exception& se) {
+                                        std::cerr << "worker: screen "
+                                            "auto-restore " << aid
+                                                  << " FAILED: "
+                                                  << se.what() << "\n";
+                                        break;
                                     }
-                                } catch (const std::exception& se) {
-                                    std::cerr << "worker: screen "
-                                        "auto-restore " << aid
-                                              << " FAILED: " << se.what()
-                                              << "\n";
                                 }
                             }
                         } catch (const std::exception& e) {
