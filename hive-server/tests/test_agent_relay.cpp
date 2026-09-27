@@ -345,6 +345,28 @@ int main() {
     assert(!recent.empty() && recent[0].id == did);
     settle(chat);
 
+    // 12) Phase 66c: the human user's view mark is isolated from agent
+    //     delivery receipts. Simulates the user watching the pair
+    //     thread in the client (POST /api/threads/:id/read).
+    std::string did2;
+    chat.post_agent_message(chief.id, honey.id, "user is watching", &did2);
+    auto st2 = chat.delivery_status(chief.id, did2);
+    assert(st2.size() == 1 && !chat.delivery_is_read(st2[0]) &&
+           "fresh delivery unread");
+    chat.user_mark_read(pair_tid);   // the user "views" the thread
+    st2 = chat.delivery_status(chief.id, did2);
+    assert(!chat.delivery_is_read(st2[0]) &&
+           "user view must NOT flip an agent-addressed delivery receipt");
+    assert(chat.read_mark(pair_tid, "user").has_value() &&
+           "the user's own mark advanced (66c badge basis)");
+    // The agent receipt path is intact: the target's own turn flips it.
+    const auto* h12 = hub.find_last(honey.id, pair_tid);
+    assert(h12);
+    chat.complete_turn(h12->task_id, "acknowledged.", "");
+    st2 = chat.delivery_status(chief.id, did2);
+    assert(chat.delivery_is_read(st2[0]) && "agent receipt path intact");
+    settle(chat);
+
     std::cout << "agent relay: all assertions passed\n";
     return 0;
 }

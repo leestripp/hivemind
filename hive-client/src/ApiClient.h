@@ -112,6 +112,10 @@ public:
     /// Minimal percent-encoding for query parameter values.
     static std::string url_encode(const std::string& v);
 
+    /// Phase 66c: the user viewed this thread — advance the hub's
+    /// reserved "user" read mark. Best-effort: throws like request().
+    void mark_thread_read(const std::string& thread_id);
+
 private:
     nlohmann::json request(const std::string& method, const std::string& path,
                            const nlohmann::json* body = nullptr);

@@ -4,6 +4,7 @@
 #include <giomm/settings.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -77,6 +78,10 @@ private:
     void refresh_all();
     void refresh_threads();
     void poll_chat();           // messages + activity for current thread
+    /// Phase 66c: after new bubbles render, POST /read for the current
+    /// thread — advances ONLY the reserved "user" hub-side mark, never
+    /// an agent's delivery receipt. Debounced 10s per thread.
+    void maybe_post_user_read(const std::string& tid);
     void poll_approvals();
     void poll_roster();          // agents busy/state (Phase 27)
     std::string roster_sig_;   // last busy/state signature
@@ -181,6 +186,9 @@ private:
     std::unordered_set<std::string> known_workers_;
     std::string current_thread_;
     std::string last_message_id_;
+    // Phase 66c read-post debounce (main thread only).
+    std::chrono::steady_clock::time_point last_read_post_{};
+    std::string last_read_post_thread_;
     // Message IDs already rendered in the open thread. Overlapping poll_chat
     // calls (timer + post-send) both snapshot the same `after` cursor and can
     // return the same new message — without this dedupe the bubble appends

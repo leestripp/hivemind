@@ -96,6 +96,10 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
 
 nlohmann::json ApiClient::list_workers() { return request("GET", "/api/workers"); }
 
+void ApiClient::mark_thread_read(const std::string& thread_id) {
+    request("POST", "/api/threads/" + thread_id + "/read");
+}
+
 nlohmann::json ApiClient::delete_agent(const std::string& id,
                                        const std::string& reassign_to) {
     std::string path = "/api/agents/" + id;

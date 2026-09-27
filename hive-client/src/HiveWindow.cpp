@@ -1121,6 +1121,19 @@ void HiveWindow::refresh_threads() {
     });
 }
 
+void HiveWindow::maybe_post_user_read(const std::string& tid) {
+    const auto now = std::chrono::steady_clock::now();
+    if (tid == last_read_post_thread_ &&
+        now - last_read_post_ < std::chrono::seconds(10))
+        return;
+    last_read_post_ = now;
+    last_read_post_thread_ = tid;
+    // Fire-and-forget: a failed read-mark must never surface in the UI.
+    run_async([this, tid] {
+        try { api_.mark_thread_read(tid); } catch (...) {}
+    });
+}
+
 void HiveWindow::poll_chat() {
     if (current_thread_.empty()) return;
     std::string tid = current_thread_;
@@ -1133,6 +1146,7 @@ void HiveWindow::poll_chat() {
             done_queue_.push_back([this, tid, msgs, act, after] {
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
+                bool any_new = false;
                 for (auto& m : arr) {
                     // Dedupe: a concurrent poll that snapshotted the same
                     // `after` cursor returns these messages too — render
@@ -1151,7 +1165,9 @@ void HiveWindow::poll_chat() {
                         m.value("attachments", json::array()),
                         m.value("stats", json::object()));
                     last_message_id_ = m.value("id", last_message_id_);
+                    any_new = true;
                 }
+                if (any_new) maybe_post_user_read(tid);
                 // Phase 55: the initial load (empty `after`) is the
                 // bounded window — record paging state. Live polls carry
                 // no has_more key; leave the state alone there.

@@ -82,6 +82,18 @@ public:
     bool delivery_is_read(const hivemind::Delivery& d);
     /// Phase 66e: admin observability (GET /api/deliveries) — raw list,
     /// newest first, optional agent (sender OR target) and state filters.
+    /// Advance the HUMAN USER's read mark in a thread (Phase 66c).
+    /// Keyed under the reserved id "user" — a row completely separate
+    /// from every agent's, so the user viewing a thread in the client
+    /// can never flip an agent-addressed delivery's read receipt
+    /// (delivery_is_read consults only the target agent's mark).
+    /// For messages addressed TO the user (user-inbox thread), this
+    /// mark IS the "read by me" state. No-op on empty threads.
+    void user_mark_read(const std::string& thread_id);
+    /// Any principal's read mark in a thread ("user" or an agent id).
+    std::optional<std::string> read_mark(const std::string& thread_id,
+                                         const std::string& agent_id);
+
     std::vector<hivemind::Delivery> deliveries_list(
         const std::string& agent_id, const std::string& state, int limit);
 

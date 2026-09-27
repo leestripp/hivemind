@@ -138,6 +138,18 @@ bool ChatService::delivery_is_read(const hivemind::Delivery& d) {
     return *mark >= msg->created_at;
 }
 
+void ChatService::user_mark_read(const std::string& thread_id) {
+    const auto msgs = threads_.list_messages(thread_id);
+    if (msgs.empty()) return;
+    const auto& last = msgs.back();
+    deliveries_.mark_read(thread_id, "user", last.id, last.created_at);
+}
+
+std::optional<std::string> ChatService::read_mark(
+    const std::string& thread_id, const std::string& agent_id) {
+    return deliveries_.read_mark(thread_id, agent_id);
+}
+
 std::chrono::seconds ChatService::relay_ttl() {
     const char* e = std::getenv("HIVEMIND_RELAY_TTL_S");
     const int v = e ? std::atoi(e) : 900;

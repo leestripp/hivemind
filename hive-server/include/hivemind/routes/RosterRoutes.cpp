@@ -614,6 +614,24 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{{"cancelled", true}}, 202);
         });
 
+    // ── POST /api/threads/:id/read — the USER viewed the thread (66c) ───
+    // Advances ONLY the reserved "user" read mark. Agent-addressed
+    // delivery receipts key off each target agent's own mark, so the
+    // user watching an agent-to-agent thread can never flip a
+    // delivery to read; messages addressed to the user (inbox) are
+    // exactly the ones this mark governs. Idempotent + monotonic.
+    server.post("/api/threads/:id/read",
+        [&threads, &chat](const OmniNet::HTTP::Request& req,
+                          OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api threads :id read
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            if (!threads.get_thread(seg[2])) {
+                send_error(resp, 404, "thread not found"); return;
+            }
+            chat.user_mark_read(seg[2]);
+            send_json(resp, json{{"read", true}}, 202);
+        });
+
     // ── GET /api/threads/:id/messages?after=<msg_id> ──────────────────────
     server.get("/api/threads/:id/messages",
         [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
