@@ -14,13 +14,16 @@ import android.widget.TextView
 /**
  * Per-agent voice picker (long-press an agent card to open).
  *
- *   tap        → sample the voice ("Hi, I'm PA — this is my voice.")
- *   long-press → select it for that agent (Prefs; applied in sessions)
+ *   single tap → sample the voice ("Hi, I'm PA — this is my voice.")
+ *   double tap → select it for that agent (Prefs; applied in sessions)
+ *   (long-press also selects)
  *
  * Framework item listeners, NOT per-row GestureDetectors: the per-row
  * detector taps silently failed to reach the handler on the test device
  * (Moto G, Android 15) while OnItemClick delivery works everywhere —
  * and item-click gives accessibility + scroll behaviour for free.
+ * The double-tap is detected manually in the click callback (same-item
+ * re-tap inside the timeout), so no GestureDetector is involved at all.
  *
  * English embedded voices only (offline, quality 400).
  */
@@ -29,6 +32,7 @@ class VoicePickerActivity : Activity() {
     companion object {
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_AGENT_NAME = "agent_name"
+        private const val DOUBLE_TAP_MS = 400L
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -37,6 +41,9 @@ class VoicePickerActivity : Activity() {
     private lateinit var list: ListView
     private var agentId = ""
     private var agentName = ""
+    /** Manual double-tap detection on the item click listener. */
+    private var lastTapPos = -1
+    private var lastTapAt = 0L
     private var options: List<TtsEngine.VoiceOption> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,13 +68,25 @@ class VoicePickerActivity : Activity() {
         options = tts.englishVoiceOptions()
         list.adapter = VoiceAdapter()
         list.setOnItemClickListener { _, _, pos, _ ->
-            if (pos in options.indices) sample(options[pos])
+            if (pos !in options.indices) return@setOnItemClickListener
+            // Manual double-tap: a second tap on the SAME row inside the
+            // timeout SELECTS instead of sampling again. The first tap of
+            // the pair still samples — you hear the voice as you pick it.
+            val now = android.os.SystemClock.uptimeMillis()
+            if (pos == lastTapPos && now - lastTapAt <= DOUBLE_TAP_MS) {
+                lastTapPos = -1   // consumed; the next tap starts fresh
+                select(options[pos])
+            } else {
+                lastTapPos = pos
+                lastTapAt = now
+                sample(options[pos])
+            }
         }
         list.setOnItemLongClickListener { _, _, pos, _ ->
             if (pos in options.indices) select(options[pos])
             true
         }
-        status.text = "${options.size} voices — tap to sample, long-press to select"
+        status.text = "${options.size} voices — tap to sample, double-tap to select"
     }
 
     private fun select(opt: TtsEngine.VoiceOption) {
