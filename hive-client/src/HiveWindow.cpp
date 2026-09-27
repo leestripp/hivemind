@@ -1501,12 +1501,12 @@ void HiveWindow::rebuild_thread_list() {
         auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
         row_box->set_margin(6);
         row_box->append(*label);
-        // Unread dot: activity newer than last-seen and not on screen.
+        // Unread dot (Phase 66c): the hub computes it from the PERSISTED
+        // "user" read mark (deliveries.db thread_reads) — survives client
+        // restarts, unlike the old in-memory last_seen_activity_ compare
+        // that re-seeded on every launch and silently lost the badge.
         const std::string tid = t.value("id", "");
-        const std::string act = t.value("last_activity", "");
-        auto seen = last_seen_activity_.find(tid);
-        const bool unread = activity_seeded_ && !act.empty() && tid != current_thread_ &&
-            (seen == last_seen_activity_.end() || act > seen->second);
+        const bool unread = t.value("unread", 0) > 0 && tid != current_thread_;
         if (unread) {
             auto* dot = Gtk::make_managed<Gtk::Label>("\u25CF");  // ●
             dot->add_css_class("hv-unread-dot");

@@ -123,6 +123,10 @@ public:
         int limit, bool& has_more);
     std::vector<ThreadMessage> list_messages(const std::string& thread_id,
                                              const std::string& after_id = "");
+    /// Phase 66c: messages newer than an ISO mark (""→ all) NOT sent by
+    /// the human user — the unread-count basis for the user's badges.
+    int count_non_user_since(const std::string& thread_id,
+                             const std::string& since_iso);
 
 private:
     std::filesystem::path db_path_;

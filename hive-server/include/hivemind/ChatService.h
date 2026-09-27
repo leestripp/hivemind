@@ -90,6 +90,10 @@ public:
     /// For messages addressed TO the user (user-inbox thread), this
     /// mark IS the "read by me" state. No-op on empty threads.
     void user_mark_read(const std::string& thread_id);
+    /// Unread count for the human user: non-user messages newer than
+    /// the "user" read mark. No mark yet → every non-user message
+    /// counts (you genuinely haven't read them).
+    int unread_for_user(const std::string& thread_id);
     /// Any principal's read mark in a thread ("user" or an agent id).
     std::optional<std::string> read_mark(const std::string& thread_id,
                                          const std::string& agent_id);

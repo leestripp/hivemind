@@ -359,12 +359,29 @@ int main() {
            "user view must NOT flip an agent-addressed delivery receipt");
     assert(chat.read_mark(pair_tid, "user").has_value() &&
            "the user's own mark advanced (66c badge basis)");
+    // 66c unread badges: 0 right after viewing, +1 per non-user
+    // message, and the user's own messages never count.
+    assert(chat.unread_for_user(pair_tid) == 0 &&
+           "viewed thread has nothing unread");
+    chat.post_user_message(pair_tid, "my own words are never unread");
+    assert(chat.unread_for_user(pair_tid) == 0 &&
+           "user-sent messages do not count as unread");
     // The agent receipt path is intact: the target's own turn flips it.
     const auto* h12 = hub.find_last(honey.id, pair_tid);
     assert(h12);
     chat.complete_turn(h12->task_id, "acknowledged.", "");
     st2 = chat.delivery_status(chief.id, did2);
     assert(chat.delivery_is_read(st2[0]) && "agent receipt path intact");
+    // Honey's reply lands after the user's mark → exactly 1 unread.
+    assert(chat.unread_for_user(pair_tid) == 1 &&
+           "one agent reply after the mark = one unread");
+    // No mark at all → every non-user message counts (first-run
+    // truth). The user-inbox thread is never user-marked in this test.
+    const std::string inbox_tid =
+        chat.post_user_inbox_message(chief.id, "inbox probe for unread");
+    assert(!chat.read_mark(inbox_tid, "user").has_value());
+    assert(chat.unread_for_user(inbox_tid) >= 1 &&
+           "never-viewed thread counts all non-user messages");
     settle(chat);
 
     std::cout << "agent relay: all assertions passed\n";

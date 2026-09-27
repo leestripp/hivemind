@@ -532,9 +532,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
 
     // ── GET /api/threads ──────────────────────────────────────────────────
     server.get("/api/threads",
-        [&threads](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+        [&threads, &chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             json list = json::array();
-            for (auto& t : threads.list_threads()) list.push_back(thread_json(t));
+            for (auto& t : threads.list_threads()) {
+                auto j = thread_json(t);
+                j["unread"] = chat.unread_for_user(t.id);   // Phase 66c
+                list.push_back(std::move(j));
+            }
             send_json(resp, json{{"threads", list}});
         });
 

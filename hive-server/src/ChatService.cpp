@@ -145,6 +145,11 @@ void ChatService::user_mark_read(const std::string& thread_id) {
     deliveries_.mark_read(thread_id, "user", last.id, last.created_at);
 }
 
+int ChatService::unread_for_user(const std::string& thread_id) {
+    return threads_.count_non_user_since(
+        thread_id, deliveries_.read_mark(thread_id, "user").value_or(""));
+}
+
 std::optional<std::string> ChatService::read_mark(
     const std::string& thread_id, const std::string& agent_id) {
     return deliveries_.read_mark(thread_id, agent_id);
