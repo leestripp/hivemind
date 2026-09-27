@@ -183,9 +183,13 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
     return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
 }
 
-// Phase 35: build any missing image in the chain. Base + gpu build from
-// the repo ROOT (they COPY build/hive-agent/hive-agent); the browser
-// variant builds from hive-server/data (it COPYs hive-screen.sh).
+// Phase 35: build any missing image in the chain. ALL Containerfiles
+// build from the repo ROOT: every COPY source is root-prefixed
+// (build/hive-agent/hive-agent, hive-server/data/hive-screen.sh, ...).
+// (An earlier revision built :browser from hive-server/data — that broke
+// the moment the COPY lines gained their hive-server/data/ prefixes;
+// found 2026-09-28 in a docs-vs-source audit. The path never fired in
+// production because deploys pre-build the chain.)
 // :gpu FROMs :browser FROMs :latest — recurse so a bare rig self-heals.
 static void ensure_image_built(const std::string& image) {
     if (podman_simple({"image", "exists", image}, nullptr) == 0) return;
@@ -202,7 +206,7 @@ static void ensure_image_built(const std::string& image) {
     const std::string cf  = is_gpu ? "hive-server/data/Containerfile.hive-agent-gpu"
                         : is_browser ? "hive-server/data/Containerfile.hive-agent-browser"
                                      : "hive-server/data/Containerfile.hive-agent";
-    const std::string ctx = is_browser ? "hive-server/data" : ".";
+    const std::string ctx = ".";   // repo root — see header comment
     std::string img;
     if (podman_simple({"build", "-t", image,
                        "--build-arg", "HIVE_UID=" + std::to_string(geteuid()),

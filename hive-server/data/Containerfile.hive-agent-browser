@@ -8,7 +8,10 @@
 # VNC) — blocked: GRD dropped clients pre-greeting. Trail: docs/computer-use.md.
 #
 # Build:  podman build -t localhost/hive-agent:browser \
-#             -f hive-server/data/Containerfile.hive-agent-browser hive-server/data
+#             -f hive-server/data/Containerfile.hive-agent-browser .
+# Context is the REPO ROOT (.) — the COPY sources below are
+# root-prefixed (hive-server/data/hive-screen.sh ...). Building from
+# hive-server/data FAILS on those COPYs (stale header fixed 2026-09-28).
 
 FROM localhost/hive-agent:latest
 
