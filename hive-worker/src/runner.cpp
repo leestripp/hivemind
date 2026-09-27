@@ -572,6 +572,13 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
             cargs.insert(cargs.end(), {"--device", "/dev/kfd",
                                        "--device", "/dev/dri",
                                        "--group-add", "keep-groups"});
+        // Pasta hairpin fix — MUST match ensure_container: a screen-path
+        // recreate without this silently drops the apex hosts entry and
+        // searxng/hub become unreachable in-container (2026-09-27 PA
+        // searxng outage: container recreated by this path, entry lost).
+        if (self_hosted_apex())
+            cargs.insert(cargs.end(),
+                         {"--add-host", "leestrippai.com:host-gateway"});
         cargs.insert(cargs.end(), {
                            "-v", ws.string() + ":/workspace",
                            "-v", home.string() + "/:/home/hive:U",
