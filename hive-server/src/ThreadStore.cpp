@@ -417,6 +417,23 @@ bool ThreadStore::delete_thread(const std::string& id) {
     return ok;
 }
 
+std::optional<ThreadMessage> ThreadStore::get_message(const std::string& id) {
+    sqlite3* db = open_conn();
+    std::optional<ThreadMessage> out;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "SELECT id, thread_id, sender_kind, sender_id, body,"
+            " attachments_json, created_at, stats_json"
+            " FROM messages WHERE id = ?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW) out = row_to_message(st);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}
+
 std::string ThreadStore::add_message(const std::string& thread_id,
                                      const std::string& sender_kind,
                                      const std::string& sender_id,

@@ -7,6 +7,7 @@
 #include "hivemind/HubRouter.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/ApprovalStore.h"
@@ -62,7 +63,8 @@ int main() {
                                   tmp / "secrets.key"};
     HubRouter hub{agents, threads, wchannel, approvals, routines,
                   secrets};
-    ChatService chat{agents, threads, hub};
+    hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
+    ChatService chat{agents, threads, hub, deliveries};
 
     const std::string wkey = wstore.enroll("testrig");
     (void)wkey;

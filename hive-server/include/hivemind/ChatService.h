@@ -21,11 +21,14 @@ class AgentStore;
 class ThreadStore;
 class HubRouter;
 struct RosterAgent;
+namespace hivemind { class DeliveryStore; }
 
 class ChatService {
 public:
-    ChatService(AgentStore& agents, ThreadStore& threads, HubRouter& hub)
-        : agents_(agents), threads_(threads), hub_(hub) { start_watchdog(); }
+    ChatService(AgentStore& agents, ThreadStore& threads, HubRouter& hub,
+                hivemind::DeliveryStore& deliveries)
+        : agents_(agents), threads_(threads), hub_(hub),
+          deliveries_(deliveries) { start_watchdog(); }
     ~ChatService();
 
     struct LiveTurn {
@@ -118,103 +121,63 @@ public:
     int cancel_agent_turns(const std::string& agent_id);
 
 private:
+    /// Phase 66b: fan_in is enqueue + try_dispatch. Every wake is a
+    /// durable DeliveryStore row (queued -> dispatched -> done|error|
+    /// dropped) that survives hub restarts; gates (mute, circuit
+    /// breaker) are re-checked AT DISPATCH TIME and a refusal is
+    /// recorded on the row with its reason. kind: "wake" | "relay".
     void fan_in(const std::string& thread_id, const RosterAgent& agent,
                 const std::string& sender_label, const std::string& body,
-                int generation);
+                int generation, const std::string& sender_id = "",
+                const std::string& source_message_id = "",
+                const std::string& kind = "wake");
+    /// Dispatch the oldest queued delivery for an IDLE agent — ONE per
+    /// call (the dispatched turn re-busies the agent; the next row
+    /// drains on that turn's completion / agent-ready / watchdog).
+    /// Gate refusals mark the row dropped with the reason.
+    void try_dispatch(const std::string& agent_id);
 
-    // ── Origin-linked relay (2026-09-23) ─────────────────────────────
+    // ── Origin-linked relay (2026-09-23; durable since Phase 66b) ────
     // Chief asks Honey via message_agent ON THE USER'S BEHALF: Honey's
-    // reply lands in the pair thread, invisible in the user's DM with
-    // Chief, so Chief "never tells me what Honey said". Fix: when
-    // message_agent is sent DURING a live turn in a user DM thread,
-    // record a one-shot link; when the peer's substantive reply posts in
-    // the pair thread, mirror it into the user DM and wake the requester
-    // there to frame it. Agent chatter (link only from user-DM turns)
-    // never mirrors; links expire (HIVEMIND_RELAY_TTL_S, def 900).
-    struct RelayLink {
-        std::string pair_thread_id;
-        std::string requester_id;
-        std::string user_thread_id;
-        std::chrono::steady_clock::time_point created;
-        bool consumed = false;
-    };
-    std::vector<RelayLink> relay_links_;   // guarded by m_
+    // reply lands in the pair thread, invisible in the thread the user
+    // is watching. Fix: when message_agent is sent DURING a live turn,
+    // record a durable one-shot link (DeliveryStore.relay_links) from
+    // the pair thread to the requester's CURRENT turn thread — any kind
+    // (user DM, routine check-in, group; the 21:00 routine blind spot
+    // of 2026-09-26). When the peer's reply posts in the pair thread,
+    // mirror it into the home thread and wake the requester there —
+    // and the requester's ordinary pair-thread fan-in is SUPPRESSED
+    // for that reply (single wake path; kills the 09-25 duplicates).
+    // Links expire (HIVEMIND_RELAY_TTL_S, def 900) via watchdog sweep.
     void record_relay(const std::string& sender_id,
                       const std::string& pair_tid);
-    void maybe_fire_relay(const std::string& thread_id,
-                          const std::string& replier_id,
-                          const std::string& replier_name,
-                          const std::string& body, int generation);
+    /// Returns the requester id the relay fired to ("" = no relay).
+    std::string maybe_fire_relay(const std::string& thread_id,
+                                 const std::string& replier_id,
+                                 const std::string& replier_name,
+                                 const std::string& body, int generation);
     static std::chrono::seconds relay_ttl();
 
-    // ── Busy-agent relay queue (2026-09-24) ──────────────────────────
-    // The relay fired while the requester was still busy: the wake task
-    // queued agent-side, but the hub-side LiveTurn aged from DISPATCH —
-    // a requester busy past HIVEMIND_TURN_TIMEOUT_S had the queued wake
-    // force-retired by the watchdog and its result tombstoned, so the
-    // user saw the peer's mirrored reply but the requester never framed
-    // it. Fix: mirror immediately (user sees the raw reply), but hold
-    // the WAKE here while the requester has any live turn; drain when it
-    // goes idle (end of complete_turn / watchdog retirement). Same TTL
-    // as relay links.
-    struct PendingRelay {
-        std::string requester_id;
-        std::string user_thread_id;
-        std::string replier_id;
-        std::string replier_name;
-        std::string body;
-        int generation = 0;
-        std::chrono::steady_clock::time_point created;
-    };
-    std::vector<PendingRelay> relay_queue_;   // guarded by m_, FIFO
+    // ── Durable wake queue (Phase 66b) ───────────────────────────────
+    // The in-memory busy-relay queue (2026-09-24) and busy-receiver hold
+    // queue (2026-09-25) are RETIRED: both existed only because wakes
+    // were volatile. Every wake is now a DeliveryStore row — busy
+    // receivers simply stay 'queued' until try_dispatch finds the agent
+    // idle (complete_turn / on_agent_ready / watchdog hooks), hub
+    // restarts requeue orphans on boot, and wake TTL expiry is a visible
+    // 'expired' state instead of a silent drop.
     /// True while the agent has any live (not done, not cancelling)
     /// turn in any thread. Caller holds m_.
     bool agent_busy_locked(const std::string& agent_id) const;
-    /// Fire queued wakes for an idle agent (TTL-reaped first). Safe to
-    /// call without holding m_; ThreadStore/fan_in happen outside it.
-    void drain_relay_queue(const std::string& agent_id);
-
-    // ── Busy-receiver hold queue (2026-09-25) ────────────────────────
-    // Chief's relay bug report: agent→agent pair-thread wakes dispatched
-    // to a BUSY receiver queued fine agent-side (hive-agent runs tasks
-    // serially) but the hub-side LiveTurn ages from DISPATCH — a receiver
-    // busy past HIVEMIND_TURN_TIMEOUT_S had the queued wake watchdog-
-    // tombstoned before the agent ever started it, and the eventual
-    // answer was dropped silently. Same defect for user/nudge wakes.
-    // Fix: fan_in holds the wake here while the receiver has any live
-    // turn; drain_pending_wakes dispatches ONE held wake when the agent
-    // goes idle (the dispatched turn re-busies it; the next drains on
-    // that turn's completion). Hooks: end of complete_turn, watchdog
-    // retirement, agent_status "ready". Entries expire after
-    // HIVEMIND_WAKE_TTL_S (default 86400 — messages outlive relay
-    // links). Drained wakes re-enter fan_in, so mute/circuit-breaker
-    // gates are re-checked at dispatch time (a mute set while the wake
-    // was held still applies).
-    struct PendingWake {
-        std::string thread_id;
-        std::string target_id;
-        std::string sender_label;
-        std::string body;
-        int generation = 0;
-        std::chrono::steady_clock::time_point created;
-    };
-    std::unordered_map<std::string, std::deque<PendingWake>>
-        pending_wakes_;   // by target agent id, guarded by m_, FIFO
-    /// Dispatch ONE held wake when the agent is idle (TTL-reaped first).
-    /// Safe to call without holding m_; ThreadStore/fan_in happen
-    /// outside it. Loops past undeliverable heads (deleted thread/agent)
-    /// so one bad entry never blocks the queue.
-    void drain_pending_wakes(const std::string& agent_id);
-    /// Pop expired entries from the front of the agent's queue.
-    /// Caller holds m_. FIFO => front-sweep is complete.
-    void sweep_pending_wakes_locked(const std::string& agent_id);
     static int wake_ttl_s();   // env HIVEMIND_WAKE_TTL_S, def 86400
 
-    // ── agent_msg dedup (2026-09-25) ─────────────────────────────────
-    // Chief reported duplicate pair-thread deliveries (09-23): a sender
-    // whose tool result is slow retries message_agent and the identical
-    // body lands twice. Identical (sender, target, body) within
-    // HIVEMIND_MSG_DEDUP_S (default 30) is a retry — drop the repeat.
+    // ── agent_msg content dedup (2026-09-25) ─────────────────────────
+    // Double-POST protection ONLY (Phase 66b): a sender whose tool call
+    // is slow retries message_agent and the identical body would post
+    // twice. Wake-path duplication is handled by DeliveryStore
+    // idempotency (has_live_wake per target+source message). Identical
+    // (sender, target, body) within HIVEMIND_MSG_DEDUP_S (default 30)
+    // is a retry — drop the repeat.
     struct RecentMsg {
         std::string sender, target, body;
         std::chrono::steady_clock::time_point at;
@@ -225,6 +188,7 @@ private:
     AgentStore& agents_;
     ThreadStore& threads_;
     HubRouter& hub_;
+    hivemind::DeliveryStore& deliveries_;   // Phase 66b durable queue
 
     std::mutex m_;
     std::unordered_map<std::string, std::vector<std::shared_ptr<LiveTurn>>> live_;

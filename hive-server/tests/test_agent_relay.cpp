@@ -6,6 +6,7 @@
 #include "hivemind/HubRouter.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/ApprovalStore.h"
@@ -94,7 +95,8 @@ int main() {
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
     MockHub hub{agents, threads, wchannel, approvals, routines, secrets};
-    ChatService chat{agents, threads, hub};
+    hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
+    ChatService chat{agents, threads, hub, deliveries};
     hub.set_chat_service(&chat);
 
     const std::string wkey = wstore.enroll("testrig");
@@ -141,10 +143,11 @@ int main() {
 
     // 5) Chief's framing reply completes in the DM — no further fan-in
     //    (dm thread has no peers; relay is one-shot). Dispatches so far:
-    //    1=user turn, 2=Honey pair, 3=relay wake, 4=pair fan-in to Chief
-    //    (Honey's reply also continues the pair thread — normal flow).
+    //    1=user turn, 2=Honey pair, 3=relay wake. Phase 66b: the pair
+    //    fan-in to Chief is SUPPRESSED when the relay fires (single
+    //    wake path — the old dispatch #4 was the 2026-09-25 duplicate).
     chat.complete_turn("mock-task-3", "Honey says 42 units shipped.", "");
-    assert(hub.dispatches.size() == 4);
+    assert(hub.dispatches.size() == 3);
 
     // 6) One-shot: a SECOND Honey pair-turn reply must NOT mirror again.
     //    (Simulate continued pair chatter without a new user-behalf ask.)

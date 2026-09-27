@@ -9,6 +9,7 @@
 #include "hivemind/ContainerManager.h"
 #include "hivemind/ExecAuditStore.h"
 #include "hivemind/FanInPolicy.h"
+#include "hivemind/DeliveryStore.h"
 
 #include <nlohmann/json.hpp>
 
@@ -93,9 +94,14 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
         tid = t.id;
     }
 
-    threads_.add_message(tid, "agent", sender_id, body);
+    const std::string msg_id =
+        threads_.add_message(tid, "agent", sender_id, body);
     record_relay(sender_id, tid);   // user-behalf pair msgs relay back
-    fan_in(tid, *target, sender->name, body, /*generation=*/1);
+    // Read receipts (Phase 66c hook): sending implies read-to-own-message.
+    if (auto m = threads_.get_message(msg_id))
+        deliveries_.mark_read(tid, sender_id, msg_id, m->created_at);
+    fan_in(tid, *target, sender->name, body, /*generation=*/1,
+           sender_id, msg_id, "wake");
     return tid;
 }
 
@@ -140,82 +146,50 @@ void ChatService::record_relay(const std::string& sender_id,
         }
     }
     if (turn_thread.empty()) return;
-    // Lock released before ThreadStore (Phase 52 lock ordering).
-    auto thread = threads_.get_thread(turn_thread);
-    // Only user<->agent DM threads (kind "dm", exactly one agent) get a
-    // relay — pair/group-thread agent chatter must never mirror into DMs.
-    if (!thread || thread->kind != "dm" || thread->agent_ids.size() != 1)
-        return;
-    std::lock_guard<std::mutex> lk(m_);
-    // Latest request wins: drop any stale link for this pair thread.
-    std::erase_if(relay_links_, [&](const RelayLink& l) {
-        return l.pair_thread_id == pair_tid; });
-    relay_links_.push_back({pair_tid, sender_id, turn_thread,
-                            std::chrono::steady_clock::now(), false});
+    if (turn_thread == pair_tid) return;   // home must differ from the
+                                           // pair thread (a "relay" into
+                                           // the same thread would
+                                           // double-post the reply)
+    // Phase 66b: ANY thread kind is a valid relay home — the old
+    // dm-only gate is why Chief's 21:00 ROUTINE check-ins never armed a
+    // relay (2026-09-26 blind spot). Durable: the link survives a hub
+    // restart (DeliveryStore), latest arm wins per pair thread.
+    deliveries_.arm_relay(pair_tid, sender_id, turn_thread);
     std::fprintf(stderr,
-        "[chat] relay armed: pair %.8s -> user dm %.8s (requester %.8s)\n",
+        "[delivery] relay armed: pair %.8s -> home %.8s (requester %.8s)\n",
         pair_tid.c_str(), turn_thread.c_str(), sender_id.c_str());
 }
 
-void ChatService::maybe_fire_relay(const std::string& thread_id,
-                                   const std::string& replier_id,
-                                   const std::string& replier_name,
-                                   const std::string& body,
-                                   int generation) {
-    RelayLink hit;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        const auto now = std::chrono::steady_clock::now();
-        std::erase_if(relay_links_, [&](const RelayLink& l) {
-            return l.consumed || now - l.created > relay_ttl(); });
-        for (auto& l : relay_links_) {
-            if (l.pair_thread_id == thread_id && l.requester_id != replier_id) {
-                l.consumed = true;   // one-shot
-                hit = l;
-                break;
-            }
-        }
-    }
-    if (hit.pair_thread_id.empty()) return;
-    // Lock released before ThreadStore/fan_in (Phase 52 lock ordering).
+std::string ChatService::maybe_fire_relay(const std::string& thread_id,
+                                          const std::string& replier_id,
+                                          const std::string& replier_name,
+                                          const std::string& body,
+                                          int generation) {
+    // Durable one-shot (Phase 66b): consume_relay returns the link only
+    // when one is armed AND the replier is not the requester.
+    const auto hit = deliveries_.consume_relay(thread_id, replier_id);
+    if (!hit) return "";
     try {
-        if (!threads_.get_thread(hit.user_thread_id)) return;
-        auto requester = agents_.get_agent(hit.requester_id);
-        if (!requester) return;
-        // Mirror the peer's reply into the user DM (attributed to the
-        // peer — every client just sees a new message), then wake the
-        // requester there so it frames the answer for the user.
-        threads_.add_message(hit.user_thread_id, "agent", replier_id, body);
-        // 2026-09-24: never dispatch the wake to a BUSY requester — the
-        // hub-side LiveTurn ages from dispatch, so a long-running turn
-        // let the watchdog retire the queued wake before the agent ever
-        // started it (result tombstoned, relay silently lost). Hold it
-        // in relay_queue_ and drain when the requester goes idle.
-        bool queued = false;
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            if (agent_busy_locked(hit.requester_id)) {
-                relay_queue_.push_back({hit.requester_id,
-                                        hit.user_thread_id, replier_id,
-                                        replier_name, body, generation + 1,
-                                        std::chrono::steady_clock::now()});
-                queued = true;
-            }
-        }
-        if (queued) {
-            std::fprintf(stderr,
-                "[chat] relay QUEUED (requester busy): %.8s's reply -> "
-                "user dm %.8s\n",
-                replier_id.c_str(), hit.user_thread_id.c_str());
-            return;
-        }
+        if (!threads_.get_thread(hit->home_thread_id)) return "";
+        auto requester = agents_.get_agent(hit->requester_id);
+        if (!requester) return "";
+        // Mirror the peer's reply into the requester's home thread
+        // (attributed to the peer), then wake the requester there to
+        // frame it. A BUSY requester just keeps the relay wake 'queued'
+        // — the durable queue drains on idle; no hold-queue needed.
+        const std::string mirror_id = threads_.add_message(
+            hit->home_thread_id, "agent", replier_id, body);
         std::fprintf(stderr,
-            "[chat] relay fired: %.8s's reply -> user dm %.8s\n",
-            replier_id.c_str(), hit.user_thread_id.c_str());
-        fan_in(hit.user_thread_id, *requester, replier_name, body,
-               generation + 1);
+            "[delivery] relay fired: %.8s's reply -> home %.8s "
+            "(requester %.8s)\n",
+            replier_id.c_str(), hit->home_thread_id.c_str(),
+            hit->requester_id.c_str());
+        fan_in(hit->home_thread_id, *requester, replier_name, body,
+               generation + 1, replier_id, mirror_id, "relay");
+        return hit->requester_id;
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "[chat] relay ERROR: %s\n", e.what());
+        std::fprintf(stderr, "[delivery] relay ERROR: %s\n", e.what());
+        return "";
     }
 }
 
@@ -227,109 +201,9 @@ bool ChatService::agent_busy_locked(const std::string& agent_id) const {
     return false;
 }
 
-void ChatService::drain_relay_queue(const std::string& agent_id) {
-    if (stopping_) return;
-    std::vector<PendingRelay> fire;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        const auto now = std::chrono::steady_clock::now();
-        std::erase_if(relay_queue_, [&](const PendingRelay& p) {
-            if (now - p.created <= relay_ttl()) return false;
-            std::fprintf(stderr,
-                "[chat] relay queue: expired wake for %.8s dropped\n",
-                p.requester_id.c_str());
-            return true;
-        });
-        if (agent_busy_locked(agent_id)) return;
-        std::vector<PendingRelay> keep;
-        for (auto& p : relay_queue_) {
-            if (p.requester_id == agent_id) fire.push_back(std::move(p));
-            else keep.push_back(std::move(p));
-        }
-        relay_queue_.swap(keep);
-    }
-    // Lock released before ThreadStore/fan_in (Phase 52 lock ordering).
-    for (const auto& p : fire) {
-        try {
-            if (!threads_.get_thread(p.user_thread_id)) continue;
-            auto requester = agents_.get_agent(p.requester_id);
-            if (!requester) continue;
-            std::fprintf(stderr,
-                "[chat] relay drained: %.8s's reply -> user dm %.8s "
-                "(requester idle)\n",
-                p.replier_id.c_str(), p.user_thread_id.c_str());
-            fan_in(p.user_thread_id, *requester, p.replier_name, p.body,
-                   p.generation);
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "[chat] relay drain ERROR: %s\n", e.what());
-        }
-    }
-}
-
-void ChatService::sweep_pending_wakes_locked(const std::string& agent_id) {
-    auto it = pending_wakes_.find(agent_id);
-    if (it == pending_wakes_.end()) return;
-    const auto now = std::chrono::steady_clock::now();
-    const auto ttl = std::chrono::seconds(wake_ttl_s());
-    auto& q = it->second;
-    while (!q.empty() && now - q.front().created > ttl) {
-        std::fprintf(stderr,
-            "[chat] held wake EXPIRED: -> %.8s thread %.8s (ttl %ds)\n",
-            agent_id.c_str(), q.front().thread_id.c_str(), wake_ttl_s());
-        q.pop_front();
-    }
-    if (q.empty()) pending_wakes_.erase(it);
-}
-
-void ChatService::drain_pending_wakes(const std::string& agent_id) {
-    if (stopping_) return;
-    for (;;) {
-        PendingWake w;
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            sweep_pending_wakes_locked(agent_id);
-            auto it = pending_wakes_.find(agent_id);
-            if (it == pending_wakes_.end()) return;
-            if (agent_busy_locked(agent_id)) return;
-            w = it->second.front();
-            it->second.pop_front();
-            if (it->second.empty()) pending_wakes_.erase(it);
-        }
-        // Lock released before ThreadStore/fan_in (Phase 52 ordering).
-        // Undeliverable heads (deleted thread/agent) are dropped and the
-        // loop continues so they never block the queue.
-        try {
-            if (!threads_.get_thread(w.thread_id)) {
-                std::fprintf(stderr,
-                    "[chat] held wake dropped: thread %.8s gone\n",
-                    w.thread_id.c_str());
-                continue;
-            }
-            auto agent = agents_.get_agent(w.target_id);
-            if (!agent) {
-                std::fprintf(stderr,
-                    "[chat] held wake dropped: agent %.8s gone\n",
-                    w.target_id.c_str());
-                continue;
-            }
-            std::fprintf(stderr,
-                "[chat] wake drained: -> %.8s thread %.8s (receiver idle)\n",
-                w.target_id.c_str(), w.thread_id.c_str());
-            // ONE wake per drain: this fan_in re-busies the agent, so
-            // the loop's next iteration returns on the busy check; the
-            // following entry drains on this turn's completion.
-            fan_in(w.thread_id, *agent, w.sender_label, w.body,
-                   w.generation);
-            return;
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "[chat] wake drain ERROR: %s\n", e.what());
-            return;
-        }
-    }
-}
-
 void ChatService::on_agent_ready(const std::string& agent_id) {
-    drain_pending_wakes(agent_id);
+    // Agent reported "ready" (spawn/reconnect): drain its durable queue.
+    try_dispatch(agent_id);
 }
 
 std::string ChatService::post_user_inbox_message(const std::string& sender_id,
@@ -340,7 +214,12 @@ std::string ChatService::post_user_inbox_message(const std::string& sender_id,
     if (!sender)
         throw std::invalid_argument("unknown sender agent");
     threads_.ensure_user_thread();
-    threads_.add_message(kUserThreadId, "agent", sender_id, body);
+    const std::string msg_id =
+        threads_.add_message(kUserThreadId, "agent", sender_id, body);
+    // Read receipts: sending implies read-to-own-message.
+    if (auto m = threads_.get_message(msg_id))
+        deliveries_.mark_read(kUserThreadId, sender_id, msg_id,
+                              m->created_at);
     return kUserThreadId;
 }
 
@@ -348,101 +227,160 @@ void ChatService::fan_in(const std::string& thread_id,
                          const RosterAgent& agent,
                          const std::string& sender_label,
                          const std::string& body,
-                         int generation) {
+                         int generation,
+                         const std::string& sender_id,
+                         const std::string& source_message_id,
+                         const std::string& kind) {
     if (stopping_) return;
 
-    // Phase 65a/65b: agent-triggered fan-in (generation > 0) respects
-    // mutes and the circuit breaker. Generation-0 (user/nudge) fan-in is
-    // never gated — post_user_message already lifted both.
-    if (generation > 0) {
-        bool just_tripped = false;
-        bool allowed = true;
+    // Idempotency (Phase 66b): a queued/dispatched wake for the same
+    // (target, source message) suppresses the duplicate — replaces the
+    // content-window dedup on the wake path.
+    if (deliveries_.has_live_wake(agent.id, source_message_id)) {
+        std::fprintf(stderr,
+            "[delivery] wake suppressed (dup): -> %.8s msg %.8s\n",
+            agent.id.c_str(), source_message_id.c_str());
+        return;
+    }
+
+    hivemind::Delivery d;
+    d.kind              = kind;
+    d.thread_id         = thread_id;
+    d.target_agent_id   = agent.id;
+    d.sender_agent_id   = sender_id;
+    d.sender_label      = sender_label;
+    d.body              = body;
+    d.generation        = generation;
+    d.source_message_id = source_message_id;
+    const std::string id = deliveries_.enqueue(std::move(d));
+    std::fprintf(stderr,
+        "[delivery] queued %.8s (%s): -> %.8s thread %.8s gen %d\n",
+        id.c_str(), kind.c_str(), agent.id.c_str(), thread_id.c_str(),
+        generation);
+    try_dispatch(agent.id);
+}
+
+void ChatService::try_dispatch(const std::string& agent_id) {
+    if (stopping_) return;
+    for (;;) {
         {
             std::lock_guard<std::mutex> lk(m_);
-            if (is_muted_locked(thread_id, agent.id)) {
-                std::fprintf(stderr,
-                    "[chat] fan-in dropped (muted): thread %.8s agent %.8s\n",
-                    thread_id.c_str(), agent.id.c_str());
-                return;
-            }
-            allowed = circuit_allow_locked(thread_id, &just_tripped);
+            if (agent_busy_locked(agent_id)) return;
         }
-        // Lock released before posting (Phase 52 lock ordering:
-        // m_ never held across ThreadStore calls).
-        if (!allowed) {
-            if (just_tripped) {
-                try {
-                    threads_.add_message(thread_id, "system", "hivemind",
-                        "*(circuit breaker tripped — too many agent turns "
-                        "in this thread; agent fan-in paused. Send a "
-                        "message to resume.)*");
-                } catch (...) {}
-            }
-            return;
-        }
-    }
-
-    // Busy-receiver hold queue (2026-09-25): hive-agent runs tasks
-    // serially, so a wake dispatched while the agent is mid-turn only
-    // queues agent-side — but the hub-side LiveTurn ages from DISPATCH
-    // and the watchdog tombstones the queued wake if the current turn
-    // outlives the timeout, silently dropping the eventual answer.
-    // Hold the wake instead; drain_pending_wakes dispatches it when the
-    // agent goes idle. Applies to ALL generations — user/nudge wakes
-    // queued behind a long turn hit the same tombstone.
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        if (agent_busy_locked(agent.id)) {
-            sweep_pending_wakes_locked(agent.id);
-            auto& q = pending_wakes_[agent.id];
-            q.push_back({thread_id, agent.id, sender_label, body,
-                         generation, std::chrono::steady_clock::now()});
+        // Lock released before stores (Phase 52 ordering).
+        const auto d = deliveries_.oldest_queued(agent_id);
+        if (!d) return;
+        auto agent = agents_.get_agent(agent_id);
+        if (!agent) {
+            deliveries_.mark_dropped(d->id, "agent deleted");
             std::fprintf(stderr,
-                "[chat] wake HELD (receiver busy): -> %.8s thread %.8s "
-                "(%zu queued)\n",
-                agent.id.c_str(), thread_id.c_str(), q.size());
-            return;
+                "[delivery] dropped %.8s: agent %.8s gone\n",
+                d->id.c_str(), agent_id.c_str());
+            continue;
         }
-    }
+        if (!threads_.get_thread(d->thread_id)) {
+            deliveries_.mark_dropped(d->id, "thread deleted");
+            std::fprintf(stderr,
+                "[delivery] dropped %.8s: thread %.8s gone\n",
+                d->id.c_str(), d->thread_id.c_str());
+            continue;
+        }
 
-    // The agent's hive-brain conversation (persisted on the worker's
-    // /workspace volume) IS the context - each task carries ONLY the new
-    // message. DO NOT add a thread-history backlog here (v1 lesson).
-    std::string prompt = "[" + sender_label + "] " + body;
+        // Phase 65a/65b gates, checked AT DISPATCH TIME (a mute set
+        // while the wake was queued still applies). Generation-0
+        // (user/nudge) wakes are never gated. A refusal is RECORDED on
+        // the row — no more silent gates.
+        if (d->generation > 0) {
+            bool muted = false, allowed = true, just_tripped = false;
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                muted = is_muted_locked(d->thread_id, agent_id);
+                if (!muted)
+                    allowed = circuit_allow_locked(d->thread_id,
+                                                   &just_tripped);
+            }
+            if (muted) {
+                deliveries_.mark_dropped(d->id, "muted");
+                std::fprintf(stderr,
+                    "[delivery] dropped %.8s (muted): -> %.8s thread %.8s\n",
+                    d->id.c_str(), agent_id.c_str(), d->thread_id.c_str());
+                continue;
+            }
+            if (!allowed) {
+                deliveries_.mark_dropped(d->id, "circuit breaker");
+                std::fprintf(stderr,
+                    "[delivery] dropped %.8s (circuit breaker): -> %.8s "
+                    "thread %.8s\n",
+                    d->id.c_str(), agent_id.c_str(), d->thread_id.c_str());
+                if (just_tripped) {
+                    try {
+                        threads_.add_message(d->thread_id, "system",
+                            "hivemind",
+                            "*(circuit breaker tripped — too many agent "
+                            "turns in this thread; agent fan-in paused. "
+                            "Send a message to resume.)*");
+                    } catch (...) {}
+                }
+                continue;
+            }
+        }
 
-    auto live = std::make_shared<LiveTurn>();
-    live->thread_id  = thread_id;
-    live->agent_id   = agent.id;
-    live->agent_name = agent.name;
-    live->worker     = agent.worker;
-    live->generation = generation;
+        // The agent's hive-brain conversation (persisted on the worker's
+        // /workspace volume) IS the context - each task carries ONLY the
+        // new message. DO NOT add a thread-history backlog (v1 lesson).
+        const std::string prompt = "[" + d->sender_label + "] " + d->body;
 
-    const std::string task_id = hub_.dispatch(agent, thread_id, prompt);
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        auto& vec = live_[thread_id];
-        vec.erase(std::remove_if(vec.begin(), vec.end(),
-                                 [](const auto& t) { return t->done; }),
-                  vec.end());
-        if (vec.size() >= kMaxLivePerThread)
-            vec.erase(vec.begin());
-        vec.push_back(live);
+        auto live = std::make_shared<LiveTurn>();
+        live->thread_id  = d->thread_id;
+        live->agent_id   = agent->id;
+        live->agent_name = agent->name;
+        live->worker     = agent->worker;
+        live->generation = d->generation;
+
+        const std::string task_id =
+            hub_.dispatch(*agent, d->thread_id, prompt);
         if (task_id.empty()) {
-            live->error = "worker offline";
-            live->done = true;
-            // Visibility: without this the user message sits at
-            // "processing" forever with no explanation (hit 2026-09-07
-            // when a dispatch raced the worker's hub reconnect).
+            // Worker offline: leave the row QUEUED (durable — it drains
+            // when the worker reconnects and the agent reports ready).
+            // Visibility system message, same as the old inline path.
+            std::fprintf(stderr,
+                "[delivery] dispatch deferred %.8s: worker offline "
+                "(-> %.8s)\n", d->id.c_str(), agent_id.c_str());
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                auto& vec = live_[d->thread_id];
+                live->error = "worker offline";
+                live->done = true;
+                vec.push_back(live);
+            }
             try {
-                threads_.add_message(thread_id, "system", "hivemind",
-                    "*(dispatch to agent " + agent.name +
-                    " failed — worker offline or no LLM config; "
-                    "resend the message to retry)*");
+                threads_.add_message(d->thread_id, "system", "hivemind",
+                    "*(dispatch to agent " + agent->name +
+                    " deferred — worker offline or no LLM config; the "
+                    "message is queued and will be delivered when the "
+                    "worker is back)*");
             } catch (...) {}
-        } else {
+            return;   // everything for this agent will fail the same way
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            auto& vec = live_[d->thread_id];
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                                     [](const auto& t) { return t->done; }),
+                      vec.end());
+            if (vec.size() >= kMaxLivePerThread)
+                vec.erase(vec.begin());
             live->task_id = task_id;
+            vec.push_back(live);
             by_task_[task_id] = live;
         }
+        deliveries_.mark_dispatched(d->id, task_id);
+        std::fprintf(stderr,
+            "[delivery] dispatched %.8s -> %.8s thread %.8s (task %.12s)\n",
+            d->id.c_str(), agent_id.c_str(), d->thread_id.c_str(),
+            task_id.c_str());
+        return;   // ONE wake per idle transition
     }
 }
 
@@ -471,7 +409,8 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;
-        fan_in(thread_id, *agent, "You", prompt_body, /*generation=*/0);
+        fan_in(thread_id, *agent, "You", prompt_body, /*generation=*/0,
+               "", msg_id, "wake");
     }
     return msg_id;
 }
@@ -490,7 +429,8 @@ std::string ChatService::post_nudge(const std::string& thread_id,
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;
-        fan_in(thread_id, *agent, "HiveMind", body, /*generation=*/0);
+        fan_in(thread_id, *agent, "HiveMind", body, /*generation=*/0,
+               "", msg_id, "wake");
     }
     return msg_id;
 }
@@ -586,12 +526,15 @@ void ChatService::complete_turn(const std::string& task_id,
     const bool has_atts = !attachments_json.empty() &&
                           attachments_json != "[]";
     if (out.empty() && has_atts) out = "*(attached a file)*";
+    std::string last_reply_id;   // for fan-in source tagging (Phase 66b)
     if ((!out.empty() && out != "(agent produced no output)") || has_atts) {
         bool posted = false;
         for (int attempt = 0; attempt < 2 && !posted; ++attempt) {
             try {
-                threads_.add_message(thread_id, "agent", agent_id, out,
-                                     attachments_json, stats_json);
+                last_reply_id = threads_.add_message(thread_id, "agent",
+                                                     agent_id, out,
+                                                     attachments_json,
+                                                     stats_json);
                 posted = true;
             } catch (const std::exception& e) {
                 std::fprintf(stderr,
@@ -609,8 +552,17 @@ void ChatService::complete_turn(const std::string& task_id,
             // the answer never reached the user's DM. An ack-looking peer
             // reply IS the answer the user is waiting for; ack-only must
             // gate ONLY the fan-in continuation below (65c).
-            maybe_fire_relay(thread_id, agent_id, agent_name, out,
-                             generation);
+            // Read receipts: posting implies read-to-own-message.
+            if (auto m = threads_.get_message(last_reply_id))
+                deliveries_.mark_read(thread_id, agent_id, last_reply_id,
+                                      m->created_at);
+            // Single wake path (Phase 66b): when a relay fires for
+            // this reply, the requester's pair-thread fan-in below is
+            // suppressed — the relay wake in the home thread is the
+            // ONLY wake (kills the 2026-09-25 duplicate deliveries).
+            const std::string relayed_to =
+                maybe_fire_relay(thread_id, agent_id, agent_name, out,
+                                 generation);
             if (generation < kMaxFanInGenerations &&
                 !hivemind::fanin_is_ack_only(out)) {   // 65c: acks post
                                                        // but never fan
@@ -635,20 +587,24 @@ void ChatService::complete_turn(const std::string& task_id,
                         for (const auto& pid :
                                  hivemind::fanin_mentioned_ids(out,
                                                                candidates)) {
+                            if (pid == relayed_to) continue;
                             auto peer = agents_.get_agent(pid);
                             if (peer)
                                 fan_in(thread_id, *peer, agent_name, out,
-                                       generation + 1);
+                                       generation + 1, agent_id,
+                                       last_reply_id, "wake");
                         }
                     } else {
                         // 2-agent threads: broadcast is self-damping
                         // (branching factor 1) — keep it.
                         for (const auto& peer_id : thread->agent_ids) {
                             if (peer_id == agent_id) continue;
+                            if (peer_id == relayed_to) continue;
                             auto peer = agents_.get_agent(peer_id);
                             if (peer)
                                 fan_in(thread_id, *peer, agent_name, out,
-                                       generation + 1);
+                                       generation + 1, agent_id,
+                                       last_reply_id, "wake");
                         }
                     }
                 }
@@ -657,12 +613,18 @@ void ChatService::complete_turn(const std::string& task_id,
         }
     }
     live->done = true;
-    // 2026-09-24: this agent may have just gone idle — fire any relay
-    // wakes held while it was busy. No-op when the fan-in continuation
-    // above re-dispatched to the same agent (still busy).
-    drain_relay_queue(agent_id);
-    // 2026-09-25: same for held message wakes (busy-receiver queue).
-    drain_pending_wakes(agent_id);
+    // Phase 66b: close out the delivery row that drove this turn (if
+    // any) and advance the agent's read mark to the wake's source
+    // message — the agent demonstrably consumed it (it WAS the prompt).
+    if (auto d = deliveries_.find_by_task(task_id)) {
+        deliveries_.mark_done(d->id);
+        if (!d->source_message_id.empty())
+            if (auto m = threads_.get_message(d->source_message_id))
+                deliveries_.mark_read(thread_id, agent_id,
+                                      d->source_message_id, m->created_at);
+    }
+    // Agent idle: dispatch the next queued wake, if any (durable queue).
+    try_dispatch(agent_id);
 }
 
 // -- polling / control ---------------------------------------------------
@@ -807,11 +769,24 @@ void ChatService::watchdog_loop() {
                     if (t->task_id == v.task_id) t->done = true;
             by_task_.erase(v.task_id);
         }
-        // 2026-09-24: a force-retired turn may have been the only thing
-        // keeping the agent busy — release its queued relay wakes.
-        for (const auto& v : victims) drain_relay_queue(v.agent_id);
-        // 2026-09-25: same for held message wakes.
-        for (const auto& v : victims) drain_pending_wakes(v.agent_id);
+        // Phase 66b: a force-retired turn FAILS its delivery row —
+        // visible in message_status, not tombstoned-silent — and the
+        // freed agent drains its next queued wake.
+        for (const auto& v : victims) {
+            if (auto d = deliveries_.find_by_task(v.task_id))
+                deliveries_.mark_error(d->id,
+                    v.was_cancelling ? "cancel unconfirmed (watchdog)"
+                                     : "turn timeout (watchdog)");
+            try_dispatch(v.agent_id);
+        }
+        // TTL sweeps: old queued wakes and relay links become visible
+        // terminal states instead of silently vanishing.
+        const int expired = deliveries_.expire_queued(wake_ttl_s());
+        if (expired > 0)
+            std::fprintf(stderr,
+                "[delivery] %d queued wake(s) expired (ttl %ds)\n",
+                expired, wake_ttl_s());
+        deliveries_.expire_relays(static_cast<int>(relay_ttl().count()));
     }
 }
 
@@ -834,6 +809,7 @@ void ChatService::flush_partial(LiveTurn& t) {
 int ChatService::cancel_agent_turns(const std::string& agent_id) {
     std::vector<std::pair<RosterAgent, std::string>> to_cancel;
     std::vector<std::shared_ptr<LiveTurn>> to_flush;
+    std::vector<std::string> cancelled_ids;
     int count = 0;
     {
         std::lock_guard<std::mutex> lk(m_);
@@ -843,7 +819,10 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
                     continue;
                 t->cancelling = true;
                 t->cancel_started = std::chrono::steady_clock::now();
-                if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
+                if (!t->task_id.empty()) {
+                    cancelled_tasks_.insert(t->task_id);
+                    cancelled_ids.push_back(t->task_id);
+                }
                 auto agent = agents_.get_agent(t->agent_id);
                 if (agent) to_cancel.emplace_back(*agent, thread_id);
                 to_flush.push_back(t);   // Phase 52: keep the commentary
@@ -857,6 +836,10 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
         std::lock_guard<std::mutex> lk(m_);
         mute_agent_locked(agent_id);
     }
+    // Phase 66b: cancelled turns' delivery rows become visibly dropped.
+    for (const auto& id : cancelled_ids)
+        if (auto d = deliveries_.find_by_task(id))
+            deliveries_.mark_dropped(d->id, "cancelled");
     // Same ordering as cancel_thread: cancels out of the lock, then
     // flush so the interrupt note lands after any in-flight text.
     for (const auto& [a, tid] : to_cancel) hub_.cancel_agent(a, tid);
@@ -867,6 +850,7 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
 void ChatService::cancel_thread(const std::string& thread_id) {
     std::vector<RosterAgent> to_cancel;
     std::vector<std::shared_ptr<LiveTurn>> to_flush;
+    std::vector<std::string> cancelled_ids;
     {
         std::lock_guard<std::mutex> lk(m_);
         auto it = live_.find(thread_id);
@@ -875,7 +859,10 @@ void ChatService::cancel_thread(const std::string& thread_id) {
             if (t->done || t->cancelling) continue;
             t->cancelling = true;
             t->cancel_started = std::chrono::steady_clock::now();
-            if (!t->task_id.empty()) cancelled_tasks_.insert(t->task_id);
+            if (!t->task_id.empty()) {
+                cancelled_tasks_.insert(t->task_id);
+                cancelled_ids.push_back(t->task_id);
+            }
             auto agent = agents_.get_agent(t->agent_id);
             if (agent) to_cancel.push_back(*agent);
             to_flush.push_back(t);   // Phase 52: keep the commentary
@@ -886,6 +873,10 @@ void ChatService::cancel_thread(const std::string& thread_id) {
         std::lock_guard<std::mutex> lk(m_);
         mute_thread_locked(thread_id);
     }
+    // Phase 66b: cancelled turns' delivery rows become visibly dropped.
+    for (const auto& id : cancelled_ids)
+        if (auto d = deliveries_.find_by_task(id))
+            deliveries_.mark_dropped(d->id, "cancelled");
     for (const auto& a : to_cancel) hub_.cancel_agent(a, thread_id);
     // Phase 52: flush AFTER the lock (ThreadStore lock ordering) and
     // after cancel_agent so the interrupt note lands after any in-flight

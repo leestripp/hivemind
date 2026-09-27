@@ -94,6 +94,9 @@ public:
     /// and fresh messages exclude the thread (proactive nudges).
     std::vector<Thread> threads_awaiting_agent(const std::string& older_than_iso);
 
+    /// Fetch one message by id (read-receipt HWM bookkeeping, Phase 66).
+    std::optional<ThreadMessage> get_message(const std::string& id);
+
     /// Append a message; returns its id.
     std::string add_message(const std::string& thread_id,
                             const std::string& sender_kind,

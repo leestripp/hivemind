@@ -230,6 +230,20 @@ void DeliveryStore::mark_dispatched(const std::string& id,
     step_done(db.db, st, "mark_dispatched");
 }
 
+std::optional<Delivery>
+DeliveryStore::find_by_task(const std::string& task_id) {
+    if (task_id.empty()) return std::nullopt;
+    DbGuard db{open_db(db_path_)};
+    StmtGuard st;
+    prepare(db.db, st,
+        ("SELECT " + std::string(kCols) +
+         " FROM deliveries WHERE task_id = ?"
+         " ORDER BY rowid DESC LIMIT 1").c_str(), "find_by_task");
+    bind_text(st, 1, task_id);
+    if (sqlite3_step(st) != SQLITE_ROW) return std::nullopt;
+    return row_to_delivery(st);
+}
+
 void DeliveryStore::mark_done(const std::string& id) {
     DbGuard db{open_db(db_path_)};
     StmtGuard st;
@@ -265,6 +279,19 @@ void DeliveryStore::mark_dropped(const std::string& id,
     bind_text(st, 2, iso_now());
     bind_text(st, 3, id);
     step_done(db.db, st, "mark_dropped");
+}
+
+int DeliveryStore::expire_queued(int ttl_s) {
+    DbGuard db{open_db(db_path_)};
+    StmtGuard st;
+    prepare(db.db, st,
+        "UPDATE deliveries SET state='expired', error='wake ttl',"
+        " completed_at=? WHERE state='queued' AND created_at < ?",
+        "expire_queued");
+    bind_text(st, 1, iso_now());
+    bind_text(st, 2, hivemind::db::iso_ago(ttl_s));
+    step_done(db.db, st, "expire_queued");
+    return sqlite3_changes(db.db);
 }
 
 int DeliveryStore::requeue_orphans() {

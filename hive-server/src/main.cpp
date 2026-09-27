@@ -52,6 +52,7 @@
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/ChatService.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
 #include "hivemind/ApprovalStore.h"
 
@@ -157,7 +158,19 @@ int main(int argc, char* argv[]) {
     HubRouter hub{agent_store, thread_store, worker_channel, approval_store,
                   routine_store, secret_store};
     hub.set_llm_store(&llm_store);
-    ChatService chat_service{agent_store, thread_store, hub};
+    // Phase 66b: durable delivery queue. Boot recovery — wakes left
+    // 'dispatched' by the previous process go back to 'queued' and drain
+    // as agents report ready; terminal rows prune after 7 days.
+    hivemind::DeliveryStore delivery_store;
+    {
+        const int requeued = delivery_store.requeue_orphans();
+        if (requeued > 0)
+            std::fprintf(stderr,
+                "[delivery] boot: %d orphaned wake(s) requeued\n", requeued);
+        delivery_store.prune_terminal_older_than(7);
+    }
+    ChatService chat_service{agent_store, thread_store, hub,
+                             delivery_store};
     hub.set_chat_service(&chat_service);
     worker_channel.on_frame =
         [&hub](const std::string& w, const nlohmann::json& f) {

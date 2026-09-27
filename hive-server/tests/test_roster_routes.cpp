@@ -4,6 +4,7 @@
 // fast in the background — queue semantics are what's under test).
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/ChatService.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
@@ -60,7 +61,8 @@ int main() {
                                   tmp / "secrets.key"};
     HubRouter hub{agents, threads, wchannel, approvals, routines,
                   secrets};
-    ChatService chat{agents, threads, hub};
+    hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
+    ChatService chat{agents, threads, hub, deliveries};
 
     OmniNet::HTTP::Server::Config cfg;
     cfg.port = 0;                       // ephemeral

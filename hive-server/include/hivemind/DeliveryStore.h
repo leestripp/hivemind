@@ -70,12 +70,17 @@ public:
     bool has_live_wake(const std::string& target_agent_id,
                        const std::string& source_message_id);
     void mark_dispatched(const std::string& id, const std::string& task_id);
+    /// Reverse lookup by dispatched task id (turn completion paths).
+    std::optional<Delivery> find_by_task(const std::string& task_id);
     void mark_done(const std::string& id);
     void mark_error(const std::string& id, const std::string& error);
     void mark_dropped(const std::string& id, const std::string& reason);
     /// Boot recovery: rows left 'dispatched' by a dead process go back to
     /// 'queued'. Returns the number requeued.
     int  requeue_orphans();
+    /// Wake TTL: queued rows older than ttl_s become 'expired'
+    /// (the message stays in the thread; only the wake dies). Count out.
+    int  expire_queued(int ttl_s);
     /// Status surface: filter by agent (sender OR target) and/or state,
     /// newest first. Empty filter = match all.
     std::vector<Delivery> list(const std::string& agent_id = "",
