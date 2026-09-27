@@ -123,6 +123,12 @@ ChatService::delivery_status(const std::string& agent_id,
     return deliveries_.sent_by(agent_id, 10);
 }
 
+std::vector<hivemind::Delivery>
+ChatService::deliveries_list(const std::string& agent_id,
+                             const std::string& state, int limit) {
+    return deliveries_.list(agent_id, state, limit);
+}
+
 bool ChatService::delivery_is_read(const hivemind::Delivery& d) {
     if (d.source_message_id.empty()) return false;
     const auto mark = deliveries_.read_mark(d.thread_id, d.target_agent_id);

@@ -213,3 +213,15 @@ Key architectural mapping:
 9. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
    ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
    keys (see `HiveWindow::follow_system_theme`).
+
+## Messaging (Phase 66)
+
+Agent-to-agent messaging is a DURABLE queue (`deliveries.db`,
+DeliveryStore): wakes survive hub restarts, gate refusals are recorded
+(`dropped` + reason), and duplicates are suppressed by (target, source
+message) idempotency. `message_agent` returns a `delivery_id`;
+`message_status` reports `queued`/`dispatched`/`done`/`error`/`dropped`/
+`expired` plus read receipts. Diagnose message loss with
+`GET /api/deliveries?agent=&state=` before touching code. When changing
+fan-in/relay logic, run test_agent_relay + test_delivery_store — the
+single wake path (relay suppresses pair fan-in) is load-bearing.

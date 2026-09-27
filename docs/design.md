@@ -102,6 +102,37 @@ keepAliveTimeout=0, per-connection writer queues) are in
    `/workspace/attachments/<thread>/outgoing/`) are swept up by the
    worker at turn end and arrive as attachment records on `task_result`
    (the hub injects the worker name so clients can route downloads).
+## Durable agent messaging (Phase 66)
+
+Messages persist in ThreadStore; the **delivery intents** (wakes that tell
+an agent a message exists) are durable rows in `deliveries.db`
+(DeliveryStore). Every wake/relay moves through
+`queued → dispatched → done | error | dropped | expired`:
+
+- **Busy receivers stay `queued`** — the hub dispatches one wake per idle
+  transition (turn completion / agent-ready / watchdog), so a wake can
+  never be tombstoned by the turn watchdog while queued agent-side.
+- **Hub restarts requeue orphans** (`dispatched → queued` on boot) and
+  draining resumes as agents report ready. Terminal rows prune after 7d.
+- **Idempotency** per (target, source message) replaces content-window
+  dedup on the wake path; content dedup remains only as double-POST
+  protection for the message row itself.
+- **Gates are checked at dispatch time and recorded** — a mute or a
+  circuit-breaker trip marks the row `dropped` with the reason instead
+  of vanishing silently.
+- **Relays are durable and arm from any thread kind** (user DM, routine
+  check-in, group); a fired relay suppresses the requester's pair-thread
+  fan-in (single wake path — no more duplicate deliveries).
+- **Read receipts**: per-(thread, agent) high-water marks; advanced when
+  a wake completes (the message was the agent's prompt) and on own posts.
+
+Agent-facing protocol (hub↔worker↔agent):
+`message_agent` is a confirmed `msg_send_req`/`msg_send_resp` round-trip
+returning the `delivery_id`; the `message_status` tool
+(`msg_status_req`/`msg_status_resp`) lists an agent's recent sends or one
+delivery, with live state and read receipts. Admin observability:
+`GET /api/deliveries?agent=&state=&limit=`.
+
 6. Worker relays events up the channel; hub stores the reply as a
    message; the client's poll picks it up and renders (images download
    through the hub's file endpoint).

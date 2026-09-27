@@ -9,6 +9,7 @@ except `/api/health`.
 | Endpoint | Notes |
 |----------|-------|
 | `GET /api/threads` / `POST /api/threads` | list / create (agent_ids + title) |
+| `GET /api/deliveries?agent=&state=&limit=` | durable delivery queue (Phase 66): every agent wake/relay with state (`queued`/`dispatched`/`done`/`error`/`dropped`/`expired`), `read` receipt, timestamps and error text — the message-loss diagnosis surface |
 | `GET /api/threads/:id/messages?after=` | incremental poll |
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |

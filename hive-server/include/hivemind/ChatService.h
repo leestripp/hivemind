@@ -80,6 +80,10 @@ public:
     /// True when the target's read high-water mark covers this
     /// delivery's source message (read receipt).
     bool delivery_is_read(const hivemind::Delivery& d);
+    /// Phase 66e: admin observability (GET /api/deliveries) — raw list,
+    /// newest first, optional agent (sender OR target) and state filters.
+    std::vector<hivemind::Delivery> deliveries_list(
+        const std::string& agent_id, const std::string& state, int limit);
 
     /// Agent -> human direct message (Phase 44): posts to the singleton
     /// User Inbox thread (kUserThreadId) as sender_kind="agent". NO

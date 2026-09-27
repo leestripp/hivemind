@@ -8,6 +8,7 @@
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/ChatService.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
 
 #include <iostream>
@@ -492,6 +493,41 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             auto t = threads.create_thread(body.value("title", ""),
                                            body.value("kind", "dm"), agent_ids);
             send_json(resp, thread_json(t), 201);
+        });
+
+    // ── GET /api/deliveries?agent=&state=&limit= (Phase 66e) ─────────
+    // Admin observability over the durable delivery queue — the "one
+    // query" diagnosis surface the 2026-09-26 silent drop lacked.
+    server.get("/api/deliveries",
+        [&chat](const OmniNet::HTTP::Request& req,
+                OmniNet::HTTP::Response& resp) {
+            const std::string agent = req.queryParameter("agent", "");
+            const std::string state = req.queryParameter("state", "");
+            int limit = 50;
+            if (std::string ls = req.queryParameter("limit", "");
+                !ls.empty()) {
+                try { limit = std::max(1, std::min(500, std::stoi(ls))); }
+                catch (...) {}
+            }
+            json arr = json::array();
+            for (const auto& d : chat.deliveries_list(agent, state, limit))
+                arr.push_back({
+                    {"id", d.id},
+                    {"kind", d.kind},
+                    {"thread_id", d.thread_id},
+                    {"target_agent_id", d.target_agent_id},
+                    {"sender_agent_id", d.sender_agent_id},
+                    {"sender_label", d.sender_label},
+                    {"generation", d.generation},
+                    {"state", d.state},
+                    {"task_id", d.task_id},
+                    {"source_message_id", d.source_message_id},
+                    {"error", d.error},
+                    {"read", chat.delivery_is_read(d)},
+                    {"created_at", d.created_at},
+                    {"dispatched_at", d.dispatched_at},
+                    {"completed_at", d.completed_at}});
+            send_json(resp, json{{"deliveries", arr}});
         });
 
     // ── GET /api/threads ──────────────────────────────────────────────────
