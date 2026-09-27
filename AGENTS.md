@@ -225,3 +225,14 @@ message) idempotency. `message_agent` returns a `delivery_id`;
 `GET /api/deliveries?agent=&state=` before touching code. When changing
 fan-in/relay logic, run test_agent_relay + test_delivery_store — the
 single wake path (relay suppresses pair fan-in) is load-bearing.
+
+Read state (66c) is per-principal high-water marks in
+`thread_reads` (deliveries.db). A delivery's read receipt consults
+ONLY the target agent's mark (`delivery_is_read`) — never let any
+other principal's view advance an agent's mark. The human user has a
+reserved `"user"` row: `POST /api/threads/:id/read` advances only it
+(the GTK client fires it debounced on view), and `GET /api/threads`
+carries `unread` = non-user messages newer than that mark — the
+client's badge count, persisted across restarts (the old in-memory
+`last_seen_activity_` badge died on every launch; do not reintroduce
+client-side read state).
