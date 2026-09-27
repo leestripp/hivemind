@@ -100,6 +100,33 @@ void ApiClient::mark_thread_read(const std::string& thread_id) {
     request("POST", "/api/threads/" + thread_id + "/read");
 }
 
+nlohmann::json ApiClient::list_thread_groups() {
+    return request("GET", "/api/thread-groups");
+}
+
+std::string ApiClient::create_thread_group(const std::string& name) {
+    nlohmann::json body{{"name", name}};
+    return request("POST", "/api/thread-groups", &body).value("id", "");
+}
+
+void ApiClient::rename_thread_group(const std::string& id,
+                                    const std::string& name) {
+    nlohmann::json body{{"name", name}};
+    request("PATCH", "/api/thread-groups/" + id, &body);
+}
+
+void ApiClient::delete_thread_group(const std::string& id) {
+    request("DELETE", "/api/thread-groups/" + id);
+}
+
+void ApiClient::set_thread_group(const std::string& thread_id,
+                                 const std::string& group_id) {
+    nlohmann::json body{{"group_id", group_id.empty()
+                                         ? nlohmann::json(nullptr)
+                                         : nlohmann::json(group_id)}};
+    request("PUT", "/api/threads/" + thread_id + "/group", &body);
+}
+
 nlohmann::json ApiClient::delete_agent(const std::string& id,
                                        const std::string& reassign_to) {
     std::string path = "/api/agents/" + id;

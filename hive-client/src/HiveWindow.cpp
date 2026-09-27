@@ -1044,13 +1044,16 @@ void HiveWindow::refresh_all() {
         json threads = api_.list_threads();
         json workers = json::object();
         try { workers = api_.list_workers(); } catch (...) {}
+        json groups = json::object();
+        try { groups = api_.list_thread_groups(); } catch (...) {}
         {
             std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, agents, threads, workers] {
+            done_queue_.push_back([this, agents, threads, workers, groups] {
                 if (!alive_) return;
                 agents_ = agents.value("agents", json::array());
                 threads_ = threads.value("threads", json::array());
                 workers_ = workers.value("workers", json::array());
+                thread_groups_ = groups.value("groups", json::array());
                 process_thread_activity();
                 rebuild_roster();
                 rebuild_thread_list();
@@ -1481,14 +1484,48 @@ void HiveWindow::process_thread_activity() {
 }
 
 void HiveWindow::rebuild_thread_list() {
+    if (!group_ui_loaded_) { load_group_ui_state(); group_ui_loaded_ = true; }
     while (auto* row = threads_list_.get_row_at_index(0))
         threads_list_.remove(*row);
+
+    // Phase 67: bucket threads into groups. Custom membership comes
+    // from the hub ("group_id"); everything else falls into a smart
+    // bucket derived from kind (computed here, never stored).
+    auto smart_of = [](const json& t) -> std::string {
+        const std::string k = t.value("kind", "");
+        if (k == "user" || k == "dm") return "smart:you";
+        if (k == "group") return "smart:chatter";
+        return "smart:routines";
+    };
+    struct Bucket { std::string id, name; bool custom; std::vector<json> items; };
+    std::vector<Bucket> buckets{{"smart:you", "You & agents", false, {}}};
+    for (auto& g : thread_groups_)
+        buckets.push_back({g.value("id", ""), g.value("name", ""), true, {}});
+    buckets.push_back({"smart:chatter", "Agent chatter", false, {}});
+    buckets.push_back({"smart:routines", "Routines", false, {}});
+
     for (auto& t : threads_) {
+        std::string gid;
+        if (t.contains("group_id") && t["group_id"].is_string())
+            gid = t["group_id"].get<std::string>();
+        Bucket* home = nullptr;
+        if (!gid.empty())
+            for (auto& b : buckets)
+                if (b.custom && b.id == gid) { home = &b; break; }
+        if (!home) {
+            const std::string sid = smart_of(t);
+            for (auto& b : buckets)
+                if (b.id == sid) { home = &b; break; }
+        }
+        if (home) home->items.push_back(t);
+    }
+
+    // One thread row — the pre-groups rendering, unchanged.
+    auto render_thread_row = [this](const json& t) {
         std::string title = t.value("title", "");
         if (t.value("kind", "") == "user")
             title = "\U0001F4E5 " + title;   // 📥 User Inbox (Phase 44)
         if (title.empty()) {
-            // fall back to participant names
             for (auto& id : t.value("agent_ids", json::array())) {
                 if (!title.empty()) title += ", ";
                 title += agent_name_of(agents_, id.get<std::string>());
@@ -1501,10 +1538,8 @@ void HiveWindow::rebuild_thread_list() {
         auto* row_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
         row_box->set_margin(6);
         row_box->append(*label);
-        // Unread dot (Phase 66c): the hub computes it from the PERSISTED
-        // "user" read mark (deliveries.db thread_reads) — survives client
-        // restarts, unlike the old in-memory last_seen_activity_ compare
-        // that re-seeded on every launch and silently lost the badge.
+        // Unread dot (Phase 66c): hub-computed from the PERSISTED
+        // "user" read mark — survives restarts.
         const std::string tid = t.value("id", "");
         const bool unread = t.value("unread", 0) > 0 && tid != current_thread_;
         if (unread) {
@@ -1517,9 +1552,8 @@ void HiveWindow::rebuild_thread_list() {
         row->set_child(*row_box);
         row->set_data("thread_id", new std::string(t.value("id", "")),
                       [](void* p) { delete static_cast<std::string*>(p); });
-        // Phase 56: right-click → thread context menu (Clear / Delete).
         auto rc = Gtk::GestureClick::create();
-        rc->set_button(0);   // listen to all buttons, filter in the handler
+        rc->set_button(0);
         rc->signal_pressed().connect(
             [this, rc, t](int, double x, double y) {
                 if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
@@ -1527,12 +1561,178 @@ void HiveWindow::rebuild_thread_list() {
             });
         row->add_controller(rc);
         threads_list_.append(*row);
-        // Keep the visible selection on the thread the chat is showing —
-        // rebuilding the list drops it otherwise (refresh clears highlight).
         if (!current_thread_.empty() && t.value("id", "") == current_thread_)
             threads_list_.select_row(*row);
+    };
+
+    for (auto& b : buckets) {
+        if (b.items.empty() && !b.custom) continue;  // hide empty smart groups
+        int unread_sum = 0;
+        for (auto& t : b.items) unread_sum += t.value("unread", 0);
+        const bool collapsed = collapsed_groups_.count(b.id) > 0;
+
+        auto* hb = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+        hb->set_margin(4);
+        auto* arrow = Gtk::make_managed<Gtk::Label>(collapsed ? "\u25B8" : "\u25BE");
+        hb->append(*arrow);
+        auto* name = Gtk::make_managed<Gtk::Label>("<b>" + b.name + "</b>");
+        name->set_use_markup(true);
+        name->set_halign(Gtk::Align::START);
+        name->set_hexpand(true);
+        name->set_ellipsize(Pango::EllipsizeMode::END);
+        hb->append(*name);
+        std::string meta = std::to_string(b.items.size());
+        if (unread_sum > 0) meta += " \u00B7 " + std::to_string(unread_sum) + " new";
+        hb->append(*Gtk::make_managed<Gtk::Label>(meta));
+        auto* hrow = Gtk::make_managed<Gtk::ListBoxRow>();
+        hrow->set_child(*hb);
+        hrow->set_activatable(false);
+        hrow->set_selectable(false);
+        const std::string gid = b.id, gname = b.name;
+        const bool is_custom = b.custom;
+        auto click = Gtk::GestureClick::create();
+        click->set_button(0);
+        click->signal_pressed().connect(
+            [this, click, gid, gname, is_custom](int, double x, double y) {
+                if (click->get_current_button() == GDK_BUTTON_SECONDARY) {
+                    if (is_custom)
+                        show_group_menu(*click->get_widget(), gid, gname, x, y);
+                    return;
+                }
+                if (collapsed_groups_.count(gid)) collapsed_groups_.erase(gid);
+                else collapsed_groups_.insert(gid);
+                save_group_ui_state();
+                rebuild_thread_list();
+            });
+        hrow->add_controller(click);
+        threads_list_.append(*hrow);
+        if (collapsed) continue;
+
+        // Unread first, then recency (hub already orders last_activity desc).
+        std::stable_sort(b.items.begin(), b.items.end(),
+            [](const json& a, const json& z) {
+                return a.value("unread", 0) > z.value("unread", 0);
+            });
+        for (auto& t : b.items) render_thread_row(t);
     }
     update_thread_title();
+}
+
+// ---- Phase 67 helpers ----
+static std::filesystem::path group_ui_state_path() {
+    const char* home = std::getenv("HOME");
+    return std::filesystem::path(home ? home : ".") /
+           ".local/share/hivemind/client-ui.json";
+}
+
+void HiveWindow::load_group_ui_state() {
+    std::ifstream in(group_ui_state_path());
+    if (!in) return;
+    json j = json::parse(in, nullptr, /*exceptions=*/false);
+    if (j.is_discarded()) return;
+    for (auto& g : j.value("collapsed_groups", json::array()))
+        if (g.is_string()) collapsed_groups_.insert(g.get<std::string>());
+}
+
+void HiveWindow::save_group_ui_state() const {
+    std::error_code ec;
+    std::filesystem::create_directories(group_ui_state_path().parent_path(), ec);
+    json arr = json::array();
+    for (auto& g : collapsed_groups_) arr.push_back(g);
+    std::ofstream out(group_ui_state_path());
+    out << json{{"collapsed_groups", arr}}.dump(2);
+}
+
+void HiveWindow::move_thread_to(const std::string& thread_id,
+                                const std::string& group_id) {
+    run_async([this, thread_id, group_id] {
+        try { api_.set_thread_group(thread_id, group_id); } catch (...) {}
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this] { if (alive_) refresh_all(); });
+    });
+}
+
+void HiveWindow::show_group_name_dialog(const std::string& title,
+                                        const std::string& initial,
+                                        const std::string& group_id,
+                                        const std::string& move_thread_id) {
+    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
+    dialog->set_title(title);
+    install_dialog_titlebar(*dialog, title);
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    auto* ok = dialog->add_button(
+        group_id.empty() ? "Create" : "Rename", Gtk::ResponseType::OK);
+    ok->add_css_class("suggested-action");
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_text(initial);
+    entry->set_margin(18);
+    entry->set_width_chars(28);
+    entry->set_activates_default(true);
+    dialog->get_content_area()->append(*entry);
+    dialog->signal_response().connect(
+        [this, dialog, entry, group_id, move_thread_id](int r) {
+            const std::string name = entry->get_text();
+            dialog->destroy();
+            if (r != Gtk::ResponseType::OK || name.empty()) return;
+            run_async([this, name, group_id, move_thread_id] {
+                try {
+                    if (group_id.empty()) {
+                        const std::string gid = api_.create_thread_group(name);
+                        if (!move_thread_id.empty())
+                            api_.set_thread_group(move_thread_id, gid);
+                    } else {
+                        api_.rename_thread_group(group_id, name);
+                    }
+                } catch (...) {}
+                std::lock_guard<std::mutex> lk(queue_m_);
+                done_queue_.push_back([this] { if (alive_) refresh_all(); });
+            });
+        });
+    dialog->present();
+}
+
+void HiveWindow::show_group_menu(Gtk::Widget& anchor,
+                                 const std::string& group_id,
+                                 const std::string& group_name,
+                                 double x, double y) {
+    auto* pop = Gtk::make_managed<Gtk::Popover>();
+    pop->set_has_arrow(false);
+    pop->set_autohide(true);
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    box->set_margin(4);
+    auto mk = [&](const char* label, const char* css,
+                  std::function<void()> fn) {
+        auto* b = Gtk::make_managed<Gtk::Button>(label);
+        b->set_has_frame(false);
+        b->add_css_class("hv-menu-item");
+        if (css) b->add_css_class(css);
+        b->signal_clicked().connect([pop, fn = std::move(fn)] {
+            pop->popdown();
+            fn();
+        });
+        box->append(*b);
+    };
+    mk("\u270F Rename group\u2026", nullptr,
+       [this, group_id, group_name] {
+           show_group_name_dialog("Rename group", group_name, group_id, "");
+       });
+    // Members revert to their smart groups hub-side.
+    mk("\U0001F5D1 Delete group", "destructive-action",
+       [this, group_id] {
+           run_async([this, group_id] {
+               try { api_.delete_thread_group(group_id); } catch (...) {}
+               std::lock_guard<std::mutex> lk(queue_m_);
+               done_queue_.push_back([this] { if (alive_) refresh_all(); });
+           });
+       });
+    pop->set_child(*box);
+    pop->set_parent(anchor);
+    Gdk::Rectangle rect((int)x, (int)y, 1, 1);
+    pop->set_pointing_to(rect);
+    pop->signal_closed().connect([pop] { pop->unparent(); });
+    pop->popup();
 }
 
 void HiveWindow::update_thread_title() {
@@ -3934,6 +4134,24 @@ void HiveWindow::show_thread_menu(Gtk::Widget& anchor,
     const std::string title = thread.value("title", "");
     mk("\U0001F9F9 Clear history\u2026", nullptr,
        [this, tid, title] { on_clear_thread(tid, title); });
+    // Phase 67: Move to group (folders — one group per thread).
+    {
+        auto* lbl = Gtk::make_managed<Gtk::Label>("<small>Move to group</small>");
+        lbl->set_use_markup(true);
+        lbl->set_halign(Gtk::Align::START);
+        lbl->set_margin(4);
+        box->append(*lbl);
+        for (auto& g : thread_groups_) {
+            const std::string gid = g.value("id", "");
+            const std::string gname = g.value("name", "");
+            mk(("\U0001F4C1 " + gname).c_str(), nullptr,
+               [this, tid, gid] { move_thread_to(tid, gid); });
+        }
+        mk("\u2795 New group\u2026", nullptr,
+           [this, tid] { show_group_name_dialog("New group", "", "", tid); });
+        mk("\u21A9 Smart default", nullptr,
+           [this, tid] { move_thread_to(tid, ""); });
+    }
     // Phase 44: the User Inbox can be cleared but never deleted.
     if (thread.value("kind", "") != "user")
         mk("\U0001F5D1 Delete thread\u2026", "destructive-action",
@@ -4070,6 +4288,7 @@ nlohmann::json HiveWindow::ui_state() {
             {"status", std::string{status_label_.get_text()}},
             {"agents", agents_},
             {"threads", threads_},
+            {"thread_groups", thread_groups_},
             {"rendered_count", rendered_.size()},
             {"entry_sensitive", entry_.get_sensitive()},
             {"attach_sensitive", attach_btn_.get_sensitive()},

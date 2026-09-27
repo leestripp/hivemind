@@ -116,6 +116,15 @@ public:
     /// reserved "user" read mark. Best-effort: throws like request().
     void mark_thread_read(const std::string& thread_id);
 
+    // Phase 67: user thread groups (folders).
+    nlohmann::json list_thread_groups();
+    std::string create_thread_group(const std::string& name);
+    void rename_thread_group(const std::string& id, const std::string& name);
+    void delete_thread_group(const std::string& id);
+    /// Empty group_id returns the thread to its smart group.
+    void set_thread_group(const std::string& thread_id,
+                          const std::string& group_id);
+
 private:
     nlohmann::json request(const std::string& method, const std::string& path,
                            const nlohmann::json* body = nullptr);

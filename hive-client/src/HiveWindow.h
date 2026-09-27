@@ -183,6 +183,23 @@ private:
     // Roster grouping by hive-worker: collapsed state survives the 1.5s
     // poll rebuilds. Offline workers start collapsed on first sight.
     std::unordered_set<std::string> collapsed_workers_;
+
+    // Phase 67: user thread groups (folders). thread_groups_ mirrors
+    // GET /api/thread-groups; collapsed_groups_ survives the rebuilds
+    // and persists to ~/.local/share/hivemind/client-ui.json.
+    nlohmann::json thread_groups_ = nlohmann::json::array();
+    std::unordered_set<std::string> collapsed_groups_;
+    bool group_ui_loaded_ = false;
+    void load_group_ui_state();
+    void save_group_ui_state() const;
+    void show_group_name_dialog(const std::string& title,
+                                const std::string& initial,
+                                const std::string& group_id,
+                                const std::string& move_thread_id);
+    void show_group_menu(Gtk::Widget& anchor, const std::string& group_id,
+                         const std::string& group_name, double x, double y);
+    void move_thread_to(const std::string& thread_id,
+                        const std::string& group_id);
     std::unordered_set<std::string> known_workers_;
     std::string current_thread_;
     std::string last_message_id_;
