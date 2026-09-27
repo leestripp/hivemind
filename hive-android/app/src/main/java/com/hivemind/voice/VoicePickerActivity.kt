@@ -1,13 +1,10 @@
 package com.hivemind.voice
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.GestureDetector
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
@@ -17,8 +14,13 @@ import android.widget.TextView
 /**
  * Per-agent voice picker (long-press an agent card to open).
  *
- *   single tap  → sample the voice ("Hi, I'm PA — this is my voice.")
- *   double tap  → select it for that agent (Prefs; applied in sessions)
+ *   tap        → sample the voice ("Hi, I'm PA — this is my voice.")
+ *   long-press → select it for that agent (Prefs; applied in sessions)
+ *
+ * Framework item listeners, NOT per-row GestureDetectors: the per-row
+ * detector taps silently failed to reach the handler on the test device
+ * (Moto G, Android 15) while OnItemClick delivery works everywhere —
+ * and item-click gives accessibility + scroll behaviour for free.
  *
  * English embedded voices only (offline, quality 400).
  */
@@ -58,7 +60,14 @@ class VoicePickerActivity : Activity() {
     private fun populate() {
         options = tts.englishVoiceOptions()
         list.adapter = VoiceAdapter()
-        status.text = "${options.size} voices — tap to sample, double-tap to select"
+        list.setOnItemClickListener { _, _, pos, _ ->
+            if (pos in options.indices) sample(options[pos])
+        }
+        list.setOnItemLongClickListener { _, _, pos, _ ->
+            if (pos in options.indices) select(options[pos])
+            true
+        }
+        status.text = "${options.size} voices — tap to sample, long-press to select"
     }
 
     private fun select(opt: TtsEngine.VoiceOption) {
@@ -67,10 +76,17 @@ class VoicePickerActivity : Activity() {
         ui.postDelayed({ finish() }, 900)
     }
 
+
+
     private fun sample(opt: TtsEngine.VoiceOption) {
         tts.setVoiceByName(opt.name)
-        tts.preview("Hi, I'm $agentName — this is my voice.")
         status.text = "Sampling ${opt.label}…"
+        // setVoice() races an immediately-queued speak(): the engine
+        // resets its synthesis pipeline for the voice change and can
+        // DROP the utterance silently (documented Android issue class).
+        // A beat of delay lets the voice change land first.
+        ui.postDelayed(
+            { tts.preview("Hi, I'm $agentName — this is my voice.") }, 250)
     }
 
     private inner class VoiceAdapter : BaseAdapter() {
@@ -79,10 +95,6 @@ class VoicePickerActivity : Activity() {
         override fun getItem(position: Int) = options[position]
         override fun getItemId(position: Int) = position.toLong()
 
-        // Taps go through a GestureDetector (single=sample, double=select)
-        // and onSingleTapConfirmed calls performClick — the accessibility
-        // contract is honored; lint just can't trace into the callback.
-        @SuppressLint("ClickableViewAccessibility")
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val v = convertView ?: LayoutInflater.from(this@VoicePickerActivity)
                 .inflate(R.layout.voice_row, parent, false)
@@ -92,20 +104,6 @@ class VoicePickerActivity : Activity() {
             v.findViewById<TextView>(R.id.voiceCheck).visibility =
                 if (opt.name == Prefs.voiceFor(this@VoicePickerActivity, agentId))
                     View.VISIBLE else View.GONE
-
-            val gd = GestureDetector(this@VoicePickerActivity,
-                object : GestureDetector.SimpleOnGestureListener() {
-                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                        v.performClick()   // accessibility contract
-                        sample(opt); return true
-                    }
-                    override fun onDoubleTap(e: MotionEvent): Boolean {
-                        select(opt); return true
-                    }
-                })
-            // Return the detector's verdict, NOT always true: consuming
-            // every MotionEvent made the ListView unable to scroll.
-            v.setOnTouchListener { _, ev -> gd.onTouchEvent(ev) }
             return v
         }
     }

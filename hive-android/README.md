@@ -32,11 +32,13 @@ the reply.
 
 ## Per-agent voices
 
-Long-press an agent card → voice picker: single tap samples a voice
-("Hi, I'm PA — this is my voice."), double tap selects it for that
+Long-press an agent card → voice picker: tap samples a voice
+("Hi, I'm PA — this is my voice."), long-press selects it for that
 agent (Prefs `voice_<agentId>`). English embedded voices only
 (offline, q400; 23 on the test device). Selections are per-agent —
-every agent can sound different.
+every agent can sound different. Sampling sets the voice, then speaks
+after a 250 ms beat: setVoice() races an immediately-queued speak()
+and the engine can drop the utterance silently.
 
 Voices follow the SENDER, not the session (Phase 68): an inbox note
 from Honey is read in Honey's configured voice even mid-chat with PA —
