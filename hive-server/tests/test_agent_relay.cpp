@@ -321,6 +321,30 @@ int main() {
     settle(chat);
     assert(chat.agent_activity().empty());
 
+    // 11) Phase 66d: confirmed send returns the durable delivery id;
+    //     delivery_status exposes the state machine; delivery_is_read
+    //     flips once the target's turn consumes the wake.
+    std::string did;
+    chat.post_agent_message(chief.id, honey.id, "status probe", &did);
+    assert(!did.empty() && "confirmed send must return a delivery id");
+    auto st = chat.delivery_status(chief.id, did);
+    assert(st.size() == 1 && st[0].id == did);
+    assert(st[0].state == "dispatched" && "idle target dispatches at once");
+    assert(!chat.delivery_is_read(st[0]) && "not read before the turn");
+    // Privacy: a third party (neither sender nor target) sees nothing.
+    assert(chat.delivery_status("not-a-party", did).empty());
+    // Complete the target's turn -> done + read receipt.
+    const auto* h11 = hub.find_last(honey.id, pair_tid);
+    assert(h11);
+    chat.complete_turn(h11->task_id, "acknowledged.", "");
+    st = chat.delivery_status(chief.id, did);
+    assert(st.size() == 1 && st[0].state == "done");
+    assert(chat.delivery_is_read(st[0]) && "read after the turn ran");
+    // No-id query: the agent's recent sends, newest first.
+    auto recent = chat.delivery_status(chief.id);
+    assert(!recent.empty() && recent[0].id == did);
+    settle(chat);
+
     std::cout << "agent relay: all assertions passed\n";
     return 0;
 }

@@ -21,7 +21,7 @@ class AgentStore;
 class ThreadStore;
 class HubRouter;
 struct RosterAgent;
-namespace hivemind { class DeliveryStore; }
+namespace hivemind { class DeliveryStore; struct Delivery; }
 
 class ChatService {
 public:
@@ -64,9 +64,22 @@ public:
 
     /// Agent->agent async message: find-or-create the pair thread, post
     /// as sender_kind="agent", fan in to the target at generation 1.
+    /// Phase 66d: when delivery_id_out is given it receives the durable
+    /// delivery id (the message_status handle); "" when the content
+    /// dedup dropped a repeat or no wake was needed.
     std::string post_agent_message(const std::string& sender_id,
                                    const std::string& target_id,
-                                   const std::string& body);
+                                   const std::string& body,
+                                   std::string* delivery_id_out = nullptr);
+
+    /// Phase 66d — message_status surface. With a delivery id: that one
+    /// delivery (empty vector when unknown/not the agent's). Without:
+    /// the agent's ~10 most recent sends, newest first.
+    std::vector<hivemind::Delivery> delivery_status(
+        const std::string& agent_id, const std::string& delivery_id = "");
+    /// True when the target's read high-water mark covers this
+    /// delivery's source message (read receipt).
+    bool delivery_is_read(const hivemind::Delivery& d);
 
     /// Agent -> human direct message (Phase 44): posts to the singleton
     /// User Inbox thread (kUserThreadId) as sender_kind="agent". NO
@@ -126,7 +139,9 @@ private:
     /// dropped) that survives hub restarts; gates (mute, circuit
     /// breaker) are re-checked AT DISPATCH TIME and a refusal is
     /// recorded on the row with its reason. kind: "wake" | "relay".
-    void fan_in(const std::string& thread_id, const RosterAgent& agent,
+    /// Returns the delivery id ("" when suppressed as a duplicate).
+    std::string fan_in(const std::string& thread_id,
+                const RosterAgent& agent,
                 const std::string& sender_label, const std::string& body,
                 int generation, const std::string& sender_id = "",
                 const std::string& source_message_id = "",

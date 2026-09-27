@@ -10,6 +10,7 @@
 #include "hivemind/ContainerManager.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/ChatService.h"
+#include "hivemind/DeliveryStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/AgentTools.h"
@@ -459,6 +460,14 @@ void HubRouter::on_worker_frame(const std::string& worker,
         if (chat_ && st == "ready") chat_->on_agent_ready(agent_id);
         return;
     }
+    if (op == "msg_send_req") {   // Phase 66d: confirmed message_agent
+        handle_msg_send_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "msg_status_req") { // Phase 66d: message_status tool
+        handle_msg_status_req(worker, agent_id, frame);
+        return;
+    }
     if (op == "agent_msg") {
         // hive-agent's message_agent tool -> pair thread (async, v1 design)
         if (chat_) {
@@ -543,4 +552,91 @@ std::string HubRouter::agent_state(const std::string& agent_id) const {
     std::lock_guard<std::mutex> lk(m_);
     auto it = states_.find(agent_id);
     return it != states_.end() ? it->second : "";
+}
+
+// ── Phase 66d: confirmed message_agent + message_status ───────────────
+
+namespace {
+json delivery_to_json(const hivemind::Delivery& d, bool read) {
+    return {{"id", d.id},
+            {"kind", d.kind},
+            {"thread_id", d.thread_id},
+            {"target_agent_id", d.target_agent_id},
+            {"sender_agent_id", d.sender_agent_id},
+            {"state", d.state},
+            {"read", read},
+            {"error", d.error},
+            {"created_at", d.created_at},
+            {"dispatched_at", d.dispatched_at},
+            {"completed_at", d.completed_at}};
+}
+}  // namespace
+
+void HubRouter::handle_msg_send_req(const std::string& worker,
+                                    const std::string& agent_id,
+                                    const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "msg_send_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    if (!chat_) {
+        resp["ok"] = false;
+        resp["error"] = "chat service unavailable";
+        channel_.send(worker, resp);
+        return;
+    }
+    // Same target resolution as the legacy agent_msg path: roster id OR
+    // display name; unresolvable -> redirected to the User Inbox.
+    std::string target = frame.value("target", "");
+    if (!agents_.get_agent(target)) {
+        if (auto by_name = agents_.get_agent_by_name(target))
+            target = by_name->id;
+    }
+    try {
+        if (!agents_.get_agent(target)) {
+            chat_->post_user_inbox_message(agent_id,
+                                           frame.value("text", ""));
+            resp["ok"] = true;
+            resp["redirected_to_user_inbox"] = true;
+            std::cerr << "[hub] msg_send target '" << target
+                      << "' unresolved -> user inbox\n";
+        } else {
+            std::string delivery_id;
+            const std::string tid = chat_->post_agent_message(
+                agent_id, target, frame.value("text", ""), &delivery_id);
+            resp["ok"] = true;
+            resp["thread_id"] = tid;
+            resp["delivery_id"] = delivery_id;
+            resp["state"] = "queued";
+        }
+    } catch (const std::exception& e) {
+        resp["ok"] = false;
+        resp["error"] = e.what();
+    }
+    channel_.send(worker, resp);
+}
+
+void HubRouter::handle_msg_status_req(const std::string& worker,
+                                      const std::string& agent_id,
+                                      const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "msg_status_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    if (!chat_) {
+        resp["ok"] = false;
+        resp["error"] = "chat service unavailable";
+        channel_.send(worker, resp);
+        return;
+    }
+    try {
+        json arr = json::array();
+        for (const auto& d : chat_->delivery_status(
+                 agent_id, frame.value("delivery_id", "")))
+            arr.push_back(delivery_to_json(d, chat_->delivery_is_read(d)));
+        resp["ok"] = true;
+        resp["deliveries"] = std::move(arr);
+    } catch (const std::exception& e) {
+        resp["ok"] = false;
+        resp["error"] = e.what();
+    }
+    channel_.send(worker, resp);
 }

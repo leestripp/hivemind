@@ -42,7 +42,9 @@ std::string attachment_refs(const std::string& attachments_json) {
 
 std::string ChatService::post_agent_message(const std::string& sender_id,
                                             const std::string& target_id,
-                                            const std::string& body) {
+                                            const std::string& body,
+                                            std::string* delivery_id_out) {
+    if (delivery_id_out) delivery_id_out->clear();
     if (stopping_)
         throw std::invalid_argument("server is shutting down");
     auto sender = agents_.get_agent(sender_id);
@@ -100,9 +102,34 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     // Read receipts (Phase 66c hook): sending implies read-to-own-message.
     if (auto m = threads_.get_message(msg_id))
         deliveries_.mark_read(tid, sender_id, msg_id, m->created_at);
-    fan_in(tid, *target, sender->name, body, /*generation=*/1,
-           sender_id, msg_id, "wake");
+    const std::string did = fan_in(tid, *target, sender->name, body,
+                                   /*generation=*/1, sender_id, msg_id,
+                                   "wake");
+    if (delivery_id_out) *delivery_id_out = did;
     return tid;
+}
+
+std::vector<hivemind::Delivery>
+ChatService::delivery_status(const std::string& agent_id,
+                             const std::string& delivery_id) {
+    if (!delivery_id.empty()) {
+        auto d = deliveries_.get(delivery_id);
+        // Only the sender or the target may see a delivery.
+        if (!d || (d->sender_agent_id != agent_id &&
+                   d->target_agent_id != agent_id))
+            return {};
+        return {*d};
+    }
+    return deliveries_.sent_by(agent_id, 10);
+}
+
+bool ChatService::delivery_is_read(const hivemind::Delivery& d) {
+    if (d.source_message_id.empty()) return false;
+    const auto mark = deliveries_.read_mark(d.thread_id, d.target_agent_id);
+    if (!mark) return false;
+    const auto msg = threads_.get_message(d.source_message_id);
+    if (!msg) return false;
+    return *mark >= msg->created_at;
 }
 
 std::chrono::seconds ChatService::relay_ttl() {
@@ -223,7 +250,7 @@ std::string ChatService::post_user_inbox_message(const std::string& sender_id,
     return kUserThreadId;
 }
 
-void ChatService::fan_in(const std::string& thread_id,
+std::string ChatService::fan_in(const std::string& thread_id,
                          const RosterAgent& agent,
                          const std::string& sender_label,
                          const std::string& body,
@@ -231,7 +258,7 @@ void ChatService::fan_in(const std::string& thread_id,
                          const std::string& sender_id,
                          const std::string& source_message_id,
                          const std::string& kind) {
-    if (stopping_) return;
+    if (stopping_) return "";
 
     // Idempotency (Phase 66b): a queued/dispatched wake for the same
     // (target, source message) suppresses the duplicate — replaces the
@@ -240,7 +267,7 @@ void ChatService::fan_in(const std::string& thread_id,
         std::fprintf(stderr,
             "[delivery] wake suppressed (dup): -> %.8s msg %.8s\n",
             agent.id.c_str(), source_message_id.c_str());
-        return;
+        return "";
     }
 
     hivemind::Delivery d;
@@ -258,6 +285,7 @@ void ChatService::fan_in(const std::string& thread_id,
         id.c_str(), kind.c_str(), agent.id.c_str(), thread_id.c_str(),
         generation);
     try_dispatch(agent.id);
+    return id;
 }
 
 void ChatService::try_dispatch(const std::string& agent_id) {

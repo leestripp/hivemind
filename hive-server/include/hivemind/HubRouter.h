@@ -84,6 +84,15 @@ public:
     void handle_routine_req(const std::string& worker,
                             const std::string& agent_id,
                             const nlohmann::json& frame);
+    /// Phase 66d: confirmed message_agent (msg_send_req -> msg_send_resp
+    /// with the durable delivery id) and the message_status query
+    /// surface (msg_status_req -> msg_status_resp).
+    void handle_msg_send_req(const std::string& worker,
+                             const std::string& agent_id,
+                             const nlohmann::json& frame);
+    void handle_msg_status_req(const std::string& worker,
+                               const std::string& agent_id,
+                               const nlohmann::json& frame);
     void handle_secret_req(const std::string& worker,
                            const std::string& agent_id,
                            const nlohmann::json& frame);

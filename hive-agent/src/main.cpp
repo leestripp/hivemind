@@ -133,6 +133,52 @@ private:
 };
 RoutineBridge g_routines;
 
+// Message bridge (Phase 66d): request/response to the hub for confirmed
+// agent messaging. message_agent emits {"ev":"msg_send_req",...} and the
+// hub replies {"op":"msg_send_resp","id":...,"ok","delivery_id",...};
+// message_status emits {"ev":"msg_status_req",...} and gets
+// {"op":"msg_status_resp","id":...,"deliveries":[...]}. Same blocking
+// pattern as RoutineBridge, 30s timeout.
+class MsgBridge {
+public:
+    json call(const std::string& ev_name, const json& payload) {
+        const std::string id = "m" + std::to_string(++seq_);
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pending_[id] = std::nullopt;
+        }
+        json ev = {{"ev", ev_name}, {"id", id}};
+        for (auto& [k, v] : payload.items()) ev[k] = v;
+        emit(ev);
+        std::unique_lock<std::mutex> lk(m_);
+        const bool got = cv_.wait_for(lk, std::chrono::seconds(30), [&] {
+            return pending_[id].has_value();
+        });
+        json out = got
+            ? *pending_[id]
+            : json{{"ok", false},
+                   {"error", "message request timed out (hub offline?)"}};
+        pending_.erase(id);
+        return out;
+    }
+
+    void resolve(const std::string& id, const json& frame) {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = pending_.find(id);
+        if (it != pending_.end()) {
+            it->second = frame;
+            cv_.notify_all();
+        }
+    }
+
+private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::map<std::string, std::optional<json>> pending_;
+    int seq_ = 0;
+};
+MsgBridge g_msgbridge;
+
 // Secret bridge: request/response to the hub for secrets_create. Tools
 // emit {"ev":"secret_req",...}; the worker forwards it as an op frame;
 // the hub applies it against SecretStore and replies with
@@ -567,14 +613,77 @@ int main(int argc, char** argv) {
             if (target.empty() || text.empty())
                 return {{"status","error"},
                         {"error","target and text required"}};
-            emit({{"ev","send_agent_message"},
-                  {"target",target},{"text",text}});
-            return {{"status","success"},
-                    {"note","posted to the pair thread; the reply arrives "
-                            "asynchronously as a new task"}};
+            // Phase 66d: CONFIRMED send — the hub durably queues the
+            // delivery and replies with its id. Track the message with
+            // message_status (queued / dispatched / done / read /
+            // error) instead of guessing.
+            const json resp = g_msgbridge.call("msg_send_req",
+                {{"target", target}, {"text", text}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error",
+                                             "send failed (hub offline?)")}};
+            json out = {{"status","success"},
+                        {"note","message durably queued; the reply arrives "
+                                "asynchronously as a new task. Use "
+                                "message_status with the delivery_id to "
+                                "check progress."}};
+            if (resp.contains("delivery_id"))
+                out["delivery_id"] = resp["delivery_id"];
+            if (resp.value("redirected_to_user_inbox", false))
+                out["note"] = "target resolved to the USER — message was "
+                              "posted to the user's inbox instead";
+            return out;
         }
     };
     agent.register_tool(std::make_unique<MessageAgentTool>());
+
+    // message_status (Phase 66d): the agent's visibility into the
+    // durable delivery queue — every message it sent (or a specific
+    // one) with its live state and read receipt.
+    class MessageStatusTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "message_status"; }
+        std::string get_description() const override {
+            return "Check the delivery status of messages you sent with "
+                   "message_agent. With no arguments, lists your 10 most "
+                   "recent sends with their state and read receipts. "
+                   "States: queued (waiting — the other agent is busy or "
+                   "its worker is offline), dispatched (delivered to the "
+                   "agent, turn running), done (the agent's turn "
+                   "completed), read=true (the agent has seen your "
+                   "message), error (failed — see the error field), "
+                   "dropped (blocked by a mute/circuit breaker/cancel — "
+                   "see error), expired (waited too long). Pass "
+                   "delivery_id (from message_agent's result) to check "
+                   "one specific message.";
+        }
+        json get_definition() const override {
+            json did = {{"type","string"},
+                        {"description","Delivery id from a message_agent "
+                                       "result (optional)"}};
+            json params = {{"type","object"},
+                           {"properties",{{"delivery_id",did}}}};
+            return {{"type","function"},
+                    {"function",{{"name","message_status"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json payload = json::object();
+            const std::string did = args.value("delivery_id","");
+            if (!did.empty()) payload["delivery_id"] = did;
+            const json resp = g_msgbridge.call("msg_status_req", payload);
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error",
+                                             "status query failed")}};
+            return {{"status","success"},
+                    {"deliveries",
+                     resp.value("deliveries", json::array())}};
+        }
+    };
+    agent.register_tool(std::make_unique<MessageStatusTool>());
 
     // message_user (Phase 44): the agent's direct line to the HUMAN.
     // Posts into the hub's singleton User Inbox thread — a one-way,
@@ -1113,6 +1222,8 @@ int main(int argc, char** argv) {
             g_routines.resolve(op.value("id", ""), op);
         } else if (kind == "secret_resp") {
             g_secrets.resolve(op.value("id", ""), op);
+        } else if (kind == "msg_send_resp" || kind == "msg_status_resp") {
+            g_msgbridge.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
         } else if (kind == "shutdown") {

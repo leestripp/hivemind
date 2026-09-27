@@ -188,6 +188,21 @@ int main(int argc, char* argv[]) {
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
+            // Phase 66d: confirmed message_agent (msg_send_resp back) and
+            // the message_status query (msg_status_resp back) — same
+            // request/response bridge pattern as routine_req.
+            else if (kind == "msg_send_req") {
+                f = ev;
+                f["op"] = "msg_send_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
+            else if (kind == "msg_status_req") {
+                f = ev;
+                f["op"] = "msg_status_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},
@@ -461,7 +476,8 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 if (op == "task" || op == "approval_resp" || op == "cancel" ||
-                    op == "routine_resp" || op == "secret_resp") {
+                    op == "routine_resp" || op == "secret_resp" ||
+                    op == "msg_send_resp" || op == "msg_status_resp") {
                     const std::string aid = frame.value("agent_id","");
                     if (!g_fleet || !g_fleet->send_to(aid, frame)) {
                         try {
