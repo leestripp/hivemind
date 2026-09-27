@@ -68,6 +68,10 @@ struct ScreenResult {
 /// `type` is the agent type ("" standard / "gpu") — the worker maps it to
 /// the screen-capable image (:browser or :gpu), mirroring fleet's
 /// resolved_image. The hub stays hardware-dumb.
+/// Pinned screen image for an agent ("" when not screen-pinned). The
+/// marker means "this agent HAS a screen session" — spawns auto-restore
+/// the stack after a container recreate (Phase 66f).
+std::string screen_pinned_image(const std::string& agent);
 ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                         const std::string& type, const std::string& resolution);
 

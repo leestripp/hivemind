@@ -451,6 +451,36 @@ int main(int argc, char* argv[]) {
                                         spec.disabled_skills.push_back(
                                             n.get<std::string>());
                             g_fleet->spawn(spec);
+                            // Phase 66f: a container recreate leaves the
+                            // screen stack DOWN even though the pin
+                            // marker persists — restore the session the
+                            // marker stands for (PA's "forgot the
+                            // browser again" report, 2026-09-27). Only
+                            // when the stack isn't already up: spec-
+                            // refresh re-spawns must not double-start
+                            // websockify. Best-effort — a screen
+                            // failure must never fail the spawn.
+                            if (!hwrunner::screen_pinned_image(aid).empty()) {
+                                try {
+                                    auto cur = hwrunner::screen_ctl(
+                                        aid, "status", spec.type, "");
+                                    if (!cur.running) {
+                                        auto sr = hwrunner::screen_ctl(
+                                            aid, "start", spec.type, "");
+                                        std::cerr << "worker: screen "
+                                            "auto-restored for " << aid
+                                                  << " port=" << sr.port
+                                                  << (sr.error.empty()
+                                                      ? "" : " error=" + sr.error)
+                                                  << "\n";
+                                    }
+                                } catch (const std::exception& se) {
+                                    std::cerr << "worker: screen "
+                                        "auto-restore " << aid
+                                              << " FAILED: " << se.what()
+                                              << "\n";
+                                }
+                            }
                         } catch (const std::exception& e) {
                             std::cerr << "worker: agent_spawn " << aid
                                       << " FAILED: " << e.what() << "\n";
