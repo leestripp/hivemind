@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <map>
+#include <mutex>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -282,7 +284,51 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             }
             const uint16_t port = resolve(seg[1]);
             if (port == 0) {
-                routes::send_error(resp, 503, "screen not running"); return;
+                // Phase 66f: SELF-HEALING share link. A parked/stopped
+                // screen used to dead-end here with a bare 503 — the
+                // recurring "forgot noVNC again" report. Instead: kick
+                // an async start on the worker (pin + maybe recreate +
+                // Xvfb/x11vnc/websockify + pasta grace = 10-45s) and
+                // serve an auto-refresh page; the next load lands on
+                // live noVNC. A 60s in-flight window dedups refreshes
+                // so concurrent starts can't stack (double websockify).
+                const std::string id = seg[1];
+                static std::mutex starts_m;
+                static std::map<std::string, std::chrono::steady_clock::time_point>
+                    starts;
+                bool kick = false;
+                {
+                    std::lock_guard<std::mutex> lk(starts_m);
+                    auto it = starts.find(id);
+                    const auto now = std::chrono::steady_clock::now();
+                    if (it == starts.end() ||
+                        now - it->second > std::chrono::seconds(60)) {
+                        starts[id] = now;
+                        kick = true;
+                    }
+                }
+                if (kick)
+                    std::thread([id] {
+                        try { WorkerRouter::screen_ctl(id, "start"); }
+                        catch (...) {}
+                    }).detach();
+                resp = OmniNet::HTTP::Response::ok();
+                resp.setContentType("text/html; charset=utf-8");
+                resp.setHeader("Cache-Control",
+                               "no-cache, no-store, must-revalidate");
+                resp.setHeader("Refresh", "8");
+                resp.setBody(
+                    "<!doctype html><meta charset=utf-8>"
+                    "<title>Starting screen\u2026</title>"
+                    "<body style='font-family:sans-serif;background:#111;"
+                    "color:#eee;display:flex;align-items:center;"
+                    "justify-content:center;height:100vh;margin:0'>"
+                    "<div style='text-align:center'>"
+                    "<h2>Screen session is starting\u2026</h2>"
+                    "<p>The desktop stack was parked. It is being woken "
+                    "now \u2014 this page refreshes automatically "
+                    "(usually 10\u201340 seconds).</p></div>");
+                return;
             }
 
             // First ?key= access: set the cookie so relative asset loads
