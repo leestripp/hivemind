@@ -210,7 +210,13 @@ Key architectural mapping:
    undrained pipe SIGPIPEs the child (rc 141) once it writes.
 8. In agent containers, `pgrep` matches ZOMBIES (PID 1 `sleep` never
    reaps) — check socket state in `/proc/net/tcp` for liveness instead.
-9. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
+9. SQLite per-op connections (`open_conn()` pattern) MUST be closed
+   (`sqlite3_close`) — a per-row helper in a LIST route multiplies the
+   leak by rows × poll rate; an unclosed connection exhausted the
+   hub's 1024-fd limit overnight and 500'd every authed request
+   (EMFILE reads as "unable to open database file"). Check fd count
+   (`ls /proc/<pid>/fd | wc -l`) before/after repeated route calls.
+10. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
    ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
    keys (see `HiveWindow::follow_system_theme`).
 
