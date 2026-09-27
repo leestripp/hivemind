@@ -534,9 +534,15 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     server.get("/api/threads",
         [&threads, &chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             json list = json::array();
+            // Phase 67: ONE membership map for the whole list — never
+            // per-row queries in a list route (66c N+1 / fd lesson).
+            auto gmap = threads.thread_group_map();
             for (auto& t : threads.list_threads()) {
                 auto j = thread_json(t);
                 j["unread"] = chat.unread_for_user(t.id);   // Phase 66c
+                auto it = gmap.find(t.id);
+                j["group_id"] = (it != gmap.end()) ? json(it->second)
+                                                   : json(nullptr);
                 list.push_back(std::move(j));
             }
             send_json(resp, json{{"threads", list}});
@@ -634,6 +640,86 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
             chat.user_mark_read(seg[2]);
             send_json(resp, json{{"read", true}}, 202);
+        });
+
+    // ── Phase 67: user thread groups (folders — a thread lives in at
+    // most one custom group; no membership row = its smart group) ────
+    server.get("/api/thread-groups",
+        [&threads](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            json list = json::array();
+            for (auto& g : threads.list_groups()) {
+                list.push_back(json{{"id", g.id},
+                                    {"name", g.name},
+                                    {"position", g.position},
+                                    {"member_count", g.member_count}});
+            }
+            send_json(resp, json{{"groups", list}});
+        });
+
+    server.post("/api/thread-groups",
+        [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            json body = json::parse(req.body(), nullptr, /*exceptions=*/false);
+            if (body.is_discarded() || !body.value("name", "").size()) {
+                send_error(resp, 400, "name required"); return;
+            }
+            try {
+                const std::string id = threads.create_group(body["name"]);
+                send_json(resp, json{{"id", id}}, 201);
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 400, e.what());
+            }
+        });
+
+    // PATCH /api/thread-groups/:id — rename. (position is assigned at
+    // creation; manual reorder lands with drag-reorder later.)
+    server.patch("/api/thread-groups/:id",
+        [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api thread-groups :id
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            json body = json::parse(req.body(), nullptr, /*exceptions=*/false);
+            if (body.is_discarded() || !body.value("name", "").size()) {
+                send_error(resp, 400, "name required"); return;
+            }
+            try {
+                threads.rename_group(seg[2], body["name"]);
+                send_json(resp, json{{"renamed", true}});
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 404, e.what());
+            }
+        });
+
+    // DELETE /api/thread-groups/:id — members revert to smart groups.
+    server.delete_("/api/thread-groups/:id",
+        [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api thread-groups :id
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            try {
+                threads.delete_group(seg[2]);
+                send_json(resp, json{{"deleted", true}}, 202);
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 404, e.what());
+            }
+        });
+
+    // PUT /api/threads/:id/group — move a thread. {"group_id":"…"} into
+    // a custom group; {"group_id":null} (or absent) back to its smart
+    // group. Folder rule: re-moving replaces, never duplicates.
+    server.put("/api/threads/:id/group",
+        [&threads](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());   // api threads :id group
+            if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
+            json body = json::parse(req.body(), nullptr, /*exceptions=*/false);
+            const std::string gid =
+                (!body.is_discarded() && body["group_id"].is_string())
+                    ? body["group_id"].get<std::string>() : "";
+            try {
+                threads.set_thread_group(seg[2], gid);
+                send_json(resp, json{{"moved", true},
+                                     {"group_id", gid.empty() ? json(nullptr)
+                                                              : json(gid)}});
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 404, e.what());
+            }
         });
 
     // ── GET /api/threads/:id/messages?after=<msg_id> ──────────────────────

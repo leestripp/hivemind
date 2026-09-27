@@ -100,6 +100,20 @@ void ThreadStore::ensure_schema() {
     exec_sql(db,
         "CREATE INDEX IF NOT EXISTS idx_messages_thread"
         " ON messages(thread_id, created_at)");
+    // Phase 67: user thread groups (folders — members PK enforces one
+    // group per thread; smart groups are computed, never stored).
+    exec_sql(db,
+        "CREATE TABLE IF NOT EXISTS thread_groups ("
+        "  id TEXT PRIMARY KEY,"
+        "  name TEXT NOT NULL,"
+        "  position INTEGER NOT NULL DEFAULT 0,"
+        "  created_at TEXT NOT NULL"
+        ")");
+    exec_sql(db,
+        "CREATE TABLE IF NOT EXISTS thread_group_members ("
+        "  thread_id TEXT PRIMARY KEY,"
+        "  group_id TEXT NOT NULL"
+        ")");
     // Phase 18 migration: attachments column on pre-existing DBs.
     bool has_att = false;
     sqlite3_stmt* st = nullptr;
@@ -593,6 +607,172 @@ ThreadStore::message_counts_since(const std::string& since_iso) {
             auto& c = out[id ? id : ""];
             if (kind && std::string(kind) == "agent") c.agent = sqlite3_column_int64(st, 2);
             else                                      c.user  = sqlite3_column_int64(st, 2);
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}
+
+// ---- Phase 67: user thread groups (folders) ----
+// Every function below closes its per-op connection — an unclosed
+// open_conn() here once exhausted the hub's fd limit (2026-09-28).
+
+std::string ThreadStore::create_group(const std::string& name) {
+    if (name.empty()) throw std::invalid_argument("group name required");
+    const std::string id = uuid_v4();
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "INSERT INTO thread_groups (id, name, position, created_at)"
+            " VALUES (?, ?,"
+            "  COALESCE((SELECT MAX(position)+1 FROM thread_groups), 0),"
+            "  ?)",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        bind_text(st, 2, name);
+        bind_text(st, 3, iso_now());
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return id;
+}
+
+void ThreadStore::rename_group(const std::string& id,
+                               const std::string& name) {
+    if (name.empty()) throw std::invalid_argument("group name required");
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    int changed = 0;
+    if (sqlite3_prepare_v2(db, "UPDATE thread_groups SET name=? WHERE id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, name);
+        bind_text(st, 2, id);
+        sqlite3_step(st);
+        changed = sqlite3_changes(db);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (changed == 0) throw std::invalid_argument("unknown group: " + id);
+}
+
+void ThreadStore::delete_group(const std::string& id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    // Revert members to their smart groups explicitly — foreign-key
+    // enforcement is off by default on a fresh per-op connection, so
+    // ON DELETE CASCADE would not fire.
+    if (sqlite3_prepare_v2(db,
+            "DELETE FROM thread_group_members WHERE group_id=?",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        st = nullptr;
+    }
+    int changed = 0;
+    if (sqlite3_prepare_v2(db, "DELETE FROM thread_groups WHERE id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, id);
+        sqlite3_step(st);
+        changed = sqlite3_changes(db);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    if (changed == 0) throw std::invalid_argument("unknown group: " + id);
+}
+
+void ThreadStore::set_thread_group(const std::string& thread_id,
+                                   const std::string& group_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    bool thread_exists = false;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM threads WHERE id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        thread_exists = (sqlite3_step(st) == SQLITE_ROW);
+        sqlite3_finalize(st);
+        st = nullptr;
+    }
+    if (!thread_exists) {
+        sqlite3_close(db);
+        throw std::invalid_argument("unknown thread: " + thread_id);
+    }
+    if (group_id.empty()) {
+        // Back to the smart group: just drop the membership row.
+        if (sqlite3_prepare_v2(db,
+                "DELETE FROM thread_group_members WHERE thread_id=?",
+                -1, &st, nullptr) == SQLITE_OK) {
+            bind_text(st, 1, thread_id);
+            sqlite3_step(st);
+        }
+        sqlite3_finalize(st);
+        sqlite3_close(db);
+        return;
+    }
+    bool group_exists = false;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM thread_groups WHERE id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, group_id);
+        group_exists = (sqlite3_step(st) == SQLITE_ROW);
+        sqlite3_finalize(st);
+        st = nullptr;
+    }
+    if (!group_exists) {
+        sqlite3_close(db);
+        throw std::invalid_argument("unknown group: " + group_id);
+    }
+    // INSERT OR REPLACE = the folder rule (re-moving replaces, never
+    // duplicates) via the thread_id PRIMARY KEY.
+    if (sqlite3_prepare_v2(db,
+            "INSERT OR REPLACE INTO thread_group_members"
+            " (thread_id, group_id) VALUES (?, ?)",
+            -1, &st, nullptr) == SQLITE_OK) {
+        bind_text(st, 1, thread_id);
+        bind_text(st, 2, group_id);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+
+std::vector<ThreadGroup> ThreadStore::list_groups() {
+    std::vector<ThreadGroup> out;
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT g.id, g.name, g.position,"
+        " (SELECT COUNT(*) FROM thread_group_members m"
+        "  WHERE m.group_id = g.id)"
+        " FROM thread_groups g ORDER BY g.position ASC, g.created_at ASC";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            ThreadGroup g;
+            const char* v = col_text(st, 0); if (v) g.id = v;
+            v = col_text(st, 1); if (v) g.name = v;
+            g.position = sqlite3_column_int(st, 2);
+            g.member_count = sqlite3_column_int(st, 3);
+            out.push_back(std::move(g));
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return out;
+}
+
+std::unordered_map<std::string, std::string>
+ThreadStore::thread_group_map() {
+    std::unordered_map<std::string, std::string> out;
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "SELECT thread_id, group_id FROM thread_group_members",
+            -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char* t = col_text(st, 0);
+            const char* g = col_text(st, 1);
+            if (t && g) out[t] = g;
         }
         sqlite3_finalize(st);
     }

@@ -49,6 +49,17 @@ struct ThreadMessage {
     std::string created_at;
 };
 
+/// Phase 67: user-organisable thread groups — FOLDERS, not labels: a
+/// thread lives in at most ONE custom group (thread_id is the members
+/// PK); a thread with no row belongs to its smart group, derived from
+/// Thread.kind client-side (smart groups are never rows here).
+struct ThreadGroup {
+    std::string id;
+    std::string name;
+    int position = 0;
+    int member_count = 0;
+};
+
 class ThreadStore {
 public:
     ThreadStore();                                  // default XDG path
@@ -127,6 +138,20 @@ public:
     /// the human user — the unread-count basis for the user's badges.
     int count_non_user_since(const std::string& thread_id,
                              const std::string& since_iso);
+
+    /// Phase 67: thread groups (see ThreadGroup). set_thread_group
+    /// with an empty group_id returns the thread to its smart group;
+    /// delete_group reverts its members the same way.
+    std::string create_group(const std::string& name);
+    void rename_group(const std::string& id, const std::string& name);
+    void delete_group(const std::string& id);
+    void set_thread_group(const std::string& thread_id,
+                          const std::string& group_id);
+    std::vector<ThreadGroup> list_groups();
+    /// thread_id → custom group_id for every assigned thread in ONE
+    /// query — the /api/threads list route must not go per-row (the
+    /// 66c N+1 lesson).
+    std::unordered_map<std::string, std::string> thread_group_map();
 
 private:
     std::filesystem::path db_path_;

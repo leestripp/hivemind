@@ -17,6 +17,7 @@ endmacro()
 
 hivemind_test(test_agent_store)
 hivemind_test(test_thread_store)
+hivemind_test(test_thread_groups)
 hivemind_test(test_delivery_store)
 hivemind_test(test_approval_store)
 hivemind_test(test_routine_store)
