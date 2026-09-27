@@ -1,5 +1,14 @@
 # Computer use
 
+> **Screen lifecycle (Phase 66f, 2026-09-27):** screens idle-park after
+> 15 min with no viewers (by design — the pin marker is removed).
+> After a container recreate the worker **auto-restores** the screen on
+> the next spawn (one 30s-grace retry; d4c4c7a). The share link is
+> **self-healing** (69ca8a6): opening `/screen/<id>/` on a parked
+> screen kicks the start and auto-refreshes into live noVNC instead of
+> 503ing. So a dark screen is never permanent — open the link.
+
+
 Agents that need a real browser (logins, JS-heavy sites, captchas a human
 must pass) get one on their WORKER: an on-demand desktop stack in the
 agent's own container (Xvfb + x11vnc + websockify/noVNC + Chromium under
