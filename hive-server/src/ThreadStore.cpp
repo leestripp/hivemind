@@ -283,6 +283,10 @@ int ThreadStore::count_non_user_since(const std::string& thread_id,
         if (sqlite3_step(st) == SQLITE_ROW) n = sqlite3_column_int(st, 0);
     }
     sqlite3_finalize(st);
+    sqlite3_close(db);   // per-op connection — a missing close leaks an
+                         // fd per call; at 30 threads per /api/threads
+                         // poll this exhausted the hub's 1024-fd limit
+                         // overnight (EMFILE → AuthStore 500s). 2026-09-28.
     return n;
 }
 
