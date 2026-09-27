@@ -67,9 +67,12 @@ class VoiceActivity : Activity() {
     /** Agent id -> display name, for "PA says: …" inbox attribution. */
     private var agentNames = mapOf<String, String>()
     private var inboxLastId = ""
+    /** A whole message awaiting speech: the text plus WHO sent it, so
+     *  it can be read in the sender's own voice (Phase 68). */
+    private data class PendingNote(val senderId: String, val text: String)
     /** Whole messages awaiting speech — only ever drained at IDLE, so an
      *  arriving note can never interleave with recording or a live reply. */
-    private val pendingSpeech = ArrayDeque<String>()
+    private val pendingSpeech = ArrayDeque<PendingNote>()
 
     // -- streaming-speech state ---------------------------------------------
     /** The reply text [spokenLen] refers to (live partial while busy). */
@@ -237,6 +240,10 @@ class VoiceActivity : Activity() {
         sphere.setLevel(0f)
         phase = Phase.THINKING
         turnGen++
+        // The streamed reply comes from the SESSION agent — re-apply its
+        // voice (a just-spoken inbox note may have left another agent's
+        // voice active on the engine).
+        tts.applyVoice(voiceNameFor(agentId))
         sphere.setSphereState(SphereState.PROCESSING)
         talk.text = "···"
         talk.setBackgroundResource(R.drawable.btn_talk)
@@ -296,22 +303,32 @@ class VoiceActivity : Activity() {
             }
             io.execute {
                 try {
-                    val fresh = mutableListOf<String>()
+                    val fresh = mutableListOf<PendingNote>()
+                    var dmConsumed = false
                     for (m in api.messagesAfter(threadId, lastMessageId)) {
                         lastMessageId = m.id
+                        dmConsumed = true
                         if (m.senderKind == "agent" && m.body.isNotBlank())
-                            fresh.add(m.body.trim())
+                            fresh.add(PendingNote(m.senderId, m.body.trim()))
                     }
                     val inbox = runCatching {
                         api.messagesAfter(INBOX_THREAD, inboxLastId)
                     }.getOrDefault(emptyList())
+                    var inboxConsumed = false
                     for (m in inbox) {
                         inboxLastId = m.id
+                        inboxConsumed = true
                         if (m.senderKind == "agent" && m.body.isNotBlank()) {
                             val who = agentNames[m.senderId] ?: "An agent"
-                            fresh.add("$who says: ${m.body.trim()}")
+                            fresh.add(PendingNote(m.senderId,
+                                "$who says: ${m.body.trim()}"))
                         }
                     }
+                    // Clear the persisted unread marks (66c) for anything
+                    // this session consumed, or desktop/web show phantom
+                    // unread from voice sessions.
+                    if (dmConsumed) runCatching { api.markRead(threadId) }
+                    if (inboxConsumed) runCatching { api.markRead(INBOX_THREAD) }
                     ui.post {
                         if (fresh.isNotEmpty()) {
                             pendingSpeech.addAll(fresh)
@@ -334,18 +351,33 @@ class VoiceActivity : Activity() {
      * onQueueEmpty when it has played.
      */
     private fun speakNotice(text: String) {
+        tts.applyVoice(voiceNameFor(agentId))
         turnDone = true            // standalone utterance: nothing more coming
         streamText = text
         spokenLen = 0
         drainSpeech(flush = true)
     }
 
+    /**
+     * The voice a message should be READ in: the sender's configured
+     * voice when they have one (VoicePickerActivity), else the session
+     * agent's, else null = engine default. This is what makes an inbox
+     * note from Honey sound like Honey while chatting with PA.
+     */
+    private fun voiceNameFor(senderId: String): String? {
+        Prefs.voiceFor(this, senderId).ifEmpty { null }?.let { return it }
+        if (senderId != agentId)
+            Prefs.voiceFor(this, agentId).ifEmpty { null }?.let { return it }
+        return null
+    }
+
     /** Speak the next pending note — IDLE only. */
     private fun speakPending() {
         if (phase != Phase.IDLE || pendingSpeech.isEmpty()) return
-        val text = pendingSpeech.removeFirst()
+        val note = pendingSpeech.removeFirst()
+        tts.applyVoice(voiceNameFor(note.senderId))
         turnDone = true            // standalone note: nothing more coming
-        streamText = text
+        streamText = note.text
         spokenLen = 0
         drainSpeech(flush = true)  // queues it whole → STREAMING via queueSpeech
     }

@@ -156,6 +156,16 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         runCatching { request("POST", "/api/threads/$threadId/cancel", JSONObject()) }
     }
 
+    /**
+     * POST /api/threads/:id/read — clear the hub's PERSISTED unread
+     * mark (Phase 66c) once this app has consumed (spoken) the new
+     * messages, or the desktop/web clients show phantom unread from
+     * voice sessions. Best effort at the call site.
+     */
+    fun markRead(threadId: String) {
+        request("POST", "/api/threads/$threadId/read", JSONObject())
+    }
+
     private fun parseMessages(arr: JSONArray): List<Message> = buildList {
         for (i in 0 until arr.length()) {
             val m = arr.getJSONObject(i)

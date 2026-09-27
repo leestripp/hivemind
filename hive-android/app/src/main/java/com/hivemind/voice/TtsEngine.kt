@@ -44,6 +44,11 @@ class TtsEngine(
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setOnUtteranceProgressListener(this)
                 Log.i(TAG, "voices available: ${tts?.voices?.size}")
+                // Name list for diagnosing per-agent voice selection on a
+                // given device (names differ across engines/OEMs).
+                tts?.voices
+                    ?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+                    ?.forEach { Log.i(TAG, "en voice: ${it.name}") }
                 ready = true
                 preferredVoiceName?.let { setVoiceByName(it) }
                 val p = pending.toList()
@@ -89,6 +94,21 @@ class TtsEngine(
                 val code = v.name.split('-').dropLast(1).last().uppercase()
                 VoiceOption(v.name, "${v.locale.displayCountry} · $code")
             }
+    }
+
+    /**
+     * Switch voices BETWEEN utterances (per-sender speech): null/empty
+     * resets to the engine default. Pre-ready the name is stored and
+     * applied on init; ready it applies immediately and only affects
+     * utterances QUEUED AFTER this call — the one playing is untouched.
+     */
+    fun applyVoice(name: String?) {
+        if (!ready) { preferredVoiceName = name; return }
+        if (name.isNullOrEmpty()) {
+            tts?.let { it.voice = it.defaultVoice }
+            return
+        }
+        setVoiceByName(name)
     }
 
     /** Select a voice by engine name ("en-us-x-tpf-local"). */

@@ -34,9 +34,18 @@ the reply.
 
 Long-press an agent card → voice picker: single tap samples a voice
 ("Hi, I'm PA — this is my voice."), double tap selects it for that
-agent (Prefs `voice_<agentId>`, applied when the session's TTS engine
-boots). English embedded voices only (offline, q400; 23 on the test
-device). Selections are per-agent — every agent can sound different.
+agent (Prefs `voice_<agentId>`). English embedded voices only
+(offline, q400; 23 on the test device). Selections are per-agent —
+every agent can sound different.
+
+Voices follow the SENDER, not the session (Phase 68): an inbox note
+from Honey is read in Honey's configured voice even mid-chat with PA —
+the engine switches between utterances, never mid-sentence. A sender
+with no configured voice falls back to the session agent's voice, then
+the engine default. DM replies and system notices always use the
+session agent's voice. The app also clears the hub's persisted unread
+mark (`POST /api/threads/:id/read`) for every message it speaks, so
+voice sessions no longer leave phantom unread on desktop/web (66c).
 
 ## Avatars
 
