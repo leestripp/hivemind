@@ -32,7 +32,11 @@ class VoicePickerActivity : Activity() {
     companion object {
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_AGENT_NAME = "agent_name"
-        private const val DOUBLE_TAP_MS = 400L
+        // Generous: measured real-user "double-tap" rhythm on device was
+        // 2+ seconds (tap, listen, tap) — 400 ms read as two lonely
+        // samples and select NEVER fired. 1200 ms still can't collide
+        // with deliberate re-sampling (the sample itself plays ~2.5 s).
+        private const val DOUBLE_TAP_MS = 1200L
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -90,8 +94,12 @@ class VoicePickerActivity : Activity() {
     }
 
     private fun select(opt: TtsEngine.VoiceOption) {
+        android.util.Log.i("HivePicker", "SELECT ${opt.name} for $agentName")
         Prefs.setVoice(this, agentId, opt.name)
         status.text = "✓ ${opt.label} — voice set for $agentName"
+        // Move the ✓ now — without a rebind the old row keeps showing the
+        // checkmark and a successful selection LOOKS like it did nothing.
+        (list.adapter as? android.widget.BaseAdapter)?.notifyDataSetChanged()
         ui.postDelayed({ finish() }, 900)
     }
 

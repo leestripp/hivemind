@@ -33,8 +33,10 @@ the reply.
 ## Per-agent voices
 
 Long-press an agent card → voice picker: single tap samples a voice
-("Hi, I'm PA — this is my voice."), double tap (or long-press) selects
-it for that agent (Prefs `voice_<agentId>`). English embedded voices only
+("Hi, I'm PA — this is my voice."), double tap (1.2 s window — a real
+user's tap-listen-tap rhythm is far slower than the 300 ms platform
+default) or long-press selects it for that agent
+(Prefs `voice_<agentId>`). English embedded voices only
 (offline, q400; 23 on the test device). Selections are per-agent —
 every agent can sound different. Sampling sets the voice, then speaks
 after a 250 ms beat: setVoice() races an immediately-queued speak()
