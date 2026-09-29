@@ -13,6 +13,12 @@ copy it to `~/.config/systemd/user/hive-worker.service`, fill in
 daemon-reload && systemctl --user enable --now hive-worker` and
 `sudo loginctl enable-linger $USER`.
 
+Skipping the `enable` is the classic way to make every agent on the rig
+vanish after a reboot (droplet, 2026-09-29): the hub is enabled but the
+WORKER is not, containers stay stopped, and the roster shows everyone
+offline. Post-boot health check:
+`systemctl --user is-enabled hive-worker && systemctl --user is-active hive-worker`.
+
 The template sets `KillMode=mixed` on purpose: rootless podman's port
 forwarder (pasta) and conmon are descendants of whichever process ran
 `podman start`, and the default `control-group` kill mode reaps them on

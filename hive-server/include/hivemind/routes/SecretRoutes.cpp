@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <vector>
+
 using json = nlohmann::json;
 using hivemind::routes::path_segments;
 using hivemind::routes::send_json;
@@ -14,7 +16,13 @@ using hivemind::routes::send_error;
 
 void register_secret_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
-                            hivemind::SecretStore& secrets) {
+                            hivemind::SecretStore& secrets,
+                            GrantsChangedFn on_grants_changed) {
+    // The callback is a hub respawn push — it must NEVER fail a route.
+    const auto notify = [on_grants_changed](const std::string& agent_id) {
+        if (!on_grants_changed) return;
+        try { on_grants_changed(agent_id); } catch (...) {}
+    };
 
     // ── GET /api/secrets — names + metadata + grants; VALUES NEVER LEAVE ──
     server.get("/api/secrets",
@@ -109,11 +117,17 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
 
     // ── DELETE /api/secrets/:name — remove + cascade grants ───────────────
     server.delete_("/api/secrets/:name",
-        [&secrets](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&secrets, notify](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());   // api secrets :name
             if (seg.size() < 3) { send_error(resp, 400, "bad path"); return; }
+            // Capture grantees BEFORE the cascade remove — each needs a
+            // fresh spawn frame so the revoked env actually disappears.
+            std::vector<std::string> grantees;
+            for (auto& entry : secrets.list())
+                if (entry.name == seg[2]) grantees = entry.agent_ids;
             if (!secrets.remove(seg[2])) { send_error(resp, 404, "not found"); return; }
             send_json(resp, json{{"deleted", seg[2]}});
+            for (const auto& aid : grantees) notify(aid);
         });
 
     // ── GET /api/agents/:id/secrets — granted names ───────────────────────
@@ -127,7 +141,7 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
 
     // ── POST /api/agents/:id/secrets — {name, granted} toggle ─────────────
     server.post("/api/agents/:id/secrets",
-        [&agents, &secrets](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, &secrets, notify](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 4) { send_error(resp, 400, "bad path"); return; }
             if (!agents.get_agent(seg[2])) { send_error(resp, 404, "agent not found"); return; }
@@ -141,5 +155,8 @@ void register_secret_routes(OmniNet::HTTP::Server& server,
                                     : secrets.revoke(name, seg[2]);
             if (granted && !ok) { send_error(resp, 500, "grant failed"); return; }
             send_json(resp, json{{"secret", name}, {"granted", granted}});
+            // Push a fresh spawn frame so the RUNNING agent's env gains/
+            // loses the secret now, not at the next worker restart.
+            notify(seg[2]);
         });
 }

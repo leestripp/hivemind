@@ -310,7 +310,20 @@ int main(int argc, char* argv[]) {
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
     register_skill_routes(server, agent_store);
-    register_secret_routes(server, agent_store, secret_store);
+    register_secret_routes(server, agent_store, secret_store,
+        [&hub, &agent_store](const std::string& agent_id) {
+            // Grant changed → push a fresh spawn frame so the agent's env
+            // picks it up now (fleet restarts the brain on spec change;
+            // no-op when the worker is offline — reconcile covers it on
+            // the next connect).
+            auto a = agent_store.get_agent(agent_id);
+            if (!a) return;
+            try { hub.spawn_agent(*a); }
+            catch (const std::exception& e) {
+                std::cerr << "[hub] grant-change spawn push for "
+                          << agent_id << " failed: " << e.what() << "\n";
+            }
+        });
     register_screen_routes(server, agent_store, auth_store);
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).

@@ -41,6 +41,7 @@ hivemind_test(test_chat_throttle)
 hivemind_test(test_agent_relay)
 hivemind_test(test_user_inbox)
 hivemind_test(test_secret_create)
+hivemind_test(test_secret_routes)
 
 # Phase 43: hub LlmStore (provider/model registry, dispatch resolution).
 hivemind_test(test_llmstore)

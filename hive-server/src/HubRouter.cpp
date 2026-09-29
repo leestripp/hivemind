@@ -286,6 +286,20 @@ void HubRouter::handle_secret_req(const std::string& worker,
         resp["error"] = std::string{"secret_req failed: "} + e.what();
     }
     channel_.send(worker, resp);
+    // The create auto-granted to this agent — the grant write is DB-only,
+    // so push a fresh spawn frame AFTER the resp or the agent never sees
+    // its own secret in env (2026-09-29 vault-loss incident). The fleet
+    // restarts the brain on the spec change; that is the designed
+    // grant-propagation semantic (fleet.cpp vault-grant comment).
+    if (resp["ok"].get<bool>()) {
+        if (auto a = agents_.get_agent(agent_id)) {
+            try { spawn_agent(*a); }
+            catch (const std::exception& e) {
+                std::cerr << "[hub] post-create spawn push for " << agent_id
+                          << " failed: " << e.what() << "\n";
+            }
+        }
+    }
 }
 
 void HubRouter::cancel_agent(const RosterAgent& agent,
