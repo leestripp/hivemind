@@ -84,6 +84,14 @@ class VoiceActivity : Activity() {
      *  a turn only times out when it STALLS, never for being long. */
     private var lastProgressMs = 0L
     private var lastPartialLen = 0
+    /** Partial length a stalled narration gave up at — inboxWatch must not
+     *  re-narrate the same stuck turn until the partial GROWS past this
+     *  (reset when the turn ends / busy goes false). */
+    private var narrationGiveUpLen = 0
+    /** Text already narrated live from the partial feed. When the turn's
+     *  stored message arrives later (stall-abort recovery), only the tail
+     *  past this prefix is spoken — never the whole reply twice. */
+    private var narratedPrefix = ""
     /** First consecutive poll-failure time (0 = polls healthy). Written on
      *  the io thread, read on the UI thread. */
     @Volatile private var netFailSince = 0L
@@ -308,9 +316,25 @@ class VoiceActivity : Activity() {
                     for (m in api.messagesAfter(threadId, lastMessageId)) {
                         lastMessageId = m.id
                         dmConsumed = true
-                        if (m.senderKind == "agent" && m.body.isNotBlank())
-                            fresh.add(PendingNote(m.senderId, m.body.trim()))
+                        if (m.senderKind == "agent" && m.body.isNotBlank()) {
+                            var body = m.body.trim()
+                            // Already narrated live from the partial feed?
+                            // Speak only the tail that was never heard.
+                            val lcp = body.commonPrefixWith(narratedPrefix).length
+                            if (narratedPrefix.isNotEmpty() && lcp >= 40) {
+                                narratedPrefix = ""
+                                body = body.substring(lcp).trim()
+                            }
+                            if (body.isNotEmpty())
+                                fresh.add(PendingNote(m.senderId, body))
+                        }
                     }
+                    // Live-turn watch: a reply STARTED ELSEWHERE (desktop /
+                    // web / routine) streams into the hub's partial feed —
+                    // narrate it as it grows instead of waiting for the
+                    // stored message (2026-09-29: "chunks sit in the live
+                    // feed while the user waits").
+                    val act = runCatching { api.activity(threadId) }.getOrNull()
                     val inbox = runCatching {
                         api.messagesAfter(INBOX_THREAD, inboxLastId)
                     }.getOrDefault(emptyList())
@@ -330,6 +354,11 @@ class VoiceActivity : Activity() {
                     if (dmConsumed) runCatching { api.markRead(threadId) }
                     if (inboxConsumed) runCatching { api.markRead(INBOX_THREAD) }
                     ui.post {
+                        if (act != null) {
+                            if (!act.busy) narrationGiveUpLen = 0
+                            else if (act.partial.length > narrationGiveUpLen)
+                                startIdleNarration()
+                        }
                         if (fresh.isNotEmpty()) {
                             pendingSpeech.addAll(fresh)
                             speakPending()
@@ -342,6 +371,33 @@ class VoiceActivity : Activity() {
                 }
             }
         }
+    }
+
+    /**
+     * Narrate a live turn the USER did not start here (desktop/web/routine
+     * reply on this DM thread): mirror sendTranscript's THINKING setup and
+     * let pollTick/handleTick drive the same sentence-by-sentence streaming
+     * as a voice-started reply. pollTick consumes the final stored message
+     * itself, so inboxWatch never speaks it twice.
+     */
+    private fun startIdleNarration() {
+        if (phase != Phase.IDLE) return
+        turnGen++
+        finalReply.clear()
+        streamText = ""
+        spokenLen = 0
+        lastPartialLen = 0
+        lastProgressMs = System.currentTimeMillis()
+        netFailSince = 0L
+        phase = Phase.THINKING
+        tts.applyVoice(voiceNameFor(agentId))
+        sphere.setSphereState(SphereState.THINKING)
+        talk.text = "\u00b7\u00b7\u00b7"
+        talk.setBackgroundResource(R.drawable.btn_talk)
+        talk.isEnabled = false
+        cancel.visibility = View.VISIBLE
+        status.text = "Replying\u2026"
+        ui.postDelayed(pollTick, POLL_MS)
     }
 
     /**
@@ -402,6 +458,8 @@ class VoiceActivity : Activity() {
             val now = System.currentTimeMillis()
             if (netFailSince != 0L && now - netFailSince > NET_FAIL_TIMEOUT_MS) {
                 tts.stop()
+                narratedPrefix = streamText
+                narrationGiveUpLen = lastPartialLen
                 toIdle("Connection lost")
                 speakNotice("I lost the connection to the hub. " +
                             "Check your network, then ask again.")
@@ -409,6 +467,8 @@ class VoiceActivity : Activity() {
             }
             if (now - lastProgressMs > STALL_TIMEOUT_MS) {
                 tts.stop()
+                narratedPrefix = streamText
+                narrationGiveUpLen = lastPartialLen
                 toIdle("Agent stopped responding")
                 speakNotice("The agent stopped responding partway through. " +
                             "I'll read the full reply out when it arrives.")
