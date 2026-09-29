@@ -243,6 +243,11 @@ std::string ChatService::maybe_fire_relay(const std::string& thread_id,
     }
 }
 
+bool ChatService::agent_busy(const std::string& agent_id) {
+    std::lock_guard<std::mutex> lk(m_);
+    return agent_busy_locked(agent_id);
+}
+
 bool ChatService::agent_busy_locked(const std::string& agent_id) const {
     for (const auto& [_, turns] : live_)
         for (const auto& t : turns)

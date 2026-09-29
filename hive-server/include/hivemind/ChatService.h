@@ -143,6 +143,11 @@ public:
     /// Latest live turn per agent across ALL threads (roster status).
     std::unordered_map<std::string, LiveTurn> agent_activity();
 
+    /// True while the agent has any live (not done, not cancelling) turn
+    /// in any thread. HubRouter defers grant-push respawns on this —
+    /// restarting a busy brain kills the in-flight turn (2026-09-29).
+    bool agent_busy(const std::string& agent_id);
+
     /// Shutdown: stop accepting new messages. (Turns are remote; the
     /// workers outlive us or get their own shutdown path.)
     void quiesce();

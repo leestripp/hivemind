@@ -291,15 +291,11 @@ void HubRouter::handle_secret_req(const std::string& worker,
     // its own secret in env (2026-09-29 vault-loss incident). The fleet
     // restarts the brain on the spec change; that is the designed
     // grant-propagation semantic (fleet.cpp vault-grant comment).
-    if (resp["ok"].get<bool>()) {
-        if (auto a = agents_.get_agent(agent_id)) {
-            try { spawn_agent(*a); }
-            catch (const std::exception& e) {
-                std::cerr << "[hub] post-create spawn push for " << agent_id
-                          << " failed: " << e.what() << "\n";
-            }
-        }
-    }
+    // Phase 67.2: push_spawn defers while the agent is mid-turn — an
+    // immediate respawn here killed the very turn that created the
+    // secret (task_result lost, hub turn wedged until cancel/timeout).
+    if (resp["ok"].get<bool>())
+        push_spawn(agent_id);
 }
 
 void HubRouter::cancel_agent(const RosterAgent& agent,
@@ -316,6 +312,47 @@ void HubRouter::spawn_agent(const RosterAgent& agent) {
                                  "' is offline");
     std::lock_guard<std::mutex> lk(m_);
     states_[agent.id] = "starting";
+}
+
+void HubRouter::push_spawn(const std::string& agent_id) {
+    if (chat_ && chat_->agent_busy(agent_id)) {
+        std::lock_guard<std::mutex> lk(m_);
+        if (pending_spawn_.insert(agent_id).second)
+            std::cerr << "[hub] spawn push for " << agent_id
+                      << " deferred — agent mid-turn\n";
+        return;
+    }
+    if (auto a = agents_.get_agent(agent_id)) {
+        try { spawn_agent(*a); }
+        catch (const std::exception& e) {
+            std::cerr << "[hub] spawn push for " << agent_id
+                      << " failed: " << e.what() << "\n";
+        }
+    }
+}
+
+void HubRouter::flush_pending_spawns() {
+    std::vector<std::string> todo;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (pending_spawn_.empty()) return;
+        todo.assign(pending_spawn_.begin(), pending_spawn_.end());
+    }
+    for (const auto& id : todo) {
+        if (chat_ && chat_->agent_busy(id)) continue;   // still turning
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pending_spawn_.erase(id);
+        }
+        std::cerr << "[hub] flushing deferred spawn push for " << id << "\n";
+        if (auto a = agents_.get_agent(id)) {
+            try { spawn_agent(*a); }
+            catch (const std::exception& e) {
+                std::cerr << "[hub] deferred spawn push for " << id
+                          << " failed: " << e.what() << "\n";
+            }
+        }
+    }
 }
 
 void HubRouter::stop_agent(const RosterAgent& agent) {
@@ -373,6 +410,7 @@ void HubRouter::reconcile_worker(const std::string& worker) {
 void HubRouter::on_heartbeat(const std::string& worker,
                              const json& agents) {
     if (!agents.is_object()) return;
+    flush_pending_spawns();
     std::lock_guard<std::mutex> lk(m_);
     for (auto it = agents.begin(); it != agents.end(); ++it)
         if (it.value().is_string()) states_[it.key()] = it.value().get<std::string>();
@@ -416,6 +454,7 @@ void HubRouter::on_worker_frame(const std::string& worker,
             std::lock_guard<std::mutex> lk(m_);
             tasks_.erase(task);
         }
+        flush_pending_spawns();   // a turn ended — deferred pushes go now
         // Phase 35: worker ships attachment records minus the worker
         // field (it doesn't know its hub-side name) — inject it here so
         // clients can fetch via /api/files/download?worker&path.

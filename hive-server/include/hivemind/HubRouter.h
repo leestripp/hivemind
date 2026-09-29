@@ -19,6 +19,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -110,6 +112,15 @@ public:
     void stop_agent(const RosterAgent& agent);
     /// Spawn one agent on its worker; throws if the worker is offline.
     void spawn_agent(const RosterAgent& agent);
+    /// Grant/model-change respawn push (Phase 67.2): spawn frames restart
+    /// the brain on spec change, so pushing one while the agent is
+    /// MID-TURN kills the turn and wedges the hub-side LiveTurn (no
+    /// task_result ever arrives — the 2026-09-29 "agents stuck until you
+    /// tap stop" regression). When the agent is busy the push is deferred
+    /// and flushed on turn completion / heartbeat; idle agents spawn
+    /// immediately. Never throws (logs instead) — safe for route
+    /// callbacks.
+    void push_spawn(const std::string& agent_id);
     /// Roster delete: worker destroys the container + local state too.
     void remove_agent(const RosterAgent& agent);
 
@@ -142,5 +153,9 @@ private:
     struct PendAppr { std::string worker; std::string agent_id;
                       std::string req_id; };  // req_id = worker-side id
     std::unordered_map<std::string, PendAppr> pend_appr_;
+    // Agents whose grant-push spawn frame is waiting for their current
+    // turn to finish (flush_pending_spawns: task_result + heartbeat).
+    std::unordered_set<std::string> pending_spawn_;
+    void flush_pending_spawns();
     uint64_t next_task_ = 1;
 };
