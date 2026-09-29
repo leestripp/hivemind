@@ -602,6 +602,14 @@ std::string HubRouter::agent_state(const std::string& agent_id) const {
     // rig reconnects, heartbeats refresh states_ with ground truth.
     auto agent = agents_.get_agent(agent_id);
     if (agent && !channel_.is_online(agent->worker)) return "down";
+    // 2026-09-29: ground truth beats self-report. The agent's own
+    // set_status tool can declare "Done"/"Idle" MID-TURN (Scout did this
+    // habitually) and the relay then overwrites the worker's accurate
+    // "acting" — the webUI showed Idle while her turn was still running
+    // ("PA shows Idle but she is still doing something"). A live turn
+    // means busy, whatever the model claims; self-report is only trusted
+    // when no turn is in flight.
+    if (chat_ && chat_->agent_busy(agent_id)) return "acting";
     std::lock_guard<std::mutex> lk(m_);
     auto it = states_.find(agent_id);
     return it != states_.end() ? it->second : "";
