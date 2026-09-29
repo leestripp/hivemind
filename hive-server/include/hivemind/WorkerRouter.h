@@ -60,6 +60,11 @@ public:
     /// resolution passed from server config; the worker runs the same
     /// podman steps). Throws std::runtime_error when the worker is
     /// offline; ScreenResult.error set on worker-side failure.
+    /// §Skills-Global: relay — list a worker's workspace global skills.
+    /// nullopt = worker offline; throws on timeout.
+    static std::optional<WorkerChannel::WsSkillsResult> workspace_skills(
+        const std::string& worker, int timeout_s = 15);
+
     static std::optional<WorkerChannel::ScreenResult> screen_ctl(
         const std::string& agent_id, const std::string& action);
 

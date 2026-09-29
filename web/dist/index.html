@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind</title>
-<link rel="stylesheet" href="css/base.css?v=20260923a">
-  <link rel="stylesheet" href="css/settings.css?v=20260923a">
+<link rel="stylesheet" href="css/base.css?v=20260930a">
+  <link rel="stylesheet" href="css/settings.css?v=20260930a">
 </head>
 <body>
 <div class="app">
@@ -293,16 +293,18 @@
         <div>
           <h2>🧩 Skills</h2>
           <p class="muted">
-            The global skill library — reusable capability packs (SKILL.md) shared
-            across agents. Toggle a chip to enable a skill for that agent; the
-            server symlinks it into the agent's skills dir and the engine discovers
-            it on its next turn. Agent-learned local skills stay between you and
-            the agent — they are not managed here.
+            Two tiers of skills. The <strong>Synced Library</strong> below is the
+            hub-managed, read-only tier: it syncs to every worker and containers
+            mount it at <code>/skills</code> — toggle a chip to enable a skill per
+            agent. <strong>Workspace Global Skills</strong> are the writable tier
+            agents create themselves in <code>/workspace/.agents/skills/</code> on
+            each machine — shared by all agents on that worker, lazy-loaded live,
+            and listed here per machine (agents manage them; this view is read-only).
           </p>
         </div>
       </div>
       <div class="section-head">
-        <h3>Global Library</h3>
+        <h3>Synced Library <span class="muted" style="font-weight:normal">(read-only <code>/skills</code> in every container)</span></h3>
         <div>
           <button id="skills-install" class="btn" title="Clone a repo containing a SKILL.md into the library">Install from Git</button>
           <button id="skills-add" class="btn">+ Add Skill</button>
@@ -312,6 +314,16 @@
         <thead><tr><th>Name</th><th>Trigger / Description</th><th>Version</th><th>Enabled for</th><th></th></tr></thead>
         <tbody id="skills-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
       </table>
+      <div class="section-head" style="margin-top:18px">
+        <h3>🖥 Workspace Global Skills — per machine</h3>
+        <div><button id="skills-ws-refresh" class="btn">↻ Refresh</button></div>
+      </div>
+      <p class="muted" style="margin-top:0">
+        Live from each worker's <code>/workspace/.agents/skills/</code> — writable
+        by every agent on that machine, discovered live (no restarts). To manage
+        one, ask an agent on that machine.
+      </p>
+      <div id="skills-workspace" class="agents-grid"><p class="muted">loading…</p></div>
       <div class="section-head" style="margin-top:18px">
         <h3>🏪 Registry — curated, one-click install</h3>
       </div>
@@ -591,7 +603,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260923a"></script>
+<script type="module" src="js/main.js?v=20260930a"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>

@@ -82,6 +82,12 @@ std::optional<WorkerChannel::FileResult> WorkerRouter::fetch_file(
 }
 
 // ── 30.4: screen passthroughs ───────────────────────────────────────────
+std::optional<WorkerChannel::WsSkillsResult> WorkerRouter::workspace_skills(
+    const std::string& worker, int timeout_s) {
+    if (!g_channel) return std::nullopt;
+    return g_channel->list_workspace_skills(worker, timeout_s);
+}
+
 std::optional<WorkerChannel::ScreenResult> WorkerRouter::screen_ctl(
         const std::string& agent_id, const std::string& action) {
     if (!g_agents || !g_channel) return std::nullopt;

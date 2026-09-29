@@ -921,6 +921,52 @@ int main(int argc, char* argv[]) {
                                       << sy.files << " files)\n";
                         }
                         }   // skill_end
+                } else if (op == "workspace_skills") {
+                    // §Skills-Global (2026-09-30): list THIS rig's shared
+                    // workspace global skills (/workspace/.agents/skills).
+                    // Synchronous reply — the server blocks on it.
+                    const std::string id = frame.value("id", "");
+                    const fs::path root = fs::path{std::getenv("HOME")} /
+                        ".local/share/hive-worker/workspace/.agents/skills";
+                    json skills = json::array();
+                    std::error_code ec;
+                    if (fs::is_directory(root, ec)) {
+                        for (auto& e : fs::directory_iterator(root, ec)) {
+                            if (ec) break;
+                            if (!e.is_directory(ec)) continue;
+                            const fs::path md = e.path() / "SKILL.md";
+                            if (!fs::exists(md, ec)) continue;
+                            std::ifstream in(md);
+                            std::string name, desc, ver, line;
+                            bool in_fm = false, got_fm = false;
+                            // Minimal flat-key frontmatter parse (first ---
+                            // block only) — enough for the catalog view.
+                            while (std::getline(in, line)) {
+                                if (line == "---") {
+                                    if (!got_fm) { in_fm = true; got_fm = true; continue; }
+                                    break;  // second --- ends frontmatter
+                                }
+                                if (!in_fm) continue;
+                                const auto colon = line.find(':');
+                                if (colon == std::string::npos) continue;
+                                std::string k = line.substr(0, colon);
+                                std::string v = line.substr(colon + 1);
+                                const auto b = v.find_first_not_of(" \t");
+                                if (b != std::string::npos) v = v.substr(b);
+                                if (k == "name") name = v;
+                                else if (k == "description") desc = v;
+                                else if (k == "version") ver = v;
+                            }
+                            skills.push_back({
+                                {"name", name.empty() ? e.path().filename().string() : name},
+                                {"description", desc},
+                                {"version", ver},
+                                {"dir", e.path().filename().string()}});
+                        }
+                    }
+                    try { send_frame({{"op","workspace_skills_result"},
+                                      {"id",id},{"skills",skills}}); }
+                    catch (...) {}
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

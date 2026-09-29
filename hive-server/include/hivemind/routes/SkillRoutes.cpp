@@ -6,6 +6,9 @@
 #include "hivemind/AgentTools.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/AgentStore.h"
+#include "hivemind/WorkerRouter.h"
+
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -139,6 +142,40 @@ void register_skill_routes(OmniNet::HTTP::Server& server,
     // ── GET /api/skills/registry — curated marketplace catalog (Phase 21) ──
     // Bundled JSON index of known-good skill repos; entries are annotated
     // with installed=true when the name is already in the global library.
+    // §Skills-Global (2026-09-30): per-worker workspace global skills.
+    // Relay-only — the hub asks each worker for its
+    // /workspace/.agents/skills contents and persists nothing. Workers
+    // are derived from the roster's worker field (machines that run
+    // agents); offline workers report online:false with empty skills.
+    server.get("/api/skills/workspace",
+               [&agents](const OmniNet::HTTP::Request&,
+                         OmniNet::HTTP::Response& res) {
+        std::set<std::string> worker_names;
+        for (const auto& a : agents.list_agents()) {
+            worker_names.insert(a.worker.empty() ? "local" : a.worker);
+        }
+        json workers = json::array();
+        for (const auto& w : worker_names) {
+            json wj = {{"worker", w}};
+            try {
+                auto r = WorkerRouter::workspace_skills(w, 10);
+                if (r) {
+                    wj["online"] = true;
+                    wj["skills"] = r->skills;
+                } else {
+                    wj["online"] = false;
+                    wj["skills"] = json::array();
+                }
+            } catch (const std::exception& e) {
+                wj["online"] = true;   // reachable, but the relay failed
+                wj["skills"] = json::array();
+                wj["error"] = e.what();
+            }
+            workers.push_back(std::move(wj));
+        }
+        send_json(res, {{"workers", workers}});
+    });
+
     server.get("/api/skills/registry",
         [](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             std::ifstream f(find_registry_file());

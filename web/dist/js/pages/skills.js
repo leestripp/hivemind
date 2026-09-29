@@ -1,8 +1,9 @@
-// js/pages/skills.js — global skills library management.
-// Server side: SkillRoutes manages ~/.local/share/hivemind/skills/ and
-// per-agent enable via symlinks into <agent_dir>/.agents/skills/. Local
-// (agent-learned) skills stay between the user and the agent — this page
-// only manages the GLOBAL library and who it's enabled for.
+// js/pages/skills.js — skills management (two tiers, §Skills-Global).
+// Tier 1 "Synced Library": SkillRoutes manages ~/.local/share/hivemind/skills/
+// (synced to workers, mounted read-only at /skills) + per-agent enable.
+// Tier 2 "Workspace Global Skills": per-worker /workspace/.agents/skills/,
+// agent-writable and lazy-loaded; fetched live via GET /api/skills/workspace
+// (hub relays to each worker, persists nothing) — read-only view here.
 import { API } from '../api.js';
 import { $, esc } from '../util.js';
 
@@ -18,6 +19,47 @@ async function loadAll() {
   skills = s.skills || [];
   agents = a.agents || [];
   renderSkills();
+}
+
+// ── workspace global skills (per worker, live relay) ──────────────────
+async function loadWorkspaceSkills() {
+  const host = $('skills-workspace');
+  host.innerHTML = '<p class="muted">loading…</p>';
+  try {
+    const d = await API.get('/api/skills/workspace');
+    const workers = d.workers || [];
+    if (!workers.length) {
+      host.innerHTML = '<p class="muted">No workers with agents yet.</p>';
+      return;
+    }
+    host.innerHTML = '';
+    for (const w of workers) {
+      const card = document.createElement('div');
+      card.className = 'agent-card';
+      const list = (w.skills || []);
+      const rows = list.length
+        ? list.map(sk =>
+            `<div style="margin:4px 0"><strong>${esc(sk.name)}</strong>` +
+            (sk.version ? ` <span class="badge">v${esc(sk.version)}</span>` : '') +
+            `<div class="muted">${esc(sk.description || '—')}</div></div>`).join('')
+        : '<p class="muted">none yet — agents create them under /workspace/.agents/skills/</p>';
+      const status = w.online === false
+        ? '<span class="badge">offline</span>'
+        : '<span class="badge">live</span>';
+      card.innerHTML = `
+        <div class="agent-top">
+          <div class="agent-id-block">
+            <div class="agent-name">🖥 ${esc(w.worker)}</div>
+            <div class="agent-role">${list.length} skill(s) ${status}</div>
+          </div>
+        </div>
+        ${w.error ? `<p class="muted">relay error: ${esc(w.error)}</p>` : ''}
+        ${w.online === false ? '<p class="muted">worker offline</p>' : rows}`;
+      host.appendChild(card);
+    }
+  } catch (e) {
+    host.innerHTML = `<p class="muted">workspace skills failed: ${esc(e.message)}</p>`;
+  }
 }
 
 // ── table ─────────────────────────────────────────────────────────────
@@ -56,6 +98,8 @@ function closeModal(id) { $(id).classList.add('hidden'); }
 
 // ── events ────────────────────────────────────────────────────────────
 export function initSkills() {
+  $('skills-ws-refresh').addEventListener('click', () => loadWorkspaceSkills());
+
   $('skills-install').addEventListener('click', () => {
     $('skill-install-form').reset();
     openModal('skill-install-modal');
@@ -187,4 +231,5 @@ async function loadRegistry() {
 export function enterSkills() {
   loadAll().catch(e => alert(e.message));
   loadRegistry();
+  loadWorkspaceSkills();
 }

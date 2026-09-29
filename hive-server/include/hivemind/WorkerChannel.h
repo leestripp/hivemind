@@ -91,6 +91,14 @@ public:
                                          const std::string& path,
                                          int timeout_s = 30);
 
+    /// §Skills-Global: synchronous listing of a worker's workspace global
+    /// skills (/workspace/.agents/skills). Relay-only — the hub persists
+    /// nothing. nullopt when the worker is offline; throws on timeout.
+    struct WsSkillsResult { bool ok = false; nlohmann::json skills;
+                            std::string error; };
+    std::optional<WsSkillsResult> list_workspace_skills(
+        const std::string& worker, int timeout_s = 15);
+
     /// Phase 30.4: synchronous screen control on the worker (the worker
     /// runs the podman steps ContainerManager runs locally). image +
     /// resolution are passed through from server config.
@@ -249,6 +257,15 @@ private:
         ScreenResult result;
     };
     std::unordered_map<std::string, std::shared_ptr<ScreenJob>> screen_jobs_;
+
+    // §Skills-Global: in-flight workspace_skills requests (id → result slot)
+    struct WsSkillsJob {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        WsSkillsResult result;
+    };
+    std::unordered_map<std::string, std::shared_ptr<WsSkillsJob>> ws_skills_jobs_;
 
     // worker → default model name (from hello "default_model")
     std::unordered_map<std::string, std::string> defaults_;

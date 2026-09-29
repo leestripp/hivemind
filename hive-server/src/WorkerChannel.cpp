@@ -425,6 +425,21 @@ void WorkerChannel::handle(Connection& ws) {
                 sj->done = true;
                 sj->cv.notify_all();
             }
+        } else if (op == "workspace_skills_result") {
+            std::shared_ptr<WsSkillsJob> wj;
+            {
+                std::lock_guard lk(m_);
+                auto it = ws_skills_jobs_.find(frame.value("id", ""));
+                if (it != ws_skills_jobs_.end()) wj = it->second;
+            }
+            if (wj) {
+                std::lock_guard jl(wj->m);
+                wj->result.ok = true;
+                wj->result.skills = frame.value("skills", json::array());
+                wj->result.error = frame.value("error", "");
+                wj->done = true;
+                wj->cv.notify_all();
+            }
         } else if (op == "model_result") {
             std::shared_ptr<ModelJob> mj;
             {
@@ -637,6 +652,36 @@ WorkerChannel::screen_ctl(const std::string& worker, const std::string& agent,
         screen_jobs_.erase(id);
     }
     return sj->result;
+}
+
+// ── §Skills-Global: workspace global skills listing ────────────────────
+std::optional<WorkerChannel::WsSkillsResult>
+WorkerChannel::list_workspace_skills(const std::string& worker, int timeout_s) {
+    if (!is_online(worker)) return std::nullopt;
+    const std::string id = "ws-" + std::to_string(next_job_++);
+    auto wj = std::make_shared<WsSkillsJob>();
+    {
+        std::lock_guard lk(m_);
+        ws_skills_jobs_[id] = wj;
+    }
+    if (!send(worker, {{"op","workspace_skills"},{"id",id}})) {
+        std::lock_guard lk(m_);
+        ws_skills_jobs_.erase(id);
+        return std::nullopt;
+    }
+    std::unique_lock lk(wj->m);
+    if (!wj->cv.wait_for(lk, std::chrono::seconds(timeout_s),
+                         [&]{ return wj->done; })) {
+        std::lock_guard g(m_);
+        ws_skills_jobs_.erase(id);
+        throw std::runtime_error("worker workspace_skills timed out");
+    }
+    auto result = wj->result;
+    {
+        std::lock_guard g(m_);
+        ws_skills_jobs_.erase(id);
+    }
+    return result;
 }
 
 // ── 30.4: streams ───────────────────────────────────────────────────────
