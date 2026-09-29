@@ -1,72 +1,17 @@
-# Containerfile.hive-agent-browser — computer-use variant (Phase 25: X11).
-# Xvfb + x11vnc + noVNC/websockify + openbox (window manager) + playwright's
-# chromium. Proven recipe — same stack as Anthropic's computer-use demo
-# (they use mutter as the WM; openbox chosen here as the bulletproof
-# container option — mutter's standalone X11 mode is gone in GNOME 50).
+# Containerfile.hive-agent-browser — LEGACY ALIAS (Phase 68c).
 #
-# Phase 24 tried GNOME-on-Wayland (mutter --headless + gnome-remote-desktop
-# VNC) — blocked: GRD dropped clients pre-greeting. Trail: docs/computer-use.md.
+# The browser capability (Xvfb, Chrome, playwright, browser_driver.py)
+# moved into the BASE image so EVERY agent has browser_* tools
+# permanently — the :browser pin was lost three times (2026-09-26/27/29),
+# stranding browser-critical agents with "driver not installed". This
+# tag now exists ONLY because the worker's screen-pin logic selects
+# :browser for screen-shared agents; content is identical to :latest.
 #
 # Build:  podman build -t localhost/hive-agent:browser \
 #             -f hive-server/data/Containerfile.hive-agent-browser .
-# Context is the REPO ROOT (.) — the COPY sources below are
-# root-prefixed (hive-server/data/hive-screen.sh ...). Building from
-# hive-server/data FAILS on those COPYs (stale header fixed 2026-09-28).
+# Context is the REPO ROOT (.) — same as the base.
 
 FROM localhost/hive-agent:latest
 
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        xvfb \
-        x11vnc \
-        openbox \
-        novnc \
-        websockify \
-        fonts-dejavu-core \
-        xfce4-terminal \
-        xterm \
-        htop \
-        scrot \
-    && rm -rf /var/lib/apt/lists/*
-
-# Browser: Google Chrome STABLE (official .deb — real production browser).
-# Two other options both fail in containers: Ubuntu's chromium-browser deb
-# is a snap stub (snaps can't run), and playwright's bundled build is
-# "Chromium for Testing" — branded as such, and some sites (Google) refuse
-# sign-in on automation/testing builds, which breaks the login-handoff
-# flow that is the entire point of the live screen.
-RUN curl -sSL -o /tmp/chrome.deb \
-        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && apt-get update && apt-get install -y /tmp/chrome.deb \
-    && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
-
-# Playwright stays as the DRIVER (and its chromium as last-resort
-# fallback): PyPI wheel — the Ubuntu python3-playwright deb strips the
-# node driver. ENV must precede the RUN or browsers land in /root/.cache.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN pip install --no-cache-dir --break-system-packages playwright \
-    && playwright install chromium --with-deps \
-    && chmod -R a+rX /opt/ms-playwright
-
-COPY hive-server/data/hive-screen.sh /usr/local/bin/hive-screen.sh
-COPY hive-server/data/hive-chrome.sh /usr/local/bin/hive-chrome.sh
-RUN chmod +x /usr/local/bin/hive-screen.sh /usr/local/bin/hive-chrome.sh
-# Desktop menu (right-click in noVNC): Chrome relaunch + terminals.
-# System-wide path — the per-agent home bind mount can't hide it.
-COPY hive-server/data/openbox-menu.xml /etc/xdg/openbox/menu.xml
-# Computer-use driver (Phase 47): the agent's browser_* tools invoke this
-# in-container — persistent Chromium over CDP :9222 on the Xvfb display.
-# /usr/local/bin, NOT /home/hive — the agent home is a per-agent bind mount
-# at runtime, which would mask the driver (browser_* tools then report
-# "driver not installed").
-COPY hive-server/data/browser_driver.py /usr/local/bin/browser_driver.py
-RUN chmod 0755 /usr/local/bin/browser_driver.py
-
-USER hive
-WORKDIR /workspace
-
-# Xvfb :99, x11vnc :5900 (password-protected), noVNC/websockify :6080.
-# Stack starts on demand via hive-screen.sh (container_exec).
-ENV DISPLAY=:99
 EXPOSE 6080
 CMD ["sleep", "infinity"]

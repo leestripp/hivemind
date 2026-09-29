@@ -1,6 +1,6 @@
 # Containerfile.hive-agent — base image for HiveMind agent sandboxes.
 # Built per machine on first use:  podman build -t localhost/hive-agent:latest \
-#     -f hive-server/data/Containerfile.hive-agent hive-server/data
+#     -f hive-server/data/Containerfile.hive-agent .   (context = REPO ROOT)
 #
 # The agent runs as named user `hive` with passwordless sudo so it can
 # install CLI tools mid-task (apt/pip/etc). Work happens in /workspace
@@ -55,6 +55,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
                 /usr/local/bin/hive-agent \
     && chmod 0755 /usr/local/bin/hive-agent \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Browser capability (Phase 68c): baked into BASE ------------------
+# EVERY agent gets browser_* tools. The :browser variant used to carry
+# this layer, but its pin was lost three times (2026-09-26/27/29), each
+# time stranding browser-critical agents with "driver not installed".
+# The stack starts ON DEMAND (browser_driver.py auto-runs hive-screen.sh
+# on first use), so idle agents pay no RAM for it.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb \
+        x11vnc \
+        openbox \
+        novnc \
+        websockify \
+        fonts-dejavu-core \
+        xfce4-terminal \
+        xterm \
+        htop \
+        scrot \
+    && rm -rf /var/lib/apt/lists/*
+
+# Google Chrome STABLE (official .deb — real production browser; sites
+# reject playwright's "Chromium for Testing" on sign-in flows).
+RUN curl -sSL -o /tmp/chrome.deb \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update && apt-get install -y /tmp/chrome.deb \
+    && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
+
+# Playwright DRIVER (+ its chromium as last-resort fallback).
+# ENV must precede the RUN or browsers land in /root/.cache.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN pip install --no-cache-dir --break-system-packages playwright \
+    && playwright install chromium --with-deps \
+    && chmod -R a+rX /opt/ms-playwright
+
+COPY hive-server/data/hive-screen.sh /usr/local/bin/hive-screen.sh
+COPY hive-server/data/hive-chrome.sh /usr/local/bin/hive-chrome.sh
+RUN chmod +x /usr/local/bin/hive-screen.sh /usr/local/bin/hive-chrome.sh
+COPY hive-server/data/openbox-menu.xml /etc/xdg/openbox/menu.xml
+# Computer-use driver — /usr/local/bin, NOT /home/hive (the per-agent
+# home bind mount would mask it).
+COPY hive-server/data/browser_driver.py /usr/local/bin/browser_driver.py
+RUN chmod 0755 /usr/local/bin/browser_driver.py
+
+ENV DISPLAY=:99
 
 USER hive
 WORKDIR /workspace
