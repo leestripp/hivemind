@@ -88,20 +88,24 @@ void SkillManager::init_after_settings() {
         // SettingsStore not available yet, use defaults
     }
 
-    // Add default skill directories.
+    // Add default skill directories (unless the host replaced the scan
+    // list — §Skills-Global: hive-agent containers exclude these
+    // container-local dirs and pass their two tiers explicitly).
     // Discovery order:
     //   1. <data_root>/skills/               - daedalus-specific user-global skills
     //      (XDG_DATA_HOME/hive-brain/skills, default
     //      ~/.local/share/hive-brain/skills)
     //   2. ~/.agents/skills/                - Anthropic Agent Skills standard (user-global)
     //   3. .agents/skills/                  - Anthropic Agent Skills standard (project-local)
-    const char* home = std::getenv("HOME");
-    settings_.directories.push_back(
-        hive::Paths::global().global_skills_dir().string());
-    if (home) {
-        settings_.directories.push_back(std::string(home) + "/.agents/skills/");
+    if (include_default_directories) {
+        const char* home = std::getenv("HOME");
+        settings_.directories.push_back(
+            hive::Paths::global().global_skills_dir().string());
+        if (home) {
+            settings_.directories.push_back(std::string(home) + "/.agents/skills/");
+        }
+        settings_.directories.push_back(".agents/skills/");
     }
-    settings_.directories.push_back(".agents/skills/");
 }
 
 SkillManager::~SkillManager() {
@@ -189,17 +193,31 @@ std::vector<Skill> SkillManager::discover_skills(const std::filesystem::path& di
             if (!entry.is_directory()) {
                 continue;
             }
-            
+
             auto skill_path = entry.path();
-            auto skill = load_skill(skill_path);
-            if (skill.has_value() && skill->is_valid()) {
-                skills.push_back(*skill);
-                // Also cache by name
-                // §fix (2026-07-18): locked — discover_all_skills() calls
-                // this on ThreadPool workers concurrently.
+            // §Skills-Global: a dropped skill is never silent — record
+            // WHY it was skipped so the discover_skills tool can surface
+            // it (Chief's 15-hour invisible-skill anomaly, 2026-09-29).
+            std::string skip_reason;
+            auto skill = load_skill(skill_path, &skip_reason);
+            if (!skill.has_value()) {
                 std::lock_guard<std::mutex> lk(cache_mutex_);
-                cached_skills_[skill->metadata.name] = *skill;
+                last_scan_skipped_.push_back({skill_path,
+                    skip_reason.empty() ? "unloadable" : skip_reason});
+                continue;
             }
+            if (!skill->is_valid()) {
+                std::lock_guard<std::mutex> lk(cache_mutex_);
+                last_scan_skipped_.push_back({skill_path,
+                    "frontmatter missing name or description"});
+                continue;
+            }
+            skills.push_back(*skill);
+            // Also cache by name
+            // §fix (2026-07-18): locked — discover_all_skills() calls
+            // this on ThreadPool workers concurrently.
+            std::lock_guard<std::mutex> lk(cache_mutex_);
+            cached_skills_[skill->metadata.name] = *skill;
         }
     } catch (const std::exception& e) {
         LOG_CERR(INFO, "Error discovering skills in " << directory << ": " << e.what());
@@ -229,6 +247,7 @@ std::vector<Skill> SkillManager::discover_all_skills() {
             auto skills = discover_skills(dir);
             all_skills.insert(all_skills.end(), skills.begin(), skills.end());
         }
+        apply_ordered_priority(all_skills);
         return all_skills;
     }
 
@@ -252,50 +271,77 @@ std::vector<Skill> SkillManager::discover_all_skills() {
         auto skills = fut.get();
         all_skills.insert(all_skills.end(), skills.begin(), skills.end());
     }
+    apply_ordered_priority(all_skills);
     return all_skills;
+}
+
+// §Skills-Global: the ThreadPool workers write the cache as they finish,
+// so a name present in TWO directories used to be won by whichever scan
+// completed last — nondeterministic. Re-apply the collected results in
+// directory order so a LATER (higher-priority) directory always shadows
+// an earlier one (the workspace global dir is listed after /skills).
+void SkillManager::apply_ordered_priority(const std::vector<Skill>& ordered) {
+    std::lock_guard<std::mutex> lk(cache_mutex_);
+    for (const auto& skill : ordered) {
+        cached_skills_[skill.metadata.name] = skill;
+    }
+    last_scan_ = std::chrono::steady_clock::now();
 }
 
 // =========================================================================
 // Loading - Reading skill content
 // =========================================================================
 
-std::optional<Skill> SkillManager::load_skill(const std::filesystem::path& skill_path) {
-    if (!validate_skill(skill_path)) {
+std::optional<Skill> SkillManager::load_skill(const std::filesystem::path& skill_path,
+                                              std::string* skip_reason) {
+    // §Skills-Global: every early return sets *skip_reason (when provided)
+    // so discovery can surface WHY a directory was dropped instead of
+    // silently omitting it.
+    auto why = [&](const char* r) { if (skip_reason) *skip_reason = r; };
+    // NB: not validate_skill() — that helper folds "no SKILL.md" into a
+    // false return, which would mask the real skip reason.
+    if (!std::filesystem::exists(skill_path) ||
+        !std::filesystem::is_directory(skill_path)) {
+        why("not a directory");
         return std::nullopt;
     }
-    
+
     Skill skill;
     skill.path = skill_path;
-    
+
     // Read SKILL.md
     auto skill_md_path = skill_path / "SKILL.md";
     if (!std::filesystem::exists(skill_md_path)) {
+        why("no SKILL.md");
         return std::nullopt;
     }
-    
+
     try {
         std::ifstream file(skill_md_path);
         if (!file.is_open()) {
+            why("SKILL.md not readable");
             return std::nullopt;
         }
-        
+
         std::stringstream buffer;
         buffer << file.rdbuf();
         std::string content = buffer.str();
         file.close();
-        
+
         // Parse frontmatter and content
         auto parsed = parse_frontmatter(content);
         if (!parsed.has_value()) {
+            why("SKILL.md missing --- YAML frontmatter ---");
             return std::nullopt;
         }
-        
+
         auto frontmatter = parsed->first;
         skill.instructions = parsed->second;
-        
+
         // Parse YAML frontmatter
         auto metadata = parse_skill_metadata(frontmatter);
         if (!metadata.has_value()) {
+            why("frontmatter unparseable (need name: and description:)");
             return std::nullopt;
         }
         skill.metadata = *metadata;
@@ -307,34 +353,42 @@ std::optional<Skill> SkillManager::load_skill(const std::filesystem::path& skill
         
     } catch (const std::exception& e) {
         LOG_CERR(INFO, "Error loading skill from " << skill_path << ": " << e.what());
+        why("exception while reading SKILL.md");
         return std::nullopt;
     }
 }
 
 std::optional<Skill> SkillManager::load_skill_by_name(const std::string& skill_name) {
-    // First check cache
-    auto it = cached_skills_.find(skill_name);
-    if (it != cached_skills_.end()) {
-        return it->second;
-    }
-    
-    // Search in all directories
+    // §Skills-Global (2026-09-30): disk is the source of truth — scan the
+    // directories FIRST so a skill created or EDITED at runtime is loaded
+    // fresh even when the cache is stale (lazy loading; load-by-name is
+    // the agents' guaranteed-instant path, per Chief's field report).
+    // Iterate in REVERSE so later (higher-priority) directories win,
+    // matching discover_skills' cache-overwrite order.
     auto directories = expand_skill_directories();
-    for (const auto& dir : directories) {
-        if (!std::filesystem::exists(dir)) {
+    for (auto dit = directories.rbegin(); dit != directories.rend(); ++dit) {
+        if (!std::filesystem::exists(*dit)) {
             continue;
         }
-        
-        auto skill_path = dir / skill_name;
+
+        auto skill_path = *dit / skill_name;
         if (std::filesystem::exists(skill_path) && std::filesystem::is_directory(skill_path)) {
             auto skill = load_skill(skill_path);
-            if (skill.has_value()) {
+            if (skill.has_value() && skill->is_valid()) {
+                std::lock_guard<std::mutex> lk(cache_mutex_);
                 cached_skills_[skill_name] = *skill;
                 return skill;
             }
         }
     }
-    
+
+    // Not on disk (transient FS issue, or a name only the cache knows
+    // from an earlier scan): fall back to the cache.
+    std::lock_guard<std::mutex> lk(cache_mutex_);
+    auto it = cached_skills_.find(skill_name);
+    if (it != cached_skills_.end()) {
+        return it->second;
+    }
     return std::nullopt;
 }
 
@@ -535,8 +589,29 @@ void SkillManager::add_skill_directory(const std::filesystem::path& directory) {
 // =========================================================================
 
 void SkillManager::refresh_cache() {
-    cached_skills_.clear();
-    discover_all_skills();
+    {
+        std::lock_guard<std::mutex> lk(cache_mutex_);
+        cached_skills_.clear();
+        last_scan_skipped_.clear();
+    }
+    discover_all_skills();  // stamps last_scan_
+}
+
+bool SkillManager::maybe_refresh_cache(std::chrono::seconds max_age) {
+    {
+        std::lock_guard<std::mutex> lk(cache_mutex_);
+        if (last_scan_ != std::chrono::steady_clock::time_point{} &&
+            std::chrono::steady_clock::now() - last_scan_ < max_age) {
+            return false;   // fresh enough
+        }
+    }
+    refresh_cache();
+    return true;
+}
+
+std::vector<SkillManager::SkippedSkill> SkillManager::get_last_scan_skipped() const {
+    std::lock_guard<std::mutex> lk(cache_mutex_);
+    return last_scan_skipped_;
 }
 
 bool SkillManager::validate_skill(const std::filesystem::path& skill_path) const {

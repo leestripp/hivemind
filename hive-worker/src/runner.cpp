@@ -80,6 +80,7 @@ another rig to "just read it from /workspace".
 | `scratch/` | Temporary working files. May be cleaned at any time — nothing here is kept. |
 | `archive/` | Finished/inactive work. Move, don't delete. |
 | `.hivemind/` | Server-owned (prompts, internal state) — agents don't touch. |
+| `.agents/skills/` | GLOBAL skill library shared by every agent on this worker. Writable — to create a shared skill, add `<skill-name>/SKILL.md` here; it is picked up live (no restart). The `/skills` mount is the read-only built-in library. |
 
 ## Departments
 
@@ -119,6 +120,7 @@ void seed_workspace(const std::string& workspace_dir) {
         "departments/engineering", "departments/executive",
         "departments/marketing", "departments/research",
         "projects", "inbox", "attachments", "scratch", "archive",
+        ".agents/skills",   // §Skills-Global: writable shared skill library
     };
     for (const char* d : kDirs)
         fs::create_directories(ws / d, ec);

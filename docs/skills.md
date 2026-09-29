@@ -19,16 +19,36 @@ location inside every container.
 ## The worker side
 
 - Lands the library at `~/.local/share/hive-worker/skills/`.
-- Bind-mounts it read-only into every agent container at hive-brain'
-  global skills dir (`Paths::global().global_skills_dir()` — the XDG
-  path hive-brain scans automatically).
+- Bind-mounts it read-only into every agent container at `/skills`
+  (`HIVEMIND_SKILLS_DIR`). Agents **cannot** modify it — this is the
+  built-in, hub-managed tier.
 - Per-agent enable/disable is roster metadata; the hub passes each
-  agent's enabled list at spawn (mount subset or env filter — hive-brain
-  `skills` config).
-- Additionally, `/workspace/.agents/skills/` (project-local) is scanned
-  automatically by every agent whose project root is the shared
-  /workspace — agents can create and share skills among themselves with
-  no hub involvement.
+  agent's enabled list at spawn (env filter — hive-brain `skills`
+  config).
+
+## The workspace global tier (§Skills-Global, 2026-09-30)
+
+`/workspace/.agents/skills/` is THE writable global skill library,
+shared by every agent on the worker via the shared `/workspace` mount.
+Agents create shared skills here themselves — write
+`<skill-name>/SKILL.md`, no hub involvement, no restart:
+
+- **Lazy-loaded at runtime**: `discover_skills` performs a live rescan
+  on every call, the per-turn system-prompt catalog refreshes when the
+  cache is older than 30 s (`maybe_refresh_cache`), and `load_skill`
+  reads disk first — so creations AND edits are picked up immediately.
+- **Skip reasons are surfaced**: a directory dropped from the catalog
+  (no SKILL.md, bad frontmatter, missing name/description) appears in
+  `discover_skills`' `skipped` list with the reason — never silent.
+- **Priority**: the workspace global is scanned after `/skills`, so a
+  workspace skill shadows a same-named library skill (deterministically,
+  even under parallel discovery).
+- **Per-rig**: like the rest of `/workspace`, each worker has its own
+  independent global tier. There is no cross-rig sync — that is by
+  design.
+- `~/.agents/skills/` (container home) remains on the scan list as a
+  PRIVATE per-agent tier, but it dies with the container — anything
+  shared must go to `/workspace/.agents/skills/`.
 
 ## Why this just works now
 

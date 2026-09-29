@@ -220,6 +220,25 @@ Key architectural mapping:
    ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
    keys (see `HiveWindow::follow_system_theme`).
 
+## Agent Skills (§Skills-Global, 2026-09-30)
+
+Two tiers inside every agent container:
+
+- `/skills` — read-only synced library (hub → worker sync, bind-mounted
+  RO, `HIVEMIND_SKILLS_DIR`). Agents cannot modify it; keep it that way.
+- `/workspace/.agents/skills/` — THE writable GLOBAL library, shared by
+  every agent on the worker (seeded by `seed_workspace`). Agents create
+  shared skills here. Lazy-loaded: `discover_skills` live-rescans, the
+  per-turn catalog refreshes via `SkillManager::maybe_refresh_cache`
+  (30 s), `load_skill_by_name` reads disk first. Skipped dirs surface in
+  `discover_skills`' `skipped` list with reasons. Workspace dir is
+  scanned LAST so its skills shadow same-named library ones
+  (`apply_ordered_priority` — parallel discovery is deterministic).
+- `~/.agents/skills/` = private container-home tier (dies with the
+  container). Fine for personal skills; never the place for shared ones.
+
+Regression coverage: `hive-agent/tests/test_skill_lazy_discovery.cpp`.
+
 ## Messaging (Phase 66)
 
 Agent-to-agent messaging is a DURABLE queue (`deliveries.db`,

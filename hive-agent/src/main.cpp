@@ -27,7 +27,7 @@
 //   HIVEMIND_MAX_CONTEXT / HIVEMIND_TEMPERATURE
 //   HIVEMIND_SYSTEM_PROMPT or HIVEMIND_SYSTEM_PROMPT_FILE
 //   HIVEMIND_AUTO_APPROVE=1      (default: approvals become events)
-//   HIVEMIND_SKILLS_DIR          (extra read-only skills mount;
+//   HIVEMIND_SKILLS_DIR          (read-only synced skills library mount;
 //                                 ':'-separated for several)
 //   HIVEMIND_MCP_SERVERS         (JSON array; seeded into hive-agent.db)
 //   HIVEMIND_AGENT_HOME       (default <project>/.daedalus/daedalus-<Name>)
@@ -491,9 +491,18 @@ int main(int argc, char** argv) {
     cfg.stream = true;
     cfg.max_agent_iterations = 600;
 
-    // Skills: hive-brain auto-scans <project>/.agents/skills/ (project-local,
-    // shared by every agent on the worker because /workspace is shared).
-    // The read-only synced library comes via HIVEMIND_SKILLS_DIR mounts.
+    // Skills (§Skills-Global, 2026-09-30): two tiers.
+    //   1. HIVEMIND_SKILLS_DIR (=/skills)   - read-only synced library,
+    //     agents cannot modify it (baked skills stay as-is).
+    //   2. <project>/.agents/skills/        - THE writable global skills
+    //     dir, shared by every agent on this worker via the shared
+    //     /workspace mount. Listed LAST so a workspace skill shadows a
+    //     same-named library skill. Created here best-effort (the worker
+    //     also seeds it) and lazy-loaded at runtime: discovery re-scans,
+    //     so skills agents create or edit are picked up without a restart.
+    // ~/.agents/skills (container home) stays on the default scan list as
+    // a PRIVATE per-agent tier — fine for personal skills, but it dies
+    // with the container, so anything shared must go to the workspace dir.
     {
         std::vector<fs::path> dirs;
         std::string extra = env_or("HIVEMIND_SKILLS_DIR");
@@ -505,7 +514,11 @@ int main(int argc, char** argv) {
             if (colon == std::string::npos) break;
             pos = colon + 1;
         }
-        if (!dirs.empty()) cfg.skills_dirs = dirs;
+        const fs::path global_dir = project_root / ".agents" / "skills";
+        std::error_code ec;
+        fs::create_directories(global_dir, ec);  // best-effort
+        dirs.push_back(global_dir);
+        cfg.skills_dirs = dirs;
     }
     // Phase 50: per-skill gate from the hub (comma-joined names). Applied
     // at initialize() via cfg.skills_disabled; task frames refresh it live.

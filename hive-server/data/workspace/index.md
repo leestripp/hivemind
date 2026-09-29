@@ -27,7 +27,7 @@ another rig to "just read it from /workspace".
 | `attachments/<thread-id>/` | Chat uploads, managed by the server. Read them; never reorganize. |
 | `scratch/` | Temporary working files. May be cleaned at any time — nothing here is kept. |
 | `archive/` | Finished/inactive work. Move, don't delete. |
-| `.hivemind/` | Server-owned (prompts, internal state) — agents don't touch. |
+        ".agents/skills",   // §Skills-Global: writable shared skill library
 
 ## Departments
 

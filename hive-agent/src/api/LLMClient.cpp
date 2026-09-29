@@ -3182,6 +3182,13 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
     // description, with active skills filtered out so each skill appears
     // in exactly one of the two sections.
     if (skill_manager_) {
+        // §Skills-Global (2026-09-30): lazy loading — rescan the skill
+        // directories when the cache is older than 30s, so a skill an
+        // agent dropped into the shared workspace global dir mid-session
+        // appears in THIS turn's catalog without a restart. (Chief's
+        // field report: catalog lag was ~18min = agent idle-respawn.)
+        skill_manager_->maybe_refresh_cache(std::chrono::seconds(30));
+
         // Active skills — use the §Phase 15 filtered view (excludes
         // host-disabled skills even if they were previously activated).
         const auto active_skills = skill_manager_->get_visible_active_skills();

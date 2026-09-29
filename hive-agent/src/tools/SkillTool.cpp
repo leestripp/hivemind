@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -22,7 +23,7 @@ json DiscoverSkillsTool::get_definition() const {
         {"type", "function"},
         {"function", {
             {"name", get_name()},
-            {"description", "Lists all available skills with their metadata (name, description, version, path), plus skill_directories: the directories scanned for skills (hive-brain user-global, ~/.agents/skills, project-local .agents/skills, and any host-configured dirs). To CREATE a new skill, write a directory named after it containing a SKILL.md file into one of those directories (prefer the project-local .agents/skills/ for project-specific skills, ~/.agents/skills/ for reusable ones), then call discover_skills again to pick it up."},
+            {"description", "LIVE-RESCANS and lists all available skills with their metadata (name, description, version, path), plus skill_directories (the dirs scanned, with exists/writable flags) and skipped (dirs that looked like skills but were dropped, with reasons). To CREATE a GLOBAL skill shared by every agent on this machine, write a directory named after it containing a SKILL.md into the writable global dir /workspace/.agents/skills/ — it is picked up immediately, no restart needed. ~/.agents/skills/ is your PRIVATE container-home tier (dies with the container — never put shared skills there). /skills is the read-only built-in library and cannot be modified."},
             {"parameters", {
                 {"type", "object"},
                 {"properties", {
@@ -46,10 +47,16 @@ json DiscoverSkillsTool::execute(const json& /*args*/, FileIO& /*file_io*/) {
         });
     }
     
+    // §Skills-Global (2026-09-30): LIVE rescan on every call — the old
+    // code served the startup cache, so a skill created at runtime stayed
+    // invisible until the agent process respawned (~18-min lag). This is
+    // the tool's own contract: "call discover_skills again to pick it up".
+    skill_manager->refresh_cache();
+
     json result = json::object();
     result["status"] = "success";
     result["skills"] = json::array();
-    
+
     const auto& skills = skill_manager->get_all_cached_skills();
     for (const auto& [name, skill] : skills) {
         json skill_info = json::object();
@@ -78,7 +85,18 @@ json DiscoverSkillsTool::execute(const json& /*args*/, FileIO& /*file_io*/) {
         const auto abs = std::filesystem::absolute(dir);
         result["skill_directories"].push_back(json::object({
             {"path", abs.string()},
-            {"exists", std::filesystem::exists(abs)}
+            {"exists", std::filesystem::exists(abs)},
+            {"writable", ::access(abs.c_str(), W_OK) == 0}
+        }));
+    }
+
+    // §Skills-Global: surface skipped would-be skills with reasons so a
+    // malformed SKILL.md is diagnosable instead of silently invisible.
+    result["skipped"] = json::array();
+    for (const auto& sk : skill_manager->get_last_scan_skipped()) {
+        result["skipped"].push_back(json::object({
+            {"path", sk.path.string()},
+            {"reason", sk.reason}
         }));
     }
 

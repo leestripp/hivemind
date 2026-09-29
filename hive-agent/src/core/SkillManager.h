@@ -9,6 +9,7 @@
 #include <set>
 #include <fstream>
 #include <mutex>
+#include <chrono>
 
 #include "SkillsSettings.h"
 
@@ -71,6 +72,17 @@ public:
     static void set_current(SkillManager* manager);
     static SkillManager* current();
 
+    // §Skills-Global (2026-09-30): when false, init_after_settings() skips
+    // the built-in default directories (hive-brain user-global,
+    // ~/.agents/skills, project-local .agents/skills) and the manager scans
+    // ONLY what the host passes via skills_dirs/add_skill_directory.
+    // hive-agent containers set this so the container-local home dirs
+    // (wiped on container recreate — skills written there die silently)
+    // leave the scan list; the read-only synced library and the shared
+    // workspace global dir are passed explicitly by the host instead.
+    // Must be set BEFORE init_after_settings().
+    bool include_default_directories = true;
+
     // Initialize skill directories and settings.
     // MUST be called once before the manager is used (Agent's
     // initialize() does this after constructing settings).
@@ -119,7 +131,8 @@ public:
      * @param skill_path Path to the skill directory
      * @return Skill object if loaded successfully, nullopt otherwise
      */
-    std::optional<Skill> load_skill(const std::filesystem::path& skill_path);
+    std::optional<Skill> load_skill(const std::filesystem::path& skill_path,
+                                    std::string* skip_reason = nullptr);
     
     /**
      * Load a skill by name from any configured directory
@@ -276,9 +289,31 @@ public:
     // =========================================================================
     
     /**
-     * Refresh skill cache (re-discover all skills)
+     * Refresh skill cache (re-discover all skills). Live rescan: drops
+     * vanished skills, picks up skills created since the last scan.
      */
     void refresh_cache();
+
+    /**
+     * §Skills-Global: refresh the cache only when the last scan is older
+     * than max_age — the lazy-loading hook. Called per turn by the LLM
+     * client so a skill dropped into a scanned directory at runtime
+     * appears without an agent restart.
+     * @return true if a rescan actually happened
+     */
+    bool maybe_refresh_cache(std::chrono::seconds max_age);
+
+    /**
+     * §Skills-Global: one record per subdirectory that looked like a
+     * skill but was dropped during the last discovery scan (no SKILL.md,
+     * bad frontmatter, missing name/description...). Surfaced by the
+     * discover_skills tool so a dropped skill is never silent.
+     */
+    struct SkippedSkill {
+        std::filesystem::path path;
+        std::string reason;
+    };
+    std::vector<SkippedSkill> get_last_scan_skipped() const;
     
     /**
      * Validate a skill directory
@@ -312,7 +347,9 @@ private:
     // §fix (2026-07-18): guards cached_skills_ writes — discover_all_skills()
     // runs discover_skills() on ThreadPool workers, which would otherwise
     // perform concurrent unordered_map writes (UB).
-    std::mutex cache_mutex_;
+    mutable std::mutex cache_mutex_;   // mutable: get_last_scan_skipped() is const
+    std::vector<SkippedSkill> last_scan_skipped_;  // guarded by cache_mutex_
+    std::chrono::steady_clock::time_point last_scan_{};  // guarded by cache_mutex_
     std::set<std::string>                  disabled_skills_;  // §Phase 15
     
     // Active skills (currently loaded in context)
@@ -330,6 +367,10 @@ private:
     // Expand skill directory paths (handles ~ and environment variables)
     std::vector<std::filesystem::path> expand_skill_directories() const;
     
+    // Re-apply ordered discovery results to the cache so later
+    // directories deterministically shadow earlier ones (§Skills-Global).
+    void apply_ordered_priority(const std::vector<Skill>& ordered);
+
     // Check if a skill matches a task context (simple keyword matching)
     bool matches_context(const Skill& skill, const std::string& context) const;
     
