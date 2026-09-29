@@ -29,7 +29,7 @@ share files, and park commands in an approval queue when
 - **File locality** — artifacts stay on the machine that produced them.
 - **Linux-only** — podman (rootless), systemd --user, GTK4/gtkmm4.
 
-Current release line: **0.9.x** (latest tag `0.9.8`; distributed workers milestone was 0.5.0).
+Current release line: **0.9.x** (latest tag `0.9.9`; distributed workers milestone was 0.5.0).
 
 ## Tech Stack
 
