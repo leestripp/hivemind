@@ -200,7 +200,7 @@ static void ensure_image_built(const std::string& image) {
 
     const bool is_browser = image == "localhost/hive-agent:browser";
     const bool is_gpu     = image == "localhost/hive-agent:gpu";
-    if (is_gpu)     ensure_image_built("localhost/hive-agent:browser");
+    if (is_gpu)     ensure_image_built("localhost/hive-agent:latest");  // Phase 68d: two-base tree
     if (is_browser) ensure_image_built("localhost/hive-agent:latest");
 
     const std::string cf  = is_gpu ? "hive-server/data/Containerfile.hive-agent-gpu"

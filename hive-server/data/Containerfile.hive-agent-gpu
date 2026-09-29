@@ -1,9 +1,11 @@
 # Containerfile.hive-agent-gpu — AMD GPU workhorse variant (Plan.md, 2026-09-01).
-# FROM the browser variant so screen share keeps working on the GPU rig.
-# Build chain on the rig:  :latest → :browser → :gpu
+# FROM the BASE image directly (Phase 68d): two-base tree —
+# :latest (non-GPU) and :gpu. The browser capability is in the base
+# since 68c, so the old :browser middle layer is pointless indirection.
+# Build chain on the rig:  :latest → :gpu   (:browser is a thin alias)
 #   podman build -t localhost/hive-agent:gpu \
 #       -f hive-server/data/Containerfile.hive-agent-gpu .   (context = repo root)
-FROM localhost/hive-agent:browser
+FROM localhost/hive-agent:latest
 
 USER root
 
