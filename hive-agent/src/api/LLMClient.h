@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <string>
 #include <nlohmann/json.hpp>
 #include "types/ImageAttachment.h"
@@ -122,6 +123,10 @@ private:
     std::unique_ptr<SessionMemory> session_memory_;
     std::unique_ptr<Messages> messages_;
     int iteration_count_;
+    // §LoopGuard: sliding window of recent tool-call signatures
+    // (name + args) plus trip counter for the degenerate-loop breaker.
+    std::deque<std::string> loop_guard_window_;
+    int loop_guard_trips_ = 0;
     int max_iterations_ = 100;
     size_t max_tool_result_size_ = 10000;  // 10KB - truncate middle for tool results
     size_t max_request_size_ = 4000000;   // 4MB default

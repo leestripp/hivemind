@@ -2407,6 +2407,39 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
                 continue;  // Skip execution, go to next tool call
             }
 
+            // §LoopGuard: degenerate repeated-tool-call circuit breaker.
+            // PA incident 2026-09-29: the model alternated set_status /
+            // compress_context for 100+ iterations with ZERO reply text,
+            // wedging the turn until the user hit Stop. A consecutive-
+            // same-call counter misses alternating patterns, so track
+            // DISTINCT signatures over a sliding window instead.
+            {
+                const std::string sig = function_name + "\x1f" + args_for_display.dump();
+                loop_guard_window_.push_back(sig);
+                if (loop_guard_window_.size() > 8) loop_guard_window_.pop_front();
+                if (loop_guard_window_.size() == 8) {
+                    const std::set<std::string> distinct(loop_guard_window_.begin(),
+                                                         loop_guard_window_.end());
+                    if (distinct.size() <= 3) {
+                        ++loop_guard_trips_;
+                        LOG_WARNING("[LOOP-GUARD] Degenerate tool loop detected (" +
+                                    std::to_string(distinct.size()) +
+                                    " distinct calls in last 8, trip " +
+                                    std::to_string(loop_guard_trips_) + "): " +
+                                    function_name);
+                        tool_results.push_back({
+                            {"role", "tool"},
+                            {"tool_call_id", call_id},
+                            {"content", "[LOOP-GUARD] You are stuck repeating the same tool calls "
+                                        "and making no progress. Do NOT call these tools again - "
+                                        "write your final reply to the user as plain text NOW."},
+                            {"status", "error"}
+                        });
+                        continue;  // skip execution, next tool call
+                    }
+                }
+            }
+
             // Execute tool once - no retries. If it fails, the LLM will fix it in the next response.
             json result;
             try {
@@ -2632,6 +2665,20 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
         // Add tool results to message history
         messages.insert(messages.end(), tool_results.begin(), tool_results.end());
         if (messages_) messages_->mark_dirty();  // PERSIST-DIRTY
+
+        // §LoopGuard hard abort: the model ignored the guard's error
+        // results and kept looping - end the turn with an honest note
+        // rather than wedging until max_iterations (PA looped 15+ min).
+        if (loop_guard_trips_ >= 2) {
+            LOG_ERROR("[LOOP-GUARD] Aborting turn: model ignored loop-guard warnings");
+            messages.push_back({
+                {"role", "assistant"},
+                {"content", "[HiveMind stopped this turn: I got stuck repeating the same tool "
+                            "calls and could not finish. Please ask again.]"}
+            });
+            if (messages_) messages_->mark_dirty();  // PERSIST-DIRTY
+            return AgentState::DONE;
+        }
 
         // Determine next state based on tool types used
         // If execute_bash was called, we just completed BUILD_TEST
@@ -3222,6 +3269,8 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
 
     // Reset per-turn state
     iteration_count_ = 0;
+    loop_guard_window_.clear();   // §LoopGuard: fresh turn, fresh window
+    loop_guard_trips_ = 0;
     last_total_tokens_ = 0;
     last_cached_tokens_ = 0;
     consecutive_compress_count_ = 0;  // §BUG-COMPRESS-LOOP
