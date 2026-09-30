@@ -314,11 +314,4 @@ Java_com_hivemind_voice_SphereNative_nativeRender(JNIEnv*, jclass,
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-JNIEXPORT void JNICALL
-Java_com_hivemind_voice_SphereNative_nativeDestroy(JNIEnv*, jclass) {
-    if (g.vbo) { glDeleteBuffers(1, &g.vbo); g.vbo = 0; }
-    if (g.program) { glDeleteProgram(g.program); g.program = 0; }
-    g.ready = false;
-}
-
 }  // extern "C"

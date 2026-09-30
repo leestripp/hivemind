@@ -26,14 +26,15 @@ class SphereView @JvmOverloads constructor(
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
-    override fun onPause() {
-        // Free the GL objects while the (possibly preserved) context is
-        // still current — otherwise every pause/resume cycle orphans a
-        // program + VBO inside it. onSurfaceCreated rebuilds on return.
-        queueEvent { SphereNative.nativeDestroy() }
-        super.onPause()
-    }
-
+    // NOTE: do NOT destroy GL objects in onPause. With a preserved EGL
+    // context (set above), GLSurfaceView only recreates the EGL *surface*
+    // on resume — onSurfaceCreated (and therefore nativeInit) is NOT
+    // called again, so anything destroyed on pause would never be
+    // rebuilt and the sphere stays black after wake (2026-09-30 bug).
+    // There is no leak either way: a preserved context keeps its objects
+    // valid, and a lost context's objects die with it — onSurfaceCreated
+    // only ever fires for a brand-new context, which nativeInit rebuilds
+    // from scratch.
     /** Instantaneous voice level 0..1 (mic RMS or TTS envelope). */
     fun setLevel(level: Float) = renderer.setLevel(level)
 

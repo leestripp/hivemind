@@ -9,5 +9,4 @@ object SphereNative {
     external fun nativeInit()
     external fun nativeResize(width: Int, height: Int)
     external fun nativeRender(timeSec: Float, level: Float, state: Float)
-    external fun nativeDestroy()
 }
