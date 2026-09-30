@@ -147,7 +147,16 @@ int main() {
     assert(r.statusCode() == 200 && json::parse(r.bodyAsString())["id"] == dm1);
     // without reuse_dm a fresh thread is created
     r = request("POST", port, "/api/threads", {{"agent_ids", json::array({a1})}});
-    assert(json::parse(r.bodyAsString())["id"] != dm1);
+    const std::string decoy = json::parse(r.bodyAsString())["id"];
+    assert(decoy != dm1);
+
+    // ── DM hijack resistance (2026-09-30 incident): the fresh thread above
+    // is a NEWER dm-kind thread for the same agent — it must NOT shadow the
+    // canonical DM. reuse_dm resolves the OLDEST 1:1 thread, so an added
+    // thread can never hijack clients (Android voice app, roster clicks).
+    r = request("POST", port, "/api/threads",
+                {{"agent_ids", json::array({a1})}, {"reuse_dm", true}});
+    assert(r.statusCode() == 200 && json::parse(r.bodyAsString())["id"] == dm1);
 
     // ── queue: post a message → 202 processing, message persisted ─────────
     r = request("POST", port, "/api/threads/" + gid + "/messages",

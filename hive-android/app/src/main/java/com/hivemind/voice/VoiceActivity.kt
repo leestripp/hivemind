@@ -284,6 +284,23 @@ class VoiceActivity : Activity() {
                         ui.postDelayed(pollTick, POLL_MS)
                     }
                 } catch (e: Exception) {
+                    // A vanished DM thread is recoverable: re-resolve and
+                    // retry the send ONCE before surfacing a failure.
+                    if (reresolveIfThreadGone(e)) {
+                        try {
+                            api.postMessage(threadId,
+                                            SpeechText.OUTGOING_PREFIX + text)
+                            ui.post {
+                                if (phase != Phase.THINKING) return@post
+                                sphere.setSphereState(SphereState.THINKING)
+                                status.text = "Thinking…"
+                                ui.postDelayed(pollTick, POLL_MS)
+                            }
+                            return@execute
+                        } catch (_: Exception) {
+                            // fall through to the visible failure below
+                        }
+                    }
                     ui.post {
                         toIdle("Send failed: ${e.message}")
                         speakNotice("Your message didn't send. " +
@@ -291,6 +308,28 @@ class VoiceActivity : Activity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * The cached DM thread id can dangle: the thread may be deleted from
+     * another client while we sit on it (2026-09-30 incident — the app
+     * 404-looped forever and voice messages posted into the void). When a
+     * call fails with HTTP 404 thread-not-found, re-resolve the canonical
+     * DM via openDm and let the caller retry/continue. Returns true when
+     * the thread was re-resolved.
+     */
+    private fun reresolveIfThreadGone(e: Exception): Boolean {
+        if (e !is ApiException || e.code != 404) return false
+        return try {
+            threadId = api.openDm(agentId)
+            lastMessageId = api.latestMessageId(threadId)
+            narratedPrefix = ""
+            Log.w(TAG, "DM thread vanished - re-resolved to $threadId")
+            true
+        } catch (e2: Exception) {
+            Log.w(TAG, "DM re-resolve failed: ${e2.message}")
+            false
         }
     }
 
@@ -366,7 +405,8 @@ class VoiceActivity : Activity() {
                         ui.postDelayed(this, IDLE_POLL_MS)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "inbox poll failed: ${e.message}")
+                    if (!reresolveIfThreadGone(e))
+                        Log.w(TAG, "inbox poll failed: ${e.message}")
                     ui.postDelayed(this, IDLE_POLL_MS)
                 }
             }
@@ -497,10 +537,15 @@ class VoiceActivity : Activity() {
                     if (partial.isNotEmpty()) lastPartialLen = partial.length
                     ui.post { handleTick(busy, error, partial, gen, grew) }
                 } catch (e: Exception) {
-                    // Transient hub/network blip — keep polling until the
-                    // failure streak itself times out (checked above).
-                    if (netFailSince == 0L)
+                    // A vanished DM thread is not a network blip — re-resolve
+                    // onto the canonical DM and keep polling.
+                    if (reresolveIfThreadGone(e)) {
+                        netFailSince = 0L
+                    } else if (netFailSince == 0L) {
+                        // Transient hub/network blip — keep polling until the
+                        // failure streak itself times out (checked above).
                         netFailSince = System.currentTimeMillis()
+                    }
                     ui.postDelayed(this, POLL_MS)
                 }
             }

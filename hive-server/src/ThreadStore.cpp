@@ -179,11 +179,23 @@ void ThreadStore::set_kind(const std::string& id, const std::string& kind) {
 }
 
 std::optional<Thread> ThreadStore::find_dm(const std::string& agent_id) {
+    // Canonical DM = the OLDEST 1:1 thread for the agent. list_threads()
+    // is ordered by last activity DESC, so returning the first match would
+    // hand back the most recently ACTIVE dm thread — any newer 1:1 thread
+    // (a client's "New thread" click, a bare API-created single-agent
+    // thread) would shadow the real DM and hijack every client that
+    // resolves "the DM with X" (Android voice app, roster clicks).
+    // 2026-09-23 (routine threads) + 2026-09-30 (check-in threads)
+    // incidents. Resolve deterministically to the oldest: later threads
+    // may coexist, but they can never hijack the canonical DM.
+    std::optional<Thread> canonical;
     for (auto& t : list_threads()) {
         if (t.kind != "dm" || t.agent_ids.size() != 1) continue;
-        if (t.agent_ids[0] == agent_id) return t;
+        if (t.agent_ids[0] != agent_id) continue;
+        if (!canonical || t.created_at < canonical->created_at)
+            canonical = t;
     }
-    return std::nullopt;
+    return canonical;
 }
 
 Thread ThreadStore::ensure_user_thread() {
