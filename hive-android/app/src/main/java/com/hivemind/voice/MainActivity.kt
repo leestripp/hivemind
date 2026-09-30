@@ -25,11 +25,26 @@ private data class Group(
 /** Agent picker — agents grouped by hive-worker; offline workers collapse. */
 class MainActivity : Activity() {
 
+    companion object {
+        private const val TAG = "HiveVoice"
+        private const val POLL_MS = 2_500L   // roster/state refresh
+    }
+
     private val io = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
     private lateinit var list: ListView
+    private lateinit var tts: TtsEngine
     private var adapter: RosterAdapter? = null
+    private lateinit var api: ApiClient
+
+    /** Edge-triggered state announcements (see AgentStateAnnouncer) — on
+     *  the selection page there is no session agent, so every agent's
+     *  edges speak, each in ITS OWN configured voice. */
+    private val stateAnnouncer = AgentStateAnnouncer(
+        enabled = { Prefs.stateAnnounce(this) },
+        suppressedAgentId = { null },
+    )
 
     /** One flattened list entry: a worker group header or an agent card. */
     sealed interface Row {
@@ -49,6 +64,7 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.statusText)
         list = findViewById(R.id.agentList)
+        tts = TtsEngine(this, onQueueEmpty = { /* nothing to resume */ })
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -81,7 +97,54 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (Prefs.isConfigured(this)) loadAgents()
+        if (!Prefs.isConfigured(this)) return
+        api = ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
+        if (adapter == null) loadAgents()
+        // removeCallbacks first: onResume also fires at creation.
+        ui.removeCallbacks(rosterPoll)
+        ui.postDelayed(rosterPoll, POLL_MS)
+    }
+
+    override fun onPause() {
+        // No pocket audio from state announcements while backgrounded.
+        ui.removeCallbacks(rosterPoll)
+        tts.stop()
+        super.onPause()
+    }
+
+    /** Live roster + state watch: refresh the list in place and speak
+     *  edge-triggered state transitions (dwell-filtered, silent
+     *  baseline — see AgentStateAnnouncer). Runs only in the
+     *  foreground; failures retry quietly at the next tick. */
+    private val rosterPoll = object : Runnable {
+        override fun run() {
+            io.execute {
+                try {
+                    val workers = api.listWorkers()
+                    val roster = api.listAgents()
+                    val anns = stateAnnouncer.diff(roster)
+                    ui.post {
+                        adapter?.update(roster, workers)
+                        if (adapter == null) loadAgents()
+                        for (ann in anns) {
+                            // The agent's OWN voice where one is picked —
+                            // you can tell WHO changed state without
+                            // looking at the screen.
+                            tts.applyVoice(
+                                Prefs.voiceFor(this@MainActivity, ann.agentId)
+                                    .ifEmpty { null })
+                            tts.speakQueued(ann.text)
+                        }
+                        ui.postDelayed(this, POLL_MS)
+                    }
+                } catch (e: Exception) {
+                    ui.post {
+                        status.text = "Hub error: ${e.message}"
+                        ui.postDelayed(this, POLL_MS)
+                    }
+                }
+            }
+        }
     }
 
     private fun loadAgents() {
@@ -115,7 +178,7 @@ class MainActivity : Activity() {
         workers: List<ApiClient.Worker>,
     ) : BaseAdapter() {
 
-        private val groups: List<Group>
+        private var groups: List<Group>
         private val collapsed = mutableSetOf<String>()
         private var rows: List<Row> = emptyList()
 
@@ -135,6 +198,21 @@ class MainActivity : Activity() {
 
         fun toggle(worker: String) {
             if (!collapsed.remove(worker)) collapsed += worker
+            rebuildRows()
+            notifyDataSetChanged()
+        }
+
+        /** In-place refresh from a fresh poll: rebuild groups/rows but
+         *  keep the user's collapse choices and scroll position. */
+        fun update(agents: List<ApiClient.Agent>, workers: List<ApiClient.Worker>) {
+            val onlineByName = workers.associate { it.name to it.online }
+            groups = agents.groupBy { it.worker.ifEmpty { "hub" } }
+                .map { (w, list) -> Group(w, onlineByName[w] ?: false, list) }
+                .sortedWith(compareByDescending<Group> { it.online }
+                    .thenBy { it.worker })
+            // A worker that came back online re-expands; gone workers
+            // stay collapsed.
+            collapsed += groups.filter { !it.online }.map { it.worker }
             rebuildRows()
             notifyDataSetChanged()
         }
@@ -234,6 +312,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacksAndMessages(null)
+        tts.destroy()
         io.shutdownNow()
         super.onDestroy()
     }

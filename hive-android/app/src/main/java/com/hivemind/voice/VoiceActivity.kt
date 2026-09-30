@@ -42,9 +42,6 @@ class VoiceActivity : Activity() {
         private const val NET_FAIL_TIMEOUT_MS = 45_000L  // consecutive poll failures
         private const val MAX_UTTER_CHARS = 2000  // TTS rejects very long utterances
         private const val INBOX_THREAD = "user"   // hub's User Inbox (kUserThreadId)
-        // State-change announcements: a new state must hold this long
-        // (~2 inbox ticks) before it is spoken — kills flicker spam.
-        private const val STATE_DWELL_MS = 5_000L
     }
 
     private enum class Phase { SETUP, IDLE, LISTENING, THINKING, STREAMING }
@@ -72,14 +69,13 @@ class VoiceActivity : Activity() {
     private var inboxLastId = ""
     /** A whole message awaiting speech: the text plus WHO sent it, so
      *  it can be read in the sender's own voice (Phase 68). */
-    /** Announced (dwelled) state per agent — the edge-trigger baseline.
-     *  Written only on the io thread inside inboxWatch. */
-    private val lastAnnouncedState = HashMap<String, String>()
-
-    /** State change waiting out its dwell window: agentId -> (bucket,
-     *  since). A flicker back to the announced state cancels the pending
-     *  note before it is ever spoken. */
-    private val pendingState = HashMap<String, Pair<String, Long>>()
+    /** Edge-triggered state-change announcements (see AgentStateAnnouncer).
+     *  The session agent's routine working/finished edges are skipped —
+     *  the reply stream itself narrates it. */
+    private val stateAnnouncer = AgentStateAnnouncer(
+        enabled = { Prefs.stateAnnounce(this) },
+        suppressedAgentId = { agentId },
+    )
 
     private data class PendingNote(val senderId: String, val text: String)
     /** Whole messages awaiting speech — only ever drained at IDLE, so an
@@ -349,70 +345,6 @@ class VoiceActivity : Activity() {
         }
     }
 
-    // -- Agent state announcements (2026-10-01) --------------------------------
-
-    /** Collapse the hub's agent states to the buckets worth speaking.
-     *  null = not trackable ("starting" flicker, no state yet). */
-    private fun stateBucket(a: ApiClient.Agent): String? = when {
-        a.busy || a.state == "acting" || a.state == "working" -> "working"
-        a.state == "awaitingapproval" -> "awaiting"
-        a.state == "error"          -> "error"
-        a.state == "down"           -> "down"
-        a.state == "starting" || a.state.isEmpty() -> null
-        else                        -> "idle"   // ready, idle, …
-    }
-
-    /** Spoken text for a dwelled transition, or null = not worth a note. */
-    private fun stateAnnounceText(name: String, from: String, to: String): String? =
-        when {
-            to == "working" && from != "working" -> "$name started working."
-            to == "idle" && from == "working"    -> "$name finished."
-            to == "awaiting" -> "$name is waiting for your approval."
-            to == "error"    -> "$name hit an error."
-            to == "down"     -> "$name went offline."
-            else             -> null
-        }
-
-    /** Edge-triggered state diff, run inside the inboxWatch io block.
-     *  Appends announcements to [fresh]; they ride the same PendingNote
-     *  queue as messages, so they only ever speak at an IDLE boundary.
-     *  The voice-chat agent's routine working/finished edges are skipped
-     *  (the reply stream itself narrates that agent) — but its actionable
-     *  states (approval, error, offline) always speak, like anyone's. */
-    private fun diffAgentStates(agents: List<ApiClient.Agent>,
-                                fresh: MutableList<PendingNote>) {
-        val now = System.currentTimeMillis()
-        for (a in agents) {
-            val cur = stateBucket(a) ?: continue
-            val prev = lastAnnouncedState[a.id]
-            if (prev == null) {           // first sight = silent baseline,
-                lastAnnouncedState[a.id] = cur   // no startup spam
-                continue
-            }
-            if (prev == cur) {            // stable: cancel any pending note
-                pendingState.remove(a.id)
-                continue
-            }
-            val pend = pendingState[a.id]
-            if (pend == null || pend.first != cur) {
-                pendingState[a.id] = cur to now   // new edge: start dwelling
-                continue
-            }
-            if (now - pend.second < STATE_DWELL_MS) continue
-            // Dwelled: this edge is real — speak it once.
-            pendingState.remove(a.id)
-            lastAnnouncedState[a.id] = cur
-            if (!Prefs.stateAnnounce(this)) continue
-            val routine = cur == "working" || cur == "idle"
-            if (a.id == agentId && routine) continue
-            val name = agentNames[a.id] ?: a.name
-            stateAnnounceText(name, prev, cur)?.let {
-                Log.d(TAG, "state announce: $name $prev -> $cur")
-                fresh.add(PendingNote("", it))
-            }
-        }
-    }
-
     // -- Inbox + DM idle watch -------------------------------------------------
 
     /**
@@ -474,7 +406,12 @@ class VoiceActivity : Activity() {
                         .getOrDefault(emptyList())
                     if (roster.isNotEmpty()) {
                         agentNames = roster.associate { it.id to it.name }
-                        diffAgentStates(roster, fresh)
+                        // Announcement notes carry the transitioning
+                        // agent's id, so speakPending reads them in THAT
+                        // agent's configured voice (falls back to the
+                        // session voice) — you can tell who it is by ear.
+                        for (ann in stateAnnouncer.diff(roster))
+                            fresh.add(PendingNote(ann.agentId, ann.text))
                     }
                     // Clear the persisted unread marks (66c) for anything
                     // this session consumed, or desktop/web show phantom
