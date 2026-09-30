@@ -1083,6 +1083,12 @@ int main(int argc, char** argv) {
                 err = e.what();
             }
             std::string body = sink->user_output();
+            // §2026-09-30 silent-mute fix: a turn ended by the LLM fatal
+            // breaker (every API call rejected, e.g. a poisoned MCP tool
+            // schema) returned DONE with err empty — the hub saw done:true
+            // + error:"" and the mute was invisible. Surface the cause.
+            if (err.empty())
+                err = agent.fatal_breaker_error();
             if (body.empty() && err.empty() && !sink->errored())
                 body = "(agent produced no output)";
             // Phase 64: per-turn stats ride the message frame so the hub

@@ -69,6 +69,9 @@ public:
     // Read-only views
     [[nodiscard]] AgentState state() const noexcept { return state_.load(std::memory_order_acquire); }
     [[nodiscard]] AgentStats stats() const noexcept;
+    /// §2026-09-30: non-empty when the last turn was ended by the LLM
+    /// fatal-error circuit breaker — see Agent::fatal_breaker_error().
+    [[nodiscard]] std::string fatal_breaker_error() const;
     [[nodiscard]] const AgentConfig& config() const noexcept { return cfg_; }
 
     // §Phase 8.8: read-only mirror of cfg_.agent_name for the

@@ -48,6 +48,11 @@ size_t Agent::pending_count() const noexcept { return impl_->pending_count(); }
 
 AgentState  Agent::state() const noexcept { return impl_->state(); }
 AgentStats  Agent::stats() const noexcept { return impl_->stats(); }
+
+std::string Agent::fatal_breaker_error() const
+{
+    return impl_->fatal_breaker_error();
+}
 const AgentConfig& Agent::config() const noexcept { return impl_->config(); }
 
 std::string_view Agent::agent_name() const noexcept { return impl_->agent_name(); }

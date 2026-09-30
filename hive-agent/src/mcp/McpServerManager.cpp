@@ -1,5 +1,6 @@
 #include "McpServerManager.h"
 #include "HttpMcpTransport.h"
+#include "SchemaSanitize.h"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -227,6 +228,17 @@ bool McpServerManager::load_from_store_impl(void* store_ptr)
     for (const auto& s : servers) {
         if (is_server_disabled(s.name)) {
             LOG_CERR(INFO, "[MCP] skipping disabled server '" << s.name << "'\n");
+            continue;
+        }
+        // §2026-09-30: honor the db row's own enabled flag. The check above
+        // only honors the config-file disabled list — a server disabled via
+        // mcp_disable (or directly in the store) reconnected on every brain
+        // restart, resurrecting whatever made it need disabling (Bob's
+        // schema-poisoned comfy server re-muted him after a container
+        // restart despite enabled=0 in his db).
+        if (!s.enabled) {
+            LOG_CERR(INFO, "[MCP] skipping store-disabled server '"
+                     << s.name << "' (enabled=0)\n");
             continue;
         }
         McpServerConfig sc;
@@ -811,6 +823,13 @@ std::vector<ToolDefinition> McpServerManager::http_list_tools(McpTransport* tran
             def.name        = tool.value("name", "");
             def.description = tool.value("description", "");
             def.input_schema = tool.value("inputSchema", json::object());
+            // §2026-09-30: one poisoned schema (recursive/over-deep shape)
+            // 400s EVERY provider request — sanitize at ingestion so a bad
+            // server can never mute the agent (4th schema incident).
+            if (sanitize_tool_schema(def.input_schema))
+                LOG_CERR(WARNING, "[MCP] tool '" << def.name
+                         << "': inputSchema sanitized for provider"
+                            " compatibility (recursive/over-deep shape)\n");
             tools.push_back(def);
         }
     }

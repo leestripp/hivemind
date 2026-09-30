@@ -125,6 +125,14 @@ public:
 
     [[nodiscard]] AgentState  state()  const noexcept;
     [[nodiscard]] AgentStats  stats()  const noexcept;
+
+    /// @brief Non-empty when the last turn was ENDED by the LLM fatal-error
+    ///        circuit breaker (unrecoverable repeated API errors — e.g. a
+    ///        poisoned tool schema making every call 400). Hosts must
+    ///        report this as the turn error; without it a muted agent is
+    ///        indistinguishable from a clean completion (2026-09-30
+    ///        silent-mute incident). Empty on any normal turn end.
+    [[nodiscard]] std::string fatal_breaker_error() const;
     [[nodiscard]] const AgentConfig& config() const noexcept;
 
     /// @brief Read-only view of the per-agent namespace (§Phase 8.8).

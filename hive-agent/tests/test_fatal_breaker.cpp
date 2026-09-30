@@ -223,5 +223,15 @@ TEST_SUITE("fatal API error circuit breaker") {
             }
         }
         CHECK(saw_terminal);
+
+        // §2026-09-30 silent-mute fix: a breaker-ended turn must be
+        // distinguishable from a clean completion — the client records the
+        // cause so hosts can report a REAL error (pre-fix: DONE + error:""
+        // at the hub, an agent muted by a poisoned tool schema looked
+        // healthy to every verification that only checked done:true).
+        CHECK(client.ended_on_fatal_breaker());
+        CHECK(!client.fatal_breaker_error().empty());
+        CHECK(client.fatal_breaker_error().find("invalid_request_error")
+              != std::string::npos);
     }
 }

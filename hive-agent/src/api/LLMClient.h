@@ -171,6 +171,12 @@ private:
     // Reset on any successful API response.
     std::string last_fatal_signature_;  // kept for logging
     int consecutive_fatal_count_ = 0;
+    // §2026-09-30: set when the fatal breaker ENDS a turn. Without this the
+    // turn returned AgentState::DONE with no error anywhere — a muted agent
+    // (every API call 400ing, e.g. a poisoned tool schema) looked identical
+    // to a clean completion at the hub surface (done:true, error:"").
+    bool ended_on_fatal_breaker_ = false;
+    std::string fatal_breaker_error_;
 
     // §IdleExitBreaker (2026-08-20): consecutive agent-loop iterations
     // whose ONLY tool call is set_status. set_status only reports state
@@ -329,6 +335,14 @@ public:
                        mcp::McpServerManager* mcp_manager = nullptr,
                        SkillManager* skill_manager = nullptr,
                        const ToolFilter* tool_filter = nullptr);
+
+    /// @brief True when the last turn was ENDED by the fatal-error circuit
+    ///        breaker (unrecoverable repeated API errors). When true,
+    ///        fatal_breaker_error() carries a human-readable cause — hosts
+    ///        must surface it as the turn error instead of reporting a
+    ///        clean completion (2026-09-30 silent-mute incident).
+    bool ended_on_fatal_breaker() const { return ended_on_fatal_breaker_; }
+    const std::string& fatal_breaker_error() const { return fatal_breaker_error_; }
 
     /// @brief Name of the resolved provider plugin (§ProviderPlugins).
     ///        Empty only before the ctor resolves it.

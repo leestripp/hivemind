@@ -758,6 +758,13 @@ AgentStats AgentImpl::stats() const noexcept
     return s;
 }
 
+std::string AgentImpl::fatal_breaker_error() const
+{
+    if (body_->client && body_->client->ended_on_fatal_breaker())
+        return body_->client->fatal_breaker_error();
+    return {};
+}
+
 std::vector<std::string> AgentImpl::mcp_configured_servers() const
 {
     // §FIX-MCP-STORE-LOAD (2026-07-17): thin forwarder. Previously

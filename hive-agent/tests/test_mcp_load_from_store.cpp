@@ -112,6 +112,25 @@ int main() {
         names = mgr.list_configured_servers();
         EXPECT(names.size() == 1);
         EXPECT(names[0] == "test-stdio");
+
+        // ML6 (2026-09-30): the db row's OWN enabled flag must gate too.
+        // Pre-fix only the config disabled-list was honored — an
+        // mcp_disable'd server (enabled=0 in the store) reconnected on
+        // every brain restart, resurrecting whatever made it need
+        // disabling (Bob's schema-poisoned comfy server re-muted him).
+        mgr.set_disabled_servers({});
+        hive::SettingsStore::McpServer s3;
+        s3.name      = "test-store-disabled";
+        s3.transport = "stdio";
+        s3.command   = "/bin/echo";
+        s3.args      = {"nope"};
+        s3.enabled   = false;
+        store.upsert_mcp_server(s3);
+        EXPECT(mgr.load_from_store(store));
+        names = mgr.list_configured_servers();
+        EXPECT(names.size() == 2);
+        for (const auto& n : names)
+            EXPECT(n != "test-store-disabled");
     }
     fs::remove_all(path);
 

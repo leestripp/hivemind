@@ -1,5 +1,6 @@
 #include "McpClient.h"
 #include "core/ThreadPool.h"
+#include "SchemaSanitize.h"
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
@@ -397,6 +398,13 @@ std::vector<ToolDefinition> McpClient::list_tools() {
             def.name = tool.value("name", "");
             def.description = tool.value("description", "");
             def.input_schema = tool.value("inputSchema", json::object());
+            // §2026-09-30: one poisoned schema (recursive/over-deep shape)
+            // 400s EVERY provider request — sanitize at ingestion so a bad
+            // server can never mute the agent (4th schema incident).
+            if (sanitize_tool_schema(def.input_schema))
+                LOG_CERR(WARNING, "[MCP] tool '" << def.name
+                         << "': inputSchema sanitized for provider"
+                            " compatibility (recursive/over-deep shape)\n");
             tools.push_back(def);
         }
     }

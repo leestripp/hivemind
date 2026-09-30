@@ -1176,6 +1176,10 @@ bool LLMClient::fatal_breaker_should_end_turn(const std::string& signature) {
         LOG_ERROR("Fatal API errors repeated " +
                   std::to_string(consecutive_fatal_count_) +
                   " times consecutively - ending turn instead of looping.");
+        // §2026-09-30: record WHY the turn is ending so the host can report
+        // a real error instead of done:true + error:"" (silent-mute lie).
+        ended_on_fatal_breaker_ = true;
+        fatal_breaker_error_ = "unrecoverable API error (" + signature + ")";
         return true;
     }
     return false;
@@ -3052,6 +3056,8 @@ void LLMClient::uninstall_crash_handlers() {
     // ===================================================================
 
 AgentState LLMClient::run_one_turn(const std::string& user_message) {
+    ended_on_fatal_breaker_ = false;
+    fatal_breaker_error_.clear();
     // §AutoCompress: hold the turn guard for the whole turn so
     // compress_context() can compress immediately when (and only when) no
     // turn is running. Also serializes concurrent turns.
