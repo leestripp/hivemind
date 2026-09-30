@@ -37,4 +37,18 @@ object Prefs {
             .putString(KEY_VOICE_PREFIX + agentId, voiceName)
             .apply()
     }
+
+    // Agent state-change announcements ("Forge started working.") — the
+    // voice-first ambient awareness toggle. Default ON (2026-10-01).
+    private const val KEY_STATE_ANNOUNCE = "state_announce"
+
+    fun stateAnnounce(ctx: Context): Boolean =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_STATE_ANNOUNCE, true)
+
+    fun setStateAnnounce(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_STATE_ANNOUNCE, on)
+            .apply()
+    }
 }

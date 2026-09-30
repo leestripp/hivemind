@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 import java.util.concurrent.Executors
@@ -24,6 +25,11 @@ class SettingsActivity : Activity() {
         val url = findViewById<EditText>(R.id.urlEdit)
         val key = findViewById<EditText>(R.id.keyEdit)
         val save = findViewById<Button>(R.id.saveButton)
+        val announce = findViewById<CheckBox>(R.id.announceCheck)
+        announce.isChecked = Prefs.stateAnnounce(this)
+        announce.setOnCheckedChangeListener { _, on ->
+            Prefs.setStateAnnounce(this, on)
+        }
         val status = findViewById<TextView>(R.id.statusText)
         url.setText(Prefs.hubUrl(this))
         key.setText(Prefs.apiKey(this))
