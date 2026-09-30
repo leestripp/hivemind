@@ -247,6 +247,9 @@ public:
         std::string bearer_token;               // http: Authorization header
         std::string description;
         bool enabled = true;
+        // Phase 71: 'hub' = roster-seeded (hub-authoritative, read-only
+        // to the agent's mcp_* tools); 'local' = agent self-service.
+        std::string origin = "local";
     };
 
     /// Get one MCP server by name.

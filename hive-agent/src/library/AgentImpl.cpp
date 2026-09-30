@@ -32,6 +32,7 @@
 #include "core/SkillManager.h"       // internal subsystem (src/core/)
 #include "tools/ToolHandler.h"       // internal subsystem (src/tools/)
 #include "tools/ToolFactory.h"       // internal subsystem (src/tools/)
+#include "tools/McpManageTools.h"    // §Phase 71: MCP self-service tools
 #include "tools/HostToolAdapter.h"   // adapter: HostTool → BaseTool
 #include "tools/TodoListService.h"   // public Agent todo API backing
 #include "LibraryToolContext.h"
@@ -415,6 +416,16 @@ void AgentImpl::initialize()
         body_->mcp->load_env_file();
         if (auto factory = ToolHandler::get_tool_factory()) {
             factory->set_mcp_manager(body_->mcp.get());
+            // §Phase 71: agent self-service MCP management. Borrowed
+            // pointers — Body outlives the factory's tool instances
+            // (Agent destruction tears the factory tools down via
+            // shutdown before Body members are released).
+            const McpToolServices mcp_svc{body_->mcp.get(), std::addressof(*body_->store)};
+            factory->register_tool(std::make_shared<McpListTool>(mcp_svc));
+            factory->register_tool(std::make_shared<McpAddTool>(mcp_svc));
+            factory->register_tool(std::make_shared<McpEnableTool>(mcp_svc));
+            factory->register_tool(std::make_shared<McpDisableTool>(mcp_svc));
+            factory->register_tool(std::make_shared<McpRemoveTool>(mcp_svc));
         }
     }
 

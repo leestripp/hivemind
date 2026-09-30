@@ -48,6 +48,9 @@ RUN mkdir -p /workspace && chown hive:hive /workspace
 # ELF interpreter for ubuntu (host linkers may emit a different path);
 # runtime libs for hive-brain (sqlite/openssl/zlib/png).
 COPY build/hive-agent/hive-agent /usr/local/bin/hive-agent
+# Phase 71: built-in agent skills (mcp-self-service etc) — scanned via
+# HIVEMIND_SKILLS_DIR-style dir appended to skills_dirs in main.cpp.
+COPY hive-agent/skills /usr/local/share/hive-agent/skills
 RUN apt-get update && apt-get install -y --no-install-recommends \
         patchelf libsqlite3-0 libssl3t64 zlib1g libpng16-16t64 \
         libpoppler-cpp3 \

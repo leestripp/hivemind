@@ -151,7 +151,7 @@ std::shared_ptr<ProviderPlugin> plugin_for_row(std::string_view hint,
 // ============================================================================
 namespace {
 
-constexpr int kSchemaVersion = 5;
+constexpr int kSchemaVersion = 6;
 
 constexpr const char* kSchemaSql = R"sql(
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -195,7 +195,8 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     url         TEXT,
     bearer_token TEXT,
     description TEXT,
-    enabled     INTEGER NOT NULL DEFAULT 1
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    origin      TEXT NOT NULL DEFAULT 'local'
 );
 
 )sql";
@@ -346,6 +347,21 @@ void migrate_to_v5(OmniNet::DB::Database& db)
     }
 }
 
+void migrate_to_v6(OmniNet::DB::Database& db)
+{
+    // v6 (Phase 71): mcp_servers.origin — 'hub' rows are owned by the
+    // roster seed (hub-authoritative, read-only to the agent); 'local'
+    // rows are agent self-service (mcp_add) and survive re-seeds.
+    // Existing rows predate self-service: every one of them came from
+    // the boot seed, so mark them 'hub'.
+    try {
+        db.execute("ALTER TABLE mcp_servers ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'");
+        db.execute("UPDATE mcp_servers SET origin = 'hub'");
+    } catch (...) {
+        // Column already exists — fine.
+    }
+}
+
 void ensure_schema(OmniNet::DB::Database& db)
 {
     db.execute(kSchemaSql);
@@ -371,6 +387,7 @@ void ensure_schema(OmniNet::DB::Database& db)
     if (current_version < 3) migrate_to_v3(db);
     if (current_version < 4) migrate_to_v4(db);
     if (current_version < 5) migrate_to_v5(db);
+    if (current_version < 6) migrate_to_v6(db);
 
     // Update the stored version if it advanced.
     if (current_version != kSchemaVersion) {
@@ -1044,6 +1061,7 @@ SettingsStore::McpServer row_to_mcp(const std::vector<std::string>& r)
     SettingsStore::McpServer s;
     if (r.size() < 9) return s;
     s.name         = r[0];
+    if (r.size() >= 10 && !r[9].empty()) s.origin = r[9];
     s.transport    = r[1].empty() ? "stdio" : r[1];
     s.command      = r[2];
     s.url          = r[5];
@@ -1078,7 +1096,7 @@ std::optional<SettingsStore::McpServer> SettingsStore::get_mcp_server(std::strin
         *mutex_,
         *db_,
         "SELECT name, transport, command, args_json, env_json, url, "
-        "bearer_token, description, enabled FROM mcp_servers WHERE name = ?",
+        "bearer_token, description, enabled, origin FROM mcp_servers WHERE name = ?",
         std::string(name));
     if (!row.has_value()) return std::nullopt;
     return row_to_mcp(*row);
@@ -1091,7 +1109,7 @@ std::vector<SettingsStore::McpServer> SettingsStore::list_mcp_servers() const
         *mutex_,
         *db_,
         "SELECT name, transport, command, args_json, env_json, url, "
-        "bearer_token, description, enabled FROM mcp_servers ORDER BY name");
+        "bearer_token, description, enabled, origin FROM mcp_servers ORDER BY name");
     out.reserve(rows.size());
     for (const auto& row : rows) {
         out.push_back(row_to_mcp(row));
@@ -1107,16 +1125,17 @@ void SettingsStore::upsert_mcp_server(const McpServer& s)
         *mutex_,
         *db_,
         "INSERT INTO mcp_servers(name, transport, command, args_json, env_json, "
-        "url, bearer_token, description, enabled) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "url, bearer_token, description, enabled, origin) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(name) DO UPDATE SET "
         "transport=excluded.transport, command=excluded.command, "
         "args_json=excluded.args_json, env_json=excluded.env_json, "
         "url=excluded.url, bearer_token=excluded.bearer_token, "
-        "description=excluded.description, enabled=excluded.enabled",
+        "description=excluded.description, enabled=excluded.enabled, "
+        "origin=excluded.origin",
         s.name, s.transport, s.command,
         args_j.dump(), env_j.dump(),
         s.url, s.bearer_token, s.description,
-        static_cast<int>(s.enabled));
+        static_cast<int>(s.enabled), s.origin);
 }
 
 void SettingsStore::delete_mcp_server(std::string_view name)

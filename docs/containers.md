@@ -48,6 +48,22 @@ The container's main process is hive-agent, a thin hive-brain host:
 - MCP servers are local child processes (stdio) or direct network
   clients. Full MCP support, in-container, no shortcuts.
 
+## MCP self-service (Phase 71)
+
+Agents manage their OWN MCP servers at runtime — no hub involvement:
+`mcp_list` / `mcp_add` / `mcp_enable` / `mcp_disable` / `mcp_remove`.
+Registrations persist in the agent-home `hive-agent.db` (`mcp_servers`
+table) with an `origin` column: `hub` rows come from the roster
+(`mcp_servers` agent field, seeded at boot and hub-authoritative —
+read-only to the agent); `local` rows are agent self-service and
+survive re-seeds and container recreations. The boot seed
+(`core/McpSeed.cpp`, fed by `HIVEMIND_MCP_SERVERS`, ALWAYS emitted by
+the worker even when empty) manages only `origin='hub'` rows.
+`mcp_add`/`mcp_enable` pass through the same approval flow as bash on
+approval-gated agents. A built-in `mcp-self-service` skill (image-baked
+at `/usr/local/share/hive-agent/skills`, appended to `skills_dirs`)
+teaches the install → register → verify → document loop.
+
 ## Lifecycle
 
 The worker creates containers on agent spawn (`agent_spawn` op), starts/

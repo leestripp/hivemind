@@ -40,6 +40,7 @@
 #include "types/ProviderConfig.h"
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
+#include "core/McpSeed.h"
 #include "tools/BrowserTools.h"
 #include "tools/SecretTools.h"
 
@@ -369,62 +370,6 @@ private:
     std::atomic<bool> errored_{false};
 };
 
-// MCP seeding: write the roster-provided server specs into the agent's
-// own hive-agent.db BEFORE Agent construction (same approach as v1's
-// seed_mcp_servers, but hive-agent owns its db outright). hive-brain then
-// spawns MCP servers as local child processes - in the container.
-void seed_mcp_servers(const fs::path& home, const json& servers) {
-    if (servers.empty()) return;
-    std::error_code ec;
-    fs::create_directories(home, ec);
-    const fs::path db = home / "hive-agent.db";
-    sqlite3* s = nullptr;
-    if (sqlite3_open(db.c_str(), &s) != SQLITE_OK) {
-        log_err("mcp seed: cannot open " + db.string());
-        if (s) sqlite3_close(s);
-        return;
-    }
-    auto exec = [&](const char* sql) {
-        char* err = nullptr;
-        sqlite3_exec(s, sql, nullptr, nullptr, &err);
-        if (err) sqlite3_free(err);
-    };
-    exec("CREATE TABLE IF NOT EXISTS mcp_servers ("
-         "name TEXT PRIMARY KEY, transport TEXT, command TEXT,"
-         " args_json TEXT, env_json TEXT, url TEXT, bearer_token TEXT,"
-         " description TEXT, enabled INTEGER DEFAULT 1)");
-    // Config-authoritative: rows no longer declared are dropped.
-    exec("DELETE FROM mcp_servers");
-    for (const auto& srv : servers) {
-        const std::string name = srv.value("name", "");
-        const std::string command = srv.value("command", "");
-        if (name.empty() || command.empty()) continue;
-        sqlite3_stmt* st = nullptr;
-        if (sqlite3_prepare_v2(s,
-                "INSERT OR REPLACE INTO mcp_servers (name, transport,"
-                " command, args_json, env_json, url, enabled)"
-                " VALUES (?,?,?,?,?,?,1)",
-                -1, &st, nullptr) != SQLITE_OK)
-            continue;
-        const std::string args = srv.value("args", json::array()).dump();
-        const std::string env  = srv.value("env", json::object()).dump();
-        const std::string url  = srv.value("url", "");
-        const std::string transport =
-            url.empty() ? "stdio" : "streamable-http";
-        sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 2, transport.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 3, command.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 4, args.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 5, env.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 6, url.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) != SQLITE_DONE)
-            log_err("mcp seed: insert failed for " + name);
-        sqlite3_finalize(st);
-    }
-    sqlite3_close(s);
-    log_err("mcp seed: " + std::to_string(servers.size()) + " server(s) seeded");
-}
-
 } // namespace
 
 // Phase 35: current turn's thread id — set by the turn thread before
@@ -518,6 +463,15 @@ int main(int argc, char** argv) {
         std::error_code ec;
         fs::create_directories(global_dir, ec);  // best-effort
         dirs.push_back(global_dir);
+        // Phase 71: image-baked built-in skills (mcp-self-service etc),
+        // COPY'd into the image by Containerfile.hive-agent. Optional —
+        // absent on bare-metal dev runs, present in containers.
+        const fs::path builtin_dir =
+            env_or("HIVEMIND_BUILTIN_SKILLS_DIR").empty()
+                ? fs::path{"/usr/local/share/hive-agent/skills"}
+                : fs::path{env_or("HIVEMIND_BUILTIN_SKILLS_DIR")};
+        if (fs::is_directory(builtin_dir, ec))
+            dirs.push_back(builtin_dir);
         cfg.skills_dirs = dirs;
     }
     // Phase 50: per-skill gate from the hub (comma-joined names). Applied
@@ -582,7 +536,7 @@ int main(int argc, char** argv) {
 
     // MCP specs arrive as JSON; seed before Agent construction.
     if (auto mcp = env_or("HIVEMIND_MCP_SERVERS"); !mcp.empty()) {
-        try { seed_mcp_servers(cfg.agent_home, json::parse(mcp)); }
+        try { hive::mcp_seed::seed_hub_mcp_servers(cfg.agent_home, json::parse(mcp), log_err); }
         catch (const std::exception& e) {
             log_err(std::string("mcp seed parse: ") + e.what());
         }

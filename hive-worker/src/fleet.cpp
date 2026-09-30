@@ -78,8 +78,11 @@ std::string AgentProcess::build_env_file() {
     const std::string prompt_path = write_prompt_file();
     if (!prompt_path.empty())
         env_line(body, "HIVEMIND_SYSTEM_PROMPT_FILE", prompt_path);
-    if (!spec_.mcp_servers.empty())
-        env_line(body, "HIVEMIND_MCP_SERVERS", spec_.mcp_servers.dump());
+    // Phase 71: ALWAYS emit (even "[]") — the brain's seed is
+    // hub-authoritative for origin='hub' rows, so an empty roster must
+    // actively drop previously-seeded hub servers. Agent-local rows
+    // (origin='local') are unaffected.
+    env_line(body, "HIVEMIND_MCP_SERVERS", spec_.mcp_servers.dump());
     // The synced canonical skill library is mounted read-only at /skills
     // (ensure_container). Project-local /workspace/.agents/skills/ is
     // auto-scanned by hive-brain on its own.
