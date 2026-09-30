@@ -335,6 +335,11 @@ function ensureAgentModal() {
           <option value="">Standard</option>
           <option value="gpu">GPU workhorse (render/compute)</option>
         </select></div>
+      <div class="form-row"><label>Memory cap</label>
+        <input id="am-memory" placeholder="worker default (4g) — e.g. 32g, 1536m"></div>
+      <div class="form-row"><label>CPU cap</label>
+        <input id="am-cpus" type="number" min="0" step="0.5"
+               placeholder="worker default (2)"></div>
       <div class="form-row"><label>Provider</label>
         <select id="am-provider"></select></div>
       <div class="form-row"><label>Model</label>
@@ -361,6 +366,9 @@ async function openAgentModal(existing = null, prefill = null) {
   $('am-appr').checked = existing ? !!existing.require_approval
                                   : !!prefill?.require_approval;
   const avatar = existing?.avatar ?? prefill?.avatar ?? '';
+  // Phase 69: resource caps — blank = worker default (hub stores ""/0).
+  $('am-memory').value = existing?.memory ?? '';
+  $('am-cpus').value = existing?.cpus > 0 ? existing.cpus : '';
 
   // Worker dropdown: online workers only; when editing, keep the current
   // placement visible even if that rig has gone offline (flagged).
@@ -437,6 +445,15 @@ async function openAgentModal(existing = null, prefill = null) {
       require_approval: $('am-appr').checked,
       avatar,
     };
+    // Phase 69: blank memory on edit = keep; "default" clears. cpus:
+    // blank = keep on edit / default on create; 0 = reset to default.
+    const memIn = $('am-memory').value.trim();
+    if (memIn) body.memory = memIn;
+    else if (editing && existing.memory) body.memory = 'default';
+    else if (!editing) body.memory = '';
+    const cpuIn = $('am-cpus').value.trim();
+    if (cpuIn !== '') body.cpus = parseFloat(cpuIn);
+    else if (editing && existing.cpus > 0) body.cpus = 0;
     // Type semantics: enabled row → "gpu" sets, Standard + previously-typed
     // sends "default" (explicit clear); disabled row → omit (keep as-is).
     if (!tsel.disabled)

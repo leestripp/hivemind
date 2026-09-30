@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,7 @@ json agent_json(const RosterAgent& a) {
         {"container_id", a.container_id},
         {"require_approval", a.require_approval}, {"avatar", a.avatar},
         {"worker", a.worker}, {"type", a.type},                   // Phase 35
+        {"memory", a.memory}, {"cpus", a.cpus},                  // Phase 69
         {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
@@ -106,6 +108,20 @@ static bool validate_type(WorkerStore& workers, const std::string& w,
     err = "worker '" + w + "' has no '" + type + "' capability"
           " (its caps: " + (caps.is_object() ? caps.dump() : "{}") + ")";
     return false;
+}
+
+// Phase 69: memory must be a podman size string — digits with an optional
+// b/k/m/g/t suffix (case-insensitive). "" and "default" pass through (they
+// mean keep/clear in the update contract, worker default at create).
+static bool validate_memory(const std::string& m) {
+    if (m.empty() || m == "default") return true;
+    size_t i = 0;
+    while (i < m.size() && m[i] >= '0' && m[i] <= '9') ++i;
+    if (i == 0) return false;
+    if (i == m.size()) return true;   // plain bytes
+    if (i + 1 != m.size()) return false;
+    const char u = (char)tolower((unsigned char)m[i]);
+    return u == 'b' || u == 'k' || u == 'm' || u == 'g' || u == 't';
 }
 
 void register_roster_routes(OmniNet::HTTP::Server& server,
@@ -230,6 +246,20 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             // an unknown name is accepted here — same contract as the PATCH.
             const std::string worker = body.value("worker", "");
             const std::string type = body.value("type", "");   // Phase 35
+            // Phase 69: optional container resource caps.
+            const std::string memory = body.value("memory", "");
+            double cpus = 0;
+            if (body.contains("cpus")) {
+                if (!body["cpus"].is_number() || body["cpus"].get<double>() < 0) {
+                    send_error(resp, 400, "cpus must be a number >= 0"); return;
+                }
+                cpus = body["cpus"].get<double>();
+            }
+            if (!validate_memory(memory)) {
+                send_error(resp, 400,
+                    "memory must be a podman size like \"4g\" or \"1536m\"");
+                return;
+            }
             {
                 std::string werr;
                 if (!validate_worker(workers, worker, werr)) {
@@ -242,7 +272,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
                                              body.value("avatar", ""), worker,
-                                             type);
+                                             type, memory, cpus);
                 // Phase C: spawn the brain on its worker right away
                 // (idempotent; offline worker spawns on reconnect).
                 hub.reconcile_worker(a.worker);
@@ -305,6 +335,20 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
             const std::string ptype = body.value("type", "");  // Phase 35
+            // Phase 69: "" = keep, "default" = clear to worker default.
+            const std::string pmemory = body.value("memory", "");
+            if (!validate_memory(pmemory)) {
+                send_error(resp, 400,
+                    "memory must be a podman size like \"4g\" or \"1536m\"");
+                return;
+            }
+            double pcpus = -1;   // -1 = keep current
+            if (body.contains("cpus")) {
+                if (!body["cpus"].is_number() || body["cpus"].get<double>() < 0) {
+                    send_error(resp, 400, "cpus must be a number >= 0"); return;
+                }
+                pcpus = body["cpus"].get<double>();
+            }
             {
                 const std::string pw = body.value("worker", "");
                 if (!pw.empty()) {
@@ -341,7 +385,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                                ? body["mcp_servers"].dump()
                                : body.value("mcp_servers", ""))
                         : "",
-                    ptype);   // "" = keep, "default" = clear
+                    ptype,   // "" = keep, "default" = clear
+                    pmemory, pcpus);   // Phase 69
                 // Name/model changes must not leak into a live brain:
                 // stop, then respawn with the new config (worker dedups).
                 hub.stop_agent(a);

@@ -27,6 +27,8 @@ struct RosterAgent {
     std::string worker = "local"; // Phase 30: "local" = server's podman, else hive-worker name
     std::string mcp_servers = "[]"; // Phase 33: JSON array [{name,command,args[],env{}}] — MCP servers for this agent
     std::string type;           // Phase 35: "" = standard, "gpu" = GPU workhorse (image+devices chosen by the worker)
+    std::string memory;         // Phase 69: podman size string ("4g", "1536m"); "" = worker default (4g)
+    double cpus = 0;            // Phase 69: CPU cap; 0 = worker default (2)
     bool require_approval = false; // Phase 3: gate shell commands for human review
     std::string created_at;
     std::string updated_at;
@@ -48,7 +50,9 @@ public:
                              bool require_approval = false,
                              const std::string& avatar = "",
                              const std::string& worker = "",
-                             const std::string& type = "");   // Phase 35: "gpu" = workhorse
+                             const std::string& type = "",   // Phase 35: "gpu" = workhorse
+                             const std::string& memory = "", // Phase 69: "" = worker default
+                             double cpus = 0);                // Phase 69: 0 = worker default
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);
@@ -65,7 +69,9 @@ public:
                              const std::string& avatar = "",
                              const std::string& worker = "",   // "" = keep current
                              const std::string& mcp_servers = "", // "" = keep current (Phase 33)
-                             const std::string& type = "");       // "" = keep, "default" = clear (Phase 35)
+                             const std::string& type = "",       // "" = keep, "default" = clear (Phase 35)
+                             const std::string& memory = "",     // "" = keep, "default" = clear (Phase 69)
+                             double cpus = -1);                   // -1 = keep, 0 = worker default (Phase 69)
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

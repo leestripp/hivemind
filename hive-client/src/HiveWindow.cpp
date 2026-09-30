@@ -3845,6 +3845,22 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     worker->property_selected().signal_changed().connect(refresh_type);
     refresh_type();   // initial state for the preselected worker
 
+    // Phase 69: per-agent container resource caps. Blank = worker default
+    // (4g / 2 cpus). Edit semantics mirror the web UI: clearing a
+    // previously-set value resets it to the worker default.
+    auto* memory_entry = Gtk::make_managed<Gtk::Entry>();
+    memory_entry->set_placeholder_text("worker default (4g) — e.g. 32g, 1536m");
+    const std::string cur_memory = editing ? existing->value("memory", "") : "";
+    if (!cur_memory.empty()) memory_entry->set_text(cur_memory);
+    auto* cpus_entry = Gtk::make_managed<Gtk::Entry>();
+    cpus_entry->set_placeholder_text("worker default (2) — e.g. 12, 1.5");
+    const double cur_cpus = editing ? existing->value("cpus", 0.0) : 0.0;
+    if (cur_cpus > 0) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%.4g", cur_cpus);
+        cpus_entry->set_text(buf);
+    }
+
     // Host mode removed (2026-08-25): agents always run containerized.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
     if (existing) {
@@ -3948,6 +3964,8 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     if (show_worker_row) {
         add_row("Worker", worker, row_i++);
         add_row("Type", type_dd, row_i++);
+        add_row("Memory cap", memory_entry, row_i++);   // Phase 69
+        add_row("CPU cap", cpus_entry, row_i++);        // Phase 69
     }
     else if (!editing) {
         // No worker online: creation is impossible (the hub rejects unknown
@@ -3965,7 +3983,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -3981,6 +3999,22 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                     !type_dd->get_sensitive() ? "" :
                     type_dd->get_selected() == 1 ? "gpu"
                     : (!cur_type.empty() ? "default" : "");
+                // Phase 69: blank on create = worker default; blank on
+                // edit with a previously-set value = explicit reset
+                // ("default" / 0). Garbage cpus text = keep (-1).
+                const std::string mem_in = memory_entry->get_text();
+                std::string mem = mem_in;
+                if (mem.empty() && editing && !cur_memory.empty())
+                    mem = "default";
+                double cp = -1;   // keep/default
+                const std::string cpu_in = cpus_entry->get_text();
+                if (!cpu_in.empty()) {
+                    try { cp = std::stod(cpu_in); }
+                    catch (...) { cp = -1; }
+                    if (cp < 0) cp = -1;
+                } else if (editing && cur_cpus > 0) {
+                    cp = 0;   // cleared -> reset to worker default
+                }
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
@@ -3988,11 +4022,11 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
-                           ap = appr->get_active()] {
+                           ap = appr->get_active(), mem, cp] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty);
+                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty);
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });

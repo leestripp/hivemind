@@ -50,6 +50,8 @@ struct AgentSpec {
     nlohmann::json mcp_servers = nlohmann::json::array();
     std::string image;         // "" -> kImageLatest (verbatim override wins)
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
+    std::string memory;        // Phase 69: podman size ("4g"); "" -> worker default
+    double cpus = 0;           // Phase 69: CPU cap; 0 -> worker default
     std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
     std::string secret_env;      // Phase 60: hub-rendered HIVE_SECRET_* lines
 

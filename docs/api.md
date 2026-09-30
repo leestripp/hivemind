@@ -34,14 +34,22 @@ stores the records with the reply message (injecting the worker name).
 | Endpoint | Notes |
 |----------|-------|
 | `GET /api/agents` | list; includes `worker` placement + live status |
-| `POST /api/agents` | create (name, role, model, worker) |
-| `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills edits |
+| `POST /api/agents` | create (name, role, model, worker, memory, cpus) |
+| `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills/memory/cpus edits |
 | `DELETE /api/agents/:id` | remove (worker reaps the container) |
 | `GET /api/agents/:id/activity` | per-agent live state |
 
 Moving an agent to another worker = PATCH worker; the hub re-homes the
 agent (old worker stops it, new worker spawns it, history volume is
 worker-local so cross-worker moves start fresh unless migrated manually).
+
+Per-agent container resources (Phase 69): `memory` is a podman size
+string (`"4g"`, `"1536m"`; `""` = worker default 4g) and `cpus` a core
+count (`0` = worker default 2). Both are cgroup CAPS, not reservations —
+a 32g cap costs nothing until used. On PATCH, `""`/`-1` = keep current,
+`"default"`/`0` = reset to the worker default. The worker applies them
+at container create AND reconciles live containers in place via
+`podman update` — no recreate needed when limits change.
 
 ## Workers
 

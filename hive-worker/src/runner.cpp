@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -235,6 +236,119 @@ std::string screen_pinned_image(const std::string& agent) {
     return tag;
 }
 
+// ── Phase 69: per-agent resource limits ──────────────────────────────
+// The hub's spawn frame carries optional memory/cpus caps per agent
+// (roster columns, PATCHable). fleet passes them to ensure_container,
+// which PINS them to disk so the screen_ctl recreate path — which never
+// sees a spawn frame — creates the container with the same limits.
+// Defaults preserve the pre-Phase-68 shape: 4g / 2 cpus.
+long long parse_memory_bytes(const std::string& s) {
+    if (s.empty()) return -1;
+    size_t i = 0;
+    long long v = 0;
+    while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+        const long long d = s[i] - '0';
+        if (v > (LLONG_MAX - d) / 10) return -1;   // overflow
+        v = v * 10 + d;
+        ++i;
+    }
+    if (i == 0) return -1;
+    long long mult = 1;
+    if (i < s.size()) {
+        if (i + 1 != s.size()) return -1;
+        switch (tolower((unsigned char)s[i])) {
+            case 'b': mult = 1; break;
+            case 'k': mult = 1024LL; break;
+            case 'm': mult = 1024LL * 1024; break;
+            case 'g': mult = 1024LL * 1024 * 1024; break;
+            case 't': mult = 1024LL * 1024 * 1024 * 1024; break;
+            default: return -1;
+        }
+    }
+    if (v > LLONG_MAX / mult) return -1;
+    return v * mult;
+}
+
+std::string format_cpus(double cpus) {
+    if (cpus <= 0) return "0";
+    char buf[32];
+    snprintf(buf, sizeof buf, "%.4g", cpus);   // 12 -> "12", 1.5 -> "1.5"
+    return buf;
+}
+
+struct AgentLimits {
+    std::string memory;   // podman size string; "" = unset
+    double cpus = 0;      // 0 = unset
+};
+
+fs::path limits_pin_path(const std::string& agent) {
+    return fs::path(worker_dir()) / "limits" / agent;
+}
+
+AgentLimits read_limits_pin(const std::string& agent) {
+    AgentLimits l;
+    std::ifstream in(limits_pin_path(agent));
+    if (!in) return l;
+    std::getline(in, l.memory);
+    std::string c;
+    if (std::getline(in, c) && !c.empty()) {
+        try { l.cpus = std::stod(c); } catch (...) { l.cpus = 0; }
+    }
+    return l;
+}
+
+void write_limits_pin(const std::string& agent, const AgentLimits& l) {
+    const fs::path p = limits_pin_path(agent);
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+    std::ofstream out(p, std::ios::trunc);
+    out << l.memory << "\n" << format_cpus(l.cpus) << "\n";
+}
+
+// Explicit params win; missing pieces fall back to the pin, then the
+// factory defaults. Exec-path ensure_container calls (no spec in hand)
+// pass ""/0 and so never clobber a pin written by the fleet.
+AgentLimits effective_limits(const std::string& agent,
+                             const std::string& memory, double cpus) {
+    AgentLimits l{memory, cpus};
+    if (l.memory.empty() || l.cpus <= 0) {
+        const AgentLimits pin = read_limits_pin(agent);
+        if (l.memory.empty()) l.memory = pin.memory;
+        if (l.cpus <= 0) l.cpus = pin.cpus;
+    }
+    if (l.memory.empty()) l.memory = "4g";
+    if (l.cpus <= 0) l.cpus = 2;
+    return l;
+}
+
+// cgroup limits are mutable on a LIVE container — reconcile drift with
+// `podman update` instead of recreating (a recreate mid-turn kills the
+// running brain). Failure is logged, never thrown: an older podman or
+// cgroup-v1 host refusing the update must not wedge the spawn.
+void reconcile_limits(const std::string& cname, const AgentLimits& l) {
+    const long long want_mem = parse_memory_bytes(l.memory);
+    if (want_mem <= 0) return;
+    std::string out;
+    if (podman_simple({"inspect", "-f",
+                       "{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}",
+                       cname}, &out) != 0)
+        return;
+    long long cur_mem = 0, cur_nano = 0;
+    if (sscanf(out.c_str(), "%lld %lld", &cur_mem, &cur_nano) != 2) return;
+    const long long want_nano = (long long)(l.cpus * 1e9 + 0.5);
+    if (cur_mem == want_mem && cur_nano == want_nano) return;
+    std::string err;
+    if (podman_simple({"update", "--memory", l.memory,
+                       "--cpus", format_cpus(l.cpus), cname}, &err) != 0) {
+        std::cerr << "runner: podman update limits failed for " << cname
+                  << ": " << err << "\n";
+    } else {
+        std::cerr << "runner: limits reconciled for " << cname
+                  << " -> memory=" << l.memory
+                  << " cpus=" << format_cpus(l.cpus) << "\n";
+    }
+}
+
 // Serialize the container recreate paths: fleet ensure_container and
 // screen_ctl start run on different threads and raced rm+create on the
 // same container (2026-09-14: screen start 502'd as the fleet recreated
@@ -245,12 +359,19 @@ std::mutex& container_recreate_mutex() {
 }
 
 void ensure_container(const std::string& agent, std::string image,
-                      bool gpu) {
+                      bool gpu, const std::string& memory, double cpus) {
     const std::string cname = container_name(agent);
 
     // Screen session pins the image (see screen_pinned_image).
     if (std::string pinned = screen_pinned_image(agent); !pinned.empty())
         image = pinned;
+
+    // Phase 69: the fleet passes the hub's per-agent caps on every
+    // spawn — pin them so spec-less paths (exec, screen recreate) reuse
+    // the same limits. Spec-less callers pass ""/0 and keep the pin.
+    if (!memory.empty() || cpus > 0)
+        write_limits_pin(agent, {memory, cpus});
+    const AgentLimits limits = effective_limits(agent, memory, cpus);
 
     ensure_image_built(image);
 
@@ -259,7 +380,10 @@ void ensure_container(const std::string& agent, std::string image,
     std::string state;
     if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
                       &state) == 0) {
-        if (state.find("running") != std::string::npos) return;   // up
+        if (state.find("running") != std::string::npos) {
+            reconcile_limits(cname, limits);   // Phase 69: in-place, no recreate
+            return;   // up
+        }
         // Stopped container: recreate when the image DRIFTED (dep bumps,
         // screen-stack changes) so a restart actually picks up the new
         // image — plain `podman start` would resurrect the old one
@@ -285,6 +409,7 @@ void ensure_container(const std::string& agent, std::string image,
         } else {
             if (podman_simple({"start", cname}, &state) != 0)
                 throw std::runtime_error("podman start failed: " + state);
+            reconcile_limits(cname, limits);   // Phase 69
             return;
         }
     }
@@ -305,8 +430,13 @@ void ensure_container(const std::string& agent, std::string image,
     // Phase 36: ALWAYS publish loopback 6080 (dynamic host port) — the
     // screen stack then starts by pure exec, with NO container recreate
     // (recreating to add the port killed the running agent mid-turn).
-    std::vector<std::string> args{"create", "--name", cname, "--memory", "4g",
-                       "--cpus", "2", "--userns=keep-id",
+    // Phase 69: memory/cpus from the (pinned) per-agent limits;
+    // --shm-size 1g matches the screen path — GUI apps and Chromium die
+    // on podman's 64Mi default /dev/shm.
+    std::vector<std::string> args{"create", "--name", cname,
+                       "--memory", limits.memory,
+                       "--cpus", format_cpus(limits.cpus),
+                       "--shm-size", "1g", "--userns=keep-id",
                        "-p", "127.0.0.1::6080"};
     if (gpu) {
         // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
@@ -330,6 +460,7 @@ void ensure_container(const std::string& agent, std::string image,
         throw std::runtime_error("podman create failed: " + out);
     if (podman_simple({"start", cname}, &out) != 0)
         throw std::runtime_error("podman start failed: " + out);
+    reconcile_limits(cname, limits);   // Phase 69: no-op on fresh create
 }
 
 ExecOutcome run_container_exec(
@@ -570,8 +701,14 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         // recreated container maps hive->subuid, every keep-id-written
         // file appears root-owned, and /workspace goes read-only for the
         // agent (2026-09-16 flip-flop incident — "perms fix not holding").
+        // Phase 69: recreate with the agent's PINNED limits (the screen
+        // path never sees a spawn frame — the pin written by the fleet's
+        // ensure_container is the only source).
+        const AgentLimits slimits = effective_limits(agent, "", 0);
         std::vector<std::string> cargs{"create", "--name", cname,
-                           "--memory", "4g", "--cpus", "2", "--shm-size", "1g",
+                           "--memory", slimits.memory,
+                           "--cpus", format_cpus(slimits.cpus),
+                           "--shm-size", "1g",
                            "--userns=keep-id",
                            "-p", "127.0.0.1::6080"};
         if (gpu)   // same passthrough contract as ensure_container

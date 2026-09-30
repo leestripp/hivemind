@@ -33,7 +33,9 @@ public:
                                 bool require_approval,
                                 const std::string& avatar = "",
                                 const std::string& worker = "",
-                                const std::string& type = "");         // POST /api/agents (Phase 35)
+                                const std::string& type = "",
+                                const std::string& memory = "",
+                                double cpus = -1);                      // POST /api/agents (Phase 69: -1 = default)
     nlohmann::json update_agent(const std::string& id,
                                 const std::string& name, const std::string& role,
                                 const std::string& model,
@@ -41,7 +43,9 @@ public:
                                 bool require_approval,
                                 const std::string& avatar,
                                 const std::string& worker = "",
-                                const std::string& type = "");         // PATCH ("" keep, "default" clear, Phase 35)
+                                const std::string& type = "",
+                                const std::string& memory = "",
+                                double cpus = -1);                      // PATCH Phase 69: "" keep, "default" clear; -1 keep, 0 reset
     nlohmann::json list_workers();                                   // GET /api/workers (Phase 30)
     nlohmann::json delete_agent(const std::string& id,
                                 const std::string& reassign_to = "");  // DELETE /api/agents/:id[?reassign_to=]

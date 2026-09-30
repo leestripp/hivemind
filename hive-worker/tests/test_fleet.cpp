@@ -6,6 +6,7 @@
 // Run from the REPO ROOT (image build context convention).
 
 #include "../src/fleet.h"
+#include "../src/runner.h"
 
 #include <sys/stat.h>
 
@@ -55,7 +56,35 @@ int main() {
         b = a;
         b.temperature = 0.5;
         assert(a != b);                          // tuning change -> restart
+        b = a;
+        b.memory = "32g";
+        assert(a != b);                          // Phase 69: limits change -> restart
+        b = a;
+        b.cpus = 12;
+        assert(a != b);                          // Phase 69
         std::cout << "test_fleet: AgentSpec equality OK\n";
+    }
+
+    // Phase 69: podman size parsing + cpu formatting (pure).
+    {
+        using hwrunner::parse_memory_bytes;
+        using hwrunner::format_cpus;
+        assert(parse_memory_bytes("4g")    == 4LL * 1024 * 1024 * 1024);
+        assert(parse_memory_bytes("32g")   == 32LL * 1024 * 1024 * 1024);
+        assert(parse_memory_bytes("1536m") == 1536LL * 1024 * 1024);
+        assert(parse_memory_bytes("512")   == 512);
+        assert(parse_memory_bytes("1t")    == 1024LL * 1024 * 1024 * 1024);
+        assert(parse_memory_bytes("2G")    == 2LL * 1024 * 1024 * 1024);
+        assert(parse_memory_bytes("")      == -1);
+        assert(parse_memory_bytes("abc")   == -1);
+        assert(parse_memory_bytes("4gb")   == -1);   // two-char suffix
+        assert(parse_memory_bytes("g")     == -1);   // no digits
+        assert(parse_memory_bytes("-4g")   == -1);   // negative
+        assert(format_cpus(12)   == "12");
+        assert(format_cpus(1.5)  == "1.5");
+        assert(format_cpus(2)    == "2");
+        assert(format_cpus(0)    == "0");
+        std::cout << "test_fleet: parse_memory_bytes/format_cpus OK\n";
     }
 
     // Phase 65b: a task queued while the exec is down must not wedge its

@@ -121,7 +121,8 @@ void AgentProcess::start() {
     // provider/model config into every task frame (llm).
     // Phase 35: type "gpu" -> gpu image + device passthrough flags
     hwrunner::ensure_container(spec_.id, resolved_image(spec_),
-                               spec_.type == "gpu");
+                               spec_.type == "gpu",
+                               spec_.memory, spec_.cpus);   // Phase 69
     spawn_exec();
     monitor_ = std::thread(&AgentProcess::monitor_loop, this);
 }
@@ -292,7 +293,8 @@ void AgentProcess::monitor_loop() {
         if (stopping_) { set_state(m_, state_, "down"); return; }
         try {
             hwrunner::ensure_container(spec_.id, resolved_image(spec_),
-                                       spec_.type == "gpu");
+                                       spec_.type == "gpu",
+                                       spec_.memory, spec_.cpus);  // Phase 69
             spawn_exec();                // creates a fresh reader_ thread
             // A stop() that landed mid-respawn (spec-change restart)
             // couldn't kill a child that didn't exist yet — do it now

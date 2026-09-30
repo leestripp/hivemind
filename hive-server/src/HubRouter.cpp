@@ -394,6 +394,8 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"mcp_servers", mcp},
             {"image", ""},                  // "" = worker default (v2)
             {"type", agent.type},             // Phase 35: "" / "gpu"
+            {"memory", agent.memory},         // Phase 69: "" = worker default
+            {"cpus", agent.cpus},             // Phase 69: 0 = worker default
             {"disabled_skills", disabled_skills_for(agent.id)}};  // Phase 50
 }
 

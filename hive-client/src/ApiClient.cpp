@@ -85,13 +85,17 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        bool require_approval,
                                        const std::string& avatar,
                                        const std::string& worker,
-                                       const std::string& type) {
+                                       const std::string& type,
+                                       const std::string& memory,
+                                       double cpus) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar}};
     if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
     if (!type.empty())   body["type"]   = type;     // Phase 35
+    if (!memory.empty()) body["memory"] = memory;   // Phase 69
+    if (cpus >= 0)       body["cpus"]   = cpus;     // Phase 69
     return request("POST", "/api/agents", &body);
 }
 
@@ -103,13 +107,17 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        bool require_approval,
                                        const std::string& avatar,
                                        const std::string& worker,
-                                       const std::string& type) {
+                                       const std::string& type,
+                                       const std::string& memory,
+                                       double cpus) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar},
                         {"worker", worker}};   // server: "" = keep current
     if (!type.empty()) body["type"] = type;    // Phase 35: "" keep, "default" clears
+    if (!memory.empty()) body["memory"] = memory;  // Phase 69: "" keep, "default" clears
+    if (cpus >= 0) body["cpus"] = cpus;        // Phase 69: -1 keep, 0 reset
     return request("PATCH", "/api/agents/" + id, &body);
 }
 

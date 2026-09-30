@@ -106,10 +106,44 @@ int main() {
                        "", "", "gpu");
     assert(store.get_agent(g.id)->type == "gpu");
 
+    // ── memory / cpus (Phase 69) ──────────────────────────────────────────
+    // create with explicit caps; defaults are ""/0 (worker decides).
+    auto big = store.create_agent("Comfy", "image gen", "", "shared", false,
+                                  "", "", "", "32g", 12);
+    assert(big.memory == "32g");
+    assert(big.cpus == 12);
+    auto persisted = store.get_agent(big.id);
+    assert(persisted && persisted->memory == "32g" && persisted->cpus == 12);
+    assert(store.get_agent(a.id)->memory.empty());        // default unset
+    assert(store.get_agent(a.id)->cpus == 0);
+    // fractional cpus survive the REAL roundtrip
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+                       "", "", "", "", 1.5);
+    assert(store.get_agent(big.id)->cpus == 1.5);
+    assert(store.get_agent(big.id)->memory == "32g");     // "" = keep
+    // cpus = -1 keeps, 0 resets to the worker default
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+                       "", "", "", "", -1);
+    assert(store.get_agent(big.id)->cpus == 1.5);
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+                       "", "", "", "", 0);
+    assert(store.get_agent(big.id)->cpus == 0);
+    // memory "default" explicitly clears
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+                       "", "", "", "default", -1);
+    assert(store.get_agent(big.id)->memory.empty());
+    // ...and both can be set again via update
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+                       "", "", "", "1536m", 8);
+    {
+        auto r = store.get_agent(big.id);
+        assert(r && r->memory == "1536m" && r->cpus == 8);
+    }
+
     // ── delete ────────────────────────────────────────────────────────────
     assert(store.delete_agent(b.id));
     assert(!store.delete_agent(b.id));  // already gone
-    assert(store.list_agents().size() == 3);
+    assert(store.list_agents().size() == 4);   // Nova, Rigger, Forge, Comfy
 
     fs::remove_all(tmp);
     std::cout << "test_agent_store: OK\n";

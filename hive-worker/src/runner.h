@@ -27,9 +27,24 @@ int podman_simple(const std::vector<std::string>& args, std::string* out);
 /// image defaults to the v1 image; the v2 fleet passes its own tag.
 /// gpu (Phase 35): pass --device /dev/kfd --device /dev/dri
 /// --group-add keep-groups so HIP/Vulkan see the host GPU.
+/// memory/cpus (Phase 69): per-agent resource caps from the hub's spawn
+/// frame; ""/0 = keep the pinned (or factory) defaults — 4g/2. When
+/// passed explicitly they are PINNED to disk so every recreate path
+/// (including screen_ctl) reuses them. A live container whose limits
+/// differ is reconciled IN PLACE via `podman update` — no recreate.
 void ensure_container(const std::string& agent,
                       std::string image = "localhost/hive-agent:latest",
-                      bool gpu = false);
+                      bool gpu = false,
+                      const std::string& memory = "",
+                      double cpus = 0);
+
+/// Phase 69: parse a podman size string ("4g", "1536m", "512") to bytes.
+/// Returns -1 on garbage. Exposed for tests.
+long long parse_memory_bytes(const std::string& s);
+
+/// Phase 69: format a cpu count the way podman --cpus wants it
+/// ("12", "1.5"). Exposed for tests.
+std::string format_cpus(double cpus);
 
 
 struct ExecOutcome {
