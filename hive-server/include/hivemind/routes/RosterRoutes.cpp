@@ -611,8 +611,16 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 auto j = thread_json(t);
                 // inbox + DMs are always user-relevant; a group only once
                 // the user has posted in it.
-                const bool user_relevant = t.kind == "user" || t.kind == "dm" ||
-                                           user_threads.count(t.id) > 0;
+                // kind "routine": the SCHEDULER posts the fire prompt as
+                // sender_kind 'user', so user_posted_thread_ids() counts
+                // every routine thread — the gate would badge all of them.
+                // Routine threads are agent workspace; results addressed to
+                // the user are routed to the user INBOX thread (kind
+                // "user", always badged). Never badge the routine itself.
+                const bool user_relevant =
+                    t.kind != "routine" &&
+                    (t.kind == "user" || t.kind == "dm" ||
+                     user_threads.count(t.id) > 0);
                 j["unread"] = user_relevant ? chat.unread_for_user(t.id) : 0;
                 auto it = gmap.find(t.id);
                 j["group_id"] = (it != gmap.end()) ? json(it->second)

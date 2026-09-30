@@ -150,6 +150,26 @@ int main() {
                 {{"thinking_level", "LOW"}});
     assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "low");
 
+    // 2026-10-01: routine threads NEVER badge — the scheduler posts the
+    // fire prompt as sender_kind 'user', so the user-posted gate alone
+    // would badge every routine. Results for the user land in the inbox.
+    {
+        auto rt = threads.create_thread("routine: nightly", "routine",
+                                        {"some-agent"});
+        threads.set_kind(rt.id, "routine");   // create_thread normalizes
+                                              // kind (1 agent -> dm)
+        threads.add_message(rt.id, "user", "", "routine fire prompt");
+        threads.add_message(rt.id, "agent", "some-agent", "agent report");
+        const json tl = jget(port, "/api/threads");
+        for (auto& t : tl["threads"]) {
+            if (t["id"] == rt.id) {
+                assert(t["unread"] == 0);   // gated, despite user-kind msg
+                break;
+            }
+        }
+        threads.delete_thread(rt.id);
+    }
+
     // ── thread create validation ──────────────────────────────────────────
     r = request("POST", port, "/api/threads", {{"agent_ids", json::array()}});
     assert(r.statusCode() == 400);                       // empty agent_ids
