@@ -164,6 +164,9 @@ void register_model_routes(OmniNet::HTTP::Server& server, LlmStore& llm) {
                                    "default|none|low|high|max");
                         return;
                     }
+                    // models store no clear-sentinel: default == inherit
+                    if (mi.thinking_level == "default")
+                        mi.thinking_level.clear();
                 }
                 llm.upsert_model(mi);
                 send_json(resp, json{{"ok", true}, {"model", name}});

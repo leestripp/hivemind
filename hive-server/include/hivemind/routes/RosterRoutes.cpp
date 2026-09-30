@@ -269,6 +269,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     "thinking_level must be one of default|none|low|high|max");
                 return;
             }
+            // create has nothing to clear: default == inherit ("")
+            if (thinking_level == "default") thinking_level.clear();
             {
                 std::string werr;
                 if (!validate_worker(workers, worker, werr)) {

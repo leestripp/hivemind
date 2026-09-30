@@ -123,6 +123,33 @@ int main() {
     assert(r.statusCode() == 200);
     assert(jget(port, "/api/agents/" + a3)["type"] == "");
 
+    // 2026-10-01: thinking_level keep/default/set at the ROUTE level.
+    // Live-deploy bug: normalize collapsed "default"->"" so clearing
+    // never reached AgentStore (store-only test missed it).
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "");
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"thinking_level", "max"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "max");
+    // "" keeps
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"thinking_level", ""}});
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "max");
+    // "default" CLEARS (the deployed bug returned max here)
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"thinking_level", "default"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "");
+    // invalid -> 400, field untouched
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"thinking_level", "banana"}});
+    assert(r.statusCode() == 400);
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "");
+    // case-insensitive set
+    r = request("PATCH", port, "/api/agents/" + a3,
+                {{"thinking_level", "LOW"}});
+    assert(jget(port, "/api/agents/" + a3)["thinking_level"] == "low");
+
     // ── thread create validation ──────────────────────────────────────────
     r = request("POST", port, "/api/threads", {{"agent_ids", json::array()}});
     assert(r.statusCode() == 400);                       // empty agent_ids

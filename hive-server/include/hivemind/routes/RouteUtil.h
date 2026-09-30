@@ -44,11 +44,15 @@ inline thread_local std::string request_origin;
 /// default). Returns false for anything else. There is no provider
 /// discovery for thinking levels — the plugin silently ignores levels the
 /// model doesn't support.
+// Validates + canonicalizes case. "" (keep), "default" (CLEAR — distinct
+// sentinel, AgentStore maps it to ""), none|low|high|max (set). Callers on
+// a CREATE path (nothing to clear) must map "default" -> "" themselves.
 inline bool normalize_thinking_level(std::string& v) {
     std::string lo = v;
     for (auto& c : lo)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (lo.empty() || lo == "default") { v.clear(); return true; }
+    if (lo.empty()) return true;
+    if (lo == "default") { v = "default"; return true; }
     if (lo == "none" || lo == "low" || lo == "high" || lo == "max") {
         v = lo;
         return true;
