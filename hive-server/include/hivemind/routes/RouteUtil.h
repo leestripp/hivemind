@@ -10,6 +10,7 @@
 
 #include "hivemind/ServerConfig.h"
 
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -37,6 +38,23 @@ inline std::vector<std::string> path_segments(std::string_view path) {
 /// thread — OmniNet dispatch is synchronous), and send_json applies the
 /// CORS headers when the origin matches ServerConfig's allowlist.
 inline thread_local std::string request_origin;
+
+/// 2026-10-01: normalize a thinking_level request value (models + agents):
+/// case-insensitive none|low|high|max; "default"/"" → "" (provider/model
+/// default). Returns false for anything else. There is no provider
+/// discovery for thinking levels — the plugin silently ignores levels the
+/// model doesn't support.
+inline bool normalize_thinking_level(std::string& v) {
+    std::string lo = v;
+    for (auto& c : lo)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lo.empty() || lo == "default") { v.clear(); return true; }
+    if (lo == "none" || lo == "low" || lo == "high" || lo == "max") {
+        v = lo;
+        return true;
+    }
+    return false;
+}
 
 /// Phase 19: structured error notices. main.cpp's first middleware stamps
 /// every request with a short unique id (same-thread handoff, like

@@ -32,14 +32,16 @@ LlmModelInfo row_to_model(sqlite3_stmt* st) {
     m.model_id   = col_text(st, 2);
     m.max_context = sqlite3_column_int(st, 3);
     m.temperature = sqlite3_column_double(st, 4);
-    m.created_at = col_text(st, 5);
+    m.thinking_level = col_text(st, 5);
+    m.created_at = col_text(st, 6);
     return m;
 }
 
 constexpr const char* kProviderCols =
     "SELECT name, host, api_key, chat_endpoint, plugin, created_at FROM providers";
 constexpr const char* kModelCols =
-    "SELECT name, provider, model_id, max_context, temperature, created_at FROM models";
+    "SELECT name, provider, model_id, max_context, temperature, thinking_level,"
+    " created_at FROM models";
 
 sqlite3* open(const fs::path& path) {
     sqlite3* db = nullptr;
@@ -95,6 +97,7 @@ void LlmStore::ensure_schema() {
         "  model_id TEXT NOT NULL DEFAULT '',"
         "  max_context INTEGER NOT NULL DEFAULT 0,"
         "  temperature REAL NOT NULL DEFAULT 0,"
+        "  thinking_level TEXT NOT NULL DEFAULT '',"
         "  created_at TEXT NOT NULL"
         ");"
         "CREATE TABLE IF NOT EXISTS meta ("
@@ -107,6 +110,11 @@ void LlmStore::ensure_schema() {
         sqlite3_free(err);
         throw std::runtime_error("LlmStore schema: " + msg);
     }
+    // 2026-10-01: thinking_level editor column — the AgentStore idempotent
+    // ALTER pattern; existing llm.dbs predate the column.
+    sqlite3_exec(db.h,
+        "ALTER TABLE models ADD COLUMN thinking_level TEXT NOT NULL DEFAULT '';",
+        nullptr, nullptr, nullptr);
 }
 
 // Providers -------------------------------------------------------------------
@@ -181,10 +189,11 @@ void LlmStore::upsert_model(const LlmModelInfo& m) {
         throw std::invalid_argument("LlmStore: unknown provider '" + m.provider + "'");
     Db db(db_path_);
     const char* sql =
-        "INSERT INTO models(name, provider, model_id, max_context, temperature, created_at)"
-        " VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+        "INSERT INTO models(name, provider, model_id, max_context, temperature,"
+        " thinking_level, created_at)"
+        " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
         " ON CONFLICT(name) DO UPDATE SET provider=?2, model_id=?3,"
-        "   max_context=?4, temperature=?5;";
+        "   max_context=?4, temperature=?5, thinking_level=?6;";
     sqlite3_stmt* st = nullptr;
     sqlite3_prepare_v2(db.h, sql, -1, &st, nullptr);
     bind_text(st, 1, m.name);
@@ -192,7 +201,8 @@ void LlmStore::upsert_model(const LlmModelInfo& m) {
     bind_text(st, 3, m.model_id.empty() ? m.name : m.model_id);
     sqlite3_bind_int(st, 4, m.max_context);
     sqlite3_bind_double(st, 5, m.temperature);
-    bind_text(st, 6, iso_now());
+    bind_text(st, 6, m.thinking_level);
+    bind_text(st, 7, iso_now());
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     if (!ok) throw std::runtime_error(sqlite3_errmsg(db.h));

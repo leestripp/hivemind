@@ -36,6 +36,11 @@ struct LlmModelInfo {
     std::string model_id;       // actual API id, e.g. "kimi-k3-0905-preview"
     int max_context = 0;        // 0 = model default
     double temperature = 0.0;   // 0 = model default
+    // Thinking/reasoning level (2026-10-01): "" = provider/model default,
+    // else none|low|high|max — the hive::ThinkingLevel to_string values.
+    // There is no generic provider discovery for this (see Plan.md), so it
+    // is an editor field; unsupported levels are ignored by the plugin.
+    std::string thinking_level;
     std::string created_at;
 };
 

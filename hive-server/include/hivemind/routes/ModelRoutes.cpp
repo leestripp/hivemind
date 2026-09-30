@@ -9,10 +9,13 @@
 #include <nlohmann/json.hpp>
 #include <http/HttpClient.h>
 
+#include <cctype>
+
 using json = nlohmann::json;
 using hivemind::routes::path_segments;
 using hivemind::routes::send_json;
 using hivemind::routes::send_error;
+using hivemind::routes::normalize_thinking_level;
 
 namespace {
 
@@ -127,6 +130,7 @@ void register_model_routes(OmniNet::HTTP::Server& server, LlmStore& llm) {
                                 {"model_id", m.model_id},
                                 {"max_context", m.max_context},
                                 {"temperature", m.temperature},
+                                {"thinking_level", m.thinking_level},
                                 {"created_at", m.created_at}});
             send_json(resp, json{{"models", list},
                                  {"default_model", llm.default_model()}});
@@ -147,6 +151,20 @@ void register_model_routes(OmniNet::HTTP::Server& server, LlmStore& llm) {
                 mi.model_id = body.value("model_id", "");
                 mi.max_context = body.value("max_context", 0);
                 mi.temperature = body.value("temperature", 0.0);
+                if (body.contains("thinking_level")) {
+                    if (!body["thinking_level"].is_string()) {
+                        send_error(resp, 400,
+                                   "thinking_level must be a string");
+                        return;
+                    }
+                    mi.thinking_level = body["thinking_level"].get<std::string>();
+                    if (!normalize_thinking_level(mi.thinking_level)) {
+                        send_error(resp, 400,
+                                   "thinking_level must be one of "
+                                   "default|none|low|high|max");
+                        return;
+                    }
+                }
                 llm.upsert_model(mi);
                 send_json(resp, json{{"ok", true}, {"model", name}});
             } catch (const std::exception& e) {

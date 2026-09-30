@@ -145,6 +145,24 @@ int main() {
     assert(!store.delete_agent(b.id));  // already gone
     assert(store.list_agents().size() == 4);   // Nova, Rigger, Forge, Comfy
 
+
+    // ── thinking level (2026-10-01): "" = inherit from model ──────────────
+    auto t = store.create_agent("Thinker", "", "", "shared", false, "",
+                                "", "", "", 0, "low");
+    assert(t.thinking_level == "low");
+    assert(store.get_agent(t.id)->thinking_level == "low");   // persisted
+    // PATCH: "" = keep, "default" = clear, a level = set.
+    auto t2 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+                                 "", "", "", "", 0, "");
+    assert(t2.thinking_level == "low");                       // kept
+    auto t3 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+                                 "", "", "", "", 0, "default");
+    assert(t3.thinking_level.empty());                        // cleared
+    auto t4 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+                                 "", "", "", "", 0, "max");
+    assert(t4.thinking_level == "max");                       // set
+    assert(store.get_agent(t.id)->thinking_level == "max");   // persisted
+
     fs::remove_all(tmp);
     std::cout << "test_agent_store: OK\n";
     return 0;

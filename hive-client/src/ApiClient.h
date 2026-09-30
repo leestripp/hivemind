@@ -35,7 +35,8 @@ public:
                                 const std::string& worker = "",
                                 const std::string& type = "",
                                 const std::string& memory = "",
-                                double cpus = -1);                      // POST /api/agents (Phase 69: -1 = default)
+                                double cpus = -1,                     // Phase 69: -1 = default
+                                const std::string& thinking_level = ""); // 2026-10-01: "" = inherit from model
     nlohmann::json update_agent(const std::string& id,
                                 const std::string& name, const std::string& role,
                                 const std::string& model,
@@ -45,7 +46,8 @@ public:
                                 const std::string& worker = "",
                                 const std::string& type = "",
                                 const std::string& memory = "",
-                                double cpus = -1);                      // PATCH Phase 69: "" keep, "default" clear; -1 keep, 0 reset
+                                double cpus = -1,                     // Phase 69: -1 keep, 0 reset
+                                const std::string& thinking_level = ""); // 2026-10-01: "" keep, "default" clears, else set
     nlohmann::json list_workers();                                   // GET /api/workers (Phase 30)
     nlohmann::json delete_agent(const std::string& id,
                                 const std::string& reassign_to = "");  // DELETE /api/agents/:id[?reassign_to=]

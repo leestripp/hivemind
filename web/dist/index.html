@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HiveMind</title>
-<link rel="stylesheet" href="css/base.css?v=20260930b">
-  <link rel="stylesheet" href="css/settings.css?v=20260930b">
+<link rel="stylesheet" href="css/base.css?v=20261001a">
+  <link rel="stylesheet" href="css/settings.css?v=20261001a">
 </head>
 <body>
 <div class="app">
@@ -352,7 +352,15 @@
         <label>Model ID <input id="model-modelid" placeholder="kimi-k3-0905-preview — the id sent to the API (defaults to name)" autocomplete="off"></label>
         <label>Max context <input id="model-context" type="number" min="0" placeholder="262144"></label>
         <label>Temperature <input id="model-temp" type="number" step="0.1" placeholder="0.6"></label>
-        <p class="muted">Stored in the hub registry — injected into tasks at dispatch, live for running agents.</p>
+        <label>Thinking level
+          <select id="model-thinking">
+            <option value="">Default (provider)</option>
+            <option value="none">None</option>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+            <option value="max">Max</option>
+          </select></label>
+        <p class="muted">Stored in the hub registry — injected into tasks at dispatch, live for running agents. Thinking level is a per-model editor setting: no provider API advertises which levels a model supports, and unsupported levels are silently ignored.</p>
         <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="button" id="model-edit-save">Save</button></div>
       </div>
     </div>
@@ -603,7 +611,7 @@
 </div>
 
 
-<script type="module" src="js/main.js?v=20260930b"></script>
+<script type="module" src="js/main.js?v=20261001a"></script>
   <div id="task-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <div class="modal-head"><h3>Add Task</h3><button class="icon-btn" data-close title="Close">✕</button></div>

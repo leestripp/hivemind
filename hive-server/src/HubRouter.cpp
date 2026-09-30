@@ -141,6 +141,13 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
         LlmModelInfo mi;
         auto prov = llm_->resolve(agent.model, &mi);
         if (prov) {
+            // 2026-10-01: effective thinking level — the agent's override
+            // wins, else the model's own setting ("" = provider default).
+            // There is no generic provider discovery for this, so both are
+            // editor fields (Plan.md); the plugin ignores unsupported ones.
+            const std::string thinking =
+                agent.thinking_level.empty() ? mi.thinking_level
+                                             : agent.thinking_level;
             op["llm"] = {{"provider", prov->name}, {"host", prov->host},
                          {"api_key", prov->api_key},
                          {"chat_endpoint", prov->chat_endpoint},
@@ -148,7 +155,8 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
                          {"model", mi.name},
                          {"model_id", mi.model_id.empty() ? mi.name : mi.model_id},
                          {"max_context", mi.max_context},
-                         {"temperature", mi.temperature}};
+                         {"temperature", mi.temperature},
+                         {"thinking_level", thinking}};
         } else {
             std::cerr << "[hub] dispatch: no LLM config for model '"
                       << (agent.model.empty() ? "(default)" : agent.model)

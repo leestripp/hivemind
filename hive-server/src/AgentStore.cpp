@@ -54,13 +54,14 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.type           = col(12);   // Phase 35
     a.memory         = col(13);   // Phase 69
     a.cpus           = sqlite3_column_double(st, 14);  // Phase 69
+    a.thinking_level = col(15);   // 2026-10-01: "" = inherit from model
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
     "       created_at, updated_at, require_approval, avatar, worker,"
-"       mcp_servers, type, memory, cpus FROM agents";
+    "       mcp_servers, type, memory, cpus, thinking_level FROM agents";
 
 } // namespace
 
@@ -135,6 +136,11 @@ void AgentStore::ensure_schema() {
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN cpus"
                      " REAL NOT NULL DEFAULT 0",
                  nullptr, nullptr, nullptr);
+    // 2026-10-01: thinking-level override (none|low|high|max);
+    // "" = inherit from the model's own thinking_level.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN thinking_level"
+                     " TEXT NOT NULL DEFAULT ''",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 }
 
@@ -147,7 +153,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& worker,
                                      const std::string& type,
                                      const std::string& memory,
-                                     double cpus) {
+                                     double cpus,
+                                     const std::string& thinking_level) {
     if (name.empty())
         throw std::invalid_argument("agent name must not be empty");
     if (get_agent_by_name(name))
@@ -166,6 +173,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.type           = type;                                    // Phase 35
     a.memory         = memory;                                  // Phase 69
     a.cpus           = cpus > 0 ? cpus : 0;                     // Phase 69
+    a.thinking_level = thinking_level;                          // 2026-10-01
     a.created_at     = iso_now();
     a.updated_at     = a.created_at;
 
@@ -174,8 +182,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     const char* sql =
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
         "                   container_id, created_at, updated_at, require_approval,"
-        "                   avatar, worker, type, memory, cpus)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?)";
+        "                   avatar, worker, type, memory, cpus, thinking_level)"
+        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -194,6 +202,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     bind_text(st, 11, a.type);
     bind_text(st, 12, a.memory);
     sqlite3_bind_double(st, 13, a.cpus);
+    bind_text(st, 14, a.thinking_level);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -253,7 +262,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& mcp_servers,
                                      const std::string& type,
                                      const std::string& memory,
-                                     double cpus) {
+                                     double cpus,
+                                     const std::string& thinking_level) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -275,7 +285,10 @@ RosterAgent AgentStore::update_agent(const std::string& id,
         // Phase 69: memory same contract as type; cpus < 0 = keep,
         // 0 = reset to the worker default.
         " memory = CASE WHEN ? = '' THEN memory WHEN ? = 'default' THEN '' ELSE ? END,"
-        " cpus = CASE WHEN ? < 0 THEN cpus ELSE ? END"
+        " cpus = CASE WHEN ? < 0 THEN cpus ELSE ? END,"
+        // 2026-10-01: same keep/default/set contract as type + memory.
+        " thinking_level = CASE WHEN ? = '' THEN thinking_level"
+        "   WHEN ? = 'default' THEN '' ELSE ? END"
         " WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
@@ -302,7 +315,10 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 17, memory);
     sqlite3_bind_double(st, 18, cpus);
     sqlite3_bind_double(st, 19, cpus);
-    bind_text(st, 20, id);
+    bind_text(st, 20, thinking_level);
+    bind_text(st, 21, thinking_level);
+    bind_text(st, 22, thinking_level);
+    bind_text(st, 23, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

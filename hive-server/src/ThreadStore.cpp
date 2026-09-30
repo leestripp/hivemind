@@ -294,6 +294,20 @@ std::optional<Thread> ThreadStore::get_thread(const std::string& id) {
     return out;
 }
 
+std::set<std::string> ThreadStore::user_posted_thread_ids() {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    std::set<std::string> out;
+    if (sqlite3_prepare_v2(db,
+            "SELECT DISTINCT thread_id FROM messages WHERE sender_kind = 'user'",
+            -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) out.insert(col_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return out;
+}
+
 int ThreadStore::count_non_user_since(const std::string& thread_id,
                                       const std::string& since_iso) {
     sqlite3* db = open_conn();

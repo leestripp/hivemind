@@ -102,6 +102,7 @@ function providerCard(prov, models, defaultModel) {
     <td>${esc(m.model_id || m.name)}</td>
     <td>${m.max_context || '—'}</td>
     <td>${m.temperature ?? '—'}</td>
+    <td>${esc(m.thinking_level || 'default')}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-small" data-act="default" data-name="${esc(m.name)}" title="Set as hub default">★</button>
       <button class="btn btn-small" data-act="edit" data-name="${esc(m.name)}" title="Edit">✎</button>
@@ -114,7 +115,7 @@ function providerCard(prov, models, defaultModel) {
       <button class="btn" data-act="add">+ Add model</button>
     </div>
     <table class="kv-table">
-      <thead><tr><th>Name</th><th>Model ID</th><th>Ctx</th><th>Temp</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Model ID</th><th>Ctx</th><th>Temp</th><th>Think</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   card.querySelectorAll('button[data-act]').forEach(b => {
@@ -153,6 +154,7 @@ function fillModal(name, e) {
   $('model-modelid').value = e.model_id || '';
   $('model-context').value = e.max_context || '';
   $('model-temp').value = (e.temperature ?? '') === 0 ? '0' : (e.temperature ?? '');
+  $('model-thinking').value = e.thinking_level || '';
   $('model-modal-title').textContent = name ? `Edit model: ${name}` : 'Add model';
 }
 
@@ -200,6 +202,7 @@ export function initModels() {
     if (mid) body.model_id = mid;
     if (!isNaN(ctx)) body.max_context = ctx;
     if (!isNaN(tmp)) body.temperature = tmp;
+    body.thinking_level = $('model-thinking').value;   // 2026-10-01
     if (!body.name) { alert('name is required'); return; }
     const btn = $('model-edit-save');
     btn.disabled = true;

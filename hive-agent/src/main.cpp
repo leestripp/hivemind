@@ -1149,10 +1149,21 @@ int main(int argc, char** argv) {
                     hive::ModelConfig mc;
                     mc.name = model; mc.provider = pc.name; mc.model_id = model_id;
                     st->upsert_model(mc);
-                    if (agent.switch_model(model))
+                    if (agent.switch_model(model)) {
                         log_err("llm config applied: " + model + " via " + pc.name);
-                    else
+                        // 2026-10-01: hub-selected thinking level rides the
+                        // Phase 43 frame ("" = provider default). Runtime
+                        // toggle stores into cfg_, so model rebuilds keep it;
+                        // plugins silently ignore levels the model rejects.
+                        const auto level = hive::thinking_level_from_string(
+                            L.value("thinking_level", ""));
+                        agent.set_thinking_level(level);
+                        if (level != hive::ThinkingLevel::Default)
+                            log_err(std::string("thinking level: ")
+                                    + hive::to_string(level));
+                    } else {
                         log_err("llm config apply failed for model '" + model + "'");
+                    }
                 }
             }
             // Phase 50: live disabled-skills gate. The hub computes the

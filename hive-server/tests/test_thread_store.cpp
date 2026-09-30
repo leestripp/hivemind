@@ -57,6 +57,20 @@ int main() {
 
     // messages of other threads are isolated
     store.add_message(grp.id, "user", "", "group hello");
+
+    // 2026-10-01: user_posted_thread_ids — the unread-badge gate. ONE
+    // DISTINCT query; a thread counts only when it has a user message.
+    auto posted = store.user_posted_thread_ids();
+    assert(posted.count(dm.id) == 1);     // user messaged the DM
+    assert(posted.count(grp.id) == 1);    // user messaged the group
+    auto agent_only = store.create_thread("a2a relay", "group",
+                                          {"agent-1", "agent-2"});
+    store.add_message(agent_only.id, "agent", "agent-1", "relay ping");
+    auto posted2 = store.user_posted_thread_ids();
+    assert(posted2.count(agent_only.id) == 0);   // pure agent-to-agent
+    assert(posted2.count(dm.id) == 1);           // unchanged
+    assert(store.delete_thread(agent_only.id));  // keep later counts exact
+
     assert(store.list_messages(dm.id).size() == 3);
     assert(store.list_messages(grp.id).size() == 1);
 
@@ -88,6 +102,7 @@ int main() {
     assert(store.list_messages(dm.id).empty());
     assert(!store.delete_thread(dm.id));
     assert(store.list_threads().size() == 2);
+
 
     fs::remove_all(tmp);
     std::cout << "test_thread_store: OK\n";

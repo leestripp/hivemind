@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -138,6 +139,12 @@ public:
     /// the human user — the unread-count basis for the user's badges.
     int count_non_user_since(const std::string& thread_id,
                              const std::string& since_iso);
+
+    /// 2026-10-01: ONE query returning every thread_id that contains at
+    /// least one user-authored message — the "thread is meant for the
+    /// user" set used to gate unread badges. Never per-row (the 66c N+1
+    /// lesson); the caller passes the set into the per-thread unread calc.
+    std::set<std::string> user_posted_thread_ids();
 
     /// Phase 67: thread groups (see ThreadGroup). set_thread_group
     /// with an empty group_id returns the thread to its smart group;

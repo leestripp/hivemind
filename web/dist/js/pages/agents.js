@@ -344,6 +344,14 @@ function ensureAgentModal() {
         <select id="am-provider"></select></div>
       <div class="form-row"><label>Model</label>
         <select id="am-model"></select></div>
+      <div class="form-row"><label>Thinking</label>
+        <select id="am-thinking">
+          <option value="">Inherit from model</option>
+          <option value="none">None</option>
+          <option value="low">Low</option>
+          <option value="high">High</option>
+          <option value="max">Max</option>
+        </select></div>
       <div class="form-row">
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="am-appr" style="width:auto">
@@ -433,6 +441,10 @@ async function openAgentModal(existing = null, prefill = null) {
     if (pm) { psel.value = pm.provider; refillModels(); msel.value = curModel; }
   }
 
+  // 2026-10-01: thinking-level override prefill. "" = inherit from model.
+  const thinkSel = $('am-thinking');
+  thinkSel.value = existing?.thinking_level || '';
+
   $('am-save').onclick = async () => {
     const name = $('am-name').value.trim();
     if (!name) { alert('Name is required.'); return; }
@@ -458,6 +470,14 @@ async function openAgentModal(existing = null, prefill = null) {
     // sends "default" (explicit clear); disabled row → omit (keep as-is).
     if (!tsel.disabled)
       body.type = tsel.value === 'gpu' ? 'gpu' : (curType ? 'default' : '');
+    // 2026-10-01: thinking level — same keep/default/set contract as type.
+    {
+      const tv = thinkSel.value;
+      const curThink = existing?.thinking_level || '';
+      if (!editing) body.thinking_level = tv;
+      else if (tv) body.thinking_level = tv;
+      else if (curThink) body.thinking_level = 'default';
+    }
     $('am-save').disabled = true;
     try {
       if (editing) await API.req('PATCH', '/api/agents/' + existing.id, body);

@@ -60,6 +60,19 @@ int main() {
     assert(prov2 && r.name == "k3");
     assert(!store.resolve("ghost"));
 
+    // 2026-10-01: thinking_level round-trips through upsert + resolve.
+    assert(r.thinking_level.empty());          // default: provider default
+    m.thinking_level = "high";
+    store.upsert_model(m);                     // re-upsert = update path
+    LlmModelInfo r2;
+    assert(store.resolve("k3", &r2) && r2.thinking_level == "high");
+    m.thinking_level = "none";
+    store.upsert_model(m);
+    assert(store.resolve("k3", &r2) && r2.thinking_level == "none");
+    m.thinking_level = "";                     // cleared back to default
+    store.upsert_model(m);
+    assert(store.resolve("k3", &r2) && r2.thinking_level.empty());
+
     // remove model clears a default pointing at it
     store.set_default_model("k3-256k");
     assert(store.remove_model("k3-256k"));

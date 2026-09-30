@@ -2529,6 +2529,12 @@ void HiveWindow::on_thread_selected() {
     for (auto& t : threads_)
         if (t.value("id", "") == *id)
             last_seen_activity_[*id] = t.value("last_activity", "");
+    // 2026-10-01: VIEWING a thread marks it read — this is the ONLY poster
+    // of the user read-mark besides poll_chat's new-message path, and its
+    // absence was the stuck-unread-dot bug: clicking cleared the dot
+    // locally, the 10 s refresh re-fetched unread > 0 from the hub, and
+    // the dot resurrected. Fire-and-forget with a 10 s per-thread debounce.
+    maybe_post_user_read(*id);
     // Clear the unread dot NOW: rows (and their dots) are otherwise only
     // rebuilt by the 10s signature-gated refresh — and clicking changes
     // no server-side data, so the dot could linger for minutes. The
@@ -3772,6 +3778,22 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 break;
             }
     }
+    // 2026-10-01: thinking-level override. "Inherit from model" ("") means
+    // the hub uses the model's own thinking_level at dispatch; otherwise the
+    // agent-level value wins. The hub validates (default|none|low|high|max).
+    const std::vector<Glib::ustring> kThinkItems{
+        "Inherit from model", "None", "Low", "High", "Max"};
+    const std::vector<std::string> kThinkValues{"", "none", "low", "high", "max"};
+    auto* think_dd = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create(kThinkItems));
+    think_dd->set_selected(0);
+    if (editing) {
+        const std::string cur_think =
+            existing->value("thinking_level", "");
+        for (size_t i = 0; i < kThinkValues.size(); ++i)
+            if (kThinkValues[i] == cur_think) { think_dd->set_selected((guint)i); break; }
+    }
+
     // Phase 30: worker placement. Query the enrolled hive-workers and offer
     // the ONLINE ones as execution targets. An offline rig can't start a
     // container, so it is hidden from the list — and when no worker is
@@ -3961,6 +3983,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
+    add_row("Thinking", think_dd, row_i++);   // 2026-10-01
     if (show_worker_row) {
         add_row("Worker", worker, row_i++);
         add_row("Type", type_dd, row_i++);
@@ -3983,7 +4006,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -4015,6 +4038,15 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 } else if (editing && cur_cpus > 0) {
                     cp = 0;   // cleared -> reset to worker default
                 }
+                // 2026-10-01: edit semantics — unchanged inherit = keep
+                // (""), explicit Inherit after an override = "default"
+                // (clear), a level = set. Create always sends the value.
+                const auto tsel = think_dd->get_selected();
+                std::string think = tsel < kThinkValues.size()
+                                        ? kThinkValues[tsel] : "";
+                if (editing && think.empty() &&
+                    !existing->value("thinking_level", "").empty())
+                    think = "default";
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
@@ -4022,11 +4054,11 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
-                           ap = appr->get_active(), mem, cp] {
+                           ap = appr->get_active(), mem, cp, think] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp);
+                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp, think);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp);
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp, think);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });

@@ -14,7 +14,7 @@ except `/api/health`.
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
 | `POST /api/threads/:id/cancel` | cancel in-flight turns + mute agent fan-in on the thread (~10 min) — the right-click Stop path |
-| `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts. Also `group_id`: custom thread-group id or null (= smart group derived from `kind`) |
+| `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts. `unread` is gated to user-relevant threads (2026-10-01): kind `user`/kind `dm`, or any group the user has posted in — pure agent-to-agent threads always report 0. Also `group_id`: custom thread-group id or null (= smart group derived from `kind`) |
 | `GET /api/thread-groups` | user's custom thread groups (id/name/position/member_count) |
 | `POST /api/thread-groups` | create group `{name}` → 201 `{id}` |
 | `PATCH /api/thread-groups/:id` | rename `{name}` |
@@ -87,6 +87,25 @@ credentials are env-injected into agents at spawn (`HIVEMIND_*`).
 `GET /api/models` returns the union of connected workers' catalogs
 (advertised in their `hello` frames) -- used by the client's New Agent
 dialog.
+
+### Hub model registry (Phase 43 — the authoritative path)
+
+`GET/POST /api/providers`, `GET/POST/DELETE /api/models`,
+`POST /api/models/default` manage the hub-owned registry (llm.db); the
+resolved provider config is injected into every task frame (`op.llm`).
+Model records carry `thinking_level` (2026-10-01): `""` = provider/model
+default, else `none|low|high|max`. There is NO provider API that
+advertises which thinking levels a model supports (OpenAI's `/v1/models`
+returns only id/created/owned_by; OpenAI `reasoning_effort`, Anthropic
+thinking budgets and Moonshot `thinking.effort` are all send-time,
+provider-specific) — so it is an editor field, validated
+`default|none|low|high|max`, and the engine's provider plugin silently
+ignores a level the model rejects. `POST /api/agents` / `PATCH
+/api/agents/:id` accept an agent-level `thinking_level` override (`""` =
+inherit from model, `"default"` = clear, else set); at dispatch the
+override wins, else the model's, and the effective value rides
+`op.llm.thinking_level` to the agent, which applies it via its runtime
+`set_thinking_level`.
 
 ## Skills
 

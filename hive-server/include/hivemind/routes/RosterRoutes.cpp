@@ -29,6 +29,7 @@ namespace {
 using hivemind::routes::path_segments;
 using hivemind::routes::send_json;
 using hivemind::routes::send_error;
+using hivemind::routes::normalize_thinking_level;
 
 
 
@@ -45,6 +46,7 @@ json agent_json(const RosterAgent& a) {
         {"require_approval", a.require_approval}, {"avatar", a.avatar},
         {"worker", a.worker}, {"type", a.type},                   // Phase 35
         {"memory", a.memory}, {"cpus", a.cpus},                  // Phase 69
+        {"thinking_level", a.thinking_level},                     // 2026-10-01
         {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
@@ -260,6 +262,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     "memory must be a podman size like \"4g\" or \"1536m\"");
                 return;
             }
+            // 2026-10-01: thinking-level override; "" = inherit from model.
+            std::string thinking_level = body.value("thinking_level", "");
+            if (!normalize_thinking_level(thinking_level)) {
+                send_error(resp, 400,
+                    "thinking_level must be one of default|none|low|high|max");
+                return;
+            }
             {
                 std::string werr;
                 if (!validate_worker(workers, worker, werr)) {
@@ -272,7 +281,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
                                              body.value("avatar", ""), worker,
-                                             type, memory, cpus);
+                                             type, memory, cpus,
+                                             thinking_level);
                 // Phase C: spawn the brain on its worker right away
                 // (idempotent; offline worker spawns on reconnect).
                 hub.reconcile_worker(a.worker);
@@ -349,6 +359,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 }
                 pcpus = body["cpus"].get<double>();
             }
+            // 2026-10-01: "" = keep, "default" = clear, else set.
+            std::string pthinking = body.value("thinking_level", "");
+            if (!normalize_thinking_level(pthinking)) {
+                send_error(resp, 400,
+                    "thinking_level must be one of default|none|low|high|max");
+                return;
+            }
             {
                 const std::string pw = body.value("worker", "");
                 if (!pw.empty()) {
@@ -386,7 +403,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                                : body.value("mcp_servers", ""))
                         : "",
                     ptype,   // "" = keep, "default" = clear
-                    pmemory, pcpus);   // Phase 69
+                    pmemory, pcpus,    // Phase 69
+                    pthinking);        // 2026-10-01
                 // Name/model changes must not leak into a live brain:
                 // stop, then respawn with the new config (worker dedups).
                 hub.stop_agent(a);
@@ -582,9 +600,18 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             // Phase 67: ONE membership map for the whole list — never
             // per-row queries in a list route (66c N+1 / fd lesson).
             auto gmap = threads.thread_group_map();
+            // 2026-10-01: unread badges ONLY for user-relevant threads.
+            // Agent-to-agent threads (agents read those themselves — Lee:
+            // "not my problem, it's the Agents") never badge the user. One
+            // DISTINCT query for the whole list, never per-row.
+            const auto user_threads = threads.user_posted_thread_ids();
             for (auto& t : threads.list_threads()) {
                 auto j = thread_json(t);
-                j["unread"] = chat.unread_for_user(t.id);   // Phase 66c
+                // inbox + DMs are always user-relevant; a group only once
+                // the user has posted in it.
+                const bool user_relevant = t.kind == "user" || t.kind == "dm" ||
+                                           user_threads.count(t.id) > 0;
+                j["unread"] = user_relevant ? chat.unread_for_user(t.id) : 0;
                 auto it = gmap.find(t.id);
                 j["group_id"] = (it != gmap.end()) ? json(it->second)
                                                    : json(nullptr);

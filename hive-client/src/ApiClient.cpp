@@ -87,7 +87,8 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& worker,
                                        const std::string& type,
                                        const std::string& memory,
-                                       double cpus) {
+                                       double cpus,
+                                       const std::string& thinking_level) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
@@ -96,6 +97,7 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
     if (!type.empty())   body["type"]   = type;     // Phase 35
     if (!memory.empty()) body["memory"] = memory;   // Phase 69
     if (cpus >= 0)       body["cpus"]   = cpus;     // Phase 69
+    if (!thinking_level.empty()) body["thinking_level"] = thinking_level;  // 2026-10-01
     return request("POST", "/api/agents", &body);
 }
 
@@ -109,7 +111,8 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& worker,
                                        const std::string& type,
                                        const std::string& memory,
-                                       double cpus) {
+                                       double cpus,
+                                       const std::string& thinking_level) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
@@ -118,6 +121,9 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
     if (!type.empty()) body["type"] = type;    // Phase 35: "" keep, "default" clears
     if (!memory.empty()) body["memory"] = memory;  // Phase 69: "" keep, "default" clears
     if (cpus >= 0) body["cpus"] = cpus;        // Phase 69: -1 keep, 0 reset
+    // 2026-10-01: the dialog always sends the effective selection —
+    // "" (inherit), "default" (clear), or a level.
+    body["thinking_level"] = thinking_level;
     return request("PATCH", "/api/agents/" + id, &body);
 }
 

@@ -182,6 +182,9 @@ class VoiceActivity : Activity() {
             try {
                 threadId = api.openDm(agentId)
                 lastMessageId = api.latestMessageId(threadId)
+                // 2026-10-01: opening the voice chat == viewing the
+                // thread — clear the hub's unread mark (best effort).
+                runCatching { api.markRead(threadId) }
                 agentNames = runCatching {
                     api.listAgents().associate { it.id to it.name }
                 }.getOrDefault(emptyMap())
@@ -324,6 +327,7 @@ class VoiceActivity : Activity() {
         return try {
             threadId = api.openDm(agentId)
             lastMessageId = api.latestMessageId(threadId)
+            runCatching { api.markRead(threadId) }
             narratedPrefix = ""
             Log.w(TAG, "DM thread vanished - re-resolved to $threadId")
             true
