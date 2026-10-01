@@ -30,6 +30,14 @@ class SettingsActivity : Activity() {
         announce.setOnCheckedChangeListener { _, on ->
             Prefs.setStateAnnounce(this, on)
         }
+        val notify = findViewById<CheckBox>(R.id.notifyCheck)
+        notify.isChecked = Prefs.notifyAnnounce(this)
+        notify.setOnCheckedChangeListener { _, on ->
+            Prefs.setNotifyAnnounce(this, on)
+            // Built-in grant popup: enabling without the permission
+            // explains + routes to the system toggle screen.
+            if (on) NotifyListenerService.ensureGranted(this)
+        }
         val status = findViewById<TextView>(R.id.statusText)
         url.setText(Prefs.hubUrl(this))
         key.setText(Prefs.apiKey(this))

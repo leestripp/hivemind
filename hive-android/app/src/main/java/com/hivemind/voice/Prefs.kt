@@ -51,4 +51,20 @@ object Prefs {
             .putBoolean(KEY_STATE_ANNOUNCE, on)
             .apply()
     }
+
+    // Read other apps' notifications aloud (SMS, missed calls) — needs
+    // the system Notification Access grant; the app prompts for it.
+    // Default ON (2026-10-01): silent until the user grants, and the
+    // Settings toggle / startup prompt route them there.
+    private const val KEY_NOTIFY_ANNOUNCE = "notify_announce"
+
+    fun notifyAnnounce(ctx: Context): Boolean =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_NOTIFY_ANNOUNCE, true)
+
+    fun setNotifyAnnounce(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_NOTIFY_ANNOUNCE, on)
+            .apply()
+    }
 }

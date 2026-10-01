@@ -65,6 +65,10 @@ class MainActivity : Activity() {
         status = findViewById(R.id.statusText)
         list = findViewById(R.id.agentList)
         tts = TtsEngine(this, onQueueEmpty = { /* nothing to resume */ })
+        // Feature on but permission missing → the grant popup, once per
+        // app start (the Settings toggle also triggers it).
+        if (Prefs.notifyAnnounce(this))
+            NotifyListenerService.ensureGranted(this)
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }

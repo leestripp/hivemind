@@ -33,5 +33,16 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
         <activity android:name=".SettingsActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <!-- Notification Access: reads other apps' notifications aloud
+             (SMS, missed calls). User grants in Settings → Special
+             access; the app only routes there. -->
+        <service android:name=".NotifyListenerService"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
