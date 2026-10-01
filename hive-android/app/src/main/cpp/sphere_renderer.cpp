@@ -1,12 +1,24 @@
 // HiveMind Voice — Jarvis sphere renderer (OpenGL ES 2.0).
 //
-// A point-cloud sphere (Fibonacci lattice) whose radius is displaced by
-// 3D simplex noise. The displacement amplitude follows the voice level
-// (mic RMS while listening, synthetic envelope while the agent speaks),
-// so the sphere visibly "moves with the voice signal".
+// A swarm of "insects" holding a sphere shape — the Hive Mind look.
 //
-// States: 0 idle · 1 listening · 2 thinking · 3 speaking.
-// Rendered additively on a near-black background.
+// Behaviour model (grounded in swarm research, not bird flocking):
+//   - Attanasi et al. 2014 (PLOS Comput Biol): insect swarms have NO
+//     collective order — unlike boids, insects never align. Each flies
+//     its own erratic path; only cohesion keeps the swarm together.
+//   - Individual flight = tangled quasi-periodic loops (incommensurate
+//     sine sums per axis) + sharp "saccade" darts (fruit-fly turn-and-go).
+//   - The swarm centre itself wanders (Sci Rep 2016, srep30515).
+// Every insect is O(1) in the vertex shader from a static seed VBO —
+// no CPU simulation, no neighbour search, ~zero battery cost.
+//
+// Voice level drives *agitation*: wander amplitude, dart frequency and
+// radial bulge all rise with the signal, so the swarm moves with the voice.
+//
+// Background: a faint procedural honeycomb hex grid (fullscreen quad,
+// drawn under the additive points) — amber, vignetted, slow drift.
+//
+// States: 0 idle · 1 listening · 2 thinking · 3 speaking · 4 processing.
 
 #include <GLES2/gl2.h>
 #include <jni.h>
@@ -20,120 +32,105 @@
 
 namespace {
 
-constexpr int kPointCount = 1600;
+constexpr int kPointCount = 2600;
 
-const char* kVertexShader = R"GLSL(
+// ---------------------------------------------------------------- swarm --
+const char* kSwarmVertexShader = R"GLSL(
 precision highp float;
 
-attribute vec3 aPos;
+attribute vec4 aSeed0;  // xyz: base direction on unit sphere · w: speed factor
+attribute vec4 aSeed1;  // x: shell radius · y: phase · z: dart rate · w: brightness
 
 uniform mat4  uProj;
 uniform float uTime;
 uniform float uLevel;   // 0..1 smoothed voice level
-uniform float uState;   // 0 idle, 1 listening, 2 thinking, 3 speaking, 4 processing (STT decode)
+uniform float uState;   // 0 idle, 1 listening, 2 thinking, 3 speaking, 4 processing
 uniform float uPointScale;
 uniform float uCamDist; // camera distance — widens for portrait screens
 
 varying vec4 vColor;
 
-// -- Ashima simplex noise 3D (MIT) --------------------------------------
-vec3 mod289(vec3 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
-vec4 mod289(vec4 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
-vec4 permute(vec4 x){ return mod289(((x*34.0)+1.0)*x); }
-vec4 taylorInvSqrt(vec4 r){ return 1.79284291400159 - 0.85373472095314 * r; }
-
-float snoise(vec3 v){
-    const vec2 C = vec2(1.0/6.0, 1.0/3.0);
-    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-
-    vec3 i  = floor(v + dot(v, C.yyy));
-    vec3 x0 = v - i + dot(i, C.xxx);
-
-    vec3 g = step(x0.yzx, x0.xyz);
-    vec3 l = 1.0 - g;
-    vec3 i1 = min(g.xyz, l.zxy);
-    vec3 i2 = max(g.xyz, l.zxy);
-
-    vec3 x1 = x0 - i1 + C.xxx;
-    vec3 x2 = x0 - i2 + C.yyy;
-    vec3 x3 = x0 - D.yyy;
-
-    i = mod289(i);
-    vec4 p = permute(permute(permute(
-              i.z + vec4(0.0, i1.z, i2.z, 1.0))
-            + i.y + vec4(0.0, i1.y, i2.y, 1.0))
-            + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-
-    float n_ = 0.142857142857;
-    vec3 ns = n_ * D.wyz - D.xzx;
-
-    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-
-    vec4 x_ = floor(j * ns.z);
-    vec4 y_ = floor(j - 7.0 * x_);
-
-    vec4 x = x_ * ns.x + ns.yyyy;
-    vec4 y = y_ * ns.x + ns.yyyy;
-    vec4 h = 1.0 - abs(x) - abs(y);
-
-    vec4 b0 = vec4(x.xy, y.xy);
-    vec4 b1 = vec4(x.zw, y.zw);
-
-    vec4 s0 = floor(b0)*2.0 + 1.0;
-    vec4 s1 = floor(b1)*2.0 + 1.0;
-    vec4 sh = -step(h, vec4(0.0));
-
-    vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
-    vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
-
-    vec3 p0 = vec3(a0.xy, h.x);
-    vec3 p1 = vec3(a0.zw, h.y);
-    vec3 p2 = vec3(a1.xy, h.z);
-    vec3 p3 = vec3(a1.zw, h.w);
-
-    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
-    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-
-    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
-    m = m * m;
-    return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+float hash1(float n){ return fract(sin(n) * 43758.5453123); }
+vec3 hash3(float n){
+    return fract(sin(vec3(n, n + 1.31, n + 2.62)) *
+                 vec3(43758.5453123, 22578.1459123, 19642.3490434));
 }
-// ------------------------------------------------------------------------
 
 void main(){
     float listenAmt = clamp(uState, 0.0, 1.0) * clamp(2.0 - uState, 0.0, 1.0);
     float thinkAmt  = max(0.0, 1.0 - abs(uState - 2.0));
     float speakAmt  = clamp(uState - 2.0, 0.0, 1.0) * clamp(4.0 - uState, 0.0, 1.0);
     float procAmt   = clamp(uState - 3.0, 0.0, 1.0);
-
-    // Heartbeat for processing: makes decode duration *visible*.
     float pulse = 0.5 + 0.5 * sin(uTime * 3.2);
 
+    vec3  baseDir = normalize(aSeed0.xyz);
+    float ph      = aSeed1.y;
+    float speed   = 0.55 + aSeed0.w * 1.45;          // per-insect pace
+    float t       = uTime * speed + ph * 113.0;      // per-insect clock
+
+    // Agitation 0..~1.5: voice + state energy. Drives everything below.
+    float agit = clamp(uLevel + thinkAmt * 0.55 + procAmt * 0.45 * pulse, 0.0, 1.5);
+
+    // Wandering swarm core — the whole ball of insects drifts (srep30515).
+    vec3 core = 0.07 * vec3(sin(uTime * 0.31 + 1.7),
+                            sin(uTime * 0.23),
+                            sin(uTime * 0.19 + 4.2));
+
+    // Loopy quasi-periodic wander: three incommensurate sines per axis,
+    // per-insect frequencies — each insect traces its own tangled loop.
+    // Tangential bias keeps the sphere silhouette readable.
+    float wanderAmp = 0.08 + 0.10 * agit;
+    float f1 = 1.9 + 1.3 * hash1(ph * 3.1 + 0.7);
+    float f2 = 2.6 + 1.5 * hash1(ph * 5.3 + 2.9);
+    float f3 = 3.4 + 1.7 * hash1(ph * 7.7 + 5.1);
+    vec3 wander = vec3(sin(t * f1 + ph * 6.1),
+                       sin(t * f2 + ph * 9.4),
+                       sin(t * f3 + ph * 12.7));
+    wander -= baseDir * dot(wander, baseDir) * 0.6;
+
+    // Saccade darts: sharp turn-and-go events, occasional per time cell.
+    float dartRate = aSeed1.z * (1.0 + 1.6 * agit);
+    float cell  = floor(t * dartRate);
+    float cellH = hash1(cell * 17.77 + ph * 91.7);
+    float dartOn = step(0.62, cellH);
+    vec3  dartDir = normalize(hash3(cell * 3.31 + ph * 57.3) - 0.5 +
+                              vec3(0.0013, -0.0007, 0.0011));
+    float dartPhase = fract(t * dartRate);
+    float dartEnv = dartOn * smoothstep(0.0, 0.18, dartPhase) *
+                    (1.0 - smoothstep(0.35, 1.0, dartPhase));
+    vec3 dart = dartDir * dartEnv * (0.03 + 0.18 * agit);
+
+    // Radial: shell position + wingbeat flutter + voice bulge.
+    float wingBeat = 7.0 + aSeed0.w * 13.0;
+    float flutter = 0.022 * sin(t * wingBeat) +
+                    0.012 * sin(t * wingBeat * 0.37 + ph);
+    float bulge = 1.0 + 0.10 * uLevel + 0.05 * thinkAmt + 0.06 * procAmt * pulse;
+    float radius = (aSeed1.x + flutter) * bulge;
+
+    vec3 world = baseDir * radius + wander * wanderAmp + dart + core;
+
     // Rotation: idle drift, listening a touch faster, thinking spins hard,
-    // processing a steady working spin.
-    float speed = 0.25 + 0.15 * listenAmt + 1.30 * thinkAmt
-                + 0.30 * speakAmt + 0.55 * procAmt;
-    float a = uTime * speed + aPos.y * (thinkAmt + 0.4 * procAmt) * 2.0;  // shear
+    // processing a steady working spin. Shear while thinking/processing.
+    float rotSpeed = 0.25 + 0.15 * listenAmt + 1.30 * thinkAmt
+                   + 0.30 * speakAmt + 0.55 * procAmt;
+    float a = uTime * rotSpeed + baseDir.y * (thinkAmt + 0.4 * procAmt) * 2.0;
     float ca = cos(a), sa = sin(a);
-    vec3 p = vec3(aPos.x * ca - aPos.z * sa, aPos.y, aPos.x * sa + aPos.z * ca);
+    world = vec3(world.x * ca - world.z * sa, world.y,
+                 world.x * sa + world.z * ca);
 
     // Slight fixed tilt for depth.
     float tilt = 0.35;
     float ct = cos(tilt), st = sin(tilt);
-    p = vec3(p.x, p.y * ct - p.z * st, p.y * st + p.z * ct);
-
-    // Noise displacement — amplitude follows the voice level.
-    float n1 = snoise(p * 2.3 + vec3(0.0, uTime * 0.45, 0.0));
-    float n2 = snoise(p * 5.0 - vec3(uTime * 0.8, 0.0, 0.0));
-    float amp = 0.045 + uLevel * 0.40 + thinkAmt * 0.10 + procAmt * 0.14 * pulse;
-    float radius = 1.0 + n1 * amp + n2 * uLevel * 0.18;
-    vec3 world = p * radius;
+    world = vec3(world.x, world.y * ct - world.z * st, world.y * st + world.z * ct);
 
     vec4 view = vec4(world.xy, world.z - uCamDist, 1.0);
     gl_Position = uProj * view;
 
-    float ps = uPointScale * (1.6 + uLevel * 2.6 + n1 * 0.9 + thinkAmt * 0.6 + procAmt * 0.4);
-    gl_PointSize = clamp(ps / max(0.6, -view.z), 1.0, 64.0);
+    // Per-insect varied size + wingbeat shimmer; agitation inflates.
+    float sizeVar = 0.7 + 0.9 * hash1(ph * 13.7 + 0.3);
+    float flicker = 0.75 + 0.25 * sin(t * wingBeat);
+    float ps = uPointScale * sizeVar * (1.1 + 1.0 * agit) * flicker;
+    gl_PointSize = clamp(ps / max(0.6, -view.z), 1.0, 48.0);
 
     // Per-state palette.
     vec3 cIdle   = vec3(0.14, 0.46, 0.58);
@@ -147,15 +144,77 @@ void main(){
     col = mix(col, cSpeak,  speakAmt);
     col = mix(col, cProc,   procAmt);
 
-    float bright = 0.55 + 0.45 * n1 + uLevel * 0.9;
+    // Amber "bee" flecks tie the swarm to the honeycomb backdrop.
+    float bee = step(0.88, hash1(ph * 29.1 + 3.3));
+    col = mix(col, vec3(1.0, 0.72, 0.25), bee * 0.55);
+
+    float bright = aSeed1.w * (0.85 + 0.75 * agit);
     // Processing owns brightness outright: luminous pulsing violet,
     // guaranteed readable at zero mic level, never clamping to white.
-    bright = mix(bright, 0.75 + 0.25 * n1 + 0.30 * pulse, procAmt);
-    vColor = vec4(col * max(0.30, bright), 1.0);
+    bright = mix(bright, 0.75 + 0.25 * dartOn + 0.30 * pulse, procAmt);
+
+    // Far side of the swarm dims — reads as a 3D ball, not a disc.
+    // Window tracks the camera: the swarm spans ±1.3 around z = -uCamDist.
+    float depthFade = 0.40 + 0.60 *
+        smoothstep(-(uCamDist + 1.3), -(uCamDist - 1.3), view.z);
+    vColor = vec4(col * max(0.30, bright), depthFade);
 }
 )GLSL";
 
-const char* kFragmentShader = R"GLSL(
+// -------------------------------------------------------------- backdrop --
+const char* kHoneyVertexShader = R"GLSL(
+precision highp float;
+attribute vec2 aPos;   // fullscreen quad, NDC
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }
+)GLSL";
+
+const char* kHoneyFragmentShader = R"GLSL(
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform float uLevel;
+
+// Distance to the border of a pointy-top hexagon centred at the origin.
+float hexDist(vec2 p){
+    p = abs(p);
+    return max(dot(p, vec2(0.5, 0.8660254)), p.x);
+}
+
+void main(){
+    vec2 px  = gl_FragCoord.xy;
+    vec2 ndc = (px - 0.5 * uRes) / uRes.y;
+    // Faint at the edges, a touch stronger behind the swarm.
+    float vign = smoothstep(1.15, 0.25, length(ndc));
+
+    // Slow drift so the hive feels alive.
+    vec2 uv = px / 34.0 + vec2(uTime * 0.010, uTime * 0.006);
+
+    const vec2 kHex = vec2(1.0, 1.7320508);   // flat-top hex tiling
+    vec2 h  = kHex * 0.5;
+    vec2 ga = mod(uv, kHex) - h;
+    vec2 gb = mod(uv - h, kHex) - h;
+    vec2 gv = dot(ga, ga) < dot(gb, gb) ? ga : gb;
+    float line = 1.0 - smoothstep(0.46, 0.5, hexDist(gv));
+
+    // Gentle per-cell brightness variation so the hive feels organic.
+    vec2 cell = uv - gv;
+    float cellHash = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+
+    // Honey amber, faint; breathes with the voice. Straight alpha — an
+    // earlier premultiplied form squared the effect to invisibility.
+    float a = line * (0.05 + 0.07 * uLevel) * (0.25 + 0.75 * vign) *
+              (0.85 + 0.25 * cellHash);
+    gl_FragColor = vec4(vec3(1.0, 0.72, 0.25), a);
+}
+)GLSL";
+
+// ------------------------------------------------------------ soft point --
+const char* kPointFragmentShader = R"GLSL(
 precision mediump float;
 varying vec4 vColor;
 void main(){
@@ -168,14 +227,22 @@ void main(){
 )GLSL";
 
 struct Renderer {
-    GLuint program = 0;
-    GLuint vbo = 0;
-    GLint aPos = -1;
-    GLint uProj = -1, uTime = -1, uLevel = -1, uState = -1, uPointScale = -1;
-    GLint uCamDist = -1;
+    // swarm program
+    GLuint swarmProgram = 0;
+    GLuint swarmVbo = 0;
+    GLint aSeed0 = -1, aSeed1 = -1;
+    GLint uProj = -1, uTime = -1, uLevel = -1, uState = -1;
+    GLint uPointScale = -1, uCamDist = -1;
+    // honeycomb backdrop program
+    GLuint honeyProgram = 0;
+    GLuint honeyVbo = 0;
+    GLint aHoneyPos = -1;
+    GLint uHoneyRes = -1, uHoneyTime = -1, uHoneyLevel = -1;
+
     float proj[16] = {0};
     float pointScale = 8.0f;
     float camDist = 3.1f;
+    float viewportW = 1.0f, viewportH = 1.0f;
     bool ready = false;
 };
 
@@ -197,6 +264,30 @@ GLuint compileShader(GLenum type, const char* src) {
     return s;
 }
 
+GLuint linkProgram(const char* vsSrc, const char* fsSrc) {
+    GLuint vs = compileShader(GL_VERTEX_SHADER, vsSrc);
+    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fsSrc);
+    if (!vs || !fs) return 0;
+
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        char buf[1024];
+        glGetProgramInfoLog(prog, sizeof(buf), nullptr, buf);
+        LOGE("program link failed: %s", buf);
+        glDeleteProgram(prog);
+        return 0;
+    }
+    return prog;
+}
+
 void perspective(float* m, float fovyRad, float aspect, float zn, float zf) {
     for (int i = 0; i < 16; ++i) m[i] = 0.0f;
     float f = 1.0f / std::tan(fovyRad * 0.5f);
@@ -207,6 +298,17 @@ void perspective(float* m, float fovyRad, float aspect, float zn, float zf) {
     m[14] = (2.0f * zf * zn) / (zn - zf);
 }
 
+// Deterministic PRNG (xorshift32) for per-insect seeds.
+uint32_t prngNext(uint32_t& s) {
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return s;
+}
+float prngFloat(uint32_t& s) {  // 0..1
+    return (prngNext(s) >> 8) * (1.0f / 16777216.0f);
+}
+
 }  // namespace
 
 extern "C" {
@@ -215,57 +317,70 @@ JNIEXPORT void JNICALL
 Java_com_hivemind_voice_SphereNative_nativeInit(JNIEnv*, jclass) {
     // onSurfaceCreated means a NEW GL context (first run, activity
     // re-entered after back, or context loss). The previous context's
-    // program/VBO died with it — always rebuild for THIS context.
+    // programs/VBOs died with it — always rebuild for THIS context.
     // (Do not glDelete* the stale handles; they belong to a dead
     // context. g.ready must NOT gate this: a second VoiceActivity got
     // an early-return here and drew with dead handles -> black sphere.)
     g = Renderer{};
 
-    GLuint vs = compileShader(GL_VERTEX_SHADER, kVertexShader);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, kFragmentShader);
-    if (!vs || !fs) { LOGE("shader build failed"); return; }
-
-    g.program = glCreateProgram();
-    glAttachShader(g.program, vs);
-    glAttachShader(g.program, fs);
-    glLinkProgram(g.program);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    GLint linked = GL_FALSE;
-    glGetProgramiv(g.program, GL_LINK_STATUS, &linked);
-    if (linked != GL_TRUE) {
-        char buf[1024];
-        glGetProgramInfoLog(g.program, sizeof(buf), nullptr, buf);
-        LOGE("program link failed: %s", buf);
-        glDeleteProgram(g.program);
-        g.program = 0;
+    g.swarmProgram = linkProgram(kSwarmVertexShader, kPointFragmentShader);
+    g.honeyProgram = linkProgram(kHoneyVertexShader, kHoneyFragmentShader);
+    if (!g.swarmProgram || !g.honeyProgram) {
+        LOGE("shader build failed");
         return;
     }
 
-    g.aPos        = glGetAttribLocation(g.program, "aPos");
-    g.uProj       = glGetUniformLocation(g.program, "uProj");
-    g.uTime       = glGetUniformLocation(g.program, "uTime");
-    g.uLevel      = glGetUniformLocation(g.program, "uLevel");
-    g.uState      = glGetUniformLocation(g.program, "uState");
-    g.uPointScale = glGetUniformLocation(g.program, "uPointScale");
-    g.uCamDist    = glGetUniformLocation(g.program, "uCamDist");
+    g.aSeed0       = glGetAttribLocation(g.swarmProgram, "aSeed0");
+    g.aSeed1       = glGetAttribLocation(g.swarmProgram, "aSeed1");
+    g.uProj        = glGetUniformLocation(g.swarmProgram, "uProj");
+    g.uTime        = glGetUniformLocation(g.swarmProgram, "uTime");
+    g.uLevel       = glGetUniformLocation(g.swarmProgram, "uLevel");
+    g.uState       = glGetUniformLocation(g.swarmProgram, "uState");
+    g.uPointScale  = glGetUniformLocation(g.swarmProgram, "uPointScale");
+    g.uCamDist     = glGetUniformLocation(g.swarmProgram, "uCamDist");
+    g.aHoneyPos    = glGetAttribLocation(g.honeyProgram, "aPos");
+    g.uHoneyRes    = glGetUniformLocation(g.honeyProgram, "uRes");
+    g.uHoneyTime   = glGetUniformLocation(g.honeyProgram, "uTime");
+    g.uHoneyLevel  = glGetUniformLocation(g.honeyProgram, "uLevel");
 
-    // Fibonacci lattice — even point distribution over the sphere.
-    std::vector<float> pts(kPointCount * 3);
+    // Per-insect seeds: base directions from a Fibonacci lattice (even
+    // sphere coverage -> the swarm always reads as a ball) plus random
+    // speed / shell depth / phase / dart rate / brightness.
+    uint32_t rng = 0x9e3779b9u;
+    std::vector<float> seeds(kPointCount * 8);
     const float ga = 3.14159265358979f * (3.0f - std::sqrt(5.0f));
     for (int i = 0; i < kPointCount; ++i) {
         float y = 1.0f - (static_cast<float>(i) / (kPointCount - 1)) * 2.0f;
         float r = std::sqrt(std::max(0.0f, 1.0f - y * y));
-        float t = ga * static_cast<float>(i);
-        pts[i * 3 + 0] = std::cos(t) * r;
-        pts[i * 3 + 1] = y;
-        pts[i * 3 + 2] = std::sin(t) * r;
+        float th = ga * static_cast<float>(i);
+        // small jitter so insects aren't pinned to the lattice
+        float jy = (prngFloat(rng) - 0.5f) * 0.12f;
+        float jt = (prngFloat(rng) - 0.5f) * 0.12f;
+        float yy = y + jy;
+        float rr = std::sqrt(std::max(0.0f, 1.0f - yy * yy));
+        float tt = th + jt;
+        seeds[i * 8 + 0] = std::cos(tt) * rr;
+        seeds[i * 8 + 1] = yy;
+        seeds[i * 8 + 2] = std::sin(tt) * rr;
+        seeds[i * 8 + 3] = prngFloat(rng);                          // speed
+        float shellHash = prngFloat(rng);
+        seeds[i * 8 + 4] = 0.50f + 0.55f * std::pow(shellHash, 1.5f); // shell
+        seeds[i * 8 + 5] = prngFloat(rng) * 1000.0f;                // phase
+        seeds[i * 8 + 6] = 0.25f + 0.75f * prngFloat(rng);          // dart rate
+        seeds[i * 8 + 7] = 0.45f + 0.55f * prngFloat(rng);          // brightness
     }
-    glGenBuffers(1, &g.vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, g.vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(pts.size() * sizeof(float)),
-                 pts.data(), GL_STATIC_DRAW);
+    glGenBuffers(1, &g.swarmVbo);
+    glBindBuffer(GL_ARRAY_BUFFER, g.swarmVbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(seeds.size() * sizeof(float)),
+                 seeds.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    // Fullscreen quad for the honeycomb backdrop (NDC triangle strip).
+    const float quad[8] = {-1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f};
+    glGenBuffers(1, &g.honeyVbo);
+    glBindBuffer(GL_ARRAY_BUFFER, g.honeyVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     g.ready = true;
@@ -275,13 +390,17 @@ JNIEXPORT void JNICALL
 Java_com_hivemind_voice_SphereNative_nativeResize(JNIEnv*, jclass,
                                                   jint w, jint h) {
     glViewport(0, 0, w, h);
+    g.viewportW = static_cast<float>(w);
+    g.viewportH = static_cast<float>(h);
     float aspect = h > 0 ? static_cast<float>(w) / static_cast<float>(h) : 1.0f;
     perspective(g.proj, 0.832f /* ~47.7deg */, aspect, 0.1f, 20.0f);
-    // Visible half-extent of the sphere must stay < ~75% of the smaller
-    // frustum half-extent at the camera plane. aspect >= 0.75 is fine at
-    // the default distance; narrower pulls the camera back.
-    g.camDist = 3.1f / std::min(1.0f, aspect / 0.75f);
-    g.pointScale = static_cast<float>(w < h ? w : h) * 0.011f *
+    // Keep the whole swarm (max radius ~1.3 world units, see the vertex
+    // shader) inside the frustum *width* on narrow portrait screens:
+    // half-width at the swarm = tan(fovy/2) * camDist * aspect, so below
+    // ~aspect 1.0 the old 3.1 baseline underscans and the swarm spills
+    // past the screen edges (2026-10-02: dots edge-to-edge, no ball).
+    g.camDist = std::max(3.1f, 1.30f / (0.4414f * aspect));
+    g.pointScale = static_cast<float>(w < h ? w : h) * 0.0125f *
                    (g.camDist / 3.1f);
 }
 
@@ -290,27 +409,47 @@ Java_com_hivemind_voice_SphereNative_nativeRender(JNIEnv*, jclass,
                                                   jfloat timeSec, jfloat level,
                                                   jfloat state) {
     if (!g.ready) return;
+    float lvl = level < 0.f ? 0.f : (level > 1.f ? 1.f : level);
 
     glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
-    glUseProgram(g.program);
+    // 1) Honeycomb backdrop — normal alpha blending, under everything.
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glUseProgram(g.honeyProgram);
+    glUniform2f(g.uHoneyRes, g.viewportW, g.viewportH);
+    glUniform1f(g.uHoneyTime, timeSec);
+    glUniform1f(g.uHoneyLevel, lvl);
+    glBindBuffer(GL_ARRAY_BUFFER, g.honeyVbo);
+    glEnableVertexAttribArray(static_cast<GLuint>(g.aHoneyPos));
+    glVertexAttribPointer(static_cast<GLuint>(g.aHoneyPos), 2, GL_FLOAT,
+                          GL_FALSE, 0, nullptr);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(static_cast<GLuint>(g.aHoneyPos));
+
+    // 2) The swarm — additive glow points.
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glUseProgram(g.swarmProgram);
     glUniformMatrix4fv(g.uProj, 1, GL_FALSE, g.proj);
     glUniform1f(g.uTime, timeSec);
-    glUniform1f(g.uLevel, level < 0.f ? 0.f : (level > 1.f ? 1.f : level));
+    glUniform1f(g.uLevel, lvl);
     glUniform1f(g.uState, state);
     glUniform1f(g.uPointScale, g.pointScale);
     glUniform1f(g.uCamDist, g.camDist);
 
-    glBindBuffer(GL_ARRAY_BUFFER, g.vbo);
-    glEnableVertexAttribArray(static_cast<GLuint>(g.aPos));
-    glVertexAttribPointer(static_cast<GLuint>(g.aPos), 3, GL_FLOAT, GL_FALSE,
-                          0, nullptr);
+    glBindBuffer(GL_ARRAY_BUFFER, g.swarmVbo);
+    glEnableVertexAttribArray(static_cast<GLuint>(g.aSeed0));
+    glVertexAttribPointer(static_cast<GLuint>(g.aSeed0), 4, GL_FLOAT,
+                          GL_FALSE, 8 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(static_cast<GLuint>(g.aSeed1));
+    glVertexAttribPointer(static_cast<GLuint>(g.aSeed1), 4, GL_FLOAT,
+                          GL_FALSE, 8 * sizeof(float),
+                          reinterpret_cast<void*>(4 * sizeof(float)));
     glDrawArrays(GL_POINTS, 0, kPointCount);
-    glDisableVertexAttribArray(static_cast<GLuint>(g.aPos));
+    glDisableVertexAttribArray(static_cast<GLuint>(g.aSeed0));
+    glDisableVertexAttribArray(static_cast<GLuint>(g.aSeed1));
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
