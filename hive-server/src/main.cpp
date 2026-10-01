@@ -349,7 +349,8 @@ int main(int argc, char* argv[]) {
     // disable themselves after firing. The actual run goes through the
     // same start_graph_run() path as the REST Run button and webhooks.
     std::jthread scheduler{[&routine_store, &chat_service,
-                            &thread_store](std::stop_token st) {
+                            &thread_store, &agent_store,
+                            &worker_channel](std::stop_token st) {
         while (!st.stop_requested()) {
             for (int i = 0; i < 30 && !st.stop_requested(); ++i)
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -363,19 +364,39 @@ int main(int argc, char* argv[]) {
                         json sched = json::parse(r.schedule_json, nullptr, false);
                         const bool once = sched.is_object()
                             && sched.value("type", "") == "once";
-                        // Phase 17 skip-if-running: never pile a routine
-                        // prompt into a thread with a turn in flight.
+                        // Phase 17 skip-if-running + 2026-10-01 offline
+                        // void: never pile a routine prompt into a thread
+                        // with a turn in flight, and NEVER fire into an
+                        // offline worker — an offline dispatch would leave
+                        // a durable QUEUED delivery row per tick that all
+                        // drain at once on reconnect. Recurring fires on
+                        // busy/offline targets are VOIDED (next_fire_at
+                        // advances, nothing queued, nothing dispatched).
+                        if (!agent_store.get_agent(r.agent_id)) {
+                            routine_store.mark_fired(r.id, now, "", true);
+                            std::cout << "[scheduler] routine " << r.id
+                                      << " (" << r.name
+                                      << ") agent gone, disabling\n";
+                            continue;
+                        }
+                        const bool online = worker_channel.is_online(
+                            agent_store.get_agent(r.agent_id)->worker);
                         switch (hm::routine_fire_action(
-                                sched, chat_service.busy(r.thread_id))) {
+                                sched, chat_service.busy(r.thread_id),
+                                online)) {
                         case hm::RoutineFireAction::RetryLater:
                             std::cout << "[scheduler] routine " << r.id
-                                      << " (" << r.name << ") busy, retry next tick\n";
+                                      << " (" << r.name << ")"
+                                      << (online ? " busy," : " offline,")
+                                      << " retry next tick\n";
                             continue;
                         case hm::RoutineFireAction::SkipReschedule: {
                             auto next = hm::compute_next_fire(sched, now, r.created_at);
                             routine_store.reschedule(r.id, next.value_or(""), !next);
                             std::cout << "[scheduler] routine " << r.id
-                                      << " (" << r.name << ") busy, skipped fire\n";
+                                      << " (" << r.name << ")"
+                                      << (online ? " busy," : " offline,")
+                                      << " fire VOIDED (nothing queued)\n";
                             continue;
                         }
                         case hm::RoutineFireAction::Fire:

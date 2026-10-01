@@ -142,8 +142,9 @@ std::optional<std::string> compute_next_fire(const json& sch,
     return time_t_to_iso(next);
 }
 
-RoutineFireAction routine_fire_action(const json& sch, bool thread_busy) {
-    if (!thread_busy) return RoutineFireAction::Fire;
+RoutineFireAction routine_fire_action(const json& sch, bool thread_busy,
+                                      bool worker_online) {
+    if (!thread_busy && worker_online) return RoutineFireAction::Fire;
     const bool once = sch.is_object() && sch.value("type", "") == "once";
     return once ? RoutineFireAction::RetryLater
                 : RoutineFireAction::SkipReschedule;

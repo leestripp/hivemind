@@ -42,13 +42,23 @@ std::string validate_schedule(const json& schedule);
 /// Skip-if-running policy (Phase 17): what the scheduler should do with a
 /// due routine whose thread already has a turn in flight.
 ///   Fire            — thread free: post the prompt as usual.
-///   SkipReschedule  — busy recurring routine: drop THIS fire and advance
-///                     next_fire_at (cron-style overlap skip; piling prompts
-///                     into a busy thread would machine-gun the agent the
-///                     moment its turn ends).
-///   RetryLater      — busy once-routine: leave next_fire_at untouched so
-///                     the next tick retries (a one-shot must not be lost).
+///   SkipReschedule  — busy OR offline recurring routine: drop THIS fire
+///                     and advance next_fire_at (cron-style overlap skip).
+///                     Piling prompts into a busy thread would machine-gun
+///                     the agent when its turn ends; firing while the
+///                     worker is offline would stack durable QUEUED
+///                     delivery rows (one per tick) that all drain at
+///                     once on reconnect — an every-minute nudge on an
+///                     offline agent would queue 1440 turns/day (user
+///                     directive 2026-10-01: scheduled tasks go to the
+///                     void, never a queue).
+///   RetryLater      — busy/offline once-routine: leave next_fire_at
+///                     untouched so the next tick retries. A one-shot
+///                     must not be lost to a transient busy/offline
+///                     blip — and a single due row retried per tick
+///                     cannot grow any queue.
 enum class RoutineFireAction { Fire, SkipReschedule, RetryLater };
-RoutineFireAction routine_fire_action(const json& schedule, bool thread_busy);
+RoutineFireAction routine_fire_action(const json& schedule, bool thread_busy,
+                                      bool worker_online);
 
 } // namespace hm

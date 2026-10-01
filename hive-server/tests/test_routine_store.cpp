@@ -71,13 +71,22 @@ int main() {
     const json once_sch = json::parse(R"({"type":"once","at":"2026-08-24T10:00"})");
     const json daily_sch = json::parse(R"({"type":"daily","time":"09:00"})");
     using A = hm::RoutineFireAction;
-    assert(hm::routine_fire_action(once_sch,  false) == A::Fire);
-    assert(hm::routine_fire_action(daily_sch, false) == A::Fire);
-    assert(hm::routine_fire_action(once_sch,  true)  == A::RetryLater);
-    assert(hm::routine_fire_action(daily_sch, true)  == A::SkipReschedule);
+    // idle + online fires
+    assert(hm::routine_fire_action(once_sch,  false, true) == A::Fire);
+    assert(hm::routine_fire_action(daily_sch, false, true) == A::Fire);
+    // busy: recurring VOIDED, once retried (no queue growth either way)
+    assert(hm::routine_fire_action(once_sch,  true,  true) == A::RetryLater);
+    assert(hm::routine_fire_action(daily_sch, true,  true) == A::SkipReschedule);
+    // OFFLINE (2026-10-01): recurring VOIDED — an offline fire would
+    // stack a durable QUEUED delivery row per tick and drain them all
+    // at once on reconnect; once retried per tick until back online.
+    assert(hm::routine_fire_action(once_sch,  false, false) == A::RetryLater);
+    assert(hm::routine_fire_action(daily_sch, false, false) == A::SkipReschedule);
+    assert(hm::routine_fire_action(once_sch,  true,  false) == A::RetryLater);
+    assert(hm::routine_fire_action(daily_sch, true,  false) == A::SkipReschedule);
     // invalid/absent type counts as recurring (never silently drop one-shot
     // semantics, but a busy invalid routine must not spin either)
-    assert(hm::routine_fire_action(json::object(), true) == A::SkipReschedule);
+    assert(hm::routine_fire_action(json::object(), true, true) == A::SkipReschedule);
 
     // reschedule advances next_fire_at WITHOUT touching last_fired_at
     auto busy = store.create("agent-1", "thread-busy", "busy-daily",
