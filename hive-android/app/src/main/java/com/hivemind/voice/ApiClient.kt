@@ -31,7 +31,13 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         val senderId: String
     )
 
-    data class Activity(val busy: Boolean, val error: String, val partial: String)
+    data class Activity(
+        val busy: Boolean, val error: String, val partial: String,
+        /** True while any live turn is being cancelled: the hub keeps it
+         *  "busy" until the worker confirms (an unkillable bash command
+         *  can hold it live for minutes), so "cancel accepted" != dead. */
+        val cancelling: Boolean = false,
+    )
 
     private fun request(method: String, path: String, body: JSONObject? = null): String {
         val conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
@@ -150,17 +156,19 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         val obj = JSONObject(request("GET", "/api/threads/$threadId/activity"))
         var error = ""
         var partial = ""
+        var cancelling = false
         val turns = obj.optJSONArray("turns")
         if (turns != null) {
             for (i in 0 until turns.length()) {
                 val t = turns.getJSONObject(i)
+                if (t.optBoolean("cancelling", false)) cancelling = true
                 val e = t.optString("error", "")
                 if (e.isNotEmpty()) { error = e; break }
                 if (partial.isEmpty()) partial = t.optString("partial", "")
             }
         }
         return Activity(busy = obj.optBoolean("busy", false), error = error,
-                        partial = partial)
+                        partial = partial, cancelling = cancelling)
     }
 
     /** POST /api/threads/:id/cancel — best effort. */

@@ -40,6 +40,7 @@ class VoiceActivity : Activity() {
         private const val IDLE_POLL_MS = 2_500L
         private const val STALL_TIMEOUT_MS = 240_000L  // no text growth
         private const val NET_FAIL_TIMEOUT_MS = 45_000L  // consecutive poll failures
+        private const val STOP_CONFIRM_MS = 12_000L  // bounded wait for a stop to confirm
         private const val MAX_UTTER_CHARS = 2000  // TTS rejects very long utterances
         private const val INBOX_THREAD = "user"   // hub's User Inbox (kUserThreadId)
     }
@@ -66,6 +67,17 @@ class VoiceActivity : Activity() {
      *  activity endpoint stays quiet there, so without the roster's
      *  agent-global busy flag the screen would show idle mid-task. */
     private var showingAgentBusy = false
+    /** A stop was requested and the agent has NOT confirmed free yet.
+     *  An unkillable command (long bash exec) keeps the turn "busy"
+     *  for minutes after the hub accepts the cancel, so input stays
+     *  locked until the polls below see the agent actually idle.
+     *  Written on the io thread (confirm loops), read on the UI thread. */
+    @Volatile private var stopping = false
+    /** A message was sent while the agent was still busy/cancelling.
+     *  The hub durably queues the wake; the UI must neither stream the
+     *  dying turn's partial as the answer nor give up in the dead zone
+     *  between the old turn dying and the queued wake dispatching. */
+    private var queuedBehindStop = false
     private var lastMessageId = ""
     private val finalReply = StringBuilder()
 
@@ -179,7 +191,9 @@ class VoiceActivity : Activity() {
             if (now - lastTalkClick < 500) return@setOnClickListener
             lastTalkClick = now
             when (phase) {
-                Phase.IDLE -> maybeStartListening()
+                // stopping: input is locked until the stop confirms
+                // (talk.isEnabled is false too — this is the backstop).
+                Phase.IDLE -> if (!stopping) maybeStartListening()
                 Phase.LISTENING -> sendTranscript()
                 Phase.STREAMING -> interruptAndTalk()
                 else -> Unit  // SETUP/THINKING: disabled
@@ -229,6 +243,8 @@ class VoiceActivity : Activity() {
 
     private fun toIdle(message: String) {
         turnGen++
+        stopping = false
+        queuedBehindStop = false
         phase = Phase.IDLE
         finalReply.clear()
         streamText = ""
@@ -294,26 +310,13 @@ class VoiceActivity : Activity() {
             ui.post { status.text = "Sending…" }
             io.execute {
                 try {
-                    api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
-                    ui.post {
-                        if (phase != Phase.THINKING) return@post
-                        sphere.setSphereState(SphereState.THINKING)
-                        status.text = "Thinking…"
-                        ui.postDelayed(pollTick, POLL_MS)
-                    }
+                    sendAndEnterWait(text)
                 } catch (e: Exception) {
                     // A vanished DM thread is recoverable: re-resolve and
                     // retry the send ONCE before surfacing a failure.
                     if (reresolveIfThreadGone(e)) {
                         try {
-                            api.postMessage(threadId,
-                                            SpeechText.OUTGOING_PREFIX + text)
-                            ui.post {
-                                if (phase != Phase.THINKING) return@post
-                                sphere.setSphereState(SphereState.THINKING)
-                                status.text = "Thinking…"
-                                ui.postDelayed(pollTick, POLL_MS)
-                            }
+                            sendAndEnterWait(text)
                             return@execute
                         } catch (_: Exception) {
                             // fall through to the visible failure below
@@ -326,6 +329,34 @@ class VoiceActivity : Activity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Post the transcript and enter the matching wait state. The agent
+     * is POLLED FIRST: if it is still tied up — a just-cancelled bash
+     * command can't die mid-flight, a task on another thread keeps it
+     * busy — the hub durably queues the message's wake, so say "queued"
+     * and wait for the REAL reply turn instead of streaming the dying
+     * turn's leftovers as if they answered (the "old message read out"
+     * bug).
+     */
+    private fun sendAndEnterWait(text: String) {
+        val preAct = runCatching { api.activity(threadId) }.getOrNull()
+        val agentBusy = runCatching {
+            api.listAgents().firstOrNull { it.id == agentId }?.busy == true
+        }.getOrDefault(false)
+        val queued = preAct?.cancelling == true || agentBusy
+        api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
+        ui.post {
+            if (phase != Phase.THINKING) return@post
+            queuedBehindStop = queued
+            sphere.setSphereState(SphereState.THINKING)
+            status.text = if (queued)
+                "${agentName.ifEmpty { "Agent" }} is busy — " +
+                    "your message is queued\u2026"
+            else "Thinking\u2026"
+            ui.postDelayed(pollTick, POLL_MS)
         }
     }
 
@@ -430,6 +461,15 @@ class VoiceActivity : Activity() {
                     if (dmConsumed) runCatching { api.markRead(threadId) }
                     if (inboxConsumed) runCatching { api.markRead(INBOX_THREAD) }
                     ui.post {
+                        // Stop confirmation (agent level): the agent was
+                        // told to stop but an unkillable command kept it
+                        // busy past the bounded wait — stand down only
+                        // now that the roster confirms it is free.
+                        if (stopping && me != null && !me.busy) {
+                            stopping = false
+                            showingAgentBusy = false
+                            toIdle("Stopped")
+                        }
                         if (act != null) {
                             if (!act.busy) narrationGiveUpLen = 0
                             // Busy alone is enough to start: the empty-
@@ -606,9 +646,11 @@ class VoiceActivity : Activity() {
                     val busy = act.busy
                     val error = act.error
                     val partial = act.partial
+                    val cancelling = act.cancelling
                     val grew = appended || partial.length > lastPartialLen
                     if (partial.isNotEmpty()) lastPartialLen = partial.length
-                    ui.post { handleTick(busy, error, partial, gen, grew) }
+                    ui.post { handleTick(busy, error, partial, cancelling,
+                                         gen, grew) }
                 } catch (e: Exception) {
                     // A vanished DM thread is not a network blip — re-resolve
                     // onto the canonical DM and keep polling.
@@ -626,7 +668,7 @@ class VoiceActivity : Activity() {
     }
 
     private fun handleTick(busy: Boolean, error: String, partial: String,
-                           gen: Int, grew: Boolean) {
+                           cancelling: Boolean, gen: Int, grew: Boolean) {
         if (gen != turnGen) return  // stale tick from a cancelled turn
         if (phase != Phase.THINKING && phase != Phase.STREAMING) return
         if (grew) lastProgressMs = System.currentTimeMillis()
@@ -635,6 +677,31 @@ class VoiceActivity : Activity() {
             toIdle("Agent error: $error")
             speakNotice("Sorry, the agent hit an error and stopped. " +
                         "Please try again.")
+            return
+        }
+        // Stop confirmation: only stand down once the turn actually died.
+        if (!busy && stopping) {
+            toIdle("Stopped")
+            return
+        }
+        // A cancelling turn's partial is the OLD reply on its way out —
+        // never stream it as the answer; just wait for the turn to
+        // clear. Suppresses the stall watchdog too: an unkillable bash
+        // command can hold a cancelling turn live for minutes, by design.
+        if (busy && cancelling) {
+            lastProgressMs = System.currentTimeMillis()
+            ui.postDelayed(pollTick, POLL_MS)
+            return
+        }
+        if (busy && queuedBehindStop) queuedBehindStop = false
+        if (!busy && queuedBehindStop) {
+            // Dead zone: the old turn died and the hub hasn't dispatched
+            // our queued message's wake yet. Not done — the reply is
+            // still coming. lastProgressMs is deliberately NOT refreshed
+            // here: the stall watchdog stays armed as the safety net if
+            // the wake is never dispatched (a normal dispatch lands in
+            // ~1 tick, far below STALL_TIMEOUT).
+            ui.postDelayed(pollTick, POLL_MS)
             return
         }
         // The text the spoken length refers to: the live partial while the
@@ -735,10 +802,13 @@ class VoiceActivity : Activity() {
         }
     }
 
-    /** Cut the agent's reply short and immediately start recording. */
+    /** Cut the agent's reply short and immediately start recording. The
+     *  user is about to queue a NEW message — cancel the old turn in the
+     *  background (no idle-wait: the send's pre-poll handles the agent
+     *  being slow to actually die). */
     private fun interruptAndTalk() {
         tts.stop()
-        cancelTurnRemote()
+        issueCancelAndResync()
         toIdle("")
         maybeStartListening()
     }
@@ -748,45 +818,124 @@ class VoiceActivity : Activity() {
         // moment the cancel lands (toIdle would otherwise drain them).
         pendingSpeech.clear()
         when (phase) {
-            Phase.LISTENING -> stt.discard()
+            Phase.LISTENING -> {
+                stt.discard()
+                toIdle("Cancelled")
+            }
+            // The stop must CONFIRM before input unlocks: an unkillable
+            // command keeps the turn busy after the hub accepts the
+            // cancel, and accepting a new message then reads the old
+            // turn's leftovers out as the answer.
             Phase.THINKING, Phase.STREAMING -> {
                 tts.stop()
-                cancelTurnRemote()
+                confirmStopThread()   // toIdles itself once the stop confirms
             }
             Phase.IDLE -> if (showingAgentBusy) {
-                // The agent is mid-task in ANOTHER thread — a thread
-                // cancel can't touch it; stop the agent itself. The
-                // chrome reverts via toIdle; if the cancel fails the
-                // next watch tick sees busy again and re-shows it.
-                io.execute { api.cancelAgent(agentId) }
-                toIdle("Stopping\u2026")
-                return
-            }
+                // Agent mid-task in ANOTHER thread: only an agent-level
+                // cancel can stop it — and it too must confirm.
+                io.execute { stopAgentAndConfirm() }
+            } else toIdle("Cancelled")
             else -> {}
         }
-        if (phase != Phase.SETUP) toIdle("Cancelled")
     }
 
     /**
-     * Hub-side cancel + baseline resync. Anything the cancelled turn still
-     * STORES after the cancel is swallowed (the poll baseline moves past
-     * it), so its ghost can't be picked up by inboxWatch and spoken as a
-     * "note" later. Bounded wait: a queued postMessage for the user's next
-     * utterance sits behind this on the single io thread.
+     * Hub-side cancel + baseline resync, fire-and-forget (interrupt path:
+     * the user is queuing a new message whose pre-poll copes with a still-
+     * busy agent). Anything the cancelled turn still STORES is swallowed
+     * (the poll baseline moves past it) so its ghost can't be picked up by
+     * inboxWatch and spoken as a "note" later.
      */
-    private fun cancelTurnRemote() {
+    private fun issueCancelAndResync() {
         io.execute {
             api.cancel(threadId)
-            val deadline = System.currentTimeMillis() + 3_000
+            val deadline = System.currentTimeMillis() + 15_000
             while (System.currentTimeMillis() < deadline) {
                 val act = runCatching { api.activity(threadId) }.getOrNull()
                     ?: break
                 if (!act.busy) break
-                Thread.sleep(300)
+                Thread.sleep(500)
             }
             runCatching { api.latestMessageId(threadId) }.getOrNull()
                 ?.let { if (it.isNotEmpty()) lastMessageId = it }
         }
+    }
+
+    /**
+     * Thread-level stop that CONFIRMS. Polls the thread's activity
+     * (bounded) until the turn actually dies before standing down. On
+     * timeout the stop stays pending: [stopping] locks input, and
+     * pollTick — which skips a cancelling turn's partial — toIdles on
+     * the first not-busy tick, whenever the command finally returns.
+     */
+    private fun confirmStopThread() {
+        io.execute {
+          try {
+            api.cancel(threadId)
+            val deadline = System.currentTimeMillis() + STOP_CONFIRM_MS
+            var free = false
+            while (System.currentTimeMillis() < deadline) {
+                Thread.sleep(500)
+                val act = runCatching { api.activity(threadId) }.getOrNull()
+                    ?: break
+                if (!act.busy) { free = true; break }
+            }
+            if (free) runCatching { api.latestMessageId(threadId) }.getOrNull()
+                ?.let { if (it.isNotEmpty()) lastMessageId = it }
+            ui.post {
+                if (free) {
+                    toIdle("Cancelled")
+                } else if (phase == Phase.THINKING || phase == Phase.STREAMING) {
+                    stopping = true
+                    talk.text = "\u00b7\u00b7\u00b7"
+                    talk.isEnabled = false
+                    status.text = "Still busy — the current command " +
+                                  "must finish first\u2026"
+                }
+            }
+          } catch (e: Exception) {
+            // Cancel call itself failed — stand back down rather than
+            // wedging the UI with input locked.
+            Log.w(TAG, "confirmStopThread failed: ${e.message}")
+            ui.post { toIdle("Stop failed — try again") }
+          }
+        }
+    }
+
+    /**
+     * Agent-level stop that CONFIRMS (the busy turn may live in another
+     * thread, where a thread cancel is a no-op). Polls the roster
+     * (bounded) for the agent to go truly idle; on timeout [stopping]
+     * locks input and the idle watch stands the UI down when the agent
+     * actually finishes.
+     */
+    private fun stopAgentAndConfirm() {
+      try {
+        api.cancelAgent(agentId)
+        val deadline = System.currentTimeMillis() + STOP_CONFIRM_MS
+        var free = false
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(500)
+            free = runCatching {
+                api.listAgents().firstOrNull { it.id == agentId }?.busy != true
+            }.getOrDefault(false)
+            if (free) break
+        }
+        ui.post {
+            if (free) {
+                showingAgentBusy = false
+                toIdle("Stopped")
+            } else if (phase == Phase.IDLE) {
+                stopping = true
+                talk.isEnabled = false
+                status.text = "Still busy — the current command " +
+                              "must finish first\u2026"
+            }
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "stopAgentAndConfirm failed: ${e.message}")
+        ui.post { toIdle("Stop failed — try again") }
+      }
     }
 
     // -- Sphere level while speaking ------------------------------------------
