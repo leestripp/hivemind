@@ -29,6 +29,10 @@ sqlite3* open_db(const fs::path& p) {
         throw std::runtime_error("DeliveryStore: cannot open " +
                                  p.string() + ": " + msg);
     }
+    // Wait up to 5s on a contended write lock instead of
+    // failing instantly (concurrent POST bursts otherwise
+    // 500 with "database is locked").
+    sqlite3_busy_timeout(db, 5000);
     return db;
 }
 

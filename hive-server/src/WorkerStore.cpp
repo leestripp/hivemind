@@ -66,6 +66,10 @@ sqlite3* WorkerStore::open_conn() {
         if (db) sqlite3_close(db);
         throw std::runtime_error("WorkerStore open failed: " + msg);
     }
+    // Wait up to 5s on a contended write lock instead of
+    // failing instantly (concurrent POST bursts otherwise
+    // 500 with "database is locked").
+    sqlite3_busy_timeout(db, 5000);
     return db;
 }
 

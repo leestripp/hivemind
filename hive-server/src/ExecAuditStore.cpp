@@ -39,6 +39,9 @@ sqlite3* ExecAuditStore::open_conn() {
     if (sqlite3_open(db_path_.c_str(), &db) != SQLITE_OK)
         throw std::runtime_error("cannot open exec audit db: " +
                                  db_path_.string());
+    // Wait up to 5s on a contended write lock instead of failing
+    // instantly (concurrent POST bursts otherwise 500).
+    sqlite3_busy_timeout(db, 5000);
     return db;
 }
 
