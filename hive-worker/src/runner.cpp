@@ -7,6 +7,8 @@
 
 #include "runner.h"
 
+#include <cstdlib>
+#include <sstream>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -358,6 +360,49 @@ std::mutex& container_recreate_mutex() {
     return m;
 }
 
+// ── LAN service exposure (2026-10-01, Slate Ape / Bob) ─────────────
+// $HIVE_LAN_PUBLISH: comma-separated extra podman -p specs published on
+// ALL interfaces, e.g. "8090:8090" or "8090:8090,5173". Rootless pasta
+// admits inbound ONLY via ports published on the agent's OWN container
+// (a sidecar bridge cannot reach a pasta netns), so an agent serving a
+// webapp to the LAN needs its port published here. Empty (default) =
+// behavior unchanged.
+static std::vector<std::string> lan_publish_args() {
+    std::vector<std::string> out;
+    const char* env = std::getenv("HIVE_LAN_PUBLISH");
+    if (!env || !*env) return out;
+    std::istringstream ss(env);
+    for (std::string spec; std::getline(ss, spec, ',');) {
+        const auto b = spec.find_first_not_of(" \t");
+        const auto e = spec.find_last_not_of(" \t");
+        if (b == std::string::npos) continue;
+        out.insert(out.end(), {"-p", spec.substr(b, e - b + 1)});
+    }
+    return out;
+}
+
+// True when the running container already binds every container-side
+// port the env var asks for (PortBindings keys are "<port>/tcp"). Used
+// to roll a newly-set env var out to pre-existing containers via the
+// normal recreate path instead of a manual rm.
+static bool lan_ports_present(const std::string& cname) {
+    const auto specs = lan_publish_args();
+    if (specs.empty()) return true;   // nothing wanted — never triggers
+    std::string json;
+    if (podman_simple({"inspect", "-f",
+                       "{{json .HostConfig.PortBindings}}", cname}, &json) != 0)
+        return false;
+    for (size_t i = 1; i < specs.size(); i += 2) {
+        const std::string& spec = specs[i];
+        const auto colon = spec.rfind(':');
+        const std::string port =
+            colon == std::string::npos ? spec : spec.substr(colon + 1);
+        if (json.find("\"" + port + "/tcp\"") == std::string::npos)
+            return false;
+    }
+    return true;
+}
+
 void ensure_container(const std::string& agent, std::string image,
                       bool gpu, const std::string& memory, double cpus) {
     const std::string cname = container_name(agent);
@@ -438,6 +483,10 @@ void ensure_container(const std::string& agent, std::string image,
                        "--cpus", format_cpus(limits.cpus),
                        "--shm-size", "1g", "--userns=keep-id",
                        "-p", "127.0.0.1::6080"};
+    {
+        const auto lan_args = lan_publish_args();
+        args.insert(args.end(), lan_args.begin(), lan_args.end());
+    }
     if (gpu) {
         // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
         // without it rocminfo sees nothing), /dev/dri = GL/Vulkan render
@@ -685,7 +734,8 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         std::string cur_img, new_img;
         podman_simple({"inspect", "-f", "{{.Image}}", cname}, &cur_img);
         podman_simple({"image", "inspect", "-f", "{{.Id}}", image}, &new_img);
-        if (screen_port_of(agent) == 0 || cur_img != new_img)
+        if (screen_port_of(agent) == 0 || cur_img != new_img ||
+            !lan_ports_present(cname))
             recreate = true;
     }
     if (recreate) {
@@ -711,6 +761,10 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                            "--shm-size", "1g",
                            "--userns=keep-id",
                            "-p", "127.0.0.1::6080"};
+        {
+            const auto lan_args = lan_publish_args();
+            cargs.insert(cargs.end(), lan_args.begin(), lan_args.end());
+        }
         if (gpu)   // same passthrough contract as ensure_container
             cargs.insert(cargs.end(), {"--device", "/dev/kfd",
                                        "--device", "/dev/dri",
