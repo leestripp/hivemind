@@ -205,10 +205,15 @@ void main(){
     vec2 cell = uv - gv;
     float cellHash = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
 
+    // Dark void behind the swarm — a large blurred black disc so the dim
+    // idle insects read against near-black instead of fighting the grid.
+    // (The sphere projects to NDC 0, the centre of this quad.)
+    float voidMask = 1.0 - 0.90 * smoothstep(0.55, 0.20, length(ndc));
+
     // Honey amber, faint; breathes with the voice. Straight alpha — an
     // earlier premultiplied form squared the effect to invisibility.
     float a = line * (0.05 + 0.07 * uLevel) * (0.25 + 0.75 * vign) *
-              (0.85 + 0.25 * cellHash);
+              (0.85 + 0.25 * cellHash) * voidMask;
     gl_FragColor = vec4(vec3(1.0, 0.72, 0.25), a);
 }
 )GLSL";
