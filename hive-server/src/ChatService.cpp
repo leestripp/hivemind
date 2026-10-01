@@ -544,13 +544,37 @@ void ChatService::complete_turn(const std::string& task_id,
                                 const std::string& frame_agent_id,
                                 const std::string& stats_json) {
     std::shared_ptr<LiveTurn> live;
+    bool suppress = false;   // 2026-10-01: cancel raced with completion
     {
         std::lock_guard<std::mutex> lk(m_);
         auto it = by_task_.find(task_id);
         if (it != by_task_.end()) {
             live = it->second;
             by_task_.erase(it);
+            if (live->cancelling) {
+                // cancel_thread/cancel_agent_turns got here first: the
+                // cancel path owns the user-facing record (delivery row
+                // dropped "cancelled" + flush_partial's *(interrupted)*
+                // note). Appending the full body too double-posts the
+                // reply (Bob 2026-10-01: both copies landed 1s apart).
+                // Consume the tombstone so a THIRD late frame can't
+                // orphan-append either, and keep the row's cancelled
+                // state instead of the tail's mark_done.
+                cancelled_tasks_.erase(task_id);
+                live->done = true;
+                suppress = true;
+            } else {
+                // Claim the single reply slot BEFORE appending so a
+                // cancel landing mid-append can't flush a duplicate.
+                live->reply_posted = true;
+            }
         }
+    }
+    if (suppress) {
+        // Phase 67.2 still holds: Stop releases the durable queue even
+        // when the cancelled turn's own result is what freed the agent.
+        try_dispatch(live->agent_id);
+        return;
     }
     if (!live) {
         // Watchdog/manual-cancel tombstone: a late result for a cancelled
@@ -883,8 +907,14 @@ void ChatService::watchdog_loop() {
 }
 
 void ChatService::flush_partial(LiveTurn& t) {
-    if (t.partial_flushed || t.partial.empty()) return;
-    t.partial_flushed = true;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        // complete_turn may have won the race and already posted the
+        // full reply (it claims reply_posted under m_ first).
+        if (t.reply_posted || t.partial_flushed || t.partial.empty())
+            return;
+        t.partial_flushed = true;
+    }
     // The turn's own final result will NOT arrive (cancelled turns are
     // tombstoned in complete_turn), so this is the only place the
     // user-facing commentary survives. Posted as the agent with an

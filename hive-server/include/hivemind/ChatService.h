@@ -47,6 +47,12 @@ public:
         // Phase 52: partial already posted to the thread (cancel /
         // watchdog flush) — guards against double-posting.
         bool partial_flushed = false;
+        // 2026-10-01 cancel-race fix: exactly ONE user-facing reply per
+        // turn. complete_turn sets this under m_ before appending the
+        // full body; flush_partial checks it so a racing cancel cannot
+        // double-post (Bob DM incident — full body AND interrupted
+        // partial both landed, user heard the reply twice via TTS).
+        bool reply_posted = false;
         // When cancelling began — the watchdog retires a cancelling turn
         // after a grace period if the worker never confirms (dropped task
         // frame / dead worker / idle brain → no task_result). Without this
