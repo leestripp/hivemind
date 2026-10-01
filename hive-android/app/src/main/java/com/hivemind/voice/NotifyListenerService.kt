@@ -26,6 +26,18 @@ import android.util.Log
  * update-bursts to the same notification are all skipped. Speak on the
  * main thread ([TtsEngine.speakQueued]'s contract), in the default
  * voice — notifications are system announcements, not an agent.
+ *
+ * Catch-up (2026-10-01): on every connect the listener snapshots the
+ * notifications still sitting in the shade (the unread ones) and
+ * relays them to the hub WITHOUT speaking — the agent gets everything
+ * the user hasn't seen yet, even notifications that arrived while the
+ * app was dead. Dedupe is a persisted fingerprint set (package | key |
+ * postTime | title | text), capped at [MAX_PUSHED]: the same instance
+ * with the same content is never relayed twice across restarts, while
+ * content updates (new text) and genuinely new notifications (new
+ * key/time) always go through. The system's own re-post burst on
+ * reconnect races the snapshot; both orders converge on exactly-one
+ * push via the same set.
  */
 class NotifyListenerService : NotificationListenerService() {
 
@@ -36,6 +48,16 @@ class NotifyListenerService : NotificationListenerService() {
         /** Default receiver for phone notifications — the PA. */
         private const val DEFAULT_AGENT = "Scout"
         private const val DEBOUNCE_MS = 4_000L
+
+        /** After connect, live posts are not SPOKEN for this long —
+         *  the system re-posts every active notification on reconnect;
+         *  those are history, not news. They still relay to the hub. */
+        private const val SPEECH_GRACE_MS = 3_000L
+
+        /** Persisted relay dedupe, service-local prefs file. */
+        private const val PUSHED_FILE = "hive_notify"
+        private const val KEY_PUSHED = "pushed"
+        private const val MAX_PUSHED = 120
 
         /** Is Notification Access granted for this app? Read straight
          *  from Settings.Secure — no androidx dependency. */
@@ -73,26 +95,49 @@ class NotifyListenerService : NotificationListenerService() {
     private var lastKey = ""
     private var lastAt = 0L
     private var lastSpoken = ""
+    private var connectedAt = 0L
+
+    /** Fingerprints of everything already relayed to the hub —
+     *  survives restarts so reconnect catch-up never double-sends. */
+    private val pushed = LinkedHashSet<String>()
+
+    override fun onCreate() {
+        super.onCreate()
+        pushed.addAll(getSharedPreferences(PUSHED_FILE, Context.MODE_PRIVATE)
+            .getStringSet(KEY_PUSHED, emptySet()) ?: emptySet())
+    }
 
     override fun onListenerConnected() {
-        Log.d(TAG, "listener connected")
+        connectedAt = System.currentTimeMillis()
+        Log.d(TAG, "listener connected, ${pushed.size} fingerprints remembered")
+        Thread { catchUp() }.start()
+    }
+
+    /** Relay everything still in the shade — the unread backlog. No
+     *  speech: this is history, the user has (or could have) seen it.
+     *  Duplicates are stopped by the persisted fingerprint set. */
+    private fun catchUp() {
+        val actives = try { getActiveNotifications() } catch (e: Exception) {
+            Log.w(TAG, "catch-up snapshot failed: ${e.message}")
+            return
+        } ?: return
+        Log.d(TAG, "catch-up: ${actives.size} active notification(s)")
+        for (sbn in actives) relay(sbn, live = false)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        relay(sbn, live = true)
+    }
+
+    private fun fingerprint(sbn: StatusBarNotification, title: String, text: String): String =
+        sbn.packageName + "|" + sbn.key + "|" + sbn.postTime + "|" + title + "|" + text
+
+    private fun relay(sbn: StatusBarNotification, live: Boolean) {
         if (!Prefs.notifyAnnounce(this)) return
         if (sbn.packageName == packageName) return
         val n = sbn.notification
         if (n.flags and Notification.FLAG_ONGOING_EVENT != 0) return
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-
-        // Update-burst debounce: one notification reposted with progress
-        // (downloads, timers) must speak at most once per DEBOUNCE_MS.
-        val now = System.currentTimeMillis()
-        synchronized(this) {
-            if (sbn.key == lastKey && now - lastAt < DEBOUNCE_MS) return
-            lastKey = sbn.key
-            lastAt = now
-        }
 
         val extras = n.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)
@@ -102,16 +147,53 @@ class NotifyListenerService : NotificationListenerService() {
             ?.trim().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return
 
-        val spoken = if (text.isEmpty()) title
-                       else if (title.isEmpty()) text
-                       else if (text == title) title
-                       else "$title. $text"
-        synchronized(this) {
-            if (spoken == lastSpoken) return   // identical repost
-            lastSpoken = spoken
+        // Persisted dedupe: same instance + same content is relayed
+        // exactly once, ever (across restarts too). Content updates and
+        // new notifications change the fingerprint and always relay.
+        val fp = fingerprint(sbn, title, text)
+        synchronized(pushed) {
+            if (fp in pushed) {
+                if (!live) Log.d(TAG, "catch-up skip (already pushed): $title")
+                return
+            }
+            // Claim the fingerprint ATOMICALLY — the system keeps
+            // multiple listener connections, so catch-up threads and
+            // live posts run concurrently; check-and-mark-in-one-block
+            // is what guarantees exactly-once. A failed hub push is
+            // dropped, never retried: dedupe correctness beats
+            // at-least-once delivery for notifications.
+            if (pushed.size >= MAX_PUSHED) pushed.remove(pushed.first())
+            pushed.add(fp)
+            getSharedPreferences(PUSHED_FILE, Context.MODE_PRIVATE).edit()
+                .putStringSet(KEY_PUSHED, HashSet(pushed))
+                .apply()
         }
-        Log.d(TAG, "notify announce: ${sbn.packageName} -> $spoken")
-        ui.post { engine().speakQueued(spoken.take(MAX_SPEAK_CHARS)) }
+
+        // Update-burst debounce (live only): one notification reposted
+        // with progress (downloads, timers) speaks at most once per
+        // DEBOUNCE_MS.
+        val now = System.currentTimeMillis()
+        if (live) synchronized(this) {
+            if (sbn.key == lastKey && now - lastAt < DEBOUNCE_MS) return
+            lastKey = sbn.key
+            lastAt = now
+        }
+
+        // Speech is for live news only — never during the post-connect
+        // grace window, never for catch-up snapshots.
+        if (live && now - connectedAt > SPEECH_GRACE_MS) {
+            val spoken = if (text.isEmpty()) title
+                           else if (title.isEmpty()) text
+                           else if (text == title) title
+                           else "$title. $text"
+            synchronized(this) {
+                if (spoken == lastSpoken) return   // identical repost
+                lastSpoken = spoken
+            }
+            Log.d(TAG, "notify announce: ${sbn.packageName} -> $spoken")
+            ui.post { engine().speakQueued(spoken.take(MAX_SPEAK_CHARS)) }
+        }
+
         pushToHub(sbn.packageName, title, text)
     }
 
