@@ -53,7 +53,7 @@ class SettingsActivity : Activity() {
             }
             ui.post {
                 val names = mutableListOf("(not shared)")
-                val ids = mutableListOf("")
+                val ids = mutableListOf(Prefs.OPT_OUT)
                 for (a in agents) { names.add(a.name); ids.add(a.id) }
                 spinner.adapter = ArrayAdapter(
                     this, android.R.layout.simple_spinner_dropdown_item, names)

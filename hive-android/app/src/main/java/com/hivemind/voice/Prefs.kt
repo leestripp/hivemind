@@ -69,8 +69,11 @@ object Prefs {
     }
 
     // Which agent receives relayed phone notifications (Settings
-    // picker); "" = not chosen yet — the phone announces locally but
-    // does not push to the hub.
+    // picker). THREE states: "" = never chosen → the service resolves
+    // the default agent (Scout, the PA) once and caches it; a real
+    // agent id = explicit choice; OPT_OUT = the user picked
+    // "(not shared)" — local announce only, never push.
+    const val OPT_OUT = "-"
     private const val KEY_NOTIFY_AGENT = "notify_agent"
 
     fun notifyAgent(ctx: Context): String =

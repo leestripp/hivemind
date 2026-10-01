@@ -32,6 +32,9 @@ class NotifyListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "HiveNotify"
         private const val MAX_SPEAK_CHARS = 200
+
+        /** Default receiver for phone notifications — the PA. */
+        private const val DEFAULT_AGENT = "Scout"
         private const val DEBOUNCE_MS = 4_000L
 
         /** Is Notification Access granted for this app? Read straight
@@ -117,8 +120,24 @@ class NotifyListenerService : NotificationListenerService() {
      *  Fire-and-forget worker thread; failures are logged and
      *  dropped — the local announce already happened. */
     private fun pushToHub(pkg: String, title: String, text: String) {
-        val agentId = Prefs.notifyAgent(this)
-        if (agentId.isEmpty()) return
+        var agentId = Prefs.notifyAgent(this)
+        if (agentId == Prefs.OPT_OUT) return          // explicit opt-out
+        if (agentId.isEmpty()) {
+            // Never chosen: default to the PA (Scout). One blocking
+            // roster fetch on this worker thread, then cached in Prefs
+            // — the Settings picker shows the resolved selection.
+            agentId = try {
+                ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
+                    .listAgents()
+                    .firstOrNull { it.name == DEFAULT_AGENT }?.id ?: ""
+            } catch (e: Exception) {
+                Log.w(TAG, "default agent lookup failed: ${e.message}")
+                ""
+            }
+            if (agentId.isEmpty()) return
+            Prefs.setNotifyAgent(this, agentId)
+            Log.d(TAG, "default notify agent -> $DEFAULT_AGENT")
+        }
         val label = try {
             val ai = packageManager.getApplicationInfo(pkg, 0)
             packageManager.getApplicationLabel(ai).toString()
