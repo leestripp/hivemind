@@ -68,9 +68,10 @@ class VoiceActivity : Activity() {
      *  agent-global busy flag the screen would show idle mid-task. */
     private var showingAgentBusy = false
     /** A stop was requested and the agent has NOT confirmed free yet.
-     *  An unkillable command (long bash exec) keeps the turn "busy"
-     *  for minutes after the hub accepts the cancel, so input stays
-     *  locked until the polls below see the agent actually idle.
+     *  A long-running command (big build, batch job) is healthy work:
+     *  the agent finishes it before going free, so the turn stays
+     *  "busy" throughout — easily minutes. Input stays locked until
+     *  the polls below see the agent actually idle.
      *  Written on the io thread (confirm loops), read on the UI thread. */
     @Volatile private var stopping = false
     /** A message was sent while the agent was still busy/cancelling.
@@ -334,9 +335,9 @@ class VoiceActivity : Activity() {
 
     /**
      * Post the transcript and enter the matching wait state. The agent
-     * is POLLED FIRST: if it is still tied up — a just-cancelled bash
-     * command can't die mid-flight, a task on another thread keeps it
-     * busy — the hub durably queues the message's wake, so say "queued"
+     * is POLLED FIRST: if it is still tied up — finishing a long-running
+     * command, working a task on another thread — the hub durably
+     * queues the message's wake, so say "queued"
      * and wait for the REAL reply turn instead of streaming the dying
      * turn's leftovers as if they answered (the "old message read out"
      * bug).
@@ -462,8 +463,9 @@ class VoiceActivity : Activity() {
                     if (inboxConsumed) runCatching { api.markRead(INBOX_THREAD) }
                     ui.post {
                         // Stop confirmation (agent level): the agent was
-                        // told to stop but an unkillable command kept it
-                        // busy past the bounded wait — stand down only
+                        // told to stop while a long-running command was
+                        // in progress and it stayed busy past the bounded
+                        // wait — stand down only
                         // now that the roster confirms it is free.
                         if (stopping && me != null && !me.busy) {
                             stopping = false
@@ -686,8 +688,9 @@ class VoiceActivity : Activity() {
         }
         // A cancelling turn's partial is the OLD reply on its way out —
         // never stream it as the answer; just wait for the turn to
-        // clear. Suppresses the stall watchdog too: an unkillable bash
-        // command can hold a cancelling turn live for minutes, by design.
+        // clear. Suppresses the stall watchdog too: a long-running
+        // command legitimately holds the cancelling turn live until the
+        // work completes — easily minutes — and that is by design.
         if (busy && cancelling) {
             lastProgressMs = System.currentTimeMillis()
             ui.postDelayed(pollTick, POLL_MS)
@@ -822,9 +825,9 @@ class VoiceActivity : Activity() {
                 stt.discard()
                 toIdle("Cancelled")
             }
-            // The stop must CONFIRM before input unlocks: an unkillable
-            // command keeps the turn busy after the hub accepts the
-            // cancel, and accepting a new message then reads the old
+            // The stop must CONFIRM before input unlocks: a long-running
+            // command keeps the turn busy while the agent finishes the
+            // work, and accepting a new message then reads the old
             // turn's leftovers out as the answer.
             Phase.THINKING, Phase.STREAMING -> {
                 tts.stop()

@@ -34,8 +34,9 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
     data class Activity(
         val busy: Boolean, val error: String, val partial: String,
         /** True while any live turn is being cancelled: the hub keeps it
-         *  "busy" until the worker confirms (an unkillable bash command
-         *  can hold it live for minutes), so "cancel accepted" != dead. */
+         *  "busy" until the worker confirms (a long-running command
+         *  legitimately holds it live until the work completes — easily
+         *  minutes), so "cancel accepted" != free. */
         val cancelling: Boolean = false,
     )
 
