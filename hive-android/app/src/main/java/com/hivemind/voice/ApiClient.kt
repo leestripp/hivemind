@@ -161,7 +161,10 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         if (turns != null) {
             for (i in 0 until turns.length()) {
                 val t = turns.getJSONObject(i)
-                if (t.optBoolean("cancelling", false)) cancelling = true
+                // Done turns linger in the array briefly with cancelling
+                // still true — only a LIVE cancelling turn means "dying".
+                if (t.optBoolean("cancelling", false) &&
+                        !t.optBoolean("done", false)) cancelling = true
                 val e = t.optString("error", "")
                 if (e.isNotEmpty()) { error = e; break }
                 if (partial.isEmpty()) partial = t.optString("partial", "")
