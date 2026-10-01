@@ -4,9 +4,13 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import java.util.concurrent.Executors
 
@@ -37,6 +41,33 @@ class SettingsActivity : Activity() {
             // Built-in grant popup: enabling without the permission
             // explains + routes to the system toggle screen.
             if (on) NotifyListenerService.ensureGranted(this)
+        }
+        // Which agent receives the relayed notifications (picker is
+        // roster-populated; "(not shared)" = local announce only).
+        val spinner = findViewById<Spinner>(R.id.notifyAgentSpinner)
+        io.execute {
+            val agents = try {
+                ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this)).listAgents()
+            } catch (e: Exception) {
+                emptyList()
+            }
+            ui.post {
+                val names = mutableListOf("(not shared)")
+                val ids = mutableListOf("")
+                for (a in agents) { names.add(a.name); ids.add(a.id) }
+                spinner.adapter = ArrayAdapter(
+                    this, android.R.layout.simple_spinner_dropdown_item, names)
+                val sel = ids.indexOf(Prefs.notifyAgent(this))
+                spinner.setSelection(if (sel >= 0) sel else 0)
+                spinner.onItemSelectedListener =
+                    object : AdapterView.OnItemSelectedListener {
+                        override fun onItemSelected(
+                            parent: AdapterView<*>?, view: View?, pos: Int, rowId: Long) {
+                            Prefs.setNotifyAgent(this@SettingsActivity, ids[pos])
+                        }
+                        override fun onNothingSelected(parent: AdapterView<*>?) {}
+                    }
+            }
         }
         val status = findViewById<TextView>(R.id.statusText)
         url.setText(Prefs.hubUrl(this))

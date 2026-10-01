@@ -877,6 +877,41 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
         });
 
+    // ── POST /api/notifications (phone → agent DM, 2026-10-01) ─────
+    // The Android app relays phone notifications (SMS, missed calls)
+    // here; the hub appends each to the chosen agent's DM as a SILENT
+    // system message — no turn triggered, no unread badge — so the
+    // agent reads it from thread context when the user asks ("what
+    // did I get?"). Same plumbing as relay/system messages.
+    server.post("/api/notifications",
+        [&threads, &agents](const OmniNet::HTTP::Request& req,
+                            OmniNet::HTTP::Response& resp) {
+            json body;
+            try { body = json::parse(req.bodyAsString()); }
+            catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+            const std::string agent_id = body.value("agent_id", "");
+            if (agent_id.empty() || !agents.get_agent(agent_id)) {
+                send_error(resp, 400, "unknown agent id"); return;
+            }
+            std::optional<Thread> dm = threads.find_dm(agent_id);
+            if (!dm) dm = threads.create_thread("", "dm", {agent_id});
+            const std::string app = body.value("app", "phone");
+            const std::string title = body.value("title", "");
+            const std::string text = body.value("text", "");
+            std::string pretty = title.empty() ? text
+                               : text.empty() ? title
+                               : title + ": " + text;
+            if (pretty.empty()) {
+                send_error(resp, 400, "empty notification"); return;
+            }
+            if (pretty.size() > 500) pretty.resize(500);   // hub-side cap
+            const std::string msg_id = threads.add_message(
+                dm->id, "system", "hivemind",
+                "[phone · " + app + "] " + pretty);
+            send_json(resp, json{{"message_id", msg_id},
+                                 {"thread_id", dm->id}}, 201);
+        });
+
     // ── GET /api/threads/:id/activity ─────────────────────────────────────
     server.get("/api/threads/:id/activity",
         [&threads, &chat](const OmniNet::HTTP::Request& req,

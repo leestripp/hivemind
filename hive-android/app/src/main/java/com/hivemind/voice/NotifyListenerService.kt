@@ -109,6 +109,31 @@ class NotifyListenerService : NotificationListenerService() {
         }
         Log.d(TAG, "notify announce: ${sbn.packageName} -> $spoken")
         ui.post { engine().speakQueued(spoken.take(MAX_SPEAK_CHARS)) }
+        pushToHub(sbn.packageName, title, text)
+    }
+
+    /** Relay to the hub so the user's chosen agent sees the
+     *  notification in DM context (folded into the next wake).
+     *  Fire-and-forget worker thread; failures are logged and
+     *  dropped — the local announce already happened. */
+    private fun pushToHub(pkg: String, title: String, text: String) {
+        val agentId = Prefs.notifyAgent(this)
+        if (agentId.isEmpty()) return
+        val label = try {
+            val ai = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(ai).toString()
+        } catch (e: Exception) {
+            pkg
+        }
+        val appLabel = if (label.length > 24) pkg else label
+        Thread {
+            try {
+                ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
+                    .postNotification(agentId, appLabel, title, text)
+            } catch (e: Exception) {
+                Log.w(TAG, "hub push failed: ${e.message}")
+            }
+        }.start()
     }
 
     private fun engine(): TtsEngine =

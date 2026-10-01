@@ -117,6 +117,18 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
             .getString("message_id")
     }
 
+    /** Phone notification → agent DM on the hub: silent system
+     *  message, folded into the agent's context on the next user
+     *  wake. Call from a worker thread (request() is blocking). */
+    fun postNotification(agentId: String, app: String, title: String, text: String) {
+        val body = JSONObject()
+            .put("agent_id", agentId)
+            .put("app", app)
+            .put("title", title)
+            .put("text", text)
+        request("POST", "/api/notifications", body)
+    }
+
     /** GET /api/threads/:id/messages?after= — incremental poll. */
     fun messagesAfter(threadId: String, afterId: String): List<Message> {
         val after = URLEncoder.encode(afterId, "UTF-8")

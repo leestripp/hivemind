@@ -449,6 +449,40 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     if (!thread)
         throw std::invalid_argument("thread not found: " + thread_id);
 
+    // ── Phone-notification fold (2026-10-01) ────────────────────
+    // Notifications relayed by the phone app (POST /api/notifications)
+    // sit in this thread as SILENT system messages — never dispatched
+    // on their own. Fold the ones posted since the previous user
+    // message into THIS wake's prompt, so the agent can answer "what
+    // did I get?" without a turn per notification. Selection is pure
+    // thread geometry (the trailing [phone · block after the last
+    // user message) — no watermark state, restart-safe.
+    std::string notify_block;
+    {
+        bool has_more = false;
+        auto recent = threads_.list_messages_window(thread_id, "", 50, has_more);
+        std::vector<std::string> pending;
+        for (auto it = recent.rbegin(); it != recent.rend(); ++it) {
+            if (it->sender_kind == "user") break;
+            if (it->sender_kind == "system" &&
+                it->body.rfind("[phone ", 0) == 0)
+                pending.push_back(it->body);
+        }
+        if (!pending.empty()) {
+            constexpr size_t kMaxFold = 10;
+            if (pending.size() > kMaxFold)
+                pending.erase(pending.begin(),
+                          pending.begin() + (pending.size() - kMaxFold));
+            std::reverse(pending.begin(), pending.end());
+            std::string joined;
+            for (const auto& pn : pending) joined += "  " + pn + "\n";
+            notify_block =
+                "Phone notifications since we last spoke:\n" + joined + "\n";
+            std::fprintf(stderr,
+                "[notify] folded %zu phone notification(s) into wake, "
+                "thread %.8s\n", pending.size(), thread_id.c_str());
+        }
+    }
     std::string msg_id =
         threads_.add_message(thread_id, "user", "", body, attachments_json);
 
@@ -460,7 +494,9 @@ std::string ChatService::post_user_message(const std::string& thread_id,
         unmute_thread_locked(thread_id, thread->agent_ids);
     }
 
-    const std::string prompt_body = body + attachment_refs(attachments_json);
+    const std::string prompt_body =
+        (notify_block.empty() ? "" : notify_block) +
+        body + attachment_refs(attachments_json);
 
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);

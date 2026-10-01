@@ -67,4 +67,19 @@ object Prefs {
             .putBoolean(KEY_NOTIFY_ANNOUNCE, on)
             .apply()
     }
+
+    // Which agent receives relayed phone notifications (Settings
+    // picker); "" = not chosen yet — the phone announces locally but
+    // does not push to the hub.
+    private const val KEY_NOTIFY_AGENT = "notify_agent"
+
+    fun notifyAgent(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_NOTIFY_AGENT, "") ?: ""
+
+    fun setNotifyAgent(ctx: Context, agentId: String) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putString(KEY_NOTIFY_AGENT, agentId)
+            .apply()
+    }
 }
