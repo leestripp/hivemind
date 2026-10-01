@@ -37,20 +37,56 @@ function isCompleted(t) {
 function fmtTime(iso) { return fmtTimeTZ(iso); }   // Phase 19: tz pref
 
 // ── table ─────────────────────────────────────────────────────────────
+// 2026-10-01: grouped by agent — the flat list got hard to scan as it
+// grew. One band per agent; groups with the soonest active fire first,
+// fully-inactive groups last (name order, unknown agent very last).
 function renderTasks() {
   const tbody = $('tasks-tbody');
   if (!tasks.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="muted">No scheduled tasks. Click “+ Add Task” to create one.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">No scheduled tasks. Click “+ Add Task” to create one.</td></tr>';
     return;
   }
   tbody.innerHTML = '';
-  // Sort: enabled+scheduled first (by next fire), then completed/disabled.
-  const sorted = [...tasks].sort((a, b) => {
+  // Within a group: enabled+scheduled first (by next fire), then the rest.
+  const sortTasks = (list) => [...list].sort((a, b) => {
     const ka = a.enabled && a.next_fire_at ? 0 : 1;
     const kb = b.enabled && b.next_fire_at ? 0 : 1;
     if (ka !== kb) return ka - kb;
     return (a.next_fire_at || a.created_at || '').localeCompare(b.next_fire_at || b.created_at || '');
   });
+  const groups = new Map();
+  for (const t of tasks) {
+    const key = t.agent_id || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  const nextActiveFire = (list) => {
+    const fires = list.filter(t => t.enabled && t.next_fire_at && !isCompleted(t))
+                      .map(t => t.next_fire_at).sort();
+    return fires.length ? fires[0] : null;
+  };
+  const sortedGroups = [...groups.entries()].sort((a, b) => {
+    const fa = nextActiveFire(a[1]), fb = nextActiveFire(b[1]);
+    if (fa && fb) return fa.localeCompare(fb);
+    if (fa) return -1;
+    if (fb) return 1;
+    const na = agentName(a[0]), nb = agentName(b[0]);
+    if (na === '—' && nb !== '—') return 1;   // unknown agent last
+    if (nb === '—' && na !== '—') return -1;
+    return na.localeCompare(nb);
+  });
+  for (const [agentId, list] of sortedGroups) {
+    const name = agentName(agentId);
+    const nActive = list.filter(t => t.enabled && !isCompleted(t)).length;
+    const gtr = document.createElement('tr');
+    gtr.className = 'group-row';
+    gtr.innerHTML = `<td colspan="6" class="group-cell"><span class="group-name">${esc(name)}</span> <span class="muted">${list.length} task${list.length === 1 ? '' : 's'}${nActive ? ` · ${nActive} active` : ''}</span></td>`;
+    tbody.appendChild(gtr);
+    renderTaskRows(tbody, sortTasks(list));
+  }
+}
+
+function renderTaskRows(tbody, sorted) {
   for (const t of sorted) {
     const tr = document.createElement('tr');
     const completed = isCompleted(t);
@@ -59,7 +95,6 @@ function renderTasks() {
       : '<span class="badge badge-ok">active</span>';
     tr.innerHTML = `
       <td><strong>${esc(t.name)}</strong><div class="muted cell-ellip" style="max-width:280px" title="${esc(t.prompt)}">${esc(truncate(t.prompt))}</div></td>
-      <td>${esc(agentName(t.agent_id))}</td>
       <td>${esc(t.schedule_text || '')}</td>
       <td>${fmtTime(t.next_fire_at)}</td>
       <td>${fmtTime(t.last_fired_at)}</td>

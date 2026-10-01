@@ -287,6 +287,16 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 .badge.st-cancelling { color: #ebcb8b; border-color: #55492e; background: rgba(235,203,139,.10); }
 .badge.st-down  { color: #d08770; border-color: #553535; background: rgba(208,135,112,.10); }
 
+/* ── Tasks page: per-agent group bands (2026-10-01) ── */
+.group-row td {
+  background: rgba(136,192,208,.08);
+  border-top: 1px solid rgba(136,192,208,.22);
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+}
+.group-name { font-weight: 600; margin-right: 6px; }
+
 /* ── Phase 13: models page ─────────────────────────────────────────── */
 .section-head {
   display: flex; align-items: center; justify-content: space-between;
