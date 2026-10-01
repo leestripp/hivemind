@@ -59,7 +59,13 @@ class VoiceActivity : Activity() {
 
     private var phase = Phase.SETUP
     private var agentId = ""
+    private var agentName = ""
     private var threadId = ""
+    /** Edge-triggered working chrome (sphere THINKING + visible cancel)
+     *  for the session agent being busy in ANOTHER thread — the DM's own
+     *  activity endpoint stays quiet there, so without the roster's
+     *  agent-global busy flag the screen would show idle mid-task. */
+    private var showingAgentBusy = false
     private var lastMessageId = ""
     private val finalReply = StringBuilder()
 
@@ -121,7 +127,8 @@ class VoiceActivity : Activity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         agentId = intent.getStringExtra(EXTRA_AGENT_ID).orEmpty()
-        val agentName = intent.getStringExtra(EXTRA_AGENT_NAME).orEmpty()
+        agentName = intent.getStringExtra(EXTRA_AGENT_NAME).orEmpty()
+        val agentName = this.agentName
         findViewById<TextView>(R.id.agentNameText).text = agentName
         findViewById<android.widget.ImageView>(R.id.agentAvatar).setImageBitmap(
             Avatars.bitmap(this, agentName,
@@ -404,6 +411,10 @@ class VoiceActivity : Activity() {
                     // refresh agentNames so inbox notes name new agents.
                     val roster = runCatching { api.listAgents() }
                         .getOrDefault(emptyList())
+                    // Agent-global busy (any thread) — the roster is the
+                    // only source; the thread activity endpoint below is
+                    // blind to turns running outside this DM.
+                    val me = roster.firstOrNull { it.id == agentId }
                     if (roster.isNotEmpty()) {
                         agentNames = roster.associate { it.id to it.name }
                         // Announcement notes carry the transitioning
@@ -421,12 +432,48 @@ class VoiceActivity : Activity() {
                     ui.post {
                         if (act != null) {
                             if (!act.busy) narrationGiveUpLen = 0
-                            else if (act.partial.length > narrationGiveUpLen)
+                            // Busy alone is enough to start: the empty-
+                            // partial guard used to block entry while the
+                            // agent was mid-tool-call (0 > 0). After a
+                            // stall-abort the give-up mark still demands
+                            // partial GROWTH before re-narrating.
+                            else if (narrationGiveUpLen == 0 ||
+                                     act.partial.length > narrationGiveUpLen)
                                 startIdleNarration()
                         }
                         if (fresh.isNotEmpty()) {
                             pendingSpeech.addAll(fresh)
                             speakPending()
+                        }
+                        // Working chrome, edge-triggered on the roster's
+                        // agent-global busy flag: busy in ANOTHER thread
+                        // shows the sphere working + a Stop button, which
+                        // agent-cancel (not the thread cancel) stops.
+                        // Only transitions AT IDLE are recorded: chrome/
+                        // narration/recording phases own the screen, and
+                        // recording a busy edge mid-turn would suppress
+                        // the chrome when the turn hands back to IDLE
+                        // with the agent still working. A vanished roster
+                        // fetch (me == null) keeps the last state.
+                        if (me != null && phase == Phase.IDLE &&
+                                me.busy != showingAgentBusy) {
+                            showingAgentBusy = me.busy
+                            if (me.busy) {
+                                sphere.setSphereState(SphereState.THINKING)
+                                status.text =
+                                    "${agentName.ifEmpty { "Agent" }} is working\u2026"
+                                cancel.visibility = View.VISIBLE
+                            } else {
+                                sphere.setSphereState(SphereState.IDLE)
+                                cancel.visibility = View.INVISIBLE
+                                // Clear only labels WE set — never
+                                // clobber status text from other paths
+                                // ("Stopping\u2026" = our own cancel).
+                                val was = "${agentName.ifEmpty { "Agent" }} is working\u2026"
+                                if (status.text.toString() == was ||
+                                        status.text.toString() == "Stopping\u2026")
+                                    status.text = ""
+                            }
                         }
                         ui.postDelayed(this, IDLE_POLL_MS)
                     }
@@ -705,6 +752,15 @@ class VoiceActivity : Activity() {
             Phase.THINKING, Phase.STREAMING -> {
                 tts.stop()
                 cancelTurnRemote()
+            }
+            Phase.IDLE -> if (showingAgentBusy) {
+                // The agent is mid-task in ANOTHER thread — a thread
+                // cancel can't touch it; stop the agent itself. The
+                // chrome reverts via toIdle; if the cancel fails the
+                // next watch tick sees busy again and re-shows it.
+                io.execute { api.cancelAgent(agentId) }
+                toIdle("Stopping\u2026")
+                return
             }
             else -> {}
         }

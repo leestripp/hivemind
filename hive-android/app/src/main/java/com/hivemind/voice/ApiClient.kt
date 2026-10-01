@@ -168,6 +168,14 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         runCatching { request("POST", "/api/threads/$threadId/cancel", JSONObject()) }
     }
 
+    /** POST /api/agents/:id/cancel — stop EVERY live turn the agent owns,
+     *  in any thread (Phase 57). Best effort; used when the session agent
+     *  is working outside this DM thread, where a thread cancel would be
+     *  a no-op. */
+    fun cancelAgent(agentId: String) {
+        runCatching { request("POST", "/api/agents/$agentId/cancel", JSONObject()) }
+    }
+
     /**
      * POST /api/threads/:id/read — clear the hub's PERSISTED unread
      * mark (Phase 66c) once this app has consumed (spoken) the new

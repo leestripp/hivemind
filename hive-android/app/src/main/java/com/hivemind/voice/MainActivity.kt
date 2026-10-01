@@ -1,5 +1,8 @@
 package com.hivemind.voice
 
+import android.animation.Keyframe
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
@@ -281,8 +284,11 @@ class MainActivity : Activity() {
             val v = convertView ?: LayoutInflater.from(this@MainActivity)
                 .inflate(R.layout.agent_row, parent, false)
             val a = row.agent
-            v.findViewById<ImageView>(R.id.avatarImage)
-                .setImageBitmap(Avatars.bitmap(this@MainActivity, a.name, a.avatar))
+            val avatar = v.findViewById<ImageView>(R.id.avatarImage)
+            avatar.setImageBitmap(Avatars.bitmap(this@MainActivity, a.name, a.avatar))
+            // Heartbeat: a working agent's avatar visibly pulses — the
+            // state pill alone was too subtle to notice at a glance.
+            pulseAvatar(avatar, row.online && a.busy)
             v.findViewById<TextView>(R.id.agentName).text = a.name
             v.findViewById<TextView>(R.id.agentRole).text =
                 a.role.lineSequence().firstOrNull().orEmpty()
@@ -312,6 +318,43 @@ class MainActivity : Activity() {
             if (state.text.isNotEmpty()) state.visibility = View.VISIBLE
             v.alpha = if (row.online) 1.0f else 0.45f
             return v
+        }
+    }
+
+    /**
+     * Heartbeat double-beat (lub-dub, then rest) on a busy agent's avatar.
+     * The animator is tag-keyed on the ImageView so convertView reuse
+     * always cancels the previous row's pulse before rebinding, and any
+     * row that stops being busy lands back at scale 1 — a recycled view
+     * can never carry a stale animation into a different agent.
+     */
+    private fun pulseAvatar(img: ImageView, on: Boolean) {
+        val running = img.getTag(R.id.avatarImage) as? ObjectAnimator
+        if (on == (running != null)) return
+        if (running != null) {
+            running.cancel()
+            img.setTag(R.id.avatarImage, null)
+            img.scaleX = 1f
+            img.scaleY = 1f
+            return
+        }
+        // Shared keyframes: quick strong beat, quick weak beat, rest.
+        val beats = arrayOf(
+            Keyframe.ofFloat(0.00f, 1.00f),
+            Keyframe.ofFloat(0.12f, 1.14f),
+            Keyframe.ofFloat(0.26f, 1.00f),
+            Keyframe.ofFloat(0.38f, 1.09f),
+            Keyframe.ofFloat(0.52f, 1.00f),
+            Keyframe.ofFloat(1.00f, 1.00f),
+        )
+        val pulse = ObjectAnimator.ofPropertyValuesHolder(img,
+            PropertyValuesHolder.ofKeyframe("scaleX", *beats),
+            PropertyValuesHolder.ofKeyframe("scaleY", *beats),
+        ).apply {
+            duration = 1_100
+            repeatCount = ObjectAnimator.INFINITE
+            img.setTag(R.id.avatarImage, this)
+            start()
         }
     }
 
