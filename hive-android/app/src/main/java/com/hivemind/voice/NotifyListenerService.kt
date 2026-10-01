@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import java.util.concurrent.Executors
 
 /**
  * Reads notifications from other apps aloud via TTS — SMS/MMS (from the
@@ -100,6 +101,11 @@ class NotifyListenerService : NotificationListenerService() {
     /** Fingerprints of everything already relayed to the hub —
      *  survives restarts so reconnect catch-up never double-sends. */
     private val pushed = LinkedHashSet<String>()
+
+    /** Single-file push queue: a catch-up burst must hit the hub one
+     *  POST at a time (ordered, polite) — a thread-per-notification
+     *  storm is what triggered the sqlite write-lock collisions. */
+    private val pushExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate() {
         super.onCreate()
@@ -227,20 +233,21 @@ class NotifyListenerService : NotificationListenerService() {
             pkg
         }
         val appLabel = if (label.length > 24) pkg else label
-        Thread {
+        pushExecutor.execute {
             try {
                 ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
                     .postNotification(agentId, appLabel, title, text)
             } catch (e: Exception) {
                 Log.w(TAG, "hub push failed: ${e.message}")
             }
-        }.start()
+        }
     }
 
     private fun engine(): TtsEngine =
         tts ?: TtsEngine(this, onQueueEmpty = { /* standalone */ }).also { tts = it }
 
     override fun onDestroy() {
+        pushExecutor.shutdown()
         tts?.destroy()
         super.onDestroy()
     }
