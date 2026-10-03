@@ -10,6 +10,7 @@
 #include "hivemind/ExecAuditStore.h"
 #include "hivemind/FanInPolicy.h"
 #include "hivemind/DeliveryStore.h"
+#include "hivemind/DbUtil.h"
 
 #include <nlohmann/json.hpp>
 
@@ -384,7 +385,17 @@ void ChatService::try_dispatch(const std::string& agent_id) {
         // The agent's hive-brain conversation (persisted on the worker's
         // /workspace volume) IS the context - each task carries ONLY the
         // new message. DO NOT add a thread-history backlog (v1 lesson).
-        const std::string prompt = "[" + d->sender_label + "] " + d->body;
+        //
+        // 2026-10-03 stray-fire fix: stamp the dispatch time on every
+        // wake. The brain keeps ONE shared, untimestamped conversation
+        // across all of the agent's threads, so a hours-old routine
+        // prompt sitting in context is indistinguishable from a fresh
+        // fire — HoneyBee re-answered her 01:00 social-warmup prompt as
+        // ~15 phantom "stray fires" in 26h (every wake re-exposed it;
+        // bursts were one turn remarking on it repeatedly). An explicit
+        // UTC stamp makes old context self-evidently old.
+        const std::string prompt = "[" + d->sender_label + " @ " +
+                                   hivemind::db::iso_now() + "] " + d->body;
 
         auto live = std::make_shared<LiveTurn>();
         live->thread_id  = d->thread_id;
