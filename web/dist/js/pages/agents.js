@@ -64,6 +64,9 @@ async function refresh() {
       API.get('/api/agents'),
       API.get('/api/agents/activity'),
     ]);
+    let workers = [];
+    try { workers = (await API.get('/api/workers')).workers || []; }
+    catch { /* group headers just lose the live online/offline badge */ }
     const agents = roster.agents || [];
     const live = act.agents || {};
     if (!agents.length) {
@@ -97,7 +100,39 @@ async function refresh() {
       return;
     }
     grid.innerHTML = '';
+    // 2026-10-04: band the roster by hive-worker (machine). The co-located
+    // worker ("" / "local") shares one "This server" band, always first.
+    const LOCAL = 'local';
+    const workerOf = (a) => (a.worker && a.worker !== LOCAL) ? a.worker : LOCAL;
+    const groups = new Map();
     for (const a of agents) {
+      const w = workerOf(a);
+      if (!groups.has(w)) groups.set(w, []);
+      groups.get(w).push(a);
+    }
+    const sortedWorkers = [...groups.keys()].sort((x, y) =>
+      x === LOCAL ? -1 : y === LOCAL ? 1 : x.localeCompare(y));
+    for (const w of sortedWorkers) {
+      const members = groups.get(w)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const isLocal = w === LOCAL;
+      const wk = isLocal ? null : workers.find(x => x.name === w);
+      const online = isLocal || !!wk?.online;
+      const band = document.createElement('div');
+      band.className = 'agent-group';
+      band.innerHTML = `
+        <div class="agent-group-head">
+          <span class="agent-group-name">${isLocal ? '🖥 This server'
+                                                    : '🖥 ' + esc(w)}</span>
+          <span class="badge ${online ? 'st-busy' : 'badge-revoked'}">${
+            online ? '● online' : '○ offline'}</span>
+          <span class="muted">${members.length} agent${
+            members.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="agents-grid"></div>`;
+      const sub = band.querySelector('.agents-grid');
+      grid.appendChild(band);
+      for (const a of members) {
       const st = live[a.id];
       // Real brain/fleet state from /api/agents (hive-agent AgentState via
       // worker heartbeats); the live-map only adds the cancelling nuance.
@@ -128,9 +163,6 @@ async function refresh() {
         <div class="agent-meta">
           <div><span>Model</span>${esc(a.model || 'default')}</div>
           <div><span>Workspace</span>${esc(a.workspace_mode || 'shared')}</div>
-          <div><span>Runs on</span>${a.worker && a.worker !== 'local'
-                ? '🖥 ' + esc(a.worker)
-                : 'this server'}</div>
           ${a.type ? `<div><span>Type</span>⚡ ${esc(a.type)}</div>` : ''}
           <div><span>Approvals</span>${a.require_approval ? 'required' : 'auto'}</div>
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
@@ -146,7 +178,8 @@ async function refresh() {
         () => openScreen(a.id, a.name));
       card.querySelector('[data-rules]').addEventListener('click',
         () => openRules(a.id, a.name));
-      grid.appendChild(card);
+      sub.appendChild(card);
+      }
     }
   } catch (e) {
     grid.innerHTML = `<p class="muted">unavailable — ${esc(e.message)}</p>`;
