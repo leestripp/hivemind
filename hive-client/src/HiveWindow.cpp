@@ -1816,7 +1816,7 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         messages_box_.append(*live_row_);
         live_agent_key_ = agent_id;
     }
-    live_label_->set_text(partial + " â");
+    live_label_->set_text(partial + " \u258C");
 }
 
 // Phase 55: row construction extracted so history page-back can PREPEND
