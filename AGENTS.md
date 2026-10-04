@@ -239,6 +239,31 @@ Two tiers inside every agent container:
 
 Regression coverage: `hive-agent/tests/test_skill_lazy_discovery.cpp`.
 
+## Message Headers (2026-10-04, Plan.md)
+
+Every wake-carrying message has a **structured header**: `source`
+(controlled vocabulary, `MessageHeader.h`) + `created_at` (UTC ISO,
+stamped at ENQUEUE, never dispatch). The header is DATA on the delivery
+row — the `[<source> @ <time>]` bracket string is rendered ONLY at the
+agent-prompt edge (`try_dispatch`) and in the hub journal
+(`complete_turn` reply trail). Stored thread bodies stay raw; no
+user-facing surface (GTK, web, Android TTS) renders headers. Vocabulary:
+`user`, `voice-app`, `routine:<label>`, `agent:<name>`, `phone`,
+`system` — clients may only claim `user`/`voice` on POST messages;
+routine/agent/phone/system are hub-internal. The voice TTS directive
+(`kVoiceChannelHint`) is appended server-side to voice-app wakes — never
+client-side (the old Android OUTGOING_PREFIX is gone).
+
+**Queue-join (2026-10-04, extended by lee to gen>0):** queued wakes
+for the same agent+thread at the same fan-in depth JOIN into one prompt
+at dispatch (one task, per-message headers, FIFO, cap 10) — user bursts
+(gen 0) and agent fan-in bursts (gen>0) alike. Every joined row shares
+the task_id, so completion/watchdog/cancel close ALL rows via
+`DeliveryStore::find_all_by_task`. Same-generation scoped (complete_turn
+continuation is depth+1); different threads never merge. The circuit
+breaker counts dispatches/turns, so its trip rate is unchanged. A burst
+with a correction now costs ONE turn.
+
 ## Messaging (Phase 66)
 
 Agent-to-agent messaging is a DURABLE queue (`deliveries.db`,

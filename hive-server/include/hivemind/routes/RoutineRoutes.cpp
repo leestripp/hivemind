@@ -5,6 +5,7 @@
 
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RoutineRoutes.h"
+#include "hivemind/MessageHeader.h"
 #include "hivemind/Schedule.h"
 
 #include <nlohmann/json.hpp>
@@ -123,7 +124,10 @@ void register_routine_routes(OmniNet::HTTP::Server& server,
                     r->id.c_str(), t.id.c_str());
             }
             try {
-                chat.post_user_message(r->thread_id, r->prompt);
+                // 2026-10-04: same routine source as the scheduler.
+                chat.post_user_message(
+                    r->thread_id, r->prompt, "[]",
+                    std::string(hivemind::msg_source::kRoutinePrefix) + r->name);
                 send_json(resp, json{{"fired", true}, {"thread_id", r->thread_id}}, 202);
             } catch (const std::exception& e) {
                 send_error(resp, 500, e.what());

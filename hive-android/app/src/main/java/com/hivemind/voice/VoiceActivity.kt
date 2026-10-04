@@ -348,7 +348,7 @@ class VoiceActivity : Activity() {
             api.listAgents().firstOrNull { it.id == agentId }?.busy == true
         }.getOrDefault(false)
         val queued = preAct?.cancelling == true || agentBusy
-        api.postMessage(threadId, SpeechText.OUTGOING_PREFIX + text)
+        api.postMessage(threadId, text, source = "voice")
         ui.post {
             if (phase != Phase.THINKING) return@post
             queuedBehindStop = queued

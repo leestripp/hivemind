@@ -22,6 +22,8 @@ static Delivery make_wake(const std::string& target,
     d.target_agent_id = target;
     d.sender_agent_id = sender;
     d.sender_label = sender.empty() ? "You" : sender;
+    // 2026-10-04: every producer sets a structured source at fan_in.
+    d.source = sender.empty() ? "user" : "agent:" + sender;
     d.body = "hello " + target;
     d.generation = 1;
     d.source_message_id = src_msg;
@@ -40,6 +42,29 @@ int main() {
     auto d = store.get(id1);
     assert(d && d->state == "queued" && d->target_agent_id == "agent-a");
     assert(d->kind == "wake" && !d->created_at.empty());
+    // 2026-10-04 (Plan.md §3.2): structured source round-trips.
+    assert(d->source == "user");
+    {
+        Delivery tagged = make_wake("agent-src", "msg-src", "Scout");
+        tagged.source = "routine:social-warmup-daily";
+        const std::string sid = store.enqueue(std::move(tagged));
+        auto sd = store.get(sid);
+        assert(sd && sd->source == "routine:social-warmup-daily");
+        // vocabulary prefix forms are the carriers; the store persists
+        // them verbatim.
+        tagged = make_wake("agent-src", "msg-src2", "Scout");
+        assert(tagged.source == "agent:Scout");
+    }
+    // Old-row default: a delivery enqueued with NO source migrates to
+    // 'unknown' (the migration DEFAULT) — never an empty string.
+    {
+        Delivery bare;
+        bare.target_agent_id = "agent-src";
+        bare.thread_id = "thread-1";
+        const std::string bid = store.enqueue(std::move(bare));
+        auto bd = store.get(bid);
+        assert(bd && bd->source == "unknown");
+    }
 
     // ── oldest_queued FIFO per agent ─────────────────────────────────
     const std::string id2 = store.enqueue(make_wake("agent-a", "msg-2"));
@@ -90,11 +115,13 @@ int main() {
     // ── list / sent_by ───────────────────────────────────────────────
     store.enqueue(make_wake("agent-a", "msg-6", "sender-x"));
     auto all = store.list("", "", 50);
-    assert(all.size() == 6);
+    // 8: 6 originals + msg-src + bare (agent-src rows, §3.2 coverage)
+    assert(all.size() == 8);
     auto for_a = store.list("agent-a", "", 50);
     assert(for_a.size() == 3);       // all three as target
     auto queued_only = store.list("", "queued", 50);
-    assert(queued_only.size() == 3); // msg-3 (b), msg-5 (d), msg-6 (a)
+    // + msg-src and bare (both still queued on agent-src)
+    assert(queued_only.size() == 5);
     auto by_x = store.sent_by("sender-x", 10);
     assert(by_x.size() == 1 && by_x[0].source_message_id == "msg-6");
 

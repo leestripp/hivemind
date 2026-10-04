@@ -117,9 +117,13 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         return JSONObject(request("POST", "/api/threads", body)).getString("id")
     }
 
-    /** POST /api/threads/:id/messages → message id (202 Accepted). */
-    fun postMessage(threadId: String, text: String): String {
-        val body = JSONObject().put("body", text)
+    /** POST /api/threads/:id/messages → message id (202 Accepted).
+     *  2026-10-04 (Plan.md §3.4): the voice app sends the structured
+     *  `source` ("voice") instead of prepending the TTS prose prefix —
+     *  the hub stamps the header + channel hint server-side, so the
+     *  thread body stays clean for every UI and TTS never reads it. */
+    fun postMessage(threadId: String, text: String, source: String = "user"): String {
+        val body = JSONObject().put("body", text).put("source", source)
         return JSONObject(request("POST", "/api/threads/$threadId/messages", body))
             .getString("message_id")
     }

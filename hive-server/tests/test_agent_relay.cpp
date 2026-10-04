@@ -13,6 +13,7 @@
 #include "hivemind/RoutineStore.h"
 #include "hivemind/SecretStore.h"
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <iostream>
@@ -22,7 +23,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
-struct Dispatch { std::string agent_id, thread_id, task_id; };
+struct Dispatch {
+    std::string agent_id, thread_id, task_id;
+    std::string prompt;   // 2026-10-04: capture for header assertions
+};
 
 class MockHub final : public HubRouter {
 public:
@@ -31,9 +35,9 @@ public:
     int next = 0;
     std::string dispatch(const RosterAgent& agent,
                          const std::string& thread_id,
-                         const std::string& /*text*/) override {
+                         const std::string& text) override {
         std::string tid = "mock-task-" + std::to_string(++next);
-        dispatches.push_back({agent.id, thread_id, tid});
+        dispatches.push_back({agent.id, thread_id, tid, text});
         return tid;
     }
     const Dispatch* find(const std::string& agent_id,
@@ -115,6 +119,22 @@ int main() {
     assert(user_turn_p && "user message should dispatch to Chief");
     // NB: capture strings, not pointers — hub.dispatches reallocs.
     const std::string user_task = user_turn_p->task_id;
+    // 2026-10-04 (Plan.md): every dispatched wake carries a rendered
+    // header from the STORED source + created_at. The user post's
+    // prompt must open with the user-source header and the stored body
+    // must NOT contain it (visibility boundary §3.6).
+    assert(user_turn_p->prompt.rfind("[user @ ", 0) == 0 &&
+           "user wake prompt must open with the [user @ …] header");
+    assert(user_turn_p->prompt.find("ask Honey for the launch numbers")
+           != std::string::npos);
+    {
+        bool clean = true;
+        for (const auto& m : threads.list_messages(dm.id))
+            if (m.sender_kind == "user" &&
+                m.body.rfind("[user @ ", 0) == 0)
+                clean = false;
+        assert(clean && "stored user body must stay header-free");
+    }
 
     // 2) Mid-turn, Chief messages Honey (pair thread created).
     chat.post_agent_message(chief.id, honey.id, "what are the numbers?");
@@ -125,6 +145,12 @@ int main() {
             pair_tid = d.thread_id; pair_task = d.task_id;
         }
     assert(!pair_task.empty() && "message_agent should fan in to Honey");
+    // message_agent wakes carry the agent-source header.
+    {
+        const auto* pair = hub.find(honey.id, pair_tid);
+        assert(pair && pair->prompt.rfind("[agent:Chief @ ", 0) == 0 &&
+               "agent wake prompt must open with [agent:Chief @ …]");
+    }
 
     // 3) Chief's user turn completes ("I've asked Honey") — no relay.
     chat.complete_turn(user_task, "I've asked Honey, hold on.", "");
@@ -140,6 +166,11 @@ int main() {
         if (d.agent_id == chief.id && d.thread_id == dm.id)
             ++chief_dm_dispatches;
     assert(chief_dm_dispatches == 2 && "relay should re-dispatch Chief in the user DM");
+    {
+        const auto* relay = hub.find_last(chief.id, dm.id);
+        assert(relay && relay->prompt.rfind("[agent:Honey @ ", 0) == 0 &&
+               "relay wake must carry the replier's agent-source header");
+    }
 
     // 5) Chief's framing reply completes in the DM — no further fan-in
     //    (dm thread has no peers; relay is one-shot). Dispatches so far:
@@ -382,6 +413,170 @@ int main() {
     assert(!chat.read_mark(inbox_tid, "user").has_value());
     assert(chat.unread_for_user(inbox_tid) >= 1 &&
            "never-viewed thread counts all non-user messages");
+    // 13) 2026-10-04 (Plan.md): source-typed wakes render the right
+    //     header AND the voice channel hint. The voice hint moved
+    //     server-side from the Android OUTGOING_PREFIX — it rides the
+    //     PROMPT only, never the stored body (§3.6 boundary).
+    settle(chat);
+    chat.post_user_message(dm.id, "voice check one two", "[]", "voice-app");
+    {
+        const auto* v = hub.find_last(chief.id, dm.id);
+        assert(v && v->prompt.rfind("[voice-app @ ", 0) == 0 &&
+               "voice wake must open with [voice-app @ …]");
+        assert(v->prompt.find("text-to-speech") != std::string::npos &&
+               "voice wake must carry the TTS channel hint");
+        bool clean = true;
+        for (const auto& m : threads.list_messages(dm.id))
+            if (m.sender_kind == "user" &&
+                m.body.find("text-to-speech") != std::string::npos)
+                clean = false;
+        assert(clean && "TTS hint must never reach the stored body");
+    }
+    // Routine fires carry routine:<label>; nudges carry system.
+    chat.complete_turn(hub.find_last(chief.id, dm.id)->task_id, "ok", "");
+    settle(chat);
+    chat.post_user_message(dm.id, "routine probe", "[]",
+                           "routine:social-warmup-daily");
+    {
+        const auto* r = hub.find_last(chief.id, dm.id);
+        assert(r && r->prompt.rfind("[routine:social-warmup-daily @ ", 0) == 0 &&
+               "routine wake must open with [routine:<label> @ …]");
+        chat.complete_turn(r->task_id, "routine ack", "");
+    }
+    settle(chat);
+    chat.post_nudge(dm.id, "nudge body");
+    {
+        const auto* n = hub.find_last(chief.id, dm.id);
+        assert(n && n->prompt.rfind("[system @ ", 0) == 0 &&
+               "nudge wake must open with [system @ …]");
+        chat.complete_turn(n->task_id, "nudged", "");
+    }
+    settle(chat);
+
+    // ── 2026-10-04 queue-join (Plan.md) ──────────────────────────────
+    // Burst 3 gen-0 messages while Chief is busy → they queue; when the
+    // live turn completes they must drain as ONE joined prompt (one
+    // task, per-message headers, FIFO order), and every joined row
+    // lands 'done' on that single turn.
+    settle(chat);
+    chat.post_user_message(dm.id, "join-1 first");
+    const auto* t1 = hub.find_last(chief.id, dm.id);
+    assert(t1 && "first burst message should dispatch immediately");
+    const std::string task1 = t1->task_id;
+    const size_t dm_dispatches_before =
+        static_cast<size_t>(std::count_if(hub.dispatches.begin(),
+            hub.dispatches.end(), [&](const Dispatch& d) {
+                return d.agent_id == chief.id && d.thread_id == dm.id;
+            }));
+    // Chief is BUSY now — the next two queue instead of dispatching.
+    chat.post_user_message(dm.id, "join-2 amendment");
+    chat.post_user_message(dm.id, "join-3 correction: undo join-2");
+    {
+        size_t dm_dispatches_now = static_cast<size_t>(std::count_if(
+            hub.dispatches.begin(), hub.dispatches.end(),
+            [&](const Dispatch& d) {
+                return d.agent_id == chief.id && d.thread_id == dm.id;
+            }));
+        assert(dm_dispatches_now == dm_dispatches_before &&
+               "bursted wakes must queue while the agent is busy");
+        int queued = 0;
+        for (const auto& d : deliveries.list(chief.id, "queued"))
+            if (d.thread_id == dm.id) ++queued;
+        assert(queued == 2 && "both burst wakes must sit queued");
+    }
+    // Complete turn 1 → try_dispatch must JOIN the two queued wakes.
+    chat.complete_turn(task1, "ack", "");
+    {
+        const auto* joined = hub.find_last(chief.id, dm.id);
+        assert(joined && joined->task_id != task1 &&
+               "queued wakes must drain as a second dispatch");
+        assert(joined->prompt.rfind("[user @ ", 0) == 0 &&
+               "joined prompt opens with the first queued header");
+        const auto pos2 = joined->prompt.find("join-2 amendment");
+        const auto pos3 = joined->prompt.find("join-3 correction");
+        assert(pos2 != std::string::npos && pos3 != std::string::npos &&
+               "joined prompt must carry both queued bodies");
+        assert(pos2 < pos3 && "joined bodies keep FIFO order");
+        assert(joined->prompt.find("[user @ ", pos2) != std::string::npos &&
+               "each joined segment keeps its own header");
+        // Every joined row shares the one task and completes on it.
+        chat.complete_turn(joined->task_id, "joined ack", "");
+        int done = 0;
+        for (const auto& d : deliveries.list(chief.id, "done"))
+            if (d.thread_id == dm.id &&
+                (d.body == "join-2 amendment" ||
+                 d.body == "join-3 correction: undo join-2"))
+                ++done;
+        assert(done == 2 && "both joined rows must land done on one turn");
+    }
+    // Cross-thread isolation: a queued wake in another thread must NOT
+    // merge into the dm drain.
+    settle(chat);
+    auto dm2 = threads.create_thread("Chief second", "dm", {chief.id});
+    chat.post_user_message(dm2.id, "other-thread first");
+    const auto* o1 = hub.find_last(chief.id, dm2.id);
+    assert(o1 && "other-thread message dispatches on its own");
+    chat.post_user_message(dm.id, "dm-queued-while-other-busy");
+    chat.complete_turn(o1->task_id, "other ack", "");
+    {
+        const auto* back = hub.find_last(chief.id, dm.id);
+        assert(back && back->prompt.find("dm-queued-while-other-busy")
+               != std::string::npos &&
+               "dm wake drains separately from the other thread");
+        assert(back->prompt.find("other-thread") == std::string::npos &&
+               "no cross-thread merge");
+        chat.complete_turn(back->task_id, "dm ack", "");
+    }
+    settle(chat);
+
+    // ── 2026-10-04 gen>0 queue-join (lee): agent fan-in bursts join
+    // into one turn exactly like user bursts. ──
+    settle(chat);
+    auto honey_dm = threads.create_thread("Honey dm", "dm", {honey.id});
+    chat.post_user_message(honey_dm.id, "hold a moment");
+    const std::string honey_task1 =
+        hub.find_last(honey.id, honey_dm.id)->task_id;
+    const size_t dispatches_before = hub.dispatches.size();
+    chat.post_agent_message(chief.id, honey.id, "fan-a first question");
+    chat.post_agent_message(chief.id, honey.id, "fan-b follow-up");
+    chat.post_agent_message(chief.id, honey.id,
+                            "fan-c correction: skip fan-b");
+    assert(hub.dispatches.size() == dispatches_before &&
+           "fan-in wakes to a busy agent must queue, not dispatch");
+    {
+        int queued = 0;
+        for (const auto& d : deliveries.list(honey.id, "queued"))
+            if (d.body.rfind("fan-", 0) == 0) ++queued;
+        assert(queued == 3 && "all three fan-in wakes sit queued");
+    }
+    // Honey's user turn ends -> the 3 queued gen-1 wakes must JOIN.
+    chat.complete_turn(honey_task1, "standing by", "");
+    {
+        assert(hub.dispatches.size() == dispatches_before + 1 &&
+               "three queued fan-in wakes must join into ONE dispatch");
+        const auto& j = hub.dispatches.back();
+        assert(j.agent_id == honey.id && "joined wake targets Honey");
+        const auto pa = j.prompt.find("fan-a first question");
+        const auto pb = j.prompt.find("fan-b follow-up");
+        const auto pc = j.prompt.find("fan-c correction");
+        assert(pa != std::string::npos && pb != std::string::npos &&
+               pc != std::string::npos &&
+               "joined prompt carries all three fan-in bodies");
+        assert(pa < pb && pb < pc && "FIFO order preserved");
+        assert(j.prompt.rfind("[agent:Chief @ ", 0) == 0 &&
+               "joined prompt opens with the agent-source header");
+        assert(j.prompt.find("[agent:Chief @ ", pb) != std::string::npos &&
+               "later segments keep their own headers");
+        // "acknowledged." gates the 65c fan-in continuation.
+        chat.complete_turn(j.task_id, "acknowledged.", "");
+        int done = 0;
+        for (const auto& d : deliveries.list(honey.id, "done"))
+            if (d.body == "fan-a first question" ||
+                d.body == "fan-b follow-up" ||
+                d.body == "fan-c correction: skip fan-b")
+                ++done;
+        assert(done == 3 && "all three joined fan-in rows land done");
+    }
     settle(chat);
 
     std::cout << "agent relay: all assertions passed\n";

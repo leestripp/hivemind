@@ -414,7 +414,13 @@ int main(int argc, char* argv[]) {
                                       << r.id << " to fresh thread "
                                       << t.id << "\n";
                         }
-                        chat_service.post_user_message(r.thread_id, r.prompt);
+                        // 2026-10-04 (Plan.md): routine fires carry
+                        // source=routine:<name> so the agent's context
+                        // shows WHICH routine fired and WHEN.
+                        chat_service.post_user_message(
+                            r.thread_id, r.prompt, "[]",
+                            std::string(hivemind::msg_source::kRoutinePrefix) +
+                                r.name);
                         auto next = once ? std::nullopt
                             : hm::compute_next_fire(sched, now, r.created_at);
                         routine_store.mark_fired(r.id, now,

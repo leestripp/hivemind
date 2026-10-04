@@ -7,6 +7,7 @@
 
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/MessageHeader.h"
 #include "hivemind/ChatService.h"
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
@@ -853,6 +854,19 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
+            // 2026-10-04 sweep fix: `body.value("body", "")` throws an
+            // UNCAUGHT nlohmann type_error when the client posts a
+            // non-string body (same latent class as the poison-wake
+            // 500s) — the handler's try/catch only covers
+            // post_user_message. Reject with a clean 400 instead.
+            // Sweep fix: `body.value("body", "")` throws an UNCAUGHT
+            // nlohmann type_error when the client posts a non-string
+            // body (same latent class as the poison-wake 500s) — the
+            // handler's try/catch only covers post_user_message.
+            // Reject with a clean 400 regardless of attachments.
+            if (body.contains("body") && !body["body"].is_string()) {
+                send_error(resp, 400, "body must be a string"); return;
+            }
             std::string text = body.value("body", "");
             // Phase 18: optional attachments array (metadata from prior
             // POST /attachments calls — {name, path, host_path, size}).
@@ -868,8 +882,34 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 send_error(resp, 400, "body must not be empty"); return;
             }
 
+            // 2026-10-04 (Plan.md §3.4): optional structured source.
+            // Clients may only claim USER-channel sources ("user" or
+            // "voice"→"voice-app"); routine:/agent:/phone:/system are
+            // hub-internal — a client forging them would corrupt the
+            // audit trail the header exists for.
+            std::string source{hivemind::msg_source::kUser};
+            if (body.contains("source")) {
+                // Sweep fix: non-string source (a number, array, …)
+                // must 400, not escape as an uncaught type_error.
+                if (!body["source"].is_string()) {
+                    send_error(resp, 400,
+                               "source must be 'user' or 'voice'");
+                    return;
+                }
+                std::string v = body.value("source", "");
+                if (v == "voice") v = std::string(hivemind::msg_source::kVoiceApp);
+                if (v != hivemind::msg_source::kUser &&
+                    v != hivemind::msg_source::kVoiceApp) {
+                    send_error(resp, 400,
+                               "source must be 'user' or 'voice'");
+                    return;
+                }
+                source = v;
+            }
+
             try {
-                std::string msg_id = chat.post_user_message(seg[2], text, atts);
+                std::string msg_id = chat.post_user_message(seg[2], text, atts,
+                                                            source);
                 send_json(resp, json{{"message_id", msg_id},
                                      {"status", "processing"}}, 202);
             } catch (const std::invalid_argument& e) {
@@ -904,7 +944,17 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             if (pretty.empty()) {
                 send_error(resp, 400, "empty notification"); return;
             }
-            if (pretty.size() > 500) pretty.resize(500);   // hub-side cap
+            // 2026-10-04: byte-truncate on a UTF-8 CHARACTER boundary —
+            // the old resize(500) cut mid-character and produced poison
+            // rows that killed dispatch with nlohmann type_error.316
+            // (2026-10-02 poison-wake incident).
+            if (pretty.size() > 500) {
+                size_t cut = 500;
+                while (cut > 0 &&
+                       (static_cast<unsigned char>(pretty[cut]) & 0xC0) == 0x80)
+                    --cut;
+                pretty.resize(cut);
+            }
             const std::string msg_id = threads.add_message(
                 dm->id, "system", "hivemind",
                 "[phone · " + app + "] " + pretty);

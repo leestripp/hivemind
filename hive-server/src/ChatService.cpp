@@ -10,6 +10,7 @@
 #include "hivemind/ExecAuditStore.h"
 #include "hivemind/FanInPolicy.h"
 #include "hivemind/DeliveryStore.h"
+#include "hivemind/MessageHeader.h"
 #include "hivemind/DbUtil.h"
 
 #include <nlohmann/json.hpp>
@@ -103,9 +104,11 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     // Read receipts (Phase 66c hook): sending implies read-to-own-message.
     if (auto m = threads_.get_message(msg_id))
         deliveries_.mark_read(tid, sender_id, msg_id, m->created_at);
-    const std::string did = fan_in(tid, *target, sender->name, body,
-                                   /*generation=*/1, sender_id, msg_id,
-                                   "wake");
+    const std::string did =
+        fan_in(tid, *target, sender->name,
+               std::string(hivemind::msg_source::kAgentPrefix) +
+                   sender->name,
+               body, /*generation=*/1, sender_id, msg_id, "wake");
     if (delivery_id_out) *delivery_id_out = did;
     return tid;
 }
@@ -235,8 +238,10 @@ std::string ChatService::maybe_fire_relay(const std::string& thread_id,
             "(requester %.8s)\n",
             replier_id.c_str(), hit->home_thread_id.c_str(),
             hit->requester_id.c_str());
-        fan_in(hit->home_thread_id, *requester, replier_name, body,
-               generation + 1, replier_id, mirror_id, "relay");
+        fan_in(hit->home_thread_id, *requester, replier_name,
+               std::string(hivemind::msg_source::kAgentPrefix) +
+                   replier_name,
+               body, generation + 1, replier_id, mirror_id, "relay");
         return hit->requester_id;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[delivery] relay ERROR: %s\n", e.what());
@@ -282,6 +287,7 @@ std::string ChatService::post_user_inbox_message(const std::string& sender_id,
 std::string ChatService::fan_in(const std::string& thread_id,
                          const RosterAgent& agent,
                          const std::string& sender_label,
+                         const std::string& source,
                          const std::string& body,
                          int generation,
                          const std::string& sender_id,
@@ -305,6 +311,7 @@ std::string ChatService::fan_in(const std::string& thread_id,
     d.target_agent_id   = agent.id;
     d.sender_agent_id   = sender_id;
     d.sender_label      = sender_label;
+    d.source            = source;
     d.body              = body;
     d.generation        = generation;
     d.source_message_id = source_message_id;
@@ -386,16 +393,59 @@ void ChatService::try_dispatch(const std::string& agent_id) {
         // /workspace volume) IS the context - each task carries ONLY the
         // new message. DO NOT add a thread-history backlog (v1 lesson).
         //
-        // 2026-10-03 stray-fire fix: stamp the dispatch time on every
-        // wake. The brain keeps ONE shared, untimestamped conversation
-        // across all of the agent's threads, so a hours-old routine
-        // prompt sitting in context is indistinguishable from a fresh
-        // fire — HoneyBee re-answered her 01:00 social-warmup prompt as
-        // ~15 phantom "stray fires" in 26h (every wake re-exposed it;
-        // bursts were one turn remarking on it repeatedly). An explicit
-        // UTC stamp makes old context self-evidently old.
-        const std::string prompt = "[" + d->sender_label + " @ " +
-                                   hivemind::db::iso_now() + "] " + d->body;
+        // 2026-10-03 stray-fire fix (Plan.md): every wake carries a
+        // header rendered from the STORED source + created_at — the
+        // delivery row's created_at is stamped at ENQUEUE, so a wake
+        // queued at 01:00 and dispatched at 09:00 (worker offline,
+        // was-queued drain) still reads as the 01:00 message. The
+        // brain keeps ONE shared, untimestamped conversation across
+        // all of the agent's threads (HoneyBee's ~15 phantom routine
+        // re-fires); an explicit UTC source+time stamp makes old
+        // context self-evidently old and says WHICH channel it came
+        // on. Voice wakes additionally carry the TTS channel hint
+        // (moved here server-side from the Android OUTGOING_PREFIX).
+        //
+        // 2026-10-04 queue-join (Plan.md): when the sender bursts several
+        // messages while the agent is busy, the wakes queue and used to
+        // drain as N sequential turns — N LLM calls and the agent could
+        // act on message 1 before seeing the correction in message 3.
+        // Queued wakes in the SAME thread at the SAME fan-in depth now
+        // JOIN into one prompt — for user bursts (gen 0) and agent
+        // fan-in bursts (gen>0, lee 2026-10-04) alike: one task, one
+        // turn, each segment keeping its own [source @ enqueue-time]
+        // header. Every joined row is stamped with the SAME task_id, so
+        // completion/watchdog/cancel paths transition all of them
+        // (DeliveryStore::find_all_by_task). Generation-scoped because
+        // complete_turn's fan-in continuation is depth+1. The mute/
+        // circuit gates above already ran on the head row and the state
+        // is per (thread, agent), so every same-thread join member
+        // shares the verdict. The circuit breaker counts DISPATCHES
+        // (turns), not messages — a joined batch is one turn, so an
+        // A→B→A ping-pong still trips at the same turn rate.
+        constexpr int kMaxJoin = 10;   // same cap as the phone fold
+        std::vector<std::string> joined_ids{d->id};
+        std::string prompt =
+            hivemind::render_message_header(d->source, d->created_at) +
+            d->body;
+        bool any_voice = (d->source == hivemind::msg_source::kVoiceApp);
+        {
+            auto join_set = deliveries_.queued_for_thread(
+                agent_id, d->thread_id, d->generation, kMaxJoin);
+            if (join_set.size() > 1) {
+                prompt.clear();
+                for (const auto& j : join_set) {
+                    prompt += hivemind::render_message_header(
+                                  j.source, j.created_at) + j.body + "\n\n";
+                    if (j.id != d->id) joined_ids.push_back(j.id);
+                    any_voice = any_voice ||
+                                (j.source == hivemind::msg_source::kVoiceApp);
+                }
+                // Drop the trailing blank line between segments.
+                prompt.resize(prompt.size() >= 2 ? prompt.size() - 2 : 0);
+            }
+        }
+        if (any_voice)
+            prompt += "\n" + std::string(hivemind::kVoiceChannelHint);
 
         auto live = std::make_shared<LiveTurn>();
         live->thread_id  = d->thread_id;
@@ -442,18 +492,28 @@ void ChatService::try_dispatch(const std::string& agent_id) {
             vec.push_back(live);
             by_task_[task_id] = live;
         }
-        deliveries_.mark_dispatched(d->id, task_id);
+        // Queue-join (Plan.md, 2026-10-04): every joined row carries the
+        // SAME task_id, so the turn's completion/watchdog/cancel paths
+        // close them all via DeliveryStore::find_all_by_task.
+        for (const auto& jid : joined_ids)
+            deliveries_.mark_dispatched(jid, task_id);
+        const std::string joined_note =
+            joined_ids.size() > 1
+                ? ", joined " + std::to_string(joined_ids.size()) +
+                  " queued wakes"
+                : "";
         std::fprintf(stderr,
-            "[delivery] dispatched %.8s -> %.8s thread %.8s (task %.12s)\n",
+            "[delivery] dispatched %.8s -> %.8s thread %.8s (task %.12s%s)\n",
             d->id.c_str(), agent_id.c_str(), d->thread_id.c_str(),
-            task_id.c_str());
+            task_id.c_str(), joined_note.c_str());
         return;   // ONE wake per idle transition
     }
 }
 
 std::string ChatService::post_user_message(const std::string& thread_id,
                                            const std::string& body,
-                                           const std::string& attachments_json) {
+                                           const std::string& attachments_json,
+                                           const std::string& source) {
     if (stopping_)
         throw std::invalid_argument("server is shutting down");
     auto thread = threads_.get_thread(thread_id);
@@ -472,12 +532,17 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     {
         bool has_more = false;
         auto recent = threads_.list_messages_window(thread_id, "", 50, has_more);
-        std::vector<std::string> pending;
+        // Each folded row gets its OWN rendered header (phone source +
+        // the row's STORED created_at) so old notifications are
+        // visibly old in context — the fold's blanket "since we last
+        // spoke" is not a timestamp (Plan.md §3.4). The in-body
+        // "[phone · app]" tag stays: it is the fold's selection marker.
+        std::vector<std::pair<std::string, std::string>> pending;
         for (auto it = recent.rbegin(); it != recent.rend(); ++it) {
             if (it->sender_kind == "user") break;
             if (it->sender_kind == "system" &&
                 it->body.rfind("[phone ", 0) == 0)
-                pending.push_back(it->body);
+                pending.emplace_back(it->created_at, it->body);
         }
         if (!pending.empty()) {
             constexpr size_t kMaxFold = 10;
@@ -486,7 +551,11 @@ std::string ChatService::post_user_message(const std::string& thread_id,
                           pending.begin() + (pending.size() - kMaxFold));
             std::reverse(pending.begin(), pending.end());
             std::string joined;
-            for (const auto& pn : pending) joined += "  " + pn + "\n";
+            for (const auto& [at, body] : pending)
+                joined += "  " +
+                    hivemind::render_message_header(
+                        hivemind::msg_source::kPhone, at) +
+                    body + "\n";
             notify_block =
                 "Phone notifications since we last spoke:\n" + joined + "\n";
             std::fprintf(stderr,
@@ -512,8 +581,8 @@ std::string ChatService::post_user_message(const std::string& thread_id,
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;
-        fan_in(thread_id, *agent, "You", prompt_body, /*generation=*/0,
-               "", msg_id, "wake");
+        fan_in(thread_id, *agent, "You", source, prompt_body,
+               /*generation=*/0, "", msg_id, "wake");
     }
     return msg_id;
 }
@@ -532,8 +601,9 @@ std::string ChatService::post_nudge(const std::string& thread_id,
     for (const auto& agent_id : thread->agent_ids) {
         auto agent = agents_.get_agent(agent_id);
         if (!agent) continue;
-        fan_in(thread_id, *agent, "HiveMind", body, /*generation=*/0,
-               "", msg_id, "wake");
+        fan_in(thread_id, *agent, "HiveMind",
+               std::string(hivemind::msg_source::kSystem), body,
+               /*generation=*/0, "", msg_id, "wake");
     }
     return msg_id;
 }
@@ -670,9 +740,21 @@ void ChatService::complete_turn(const std::string& task_id,
                     thread_id.c_str(), attempt + 1, e.what());
             }
         }
-        if (!posted)
+        if (!posted) {
             live->error = "reply generated but could not be posted";
-        else {
+        } else {
+            // 2026-10-04 (Plan.md §3.6): the response side of the
+            // header trail — every posted reply is journaled with a
+            // rendered [agent:<name> @ <time>] stamp so a reply can
+            // always be correlated with the wake that produced it.
+            // Hub journal only; the stored body stays raw and no
+            // user-facing surface renders this.
+            std::fprintf(stderr, "[header] %sthread %.8s task %.12s\n",
+                hivemind::render_message_header(
+                    std::string(hivemind::msg_source::kAgentPrefix) +
+                        agent_name,
+                    hivemind::db::iso_now()).c_str(),
+                thread_id.c_str(), task_id.c_str());
             // Relay fires on ANY posted reply — the 2026-09-23 probe
             // proved the bug: Honey's "RELAY-PROBE-OK … acknowledged"
             // reply was ack-only, and with the hook behind the ack guard
@@ -717,8 +799,11 @@ void ChatService::complete_turn(const std::string& task_id,
                             if (pid == relayed_to) continue;
                             auto peer = agents_.get_agent(pid);
                             if (peer)
-                                fan_in(thread_id, *peer, agent_name, out,
-                                       generation + 1, agent_id,
+                                fan_in(thread_id, *peer, agent_name,
+                                       std::string(
+                                           hivemind::msg_source::kAgentPrefix) +
+                                           agent_name,
+                                       out, generation + 1, agent_id,
                                        last_reply_id, "wake");
                         }
                     } else {
@@ -729,8 +814,11 @@ void ChatService::complete_turn(const std::string& task_id,
                             if (peer_id == relayed_to) continue;
                             auto peer = agents_.get_agent(peer_id);
                             if (peer)
-                                fan_in(thread_id, *peer, agent_name, out,
-                                       generation + 1, agent_id,
+                                fan_in(thread_id, *peer, agent_name,
+                                       std::string(
+                                           hivemind::msg_source::kAgentPrefix) +
+                                           agent_name,
+                                       out, generation + 1, agent_id,
                                        last_reply_id, "wake");
                         }
                     }
@@ -743,12 +831,15 @@ void ChatService::complete_turn(const std::string& task_id,
     // Phase 66b: close out the delivery row that drove this turn (if
     // any) and advance the agent's read mark to the wake's source
     // message — the agent demonstrably consumed it (it WAS the prompt).
-    if (auto d = deliveries_.find_by_task(task_id)) {
-        deliveries_.mark_done(d->id);
-        if (!d->source_message_id.empty())
-            if (auto m = threads_.get_message(d->source_message_id))
+    // Queue-join (Plan.md, 2026-10-04): one task may carry several
+    // joined generation-0 rows — close out EVERY row, advancing the
+    // read mark past each wake's source message.
+    for (auto& d : deliveries_.find_all_by_task(task_id)) {
+        deliveries_.mark_done(d.id);
+        if (!d.source_message_id.empty())
+            if (auto m = threads_.get_message(d.source_message_id))
                 deliveries_.mark_read(thread_id, agent_id,
-                                      d->source_message_id, m->created_at);
+                                      d.source_message_id, m->created_at);
     }
     // Agent idle: dispatch the next queued wake, if any (durable queue).
     try_dispatch(agent_id);
@@ -900,8 +991,8 @@ void ChatService::watchdog_loop() {
         // visible in message_status, not tombstoned-silent — and the
         // freed agent drains its next queued wake.
         for (const auto& v : victims) {
-            if (auto d = deliveries_.find_by_task(v.task_id))
-                deliveries_.mark_error(d->id,
+            for (auto& d : deliveries_.find_all_by_task(v.task_id))
+                deliveries_.mark_error(d.id,
                     v.was_cancelling ? "cancel unconfirmed (watchdog)"
                                      : "turn timeout (watchdog)");
             try_dispatch(v.agent_id);
@@ -970,9 +1061,10 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
         mute_agent_locked(agent_id);
     }
     // Phase 66b: cancelled turns' delivery rows become visibly dropped.
+    // Queue-join: one task may own several joined rows — drop them all.
     for (const auto& id : cancelled_ids)
-        if (auto d = deliveries_.find_by_task(id))
-            deliveries_.mark_dropped(d->id, "cancelled");
+        for (auto& d : deliveries_.find_all_by_task(id))
+            deliveries_.mark_dropped(d.id, "cancelled");
     // Same ordering as cancel_thread: cancels out of the lock, then
     // flush so the interrupt note lands after any in-flight text.
     for (const auto& [a, tid] : to_cancel) hub_.cancel_agent(a, tid);
@@ -1007,9 +1099,10 @@ void ChatService::cancel_thread(const std::string& thread_id) {
         mute_thread_locked(thread_id);
     }
     // Phase 66b: cancelled turns' delivery rows become visibly dropped.
+    // Queue-join: one task may own several joined rows — drop them all.
     for (const auto& id : cancelled_ids)
-        if (auto d = deliveries_.find_by_task(id))
-            deliveries_.mark_dropped(d->id, "cancelled");
+        for (auto& d : deliveries_.find_all_by_task(id))
+            deliveries_.mark_dropped(d.id, "cancelled");
     for (const auto& a : to_cancel) hub_.cancel_agent(a, thread_id);
     // Phase 52: flush AFTER the lock (ThreadStore lock ordering) and
     // after cancel_agent so the interrupt note lands after any in-flight

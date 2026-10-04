@@ -3,23 +3,15 @@ package com.hivemind.voice
 /**
  * Text hygiene for the voice channel.
  *
- * [OUTGOING_PREFIX] rides on every user message from this app so the
- * agent knows the reply will be spoken aloud and should stay in plain,
- * flowing, TTS-friendly prose.
+ * 2026-10-04 (Plan.md §3.4): the outgoing TTS directive (formerly
+ * OUTGOING_PREFIX) moved SERVER-SIDE — VoiceActivity now sends
+ * `source: "voice"` and the hub attaches the header + channel hint to
+ * the agent prompt. Nothing client-side prefixes message text anymore.
  *
  * [forSpeech] is the safety net: whatever the agent still emits that
  * reads badly aloud gets cleaned before hitting TextToSpeech.
  */
 object SpeechText {
-
-    const val OUTGOING_PREFIX: String =
-        "(Voice message via the HiveMind Voice app — your reply is read " +
-        "aloud by text-to-speech, so answer in plain flowing prose: no " +
-        "markdown, lists, tables, code blocks, links, or emoji; write " +
-        "numbers, dates and abbreviations the way they should be spoken; " +
-        "keep it conversational and concise unless I ask for detail. " +
-        "If you need another agent's input, use message_agent to consult " +
-        "them, then report the answer back to me via message_user.)\n\n"
 
     /** Make an agent reply safe for TextToSpeech. */
     fun forSpeech(text: String): String {

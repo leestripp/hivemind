@@ -61,7 +61,7 @@ void step_done(sqlite3* db, sqlite3_stmt* st, const char* what) {
 
 constexpr const char* kCols =
     "id, kind, thread_id, target_agent_id, sender_agent_id, sender_label,"
-    " body, generation, state, task_id, source_message_id, error,"
+    " source, body, generation, state, task_id, source_message_id, error,"
     " created_at, dispatched_at, completed_at";
 
 hivemind::Delivery row_to_delivery(sqlite3_stmt* st) {
@@ -72,15 +72,16 @@ hivemind::Delivery row_to_delivery(sqlite3_stmt* st) {
     d.target_agent_id   = col_text(st, 3);
     d.sender_agent_id   = col_text(st, 4);
     d.sender_label      = col_text(st, 5);
-    d.body              = col_text(st, 6);
-    d.generation        = sqlite3_column_int(st, 7);
-    d.state             = col_text(st, 8);
-    d.task_id           = col_text(st, 9);
-    d.source_message_id = col_text(st, 10);
-    d.error             = col_text(st, 11);
-    d.created_at        = col_text(st, 12);
-    d.dispatched_at     = col_text(st, 13);
-    d.completed_at      = col_text(st, 14);
+    d.source            = col_text(st, 6);
+    d.body              = col_text(st, 7);
+    d.generation        = sqlite3_column_int(st, 8);
+    d.state             = col_text(st, 9);
+    d.task_id           = col_text(st, 10);
+    d.source_message_id = col_text(st, 11);
+    d.error             = col_text(st, 12);
+    d.created_at        = col_text(st, 13);
+    d.dispatched_at     = col_text(st, 14);
+    d.completed_at      = col_text(st, 15);
     return d;
 }
 
@@ -112,6 +113,7 @@ void DeliveryStore::init_schema() {
         "  target_agent_id TEXT NOT NULL,"
         "  sender_agent_id TEXT NOT NULL DEFAULT '',"
         "  sender_label TEXT NOT NULL DEFAULT '',"
+        "  source TEXT NOT NULL DEFAULT 'unknown',"
         "  body TEXT NOT NULL DEFAULT '',"
         "  generation INTEGER NOT NULL DEFAULT 0,"
         "  state TEXT NOT NULL DEFAULT 'queued',"
@@ -122,6 +124,28 @@ void DeliveryStore::init_schema() {
         "  dispatched_at TEXT NOT NULL DEFAULT '',"
         "  completed_at TEXT NOT NULL DEFAULT ''"
         ")", "create deliveries");
+    // 2026-10-04: message-header source column (same guard pattern as
+    // ThreadStore's attachments_json migration). Old rows default to
+    // 'unknown'.
+    {
+        bool has_source = false;
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db.db, "PRAGMA table_info(deliveries)",
+                               -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char* n = col_text(st, 1);
+                if (n && std::string_view{n} == "source") {
+                    has_source = true; break;
+                }
+            }
+            sqlite3_finalize(st);
+        }
+        if (!has_source)
+            exec_sql(db.db,
+                "ALTER TABLE deliveries ADD COLUMN source"
+                " TEXT NOT NULL DEFAULT 'unknown'",
+                "migrate deliveries source");
+    }
     exec_sql(db.db,
         "CREATE INDEX IF NOT EXISTS idx_deliveries_target"
         " ON deliveries(target_agent_id, state, created_at)",
@@ -156,10 +180,11 @@ std::string DeliveryStore::enqueue(Delivery d) {
     if (d.state.empty()) d.state = "queued";
     if (d.kind.empty()) d.kind = "wake";
     if (d.created_at.empty()) d.created_at = iso_now();
+    if (d.source.empty()) d.source = "unknown";
     DbGuard db{open_db(db_path_)};
     StmtGuard st;
     const std::string sql = "INSERT INTO deliveries (" +
-        std::string(kCols) + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        std::string(kCols) + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     prepare(db.db, st, sql.c_str(), "enqueue");
     bind_text(st, 1, d.id);
     bind_text(st, 2, d.kind);
@@ -167,15 +192,16 @@ std::string DeliveryStore::enqueue(Delivery d) {
     bind_text(st, 4, d.target_agent_id);
     bind_text(st, 5, d.sender_agent_id);
     bind_text(st, 6, d.sender_label);
-    bind_text(st, 7, d.body);
-    sqlite3_bind_int(st, 8, d.generation);
-    bind_text(st, 9, d.state);
-    bind_text(st, 10, d.task_id);
-    bind_text(st, 11, d.source_message_id);
-    bind_text(st, 12, d.error);
-    bind_text(st, 13, d.created_at);
-    bind_text(st, 14, d.dispatched_at);
-    bind_text(st, 15, d.completed_at);
+    bind_text(st, 7, d.source);
+    bind_text(st, 8, d.body);
+    sqlite3_bind_int(st, 9, d.generation);
+    bind_text(st, 10, d.state);
+    bind_text(st, 11, d.task_id);
+    bind_text(st, 12, d.source_message_id);
+    bind_text(st, 13, d.error);
+    bind_text(st, 14, d.created_at);
+    bind_text(st, 15, d.dispatched_at);
+    bind_text(st, 16, d.completed_at);
     step_done(db.db, st, "enqueue");
     return d.id;
 }
@@ -246,6 +272,42 @@ DeliveryStore::find_by_task(const std::string& task_id) {
     bind_text(st, 1, task_id);
     if (sqlite3_step(st) != SQLITE_ROW) return std::nullopt;
     return row_to_delivery(st);
+}
+
+std::vector<hivemind::Delivery>
+DeliveryStore::find_all_by_task(const std::string& task_id) {
+    std::vector<Delivery> out;
+    if (task_id.empty()) return out;
+    DbGuard db{open_db(db_path_)};
+    StmtGuard st;
+    prepare(db.db, st,
+        ("SELECT " + std::string(kCols) +
+         " FROM deliveries WHERE task_id = ?"
+         " ORDER BY rowid ASC").c_str(), "find_all_by_task");
+    bind_text(st, 1, task_id);
+    while (sqlite3_step(st) == SQLITE_ROW) out.push_back(row_to_delivery(st));
+    return out;
+}
+
+std::vector<hivemind::Delivery>
+DeliveryStore::queued_for_thread(const std::string& target_agent_id,
+                                 const std::string& thread_id,
+                                 int generation, int limit) {
+    std::vector<Delivery> out;
+    DbGuard db{open_db(db_path_)};
+    StmtGuard st;
+    prepare(db.db, st,
+        ("SELECT " + std::string(kCols) +
+         " FROM deliveries WHERE target_agent_id = ? AND thread_id = ?"
+         " AND state = 'queued' AND generation = ?"
+         " ORDER BY created_at ASC, rowid ASC LIMIT ?").c_str(),
+        "queued_for_thread");
+    bind_text(st, 1, target_agent_id);
+    bind_text(st, 2, thread_id);
+    sqlite3_bind_int(st, 3, generation);
+    sqlite3_bind_int(st, 4, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) out.push_back(row_to_delivery(st));
+    return out;
 }
 
 void DeliveryStore::mark_done(const std::string& id) {

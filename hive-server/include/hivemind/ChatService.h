@@ -6,6 +6,8 @@
 // live turn state until task_result arrives, fan agent replies into
 // peer participants (generation-capped).
 
+#include "hivemind/MessageHeader.h"
+
 #include <atomic>
 #include <deque>
 #include <memory>
@@ -64,9 +66,15 @@ public:
     /// Record a user message and dispatch a task to every agent
     /// participant of the thread. Returns the user message id.
     /// Throws std::invalid_argument if the thread does not exist.
+    /// 2026-10-04 (Plan.md): `source` is the structured message header
+    /// field (MessageHeader.h vocabulary) persisted on the delivery row.
+    /// "user" (default) for UI posts, "voice-app" for the voice app,
+    /// "routine:<name>" for routine fires — one path, three sources.
     std::string post_user_message(const std::string& thread_id,
                                   const std::string& body,
-                                  const std::string& attachments_json = "[]");
+                                  const std::string& attachments_json = "[]",
+                                  const std::string& source =
+                                      std::string(hivemind::msg_source::kUser));
 
     /// Agent->agent async message: find-or-create the pair thread, post
     /// as sender_kind="agent", fan in to the target at generation 1.
@@ -173,7 +181,8 @@ private:
     /// Returns the delivery id ("" when suppressed as a duplicate).
     std::string fan_in(const std::string& thread_id,
                 const RosterAgent& agent,
-                const std::string& sender_label, const std::string& body,
+                const std::string& sender_label,
+                const std::string& source, const std::string& body,
                 int generation, const std::string& sender_id = "",
                 const std::string& source_message_id = "",
                 const std::string& kind = "wake");

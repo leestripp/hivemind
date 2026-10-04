@@ -29,6 +29,7 @@ struct Delivery {
     std::string target_agent_id;   // who is being woken
     std::string sender_agent_id;   // who caused it ("" for user/system)
     std::string sender_label;      // display label used in the prompt
+    std::string source;            // controlled vocab (MessageHeader.h)
     std::string body;              // wake payload
     int         generation = 0;    // fan-in depth
     std::string state;             // queued|dispatched|done|error|dropped|expired
@@ -72,6 +73,21 @@ public:
     void mark_dispatched(const std::string& id, const std::string& task_id);
     /// Reverse lookup by dispatched task id (turn completion paths).
     std::optional<Delivery> find_by_task(const std::string& task_id);
+    /// ALL rows sharing a dispatched task id. When try_dispatch JOINS
+    /// queued generation-0 wakes into one prompt (Plan.md, 2026-10-04),
+    /// every joined row carries the same task_id; completion/watchdog/
+    /// cancel paths must transition all of them (FIFO rowid order).
+    std::vector<Delivery> find_all_by_task(const std::string& task_id);
+    /// Queued wakes for one agent+thread at ONE fan-in depth, FIFO
+    /// order — the JOIN set try_dispatch collapses into a single
+    /// prompt. Generation-scoped: mixing depths in one turn would
+    /// break complete_turn's fan-in continuation (gen+1). Gen-0 user
+    /// bursts and gen>0 agent bursts both join (Plan.md, 2026-10-04);
+    /// the circuit breaker counts dispatches (turns), and a joined
+    /// batch is still one turn, so its trip semantics are unchanged.
+    std::vector<Delivery> queued_for_thread(
+        const std::string& target_agent_id, const std::string& thread_id,
+        int generation, int limit);
     void mark_done(const std::string& id);
     void mark_error(const std::string& id, const std::string& error);
     void mark_dropped(const std::string& id, const std::string& reason);
