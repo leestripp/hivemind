@@ -262,7 +262,10 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   gap: 14px;
 }
 /* ── 2026-10-04: agents page banded by hive-worker (machine) ─────── */
-.agent-group { display: flex; flex-direction: column; gap: 12px; }
+/* Bands stack VERTICALLY (full row each); the card grid inside a band
+   stays HORIZONTAL (reuses .agents-grid). grid-column:1/-1 keeps a band
+   from becoming a single column of the OUTER auto-fill grid. */
+.agent-group { display: flex; flex-direction: column; gap: 12px; grid-column: 1 / -1; }
 .agent-group-head {
   display: flex; align-items: baseline; gap: 10px;
   padding-top: 8px;
