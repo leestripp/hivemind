@@ -16,16 +16,24 @@ namespace hv {
 class AudioPlayback;
 class TtsEngine;
 
-// Agent roster — port of hive-android MainActivity using hive-client's
-// roster row structure: avatar + name/role + live state pill (+spinner),
-// card-styled rows, ⚙ settings, per-card voice button, 2.5s state poll
-// with dwell-filtered spoken announcements.
-class RosterWindow : public Gtk::Window {
+// Agent roster page — port of hive-android MainActivity using
+// hive-client's roster row structure: avatar + name/role + live state
+// pill (+spinner), card-styled rows, ⚙ settings, per-card voice button,
+// 2.5s state poll with dwell-filtered spoken announcements.
+//
+// A page (Gtk::Box), not a window: MainWindow stacks it with the voice
+// session page. Tapping an agent emits signal_open_voice().
+class RosterView : public Gtk::Box {
  public:
-    explicit RosterWindow(Prefs& prefs);
-    ~RosterWindow() override;
+    explicit RosterView(Prefs& prefs);
+    ~RosterView() override;
 
     void refresh();
+
+    // Emitted when the user taps an online agent card.
+    sigc::signal<void(const AgentInfo&)>& signal_open_voice() {
+        return signal_open_voice_;
+    }
 
     // DebugShell hooks.
     const std::vector<AgentInfo>& debugAgents() const { return lastAgents_; }
@@ -37,6 +45,8 @@ class RosterWindow : public Gtk::Window {
     void openVoicePicker(const AgentInfo& agent);
     void openSettings();
     void announce(const std::vector<AgentInfo>& agents);
+
+    sigc::signal<void(const AgentInfo&)> signal_open_voice_;
 
     Prefs& prefs_;
     std::unique_ptr<ApiClient> api_;

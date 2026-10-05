@@ -33,9 +33,9 @@ class DebugShell {
     explicit DebugShell(Gtk::Application& app);
     ~DebugShell();
 
-    // Window registry (single-instance app; latest registration wins).
-    static void registerRoster(class RosterWindow* w);
-    static void registerVoice(class VoiceWindow* w);  // nullptr on close
+    // Page registry (single-window app; latest registration wins).
+    static void registerRoster(class RosterView* w);
+    static void registerVoice(class VoiceView* w);  // nullptr on page close
 
  private:
     void serveLoop();

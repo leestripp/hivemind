@@ -1,4 +1,4 @@
-#include "RosterWindow.h"
+#include "RosterView.h"
 
 #include "DebugShell.h"
 
@@ -8,7 +8,6 @@
 #include "SettingsWindow.h"
 #include "TtsEngine.h"
 #include "VoicePickerWindow.h"
-#include "VoiceWindow.h"
 
 #include <algorithm>
 #include <thread>
@@ -27,14 +26,10 @@ bool workingState(const std::string& st) {
 }
 }  // namespace
 
-RosterWindow::RosterWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
+RosterView::RosterView(Prefs& prefs)
+    : Gtk::Box(Gtk::Orientation::VERTICAL, 10), prefs_(prefs) {
     DebugShell::registerRoster(this);
-    set_title("HiveMind");
-    set_default_size(440, 620);
-
-    auto* root = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 10);
-    root->set_margin(16);
-    set_child(*root);
+    set_margin(16);
 
     // Header: title + status (activity_main.xml) + ⚙ settings button.
     auto* header = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
@@ -58,21 +53,21 @@ RosterWindow::RosterWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
     gear->set_tooltip_text("Settings");
     gear->signal_clicked().connect([this] { openSettings(); });
     header->append(*gear);
-    root->append(*header);
+    append(*header);
 
     error_ = Gtk::make_managed<Gtk::Label>();
     error_->add_css_class("error");
     error_->set_halign(Gtk::Align::START);
     error_->set_wrap(true);
     error_->set_visible(false);
-    root->append(*error_);
+    append(*error_);
 
     auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroll->set_vexpand(true);
     scroll->set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
     list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
     scroll->set_child(*list_);
-    root->append(*scroll);
+    append(*scroll);
 
     api_ = std::make_unique<ApiClient>(prefs_.base(), prefs_.apiKey());
     refresh();
@@ -84,10 +79,10 @@ RosterWindow::RosterWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
         kPollMs);
 }
 
-RosterWindow::~RosterWindow() {
+RosterView::~RosterView() {
     DebugShell::registerRoster(nullptr); poll_.disconnect(); }
 
-void RosterWindow::refresh() {
+void RosterView::refresh() {
     spinner_->start();
     ApiClient* api = api_.get();
     // ApiClient is blocking — fetch on a worker, paint on the UI thread.
@@ -120,7 +115,7 @@ void RosterWindow::refresh() {
     }).detach();
 }
 
-void RosterWindow::rebuildList(const std::vector<AgentInfo>& agents) {
+void RosterView::rebuildList(const std::vector<AgentInfo>& agents) {
     lastAgents_ = agents;
     while (auto* child = list_->get_first_child()) list_->remove(*child);
 
@@ -212,25 +207,26 @@ void RosterWindow::rebuildList(const std::vector<AgentInfo>& agents) {
     }
 }
 
-void RosterWindow::openVoice(const AgentInfo& agent) {
-    prefs_.setAgentId(agent.id);
-    prefs_.setAgentName(agent.name);
-    prefs_.setOnboardingDone(true);
-    prefs_.save();
-    auto* win = VoiceWindow::create(prefs_, agent);
-    win->present();
+void RosterView::openVoice(const AgentInfo& agent) {
+    signal_open_voice_.emit(agent);
 }
 
-void RosterWindow::openVoicePicker(const AgentInfo& agent) {
+void RosterView::openVoicePicker(const AgentInfo& agent) {
     auto* win = Gtk::make_managed<VoicePickerWindow>(prefs_, agent.id,
                                                      agent.name);
-    win->set_transient_for(*this);
+    if (auto* top = dynamic_cast<Gtk::Window*>(get_root())) {
+        win->set_transient_for(*top);
+        win->set_modal(true);
+    }
     win->present();
 }
 
-void RosterWindow::openSettings() {
+void RosterView::openSettings() {
     auto* win = Gtk::make_managed<SettingsWindow>(prefs_);
-    win->set_transient_for(*this);
+    if (auto* top = dynamic_cast<Gtk::Window*>(get_root())) {
+        win->set_transient_for(*top);
+        win->set_modal(true);
+    }
     win->signal_hide().connect([this] {
         // Hub URL / key may have changed: rebuild the client + roster.
         api_ = std::make_unique<ApiClient>(prefs_.base(), prefs_.apiKey());
@@ -240,7 +236,7 @@ void RosterWindow::openSettings() {
     win->present();
 }
 
-void RosterWindow::announce(const std::vector<AgentInfo>& agents) {
+void RosterView::announce(const std::vector<AgentInfo>& agents) {
     if (!prefs_.stateAnnounce()) return;
     std::vector<AgentSnapshot> snaps;
     snaps.reserve(agents.size());
@@ -259,7 +255,7 @@ void RosterWindow::announce(const std::vector<AgentInfo>& agents) {
     }
 }
 
-bool RosterWindow::debugOpenVoice(const std::string& nameSub) {
+bool RosterView::debugOpenVoice(const std::string& nameSub) {
     const Glib::ustring needle = Glib::ustring(nameSub).lowercase();
     for (const auto& a : lastAgents_) {
         if (!a.online) continue;

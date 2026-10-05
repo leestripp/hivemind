@@ -1,8 +1,8 @@
 #include "DebugShell.h"
 
-#include "RosterWindow.h"
+#include "RosterView.h"
 #include "SphereArea.h"
-#include "VoiceWindow.h"
+#include "VoiceView.h"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -16,8 +16,8 @@
 namespace hv {
 
 namespace {
-RosterWindow* g_roster = nullptr;
-VoiceWindow* g_voice = nullptr;
+RosterView* g_roster = nullptr;
+VoiceView* g_voice = nullptr;
 
 std::string socketPath() {
     if (const char* p = std::getenv("HIVE_VOICE_CTL")) return p;
@@ -55,8 +55,8 @@ const char* kHelp =
     "processing> | level <0..1> | glinfo\n";
 }  // namespace
 
-void DebugShell::registerRoster(RosterWindow* w) { g_roster = w; }
-void DebugShell::registerVoice(VoiceWindow* w) { g_voice = w; }
+void DebugShell::registerRoster(RosterView* w) { g_roster = w; }
+void DebugShell::registerVoice(VoiceView* w) { g_voice = w; }
 
 DebugShell::DebugShell(Gtk::Application& app) : app_(app), path_(socketPath()) {
     listenFd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
@@ -143,12 +143,6 @@ std::string DebugShell::shot(const std::string& path,
             break;
         }
     }
-    // VoiceWindow isn't add_window()'d — check the debug registry too.
-    if (!target && g_voice &&
-        (titleSub.empty() || Glib::ustring("voice").find(
-                                 Glib::ustring(titleSub).lowercase()) !=
-                                 Glib::ustring::npos))
-        target = g_voice;
     if (!target) return "error: no matching window\n";
     // Raw C API — the gtkmm4 wrappers for snapshot/renderer are partial.
     GskRenderer* renderer = gtk_native_get_renderer(GTK_NATIVE(target->gobj()));

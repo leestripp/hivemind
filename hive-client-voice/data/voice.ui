@@ -3,17 +3,23 @@
      SphereView full-bleed; header floats top; buttons float bottom. -->
 <interface>
   <requires lib="gtk" version="4.0"/>
-  <object class="GtkWindow" id="voiceWindow">
-    <property name="title">Voice</property>
-    <property name="default-width">440</property>
-    <property name="default-height">700</property>
-    <property name="resizable">True</property>
+  <object class="GtkBox" id="voiceRoot">
     <child>
       <object class="GtkOverlay">
         <child>
           <object class="GtkGLArea" id="sphere">
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkButton" id="backButton">
+            <property name="label">&#8249; Back</property>
+            <property name="halign">start</property>
+            <property name="valign">start</property>
+            <property name="margin-start">12</property>
+            <property name="margin-top">12</property>
+            <style><class name="flat"/></style>
           </object>
         </child>
         <child type="overlay">

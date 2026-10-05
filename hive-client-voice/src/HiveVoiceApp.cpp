@@ -2,10 +2,9 @@
 
 #include "ApiClient.h"
 #include "DebugShell.h"
-#include "RosterWindow.h"
+#include "MainWindow.h"
 #include "SettingsWindow.h"
 #include "VoicePickerWindow.h"
-#include "VoiceWindow.h"
 
 #include <thread>
 
@@ -31,7 +30,7 @@ void HiveVoiceApp::on_activate() {
     // add_window() associates the window with the application — do NOT
     // wrap `this` in a RefPtr (it unrefs on destruction and frees the
     // app mid-activation).
-    auto* win = Gtk::make_managed<RosterWindow>(prefs_);
+    auto* win = Gtk::make_managed<MainWindow>(prefs_);
     add_window(*win);
     win->present();
 }

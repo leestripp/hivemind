@@ -1,4 +1,4 @@
-#include "VoiceWindow.h"
+#include "VoiceView.h"
 
 #include "DebugShell.h"
 
@@ -37,10 +37,10 @@ long nowMs() {
 }
 }  // namespace
 
-VoiceWindow::VoiceWindow(BaseObjectType* cobject,
+VoiceView::VoiceView(BaseObjectType* cobject,
                          const Glib::RefPtr<Gtk::Builder>& builder,
                          Prefs& prefs, AgentInfo agent)
-    : Gtk::Window(cobject), prefs_(prefs), agent_(std::move(agent)) {
+    : Gtk::Box(cobject), prefs_(prefs), agent_(std::move(agent)) {
     DebugShell::registerVoice(this);
     agentName_ = agent_.name.empty() ? "Agent" : agent_.name;
 
@@ -49,6 +49,10 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
     status_ = builder->get_widget<Gtk::Label>("statusText");
     talk_ = builder->get_widget<Gtk::Button>("talkButton");
     cancel_ = builder->get_widget<Gtk::Button>("cancelButton");
+    back_ = builder->get_widget<Gtk::Button>("backButton");
+    if (back_)
+        back_->signal_clicked().connect(
+            [this] { signal_back_.emit(); });
     sphere_ = Gtk::Builder::get_widget_derived<SphereArea>(builder, "sphere");
     if (name_) name_->set_label(agentName_);
     if (avatar_) {
@@ -56,8 +60,6 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
                                   80));  // 40 logical px, 2x for HiDPI
         avatar_->set_pixel_size(40);
     }
-
-    set_title(agentName_ + " — Voice");
 
     // io worker + UI dispatch.
     ioRunning_ = true;
@@ -134,7 +136,7 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
     openThread();
 }
 
-VoiceWindow::~VoiceWindow() {
+VoiceView::~VoiceView() {
     DebugShell::registerVoice(nullptr);
     stopSpeakAnimator();
     inboxConn_.disconnect();
@@ -151,16 +153,9 @@ VoiceWindow::~VoiceWindow() {
     capture_.reset();
 }
 
-VoiceWindow* VoiceWindow::create(Prefs& prefs, const AgentInfo& agent) {
-    auto builder = Gtk::Builder::create_from_resource(
-        "/org/hivemind/voice/ui/voice.ui");
-    return Gtk::Builder::get_widget_derived<VoiceWindow>(builder, "voiceWindow",
-                                                         prefs, agent);
-}
-
 // -- io plumbing ---------------------------------------------------------
 
-void VoiceWindow::post(std::function<void()> work) {
+void VoiceView::post(std::function<void()> work) {
     {
         std::lock_guard<std::mutex> lk(ioMutex_);
         ioQueue_.push_back(std::move(work));
@@ -168,7 +163,7 @@ void VoiceWindow::post(std::function<void()> work) {
     ioCv_.notify_one();
 }
 
-void VoiceWindow::toUi(std::function<void()> fn) {
+void VoiceView::toUi(std::function<void()> fn) {
     {
         std::lock_guard<std::mutex> lk(uiMutex_);
         uiQueue_.push_back(std::move(fn));
@@ -176,7 +171,7 @@ void VoiceWindow::toUi(std::function<void()> fn) {
     uiDispatch_.emit();
 }
 
-void VoiceWindow::ioLoop() {
+void VoiceView::ioLoop() {
     for (;;) {
         std::function<void()> work;
         {
@@ -197,7 +192,7 @@ void VoiceWindow::ioLoop() {
 
 // -- setup -----------------------------------------------------------------
 
-void VoiceWindow::openThread() {
+void VoiceView::openThread() {
     post([this] {
         try {
             thread_id_ = api_->openDm(agent_.id);
@@ -236,7 +231,7 @@ void VoiceWindow::openThread() {
 
 // -- phases -----------------------------------------------------------------
 
-void VoiceWindow::toIdle(const std::string& message) {
+void VoiceView::toIdle(const std::string& message) {
     ++turnGen_;
     stopping_ = false;
     queuedBehindStop_ = false;
@@ -261,7 +256,7 @@ void VoiceWindow::toIdle(const std::string& message) {
     if (!pendingSpeech_.empty()) speakPending();
 }
 
-void VoiceWindow::maybeStartListening() {
+void VoiceView::maybeStartListening() {
     phase_ = Phase::Listening;
     if (sphere_) sphere_->setState(SphereState::Listening);
     if (talk_) {
@@ -275,7 +270,7 @@ void VoiceWindow::maybeStartListening() {
     stt_->start();
 }
 
-void VoiceWindow::sendTranscript() {
+void VoiceView::sendTranscript() {
     if (sphere_) sphere_->setLevel(0.0f);
     phase_ = Phase::Thinking;
     ++turnGen_;
@@ -324,7 +319,7 @@ void VoiceWindow::sendTranscript() {
     });
 }
 
-void VoiceWindow::sendAndEnterWait(const std::string& text) {
+void VoiceView::sendAndEnterWait(const std::string& text) {
     ThreadActivity preAct;
     bool havePre = false;
     try {
@@ -350,7 +345,7 @@ void VoiceWindow::sendAndEnterWait(const std::string& text) {
     });
 }
 
-bool VoiceWindow::reresolveIfThreadGone(const std::exception& e) {
+bool VoiceView::reresolveIfThreadGone(const std::exception& e) {
     const auto* apiEx = dynamic_cast<const ApiException*>(&e);
     if (!apiEx || apiEx->code() != 404) return false;
     try {
@@ -364,7 +359,7 @@ bool VoiceWindow::reresolveIfThreadGone(const std::exception& e) {
     }
 }
 
-void VoiceWindow::startIdleNarration() {
+void VoiceView::startIdleNarration() {
     if (phase_ != Phase::Idle) return;
     ++turnGen_;
     finalReply_.clear();
@@ -386,7 +381,7 @@ void VoiceWindow::startIdleNarration() {
     schedulePollTick(kPollMs);
 }
 
-void VoiceWindow::speakNotice(const std::string& text) {
+void VoiceView::speakNotice(const std::string& text) {
     tts_->applyVoice(voiceNameFor(agent_.id));
     turnDone_ = true;
     streamText_ = text;
@@ -394,7 +389,7 @@ void VoiceWindow::speakNotice(const std::string& text) {
     drainSpeech(true);
 }
 
-void VoiceWindow::speakPending() {
+void VoiceView::speakPending() {
     if (phase_ != Phase::Idle || pendingSpeech_.empty()) return;
     PendingNote note = std::move(pendingSpeech_.front());
     pendingSpeech_.pop_front();
@@ -405,7 +400,7 @@ void VoiceWindow::speakPending() {
     drainSpeech(true);
 }
 
-void VoiceWindow::enterStreaming() {
+void VoiceView::enterStreaming() {
     phase_ = Phase::Streaming;
     if (sphere_) sphere_->setState(SphereState::Speaking);
     if (talk_) {
@@ -418,7 +413,7 @@ void VoiceWindow::enterStreaming() {
     startSpeakAnimator();
 }
 
-void VoiceWindow::onEngineStopped(const std::string& msg) {
+void VoiceView::onEngineStopped(const std::string& msg) {
     if (phase_ != Phase::Listening) {
         if (status_) status_->set_label(msg);
     } else if (!stt_->transcript().empty()) {
@@ -430,14 +425,14 @@ void VoiceWindow::onEngineStopped(const std::string& msg) {
     }
 }
 
-void VoiceWindow::interruptAndTalk() {
+void VoiceView::interruptAndTalk() {
     tts_->stop();
     issueCancelAndResync();
     toIdle("");
     maybeStartListening();
 }
 
-void VoiceWindow::cancelCurrent() {
+void VoiceView::cancelCurrent() {
     // Stop means STOP: queued inbox notes must not start playing the
     // moment the cancel lands.
     pendingSpeech_.clear();
@@ -463,7 +458,7 @@ void VoiceWindow::cancelCurrent() {
     }
 }
 
-void VoiceWindow::confirmStopThread() {
+void VoiceView::confirmStopThread() {
     post([this] {
         bool free_ = false;
         try {
@@ -510,7 +505,7 @@ void VoiceWindow::confirmStopThread() {
     });
 }
 
-void VoiceWindow::stopAgentAndConfirm() {
+void VoiceView::stopAgentAndConfirm() {
     bool free_ = false;
     try {
         api_->cancelAgent(agent_.id);
@@ -546,7 +541,7 @@ void VoiceWindow::stopAgentAndConfirm() {
     });
 }
 
-void VoiceWindow::issueCancelAndResync() {
+void VoiceView::issueCancelAndResync() {
     post([this] {
         api_->cancelThread(thread_id_);
         const long deadline = nowMs() + 15000;
@@ -567,7 +562,7 @@ void VoiceWindow::issueCancelAndResync() {
     });
 }
 
-std::string VoiceWindow::voiceNameFor(const std::string& senderId) const {
+std::string VoiceView::voiceNameFor(const std::string& senderId) const {
     const std::string v = prefs_.voiceFor(senderId);
     if (!v.empty()) return v;
     if (senderId != agent_.id) return prefs_.voiceFor(agent_.id);
@@ -576,7 +571,7 @@ std::string VoiceWindow::voiceNameFor(const std::string& senderId) const {
 
 // -- ticks -------------------------------------------------------------------
 
-void VoiceWindow::scheduleInboxWatch(int ms) {
+void VoiceView::scheduleInboxWatch(int ms) {
     inboxConn_.disconnect();
     inboxConn_ = Glib::signal_timeout().connect(
         [this] {
@@ -586,7 +581,7 @@ void VoiceWindow::scheduleInboxWatch(int ms) {
         ms);
 }
 
-void VoiceWindow::schedulePollTick(int ms) {
+void VoiceView::schedulePollTick(int ms) {
     pollConn_.disconnect();
     pollConn_ = Glib::signal_timeout().connect(
         [this] {
@@ -596,7 +591,7 @@ void VoiceWindow::schedulePollTick(int ms) {
         ms);
 }
 
-void VoiceWindow::inboxWatchTick() {
+void VoiceView::inboxWatchTick() {
     if (phase_ != Phase::Idle) {
         scheduleInboxWatch(kIdlePollMs);
         return;
@@ -709,7 +704,7 @@ void VoiceWindow::inboxWatchTick() {
     });
 }
 
-void VoiceWindow::pollTick() {
+void VoiceView::pollTick() {
     if (phase_ != Phase::Thinking && phase_ != Phase::Streaming) return;
     const long now = nowMs();
     if (netFailSince_ != 0 && now - netFailSince_ > kNetFailTimeoutMs) {
@@ -761,7 +756,7 @@ void VoiceWindow::pollTick() {
     });
 }
 
-void VoiceWindow::handleTick(bool busy, const std::string& error,
+void VoiceView::handleTick(bool busy, const std::string& error,
                              const std::string& partial, bool cancelling,
                              int gen, bool grew) {
     if (gen != turnGen_) return;  // stale tick from a cancelled turn
@@ -816,7 +811,7 @@ void VoiceWindow::handleTick(bool busy, const std::string& error,
 
 // -- speech -------------------------------------------------------------------
 
-void VoiceWindow::drainSpeech(bool flush) {
+void VoiceView::drainSpeech(bool flush) {
     if (flush) {
         const std::string tail =
             trimStr(streamText_.substr(spokenLen_));
@@ -842,7 +837,7 @@ void VoiceWindow::drainSpeech(bool flush) {
     }
 }
 
-void VoiceWindow::queueSpeech(const std::string& text) {
+void VoiceView::queueSpeech(const std::string& text) {
     const std::string clean = speech::forSpeech(text);
     if (clean.empty()) return;
     std::string rest = clean;
@@ -855,7 +850,7 @@ void VoiceWindow::queueSpeech(const std::string& text) {
     queueSpeechChunk(rest);
 }
 
-void VoiceWindow::queueSpeechChunk(const std::string& text) {
+void VoiceView::queueSpeechChunk(const std::string& text) {
     if (text.empty()) return;
     tts_->speakQueued(text);
     if (phase_ == Phase::Thinking || phase_ == Phase::Idle) enterStreaming();
@@ -863,7 +858,7 @@ void VoiceWindow::queueSpeechChunk(const std::string& text) {
 
 // -- sphere level while speaking ------------------------------------------------
 
-void VoiceWindow::startSpeakAnimator() {
+void VoiceView::startSpeakAnimator() {
     stopSpeakAnimator();
     speakStart_ = std::chrono::steady_clock::now();
     speakAnim_ = Glib::signal_timeout().connect(
@@ -878,11 +873,11 @@ void VoiceWindow::startSpeakAnimator() {
         50);
 }
 
-void VoiceWindow::stopSpeakAnimator() { speakAnim_.disconnect(); }
+void VoiceView::stopSpeakAnimator() { speakAnim_.disconnect(); }
 
 // -- DebugShell hooks -----------------------------------------------------
 
-std::string VoiceWindow::debugPhaseName() const {
+std::string VoiceView::debugPhaseName() const {
     switch (phase_) {
         case Phase::Setup: return "setup";
         case Phase::Idle: return "idle";
@@ -893,11 +888,11 @@ std::string VoiceWindow::debugPhaseName() const {
     return "?";
 }
 
-std::string VoiceWindow::debugStatusText() const {
+std::string VoiceView::debugStatusText() const {
     return status_ ? std::string(status_->get_text()) : std::string();
 }
 
-void VoiceWindow::debugSay(const std::string& text) {
+void VoiceView::debugSay(const std::string& text) {
     // Inject as if STT had produced it — same path as sendTranscript's
     // post-STT branch, minus the microphone.
     if (text.empty() || phase_ == Phase::Setup || phase_ == Phase::Thinking)
@@ -935,22 +930,22 @@ void VoiceWindow::debugSay(const std::string& text) {
     });
 }
 
-void VoiceWindow::debugSetSphere(SphereState state, float level) {
+void VoiceView::debugSetSphere(SphereState state, float level) {
     if (sphere_) {
         sphere_->setState(state);
         sphere_->setLevel(level);
     }
 }
 
-void VoiceWindow::debugSetSphereLevel(float level) {
+void VoiceView::debugSetSphereLevel(float level) {
     if (sphere_) sphere_->setLevel(level);
 }
 
-std::string VoiceWindow::debugSphereStats() const {
+std::string VoiceView::debugSphereStats() const {
     return sphere_ ? sphere_->debugStats() : std::string("no sphere widget");
 }
 
-void VoiceWindow::debugSphereShot(const std::string& path) {
+void VoiceView::debugSphereShot(const std::string& path) {
     if (sphere_) sphere_->queueShot(path);
 }
 

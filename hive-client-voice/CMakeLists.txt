@@ -40,8 +40,9 @@ add_executable(hive-client-voice
     src/SttEngine.cpp
     src/TtsEngine.cpp
     src/SphereArea.cpp
-    src/RosterWindow.cpp
-    src/VoiceWindow.cpp
+    src/MainWindow.cpp
+    src/RosterView.cpp
+    src/VoiceView.cpp
     src/SettingsWindow.cpp
     src/VoicePickerWindow.cpp
 )

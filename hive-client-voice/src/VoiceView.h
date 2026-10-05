@@ -32,14 +32,17 @@ class TtsEngine;
 //
 // IDLE ─tap─▶ LISTENING ─tap─▶ THINKING ─first sentence─▶ STREAMING
 //   ─speech done─▶ IDLE; ✕ cancel anywhere → IDLE.
-class VoiceWindow : public Gtk::Window {
+// A page (Gtk::Box, builder root voiceRoot), not a window: MainWindow
+// slides it over the roster and destroys it on < Back.
+class VoiceView : public Gtk::Box {
  public:
-    VoiceWindow(BaseObjectType* cobject,
+    VoiceView(BaseObjectType* cobject,
                 const Glib::RefPtr<Gtk::Builder>& builder, Prefs& prefs,
                 AgentInfo agent);
-    ~VoiceWindow() override;
+    ~VoiceView() override;
 
-    static VoiceWindow* create(Prefs& prefs, const AgentInfo& agent);
+    // < Back pressed — MainWindow pops to the roster and destroys us.
+    sigc::signal<void()>& signal_back() { return signal_back_; }
 
     // DebugShell hooks.
     std::string debugAgentName() const { return agentName_; }
@@ -110,6 +113,8 @@ class VoiceWindow : public Gtk::Window {
     Gtk::Label* status_ = nullptr;
     Gtk::Button* talk_ = nullptr;
     Gtk::Button* cancel_ = nullptr;
+    Gtk::Button* back_ = nullptr;
+    sigc::signal<void()> signal_back_;
     SphereArea* sphere_ = nullptr;
 
     // -- engines ---------------------------------------------------------
