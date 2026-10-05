@@ -53,5 +53,5 @@ private:
     float gate_open_{0.018f};
     float gate_close_{0.010f};
     float vad_peak_{0.012f};
-    bool state_announce_{true};
+    bool state_announce_{false};
 };
