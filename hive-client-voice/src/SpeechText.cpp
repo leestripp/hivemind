@@ -265,7 +265,7 @@ std::string normalizeTranscript(std::string_view raw) {
     // Trim stray leading/trailing punctuation left by filler stripping.
     auto edge = [](char ch) {
         return !std::isalnum(static_cast<unsigned char>(ch)) &&
-               ch != ''' && ch != '(' && ch != '[';
+               ch != '\'' && ch != '(' && ch != '[';
     };
     size_t b = 0, e = r.size();
     while (b < e && edge(r[b])) ++b;
