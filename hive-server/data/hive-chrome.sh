@@ -38,4 +38,7 @@ nohup "$CHROME" --remote-debugging-port=9222 \
     --disable-dev-shm-usage --no-sandbox --disable-gpu --noerrdialogs \
     --hide-crash-restore-bubble \
     --disable-features=TranslateUI \
-    --start-maximized "$URL" >/tmp/chromium.log 2>&1 &
+    --start-maximized \
+    --renderer-process-limit=6 \
+    --js-flags=--max-old-space-size=384 \
+    "$URL" >/tmp/chromium.log 2>&1 &

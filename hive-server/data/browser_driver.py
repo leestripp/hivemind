@@ -94,7 +94,15 @@ def ensure_browser(pw):
          # itself is the sandbox boundary).
          "--no-sandbox",
          "--disable-gpu", "--noerrdialogs",
-         "--disable-features=TranslateUI", "--start-maximized", "about:blank"],
+         "--disable-features=TranslateUI", "--start-maximized",
+         # Memory discipline (2026-10-05 HoneyBee browser report):
+         # unbounded renderer sprawl (47 procs) OOM-killed the whole
+         # browser overnight under the container's memory cap. Cap the
+         # renderer count and per-renderer JS heap so idle tabs can't
+         # eat the container.
+         "--renderer-process-limit=6",
+         "--js-flags=--max-old-space-size=384",
+         "about:blank"],
         env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     last = None
