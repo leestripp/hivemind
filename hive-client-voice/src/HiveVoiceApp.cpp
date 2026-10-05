@@ -19,8 +19,10 @@ HiveVoiceApp::HiveVoiceApp() : Gtk::Application("org.hivemind.voice") {
 }
 
 void HiveVoiceApp::on_activate() {
+    // add_window() associates the window with the application — do NOT
+    // wrap `this` in a RefPtr (it unrefs on destruction and frees the
+    // app mid-activation).
     auto* win = Gtk::make_managed<RosterWindow>(prefs_);
-    win->set_application(Glib::RefPtr<HiveVoiceApp>(this));
     add_window(*win);
     win->present();
 }
