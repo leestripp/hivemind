@@ -62,7 +62,7 @@ nlohmann::json ApiClient::request(const std::string& method,
         throw std::runtime_error(last_error_);
     }
     const int code = result->statusCode();
-    if (code >= 500)
+    if (code < 200 || code >= 300)
         fprintf(stderr, "hive-net: %s %s -> HTTP %d (%s)\n", method.c_str(),
                 path.c_str(), code, hostOf(base_).c_str());
     nlohmann::json j = nlohmann::json::object();
@@ -137,7 +137,16 @@ std::vector<ThreadMessage> ApiClient::messagesAfter(
         msg.senderId = jstr(m, "sender_id");
         msg.senderName = jstr(m, "sender_name");
         msg.body = jstr(m, "body");
-        msg.createdAt = m.value("created_at", int64_t{0});
+        // The hub sends created_at as an ISO-8601 string ("2026-10-05T...")
+        // while this field expects epoch millis. Nothing consumes the
+        // value yet, so accept either form without throwing — the strict
+        // m.value<>(int64_t) here made EVERY poll tick throw
+        // type_error.302 once any message existed, which the poll loop
+        // counted as a network failure until it announced "connection
+        // lost" 45 s later.
+        if (const auto it = m.find("created_at");
+            it != m.end() && it->is_number())
+            msg.createdAt = it->get<int64_t>();
         out.push_back(std::move(msg));
     }
     return out;

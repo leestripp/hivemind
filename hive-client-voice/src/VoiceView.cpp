@@ -746,6 +746,7 @@ void VoiceView::pollTick() {
                            gen, grew);
             });
         } catch (const std::exception& e) {
+            fprintf(stderr, "hive-poll: tick threw: %s\n", e.what());
             if (reresolveIfThreadGone(e)) {
                 netFailSince_ = 0;
             } else if (netFailSince_ == 0) {
