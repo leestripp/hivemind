@@ -43,8 +43,8 @@ class TtsEngine {
     std::string voice() const;
 
     // Speech-rate multiplier (1.0 = normal). Read at spawn time, so a
-    // change applies to the NEXT utterance. Clamped to [0.5, 2.0].
-    void setSpeed(double multiplier) { speed_ = std::clamp(multiplier, 0.5, 2.0); }
+    // change applies to the NEXT utterance. Clamped to [0.5, 4.0].
+    void setSpeed(double multiplier) { speed_ = std::clamp(multiplier, 0.5, 4.0); }
     double speed() const { return speed_.load(); }
 
     // Queue a chunk for speech (from any thread).

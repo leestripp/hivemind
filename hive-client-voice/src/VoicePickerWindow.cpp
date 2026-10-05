@@ -34,8 +34,10 @@ VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
     speedLabel->add_css_class("dim-label");
     root->append(*speedLabel);
     auto* speed = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
-    speed->set_range(0.5, 2.0);
-    speed->set_increments(0.05, 0.25);
+    // 2.0x sits ~halfway: user reports max-as-normal, so leave
+    // headroom above (piper --length_scale floor 0.25).
+    speed->set_range(0.5, 4.0);
+    speed->set_increments(0.05, 0.5);
     speed->set_value(prefs_.ttsSpeed());
     speed->signal_value_changed().connect([this, speed, speedLabel, fmtSpeed] {
         const double s = speed->get_value();
