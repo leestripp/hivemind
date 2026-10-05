@@ -125,10 +125,23 @@ struct PwSource {
     }
 
     void close() {
-        if (stream) pw_stream_destroy(stream);
+        // Canonical teardown: destroy the stream WHILE HOLDING the
+        // thread-loop lock, then stop the loop. Destroying unlocked
+        // (the old code) raced the in-flight process callback —
+        // PipeWire warned "pw_stream_destroy called from wrong
+        // context" and segfaulted when the race went badly, which is
+        // what crashed the app when a voice-picker preview playback
+        // was torn down.
+        if (loop) pw_thread_loop_lock(loop);
+        if (stream) {
+            pw_stream_destroy(stream);
+            stream = nullptr;
+        }
         if (loop) {
+            pw_thread_loop_unlock(loop);
             pw_thread_loop_stop(loop);
             pw_thread_loop_destroy(loop);
+            loop = nullptr;
         }
         pw_deinit();
     }
