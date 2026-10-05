@@ -8,7 +8,12 @@
 cmake_minimum_required(VERSION 3.28)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
+# PipeWire is the audio backend (16 kHz mono capture + playback). The
+# whole app still builds without the dev package — voice I/O compiles to
+# a null backend and the app says so on startup — but install
+# libpipewire-0.3-dev for a functional client.
+pkg_check_modules(PIPEWIRE libpipewire-0.3)
 
 add_executable(hive-client-voice
     src/main.cpp
@@ -36,11 +41,20 @@ target_include_directories(hive-client-voice PRIVATE src)
 
 target_link_libraries(hive-client-voice PRIVATE
     PkgConfig::GTKMM
-    PkgConfig::PIPEWIRE
     nlohmann_json::nlohmann_json
     OmniNet::OmniNet
     whisper
 )
+
+if(PIPEWIRE_FOUND)
+    target_link_libraries(hive-client-voice PRIVATE PkgConfig::PIPEWIRE)
+    target_compile_definitions(hive-client-voice PRIVATE HIVEMIND_VOICE_PIPEWIRE=1)
+else()
+    message(WARNING
+        "libpipewire-0.3 not found — building hive-client-voice with a null "
+        "audio backend (no mic/speaker). Install libpipewire-0.3-dev for "
+        "full voice I/O.")
+endif()
 
 if(TARGET compile_options)
     target_link_libraries(hive-client-voice PRIVATE compile_options)
