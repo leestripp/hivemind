@@ -31,13 +31,19 @@ std::vector<Announcement> AgentStateAnnouncer::diff(
         std::string prevName = prev->name;
         std::string prevState = friendlyState(prev->online, prev->busy);
         std::string newState = friendlyState(a.online, a.busy);
-        if (prevState != newState && t - prev->since >= dwell_) {
-            out.push_back({a.id, prevName + " is " + newState});
-            prev->since = t;
+        if (prevState != newState) {
+            if (t - prev->since >= dwell_) {
+                out.push_back({a.id, prevName + " is " + newState});
+                prev->since = t;
+                prev->name = a.name;
+                prev->online = a.online;
+                prev->busy = a.busy;
+            }
+            // Suppressed edge: keep the previous state + timestamp so the
+            // edge stays pending and announces once it has dwelled.
+        } else {
+            prev->name = a.name;
         }
-        prev->name = a.name;
-        prev->online = a.online;
-        prev->busy = a.busy;
     }
     seeded_ = true;
     return out;
