@@ -26,6 +26,19 @@ functional client you need:
    `~/.local/share/hive-client-voice/models/`:
    - `ggml-tiny.en-q8_0.bin`  (live partials)
    - `ggml-base.en-q8_0.bin`  (final decode on SEND)
+
+   ```sh
+   D=~/.local/share/hive-client-voice/models
+   mkdir -p "$D"
+   WM=https://huggingface.co/ggerganov/whisper.cpp/resolve/main
+   for m in ggml-tiny.en-q8_0.bin ggml-base.en-q8_0.bin; do
+       curl -fSL -o "$D/$m" "$WM/$m"
+   done
+   ```
+
+   At startup the app probes both files and logs one line per probe
+   (`hive-stt: model probe — ...`); a missing or truncated model names
+   the exact file and the curl command to fix it in the UI status.
 3. **TTS voice** — a piper binary on `PATH` (or `~/.local/bin/piper`)
    plus at least one piper `.onnx` model in
    `~/.local/share/hive-client-voice/voices/`. The session default is

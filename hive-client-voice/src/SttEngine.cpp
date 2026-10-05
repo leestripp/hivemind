@@ -1,13 +1,16 @@
 #include "SttEngine.h"
 
 #include "AudioCapture.h"
+#include "SttModelProbe.h"
 
 #include <whisper.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <thread>
 
@@ -20,17 +23,21 @@ constexpr int kWindowSamples = kSampleRate * 5;  // 5 s partial window
 constexpr int kMaxSeconds = 120;
 constexpr size_t kMaxSamples = kSampleRate * kMaxSeconds;
 constexpr int kVadPeakMin = 500;  // PCM16 peak; speech ~3-20k
-const char* kModelPartial = "ggml-tiny.en-q8_0.bin";
-const char* kModelFinal = "ggml-base.en-q8_0.bin";
-
-std::string home() {
-    if (const char* h = std::getenv("HOME")) return h;
-    return ".";
+// Route whisper.cpp's own stderr noise through a prefixed logger so a
+// model failure is attributable to THIS app (whisper_log_set is global;
+// install once).
+void whisperLogToStderr(enum ggml_log_level level, const char* text,
+                        void* /*user_data*/) {
+    const char* tag = level == GGML_LOG_LEVEL_ERROR ? "ERROR"
+                    : level == GGML_LOG_LEVEL_WARN  ? "warn"
+                                                    : "info";
+    fprintf(stderr, "hive-stt[whisper:%s] %s", tag, text ? text : "");
+    if (text && text[0] && text[strlen(text) - 1] != '\n') fputc('\n', stderr);
 }
 }  // namespace
 
 std::string SttEngine::modelDir() {
-    return home() + "/.local/share/hive-client-voice/models";
+    return sttModelDir();
 }
 
 SttEngine::SttEngine(AudioCapture& capture,
@@ -67,22 +74,45 @@ void SttEngine::workerInit() {
 }
 
 void SttEngine::initEngine() {
-    const std::string dir = modelDir();
-    const std::string partialPath = dir + "/" + kModelPartial;
-    const std::string finalPath = dir + "/" + kModelFinal;
+    static const bool logInstalled = [] {
+        whisper_log_set(whisperLogToStderr, nullptr);
+        return true;
+    }();
+    (void)logInstalled;
+
+    // Pre-flight the files ourselves: whisper's "failed to open" alone
+    // can't say WHICH model is missing, and a truncated download opens
+    // fine and dies deep inside ggml. The probe names both.
+    const SttModelStatus st = probeSttModels(modelDir());
+    fprintf(stderr, "hive-stt: model probe — %s\n", st.summary().c_str());
+    if (!st.ready()) {
+        if (on_stopped_) on_stopped_(st.userMessage());
+        return;
+    }
+
     whisper_context_params cparams = whisper_context_default_params();
-    ctx_partial_ = whisper_init_from_file_with_params(partialPath.c_str(),
-                                                      cparams);
-    ctx_final_ = whisper_init_from_file_with_params(finalPath.c_str(),
-                                                    cparams);
+    ctx_partial_ =
+        whisper_init_from_file_with_params(st.partial.path.c_str(), cparams);
+    ctx_final_ =
+        whisper_init_from_file_with_params(st.final.path.c_str(), cparams);
     if (!ctx_partial_ || !ctx_final_) {
+        // Files probed clean but ggml rejected one — log exactly which.
+        fprintf(stderr,
+                "hive-stt: whisper_init FAILED despite clean probe "
+                "(partial=%s final=%s) — file(s) corrupt or not ggml "
+                "whisper models\n",
+                ctx_partial_ ? "ok" : "FAILED",
+                ctx_final_ ? "ok" : "FAILED");
         if (ctx_partial_) { whisper_free(ctx_partial_); ctx_partial_ = nullptr; }
         if (ctx_final_) { whisper_free(ctx_final_); ctx_final_ = nullptr; }
         if (on_stopped_)
-            on_stopped_("Speech model failed to load from " + dir +
-                        " — run the model fetch script (see README)");
+            on_stopped_("Speech models exist but whisper could not parse "
+                        "them (see hive-stt log) — re-download from " +
+                        std::string(kSttModelBaseUrl));
         return;
     }
+    fprintf(stderr, "hive-stt: models loaded — partial=%s final=%s\n",
+            st.partial.path.c_str(), st.final.path.c_str());
     ready_ = true;
     if (want_listen_) startCapture();
 }

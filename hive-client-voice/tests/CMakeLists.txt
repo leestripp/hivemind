@@ -29,7 +29,11 @@ add_executable(test_avatars test_avatars.cpp
 target_link_libraries(test_avatars PRIVATE Catch2::Catch2WithMain
     PkgConfig::GTKMM)
 
-foreach(t test_speech_text test_announcer test_prefs test_avatars)
+add_executable(test_stt_models test_stt_models.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/SttModelProbe.cpp)
+target_link_libraries(test_stt_models PRIVATE Catch2::Catch2WithMain)
+
+foreach(t test_speech_text test_announcer test_prefs test_avatars test_stt_models)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()

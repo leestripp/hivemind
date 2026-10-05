@@ -38,6 +38,7 @@ add_executable(hive-client-voice
     src/AudioCapture.cpp
     src/AudioPlayback.cpp
     src/SttEngine.cpp
+    src/SttModelProbe.cpp
     src/TtsEngine.cpp
     src/SphereArea.cpp
     src/MainWindow.cpp
