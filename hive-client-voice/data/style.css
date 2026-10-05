@@ -1,0 +1,76 @@
+/* HiveMind Voice — Android-app palette (hive-android res/values/colors.xml):
+   bg #05080E · cyan #33D6E8 · text #DCE8F0 · dim #7A8A99
+   card #101B29 / #1E3045 · pill #0A1420 / #274058            */
+
+window { background-color: #05080E; color: #DCE8F0; }
+label { color: #DCE8F0; }
+.dim-label, .hv-dim { color: #7A8A99; }
+.error { color: #E85D75; }
+spinner { color: #33D6E8; }
+scrolledwindow, scrolledwindow viewport { background-color: transparent; }
+
+/* Generic controls on the dark shell */
+button { background-color: #0E2233; color: #DCE8F0;
+         border: 1px solid #1E3045; border-radius: 8px;
+         padding: 6px 12px; box-shadow: none; }
+button:hover { background-color: #142C44; }
+button:disabled { opacity: 0.55; }
+button.flat { background-color: transparent; border-color: transparent; }
+entry, spinbutton { background-color: #0A1420; color: #DCE8F0;
+                    border: 1px solid #274058; border-radius: 8px;
+                    padding: 6px 10px; caret-color: #33D6E8; }
+entry:focus { border-color: #33D6E8; }
+switch { background-color: #0A1420; border: 1px solid #274058; }
+switch slider { background-color: #7A8A99; }
+switch:checked { background-color: #0E2233; border-color: #33D6E8; }
+switch:checked slider { background-color: #33D6E8; }
+
+/* ── Roster (MainActivity) ─────────────────────────────────── */
+.hv-title { font-size: 22px; font-weight: 700; }
+.hv-gear { color: #33D6E8; font-size: 20px;
+           min-width: 48px; min-height: 48px;
+           background-color: transparent; border-color: transparent; }
+.hv-gear:hover { background-color: alpha(#33D6E8, 0.12); }
+.hv-status { color: #7A8A99; font-size: 14px; }
+
+/* Agent card (card_bg.xml): #101B29 fill, 16dp radius, 1dp #1E3045 stroke */
+.hv-card { background-color: #101B29; border: 1px solid #1E3045;
+           border-radius: 16px; padding: 14px; }
+.hv-card:hover { background-color: #142334; }
+.hv-name { font-size: 20px; font-weight: 700; }
+.hv-name-busy { color: #33D6E8; }
+.hv-role { color: #7A8A99; font-size: 13px; }
+
+/* State pill (state_pill.xml): #0A1420 fill, 10dp radius, #274058 stroke */
+.hv-pill { background-color: #0A1420; border: 1px solid #274058;
+           border-radius: 10px; padding: 2px 10px;
+           font-size: 12px; font-weight: 700; }
+.hv-pill-ready { color: #3DDC84; }
+.hv-pill-busy  { color: #FFB74D; }
+.hv-pill-off   { color: #7A8A99; }
+
+.hv-voice-btn { color: #7A8A99; background-color: transparent;
+                border-color: transparent; font-size: 16px; }
+.hv-voice-btn:hover { color: #33D6E8;
+                      background-color: alpha(#33D6E8, 0.10); }
+
+/* ── Voice session (activity_voice) ────────────────────────── */
+.hv-agent-name { font-size: 24px; font-weight: 700; }
+
+/* TALK (btn_talk.xml): oval #0E2233, 2dp cyan stroke, cyan bold text.
+   Active (btn_talk_active.xml): solid cyan, 3dp #BFF4FC stroke. */
+button.hv-talk { border-radius: 9999px;
+                 min-width: 120px; min-height: 120px;
+                 background-color: #0E2233; border: 2px solid #33D6E8;
+                 color: #33D6E8; font-size: 17px; font-weight: 700; }
+button.hv-talk:hover { background-color: #12293E; }
+button.hv-talk:disabled { border-color: #1E3045; color: #7A8A99; }
+button.hv-talk.talk-active { background-color: #33D6E8;
+                             border: 3px solid #BFF4FC; color: #052029; }
+
+/* ✕ (btn_cancel.xml): oval #2A1218, 2dp #E85D75 stroke */
+button.hv-cancel { border-radius: 9999px;
+                   min-width: 56px; min-height: 56px;
+                   background-color: #2A1218; border: 2px solid #E85D75;
+                   color: #E85D75; font-size: 20px; padding: 0; }
+button.hv-cancel:hover { background-color: #3A1820; }

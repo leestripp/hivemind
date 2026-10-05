@@ -68,6 +68,8 @@ std::vector<AgentInfo> ApiClient::listAgents() {
         i.id = jstr(a, "id");
         i.name = jstr(a, "name");
         i.role = jstr(a, "role");
+        i.avatar = jstr(a, "avatar");
+        i.state = jstr(a, "state");
         i.busy = a.value("busy", false);
         // The roster payload exposes state ("online"/"offline") rather
         // than a boolean — derive it, tolerating both shapes.

@@ -24,7 +24,12 @@ add_executable(test_prefs test_prefs.cpp
 target_link_libraries(test_prefs PRIVATE Catch2::Catch2WithMain
     nlohmann_json::nlohmann_json)
 
-foreach(t test_speech_text test_announcer test_prefs)
+add_executable(test_avatars test_avatars.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/Avatars.cpp)
+target_link_libraries(test_avatars PRIVATE Catch2::Catch2WithMain
+    PkgConfig::GTKMM)
+
+foreach(t test_speech_text test_announcer test_prefs test_avatars)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()

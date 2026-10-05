@@ -16,6 +16,13 @@ Glib::RefPtr<HiveVoiceApp> HiveVoiceApp::create() {
 
 HiveVoiceApp::HiveVoiceApp() : Gtk::Application("org.hivemind.voice") {
     prefs_.load();
+    // App-wide theme: the hive-android palette (data/style.css), priority
+    // above the theme so the dark shell wins everywhere.
+    auto css = Gtk::CssProvider::create();
+    css->load_from_resource("/org/hivemind/voice/style.css");
+    Gtk::StyleContext::add_provider_for_display(
+        Gdk::Display::get_default(), css,
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
 void HiveVoiceApp::on_activate() {

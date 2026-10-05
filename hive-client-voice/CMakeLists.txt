@@ -21,12 +21,13 @@ set(VOICE_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/hive-voice-resources.c)
 add_custom_command(
     OUTPUT ${VOICE_RESOURCES}
     COMMAND glib-compile-resources --target=${VOICE_RESOURCES} --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/data --generate-source ${CMAKE_CURRENT_SOURCE_DIR}/data/hive-voice.gresource.xml
-    DEPENDS data/hive-voice.gresource.xml data/voice.ui
+    DEPENDS data/hive-voice.gresource.xml data/voice.ui data/style.css
     VERBATIM)
 
 add_executable(hive-client-voice
     ${VOICE_RESOURCES}
     src/main.cpp
+    src/Avatars.cpp
     src/HiveVoiceApp.cpp
     src/Prefs.cpp
     src/ApiClient.cpp

@@ -1,6 +1,7 @@
 #include "VoiceWindow.h"
 
 #include "AudioCapture.h"
+#include "Avatars.h"
 #include "AudioPlayback.h"
 #include "SpeechText.h"
 #include "SttEngine.h"
@@ -40,12 +41,18 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
     : Gtk::Window(cobject), prefs_(prefs), agent_(std::move(agent)) {
     agentName_ = agent_.name.empty() ? "Agent" : agent_.name;
 
+    avatar_ = builder->get_widget<Gtk::Image>("agentAvatar");
     name_ = builder->get_widget<Gtk::Label>("agentName");
     status_ = builder->get_widget<Gtk::Label>("statusText");
     talk_ = builder->get_widget<Gtk::Button>("talkButton");
     cancel_ = builder->get_widget<Gtk::Button>("cancelButton");
     sphere_ = Gtk::Builder::get_widget_derived<SphereArea>(builder, "sphere");
     if (name_) name_->set_label(agentName_);
+    if (avatar_) {
+        avatar_->set(avatarPixbuf(resolveAvatar(agentName_, agent_.avatar),
+                                  80));  // 40 logical px, 2x for HiDPI
+        avatar_->set_pixel_size(40);
+    }
 
     set_title(agentName_ + " — Voice");
 
@@ -240,6 +247,7 @@ void VoiceWindow::toIdle(const std::string& message) {
     }
     stopSpeakAnimator();
     if (talk_) {
+        talk_->remove_css_class("talk-active");
         talk_->set_label("TALK");
         talk_->set_sensitive(true);
     }
@@ -252,7 +260,10 @@ void VoiceWindow::toIdle(const std::string& message) {
 void VoiceWindow::maybeStartListening() {
     phase_ = Phase::Listening;
     if (sphere_) sphere_->setState(SphereState::Listening);
-    if (talk_) talk_->set_label("SEND");
+    if (talk_) {
+        talk_->set_label("SEND");
+        talk_->add_css_class("talk-active");
+    }
     if (cancel_) cancel_->set_visible(true);
     if (status_)
         status_->set_label(stt_->engineReady() ? "Listening…"
@@ -269,6 +280,7 @@ void VoiceWindow::sendTranscript() {
     if (talk_) {
         talk_->set_label("···");
         talk_->set_sensitive(false);
+        talk_->remove_css_class("talk-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_) status_->set_label("Transcribing…");
@@ -363,6 +375,7 @@ void VoiceWindow::startIdleNarration() {
     if (talk_) {
         talk_->set_label("···");
         talk_->set_sensitive(false);
+        talk_->remove_css_class("talk-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_) status_->set_label("Replying…");
@@ -392,6 +405,7 @@ void VoiceWindow::enterStreaming() {
     phase_ = Phase::Streaming;
     if (sphere_) sphere_->setState(SphereState::Speaking);
     if (talk_) {
+        talk_->remove_css_class("talk-active");
         talk_->set_label("TALK");  // interrupt-into-recording
         talk_->set_sensitive(true);
     }

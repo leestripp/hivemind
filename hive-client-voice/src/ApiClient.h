@@ -26,6 +26,8 @@ struct AgentInfo {
     std::string id;
     std::string name;
     std::string role;
+    std::string avatar;  // stored choice; "" = name-hash auto (see Avatars.h)
+    std::string state;   // fleet heartbeat state ("ready"/"down"/...)
     bool busy = false;
     bool online = false;
 };

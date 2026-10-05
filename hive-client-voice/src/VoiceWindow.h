@@ -95,6 +95,7 @@ class VoiceWindow : public Gtk::Window {
     AgentInfo agent_;
     std::string agentName_;
 
+    Gtk::Image* avatar_ = nullptr;
     Gtk::Label* name_ = nullptr;
     Gtk::Label* status_ = nullptr;
     Gtk::Button* talk_ = nullptr;

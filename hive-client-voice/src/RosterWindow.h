@@ -1,19 +1,25 @@
 #pragma once
 
-#include "ApiClient.h"
-
 #include <gtkmm.h>
 
 #include <memory>
+#include <string>
 #include <vector>
+
+#include "AgentStateAnnouncer.h"
+#include "ApiClient.h"
 
 class Prefs;
 
 namespace hv {
 
-// Agent roster: the entry screen. Lists agents from /api/agents with an
-// online/busy dot; picking one saves it as the default and opens the
-// voice session. Mirrors RosterActivity.kt.
+class AudioPlayback;
+class TtsEngine;
+
+// Agent roster — port of hive-android MainActivity using hive-client's
+// roster row structure: avatar + name/role + live state pill (+spinner),
+// card-styled rows, ⚙ settings, per-card voice button, 2.5s state poll
+// with dwell-filtered spoken announcements.
 class RosterWindow : public Gtk::Window {
  public:
     explicit RosterWindow(Prefs& prefs);
@@ -24,12 +30,24 @@ class RosterWindow : public Gtk::Window {
  private:
     void rebuildList(const std::vector<AgentInfo>& agents);
     void openVoice(const AgentInfo& agent);
+    void openVoicePicker(const AgentInfo& agent);
+    void openSettings();
+    void announce(const std::vector<AgentInfo>& agents);
 
     Prefs& prefs_;
-    Gtk::Box* list_ = nullptr;
-    Gtk::Spinner* spinner_ = nullptr;
-    Gtk::Label* error_ = nullptr;
     std::unique_ptr<ApiClient> api_;
+    Gtk::Label* status_ = nullptr;
+    Gtk::Label* error_ = nullptr;
+    Gtk::Spinner* spinner_ = nullptr;
+    Gtk::Box* list_ = nullptr;
+
+    // Announcement TTS — created lazily on the first edge so a mute /
+    // voiceless setup never pays for the pipeline.
+    std::unique_ptr<AudioPlayback> playback_;
+    std::unique_ptr<TtsEngine> tts_;
+    AgentStateAnnouncer announcer_;
+
+    sigc::connection poll_;
 };
 
 }  // namespace hv

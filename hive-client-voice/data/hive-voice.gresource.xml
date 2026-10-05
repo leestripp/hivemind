@@ -3,4 +3,28 @@
   <gresource prefix="/org/hivemind/voice/ui">
     <file>voice.ui</file>
   </gresource>
+  <gresource prefix="/org/hivemind/voice">
+    <file>style.css</file>
+  </gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="ant.svg">../../hive-client/data/avatars/ant.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="beetle.svg">../../hive-client/data/avatars/beetle.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="blue-butterfly.svg">../../hive-client/data/avatars/blue-butterfly.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="bumblebee.svg">../../hive-client/data/avatars/bumblebee.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="butterfly.svg">../../hive-client/data/avatars/butterfly.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="caterpillar.svg">../../hive-client/data/avatars/caterpillar.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="cricket.svg">../../hive-client/data/avatars/cricket.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="dragonfly.svg">../../hive-client/data/avatars/dragonfly.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="drone-bee.svg">../../hive-client/data/avatars/drone-bee.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="firefly.svg">../../hive-client/data/avatars/firefly.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="grasshopper.svg">../../hive-client/data/avatars/grasshopper.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="honey-bee.svg">../../hive-client/data/avatars/honey-bee.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="ladybug.svg">../../hive-client/data/avatars/ladybug.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="mantis.svg">../../hive-client/data/avatars/mantis.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="moth.svg">../../hive-client/data/avatars/moth.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="queen-bee.svg">../../hive-client/data/avatars/queen-bee.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="snail.svg">../../hive-client/data/avatars/snail.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="spider.svg">../../hive-client/data/avatars/spider.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="user.svg">../../hive-client/data/avatars/user.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="worker-bee.svg">../../hive-client/data/avatars/worker-bee.svg</file></gresource>
+  <gresource prefix="/org/hivemind/voice/avatars"><file alias="worm.svg">../../hive-client/data/avatars/worm.svg</file></gresource>
 </gresources>
