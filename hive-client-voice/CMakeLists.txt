@@ -84,6 +84,14 @@ if(NOT TARGET whisper)
         ${CMAKE_BINARY_DIR}/whisper-cpp)
 endif()
 
+# Installed binary lives in ~/.local/bin, its whisper/libggml shared
+# libs in ~/.local/lib — anchor the rpath to the binary so the loader
+# finds them without LD_LIBRARY_PATH or ldconfig.
+set_target_properties(hive-client-voice PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../lib"
+    # DT_RPATH (not RUNPATH): RUNPATH is not transitive, and
+    # libwhisper.so has no rpath of its own for libggml.
+    LINK_OPTIONS "-Wl,--disable-new-dtags")
 install(TARGETS hive-client-voice RUNTIME DESTINATION bin)
 
 # Data: desktop entry + icon.
