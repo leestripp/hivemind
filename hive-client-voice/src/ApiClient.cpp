@@ -1,10 +1,23 @@
 #include "ApiClient.h"
 
+#include <cstdio>
+
 #include <OmniNet.h>
 
 #include <chrono>
 
 namespace hv {
+
+namespace {
+// "https://leestrippai.com" -> "leestrippai.com" (port kept if present)
+std::string hostOf(const std::string& base) {
+    const auto s = base.find("://");
+    const auto from = (s == std::string::npos) ? 0 : s + 3;
+    const auto e = base.find('/', from);
+    return base.substr(from, e == std::string::npos ? e : e - from);
+}
+}  // namespace
+
 
 namespace {
 std::string jstr(const nlohmann::json& j, const char* k) {
@@ -39,11 +52,19 @@ nlohmann::json ApiClient::request(const std::string& method,
     auto result = Client::get_instance().send_blocking(req, cfg);
     if (!result.has_value()) {
         last_error_ = "request failed: " +
-                      std::string{clientErrorName(result.error())};
+                      std::string{clientErrorName(result.error())} + " (" +
+                      hostOf(base_) + ")";
+        // Request failures were invisible until they surfaced in the UI —
+        // log every one so connection flapping is diagnosable.
+        fprintf(stderr, "hive-net: %s %s -> %s\n", method.c_str(),
+                path.c_str(), last_error_.c_str());
         if (tolerate_error) return nlohmann::json::object();
         throw std::runtime_error(last_error_);
     }
     const int code = result->statusCode();
+    if (code >= 500)
+        fprintf(stderr, "hive-net: %s %s -> HTTP %d (%s)\n", method.c_str(),
+                path.c_str(), code, hostOf(base_).c_str());
     nlohmann::json j = nlohmann::json::object();
     try {
         j = nlohmann::json::parse(result->bodyAsString());
