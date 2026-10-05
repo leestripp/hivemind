@@ -77,6 +77,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     playback_ = std::make_unique<AudioPlayback>();
     playback_->start();
     tts_ = std::make_unique<TtsEngine>(*playback_);
+    tts_->setSpeed(prefs_.ttsSpeed());
     tts_->onQueueEmpty = [this] {
         toUi([this] {
             if (phase_ == Phase::Streaming && turnDone_) toIdle("");

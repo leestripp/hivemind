@@ -38,6 +38,11 @@ public:
 
 
     bool stateAnnounce() const { return state_announce_; }
+
+    // TTS speech-rate multiplier (1.0 = normal, 2.0 = twice as fast).
+    // Applied as piper --length_scale = 1/speed.
+    double ttsSpeed() const { return tts_speed_; }
+    void setTtsSpeed(double v) { tts_speed_ = v; }
     void setStateAnnounce(bool v) { state_announce_ = v; }
 
     static std::string configPath();
@@ -54,4 +59,5 @@ private:
     float gate_close_{0.010f};
     float vad_peak_{0.012f};
     bool state_announce_{false};
+    double tts_speed_{1.0};
 };

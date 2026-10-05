@@ -4,6 +4,8 @@
 #include "Prefs.h"
 #include "TtsEngine.h"
 
+#include <cstdio>
+
 namespace hv {
 
 VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
@@ -19,6 +21,31 @@ VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
     auto* title = Gtk::make_managed<Gtk::Label>("Pick a voice");
     title->add_css_class("title-3");
     root->append(*title);
+
+    // Global speech-rate slider (piper --length_scale under the hood).
+    // Applies to every voice; previews use it live.
+    tts_->setSpeed(prefs_.ttsSpeed());
+    auto* speedLabel = Gtk::make_managed<Gtk::Label>();
+    const auto fmtSpeed = [](double s) {
+        char b[40];
+        snprintf(b, sizeof b, "Speech speed: %.2f\xc3\x97", s);
+        return std::string(b);
+    };
+    speedLabel->set_text(fmtSpeed(prefs_.ttsSpeed()));
+    speedLabel->add_css_class("dim-label");
+    root->append(*speedLabel);
+    auto* speed = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
+    speed->set_range(0.5, 2.0);
+    speed->set_increments(0.05, 0.25);
+    speed->set_value(prefs_.ttsSpeed());
+    speed->signal_value_changed().connect([this, speed, speedLabel, fmtSpeed] {
+        const double s = speed->get_value();
+        prefs_.setTtsSpeed(s);
+        prefs_.save();
+        tts_->setSpeed(s);
+        speedLabel->set_text(fmtSpeed(s));
+    });
+    root->append(*speed);
 
     auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroll->set_vexpand(true);

@@ -2,6 +2,7 @@
 
 #include "AudioCommon.h"
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -40,6 +41,11 @@ class TtsEngine {
     // Applied per spawned utterance (piper --model); "" = engine default.
     void applyVoice(const std::string& modelPath);
     std::string voice() const;
+
+    // Speech-rate multiplier (1.0 = normal). Read at spawn time, so a
+    // change applies to the NEXT utterance. Clamped to [0.5, 2.0].
+    void setSpeed(double multiplier) { speed_ = std::clamp(multiplier, 0.5, 2.0); }
+    double speed() const { return speed_.load(); }
 
     // Queue a chunk for speech (from any thread).
     void speakQueued(const std::string& text);
@@ -84,6 +90,7 @@ class TtsEngine {
     std::thread worker_;
 
     std::string voice_;  // under m_
+    std::atomic<double> speed_{1.0};
     std::uint64_t epoch_ = 0;
     std::uint64_t nextTag_ = 1;
     std::atomic<int> outstanding_{0};

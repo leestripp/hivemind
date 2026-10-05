@@ -145,7 +145,8 @@ struct PiperChild {
     int stdoutFd = -1;
 };
 
-bool spawnPiper(PiperChild& child, const std::string& voice) {
+bool spawnPiper(PiperChild& child, const std::string& voice,
+                double speed) {
     int inPipe[2], outPipe[2];
     if (pipe(inPipe) != 0 || pipe(outPipe) != 0) return false;
     const pid_t pid = fork();
@@ -172,7 +173,12 @@ bool spawnPiper(PiperChild& child, const std::string& voice) {
             if (access(def.c_str(), R_OK) == 0) model = def;
         }
         if (model.empty()) _exit(127);
+        // Speech rate: piper's --length_scale is phoneme duration, the
+        // inverse of speed (2x speed -> 0.5 scale).
+        char lengthScale[16];
+        snprintf(lengthScale, sizeof lengthScale, "%.3f", 1.0 / speed);
         execlp(piperBin.c_str(), piperBin.c_str(), "--model", model.c_str(),
+               "--length_scale", lengthScale,
                "--output-raw", static_cast<const char*>(nullptr));
         _exit(127);
     }
@@ -189,7 +195,7 @@ bool spawnPiper(PiperChild& child, const std::string& voice) {
 Pcm16 TtsEngine::synthesize(const std::string& text,
                             const std::string& voice) {
     PiperChild child;
-    if (!spawnPiper(child, voice)) return {};
+    if (!spawnPiper(child, voice, speed_.load())) return {};
     // Sentence on stdin, then close so piper decodes exactly it.
     const std::string line = text + "\n";
     std::size_t off = 0;
