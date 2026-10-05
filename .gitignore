@@ -21,3 +21,22 @@ models.json
 Plan.md
 .agents/
 prompt.txt
+
+# Agent brain state — lives under ~/.local/share on hosts; this guards
+# against an in-repo checkout during dev (per AGENTS.md this must stay
+# out of version control)
+.hive-agent/
+
+# Python bytecode (browser_driver.py et al. get imported/run in-tree)
+__pycache__/
+*.py[co]
+
+# Editor / OS / runtime cruft
+.DS_Store
+*~
+.*.swp
+.idea/
+.vscode/
+*.log
+core
+core.*
