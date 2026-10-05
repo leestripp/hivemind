@@ -24,7 +24,6 @@ VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
 
     // Global speech-rate slider (piper --length_scale under the hood).
     // Applies to every voice; previews use it live.
-    tts_->setSpeed(prefs_.ttsSpeed());
     auto* speedLabel = Gtk::make_managed<Gtk::Label>();
     const auto fmtSpeed = [](double s) {
         char b[40];
@@ -56,6 +55,9 @@ VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
     playback_ = std::make_unique<AudioPlayback>();
     playback_->start();
     tts_ = std::make_unique<TtsEngine>(*playback_);
+    tts_->setSpeed(prefs_.ttsSpeed());  // after construction — calling
+                                        // this before tts_ exists
+                                        // segfaulted on picker open
 
     const auto voices = TtsEngine::voiceOptions(Prefs::voiceDir());
     const std::string current = prefs_.voiceFor(agentId_);

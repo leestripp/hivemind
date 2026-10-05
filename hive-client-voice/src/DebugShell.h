@@ -20,6 +20,7 @@ namespace hv {
 //   windows                  list app windows (title, size, visible)
 //   shot <path.png> [title]  render a window to PNG via the Gsk renderer
 //   agents                   dump the last roster poll
+//   picker <Name>            open the voice picker for an agent
 //   open <agent name>        open a voice session (substring, online only)
 //   say <text>               inject text as if it were transcribed speech
 //   phase <idle|listening|thinking|speaking|processing>

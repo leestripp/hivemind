@@ -336,6 +336,18 @@ void RosterView::announce(const std::vector<AgentInfo>& agents) {
     }
 }
 
+bool RosterView::debugOpenVoicePicker(const std::string& nameSub) {
+    const Glib::ustring needle = Glib::ustring(nameSub).lowercase();
+    for (const auto& a : lastAgents_) {
+        if (Glib::ustring(a.name).lowercase().find(needle) !=
+            Glib::ustring::npos) {
+            openVoicePicker(a);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool RosterView::debugOpenVoice(const std::string& nameSub) {
     const Glib::ustring needle = Glib::ustring(nameSub).lowercase();
     for (const auto& a : lastAgents_) {

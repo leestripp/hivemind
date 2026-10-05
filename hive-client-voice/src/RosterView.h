@@ -39,6 +39,7 @@ class RosterView : public Gtk::Box {
     // DebugShell hooks.
     const std::vector<AgentInfo>& debugAgents() const { return lastAgents_; }
     bool debugOpenVoice(const std::string& nameSub);
+    bool debugOpenVoicePicker(const std::string& nameSub);
 
  private:
     void rebuildList(const std::vector<AgentInfo>& agents,

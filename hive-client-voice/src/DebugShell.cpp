@@ -222,6 +222,13 @@ std::string DebugShell::handle(const std::string& line) {
         return SphereArea::glInfo().empty() ? "GL not realized yet\n"
                                             : SphereArea::glInfo() + "\n";
 
+    if (line.rfind("picker ", 0) == 0) {
+        if (!g_roster) return "error: no roster\n";
+        const std::string name = line.substr(7);
+        if (g_roster->debugOpenVoicePicker(name)) return "ok\n";
+        return "error: no such agent (see `agents`)\n";
+    }
+
     if (line == "agents") {
         if (!g_roster) return "error: no roster\n";
         std::string out;
