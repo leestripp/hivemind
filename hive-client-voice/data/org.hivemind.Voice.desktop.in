@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hive Voice
+Comment=Voice client for the Hive Mind
+Exec=@CMAKE_INSTALL_PREFIX@/bin/hive-client-voice
+Icon=org.hivemind.Voice
+Terminal=false
+Categories=Network;Chat;
+StartupNotify=true

@@ -135,6 +135,7 @@ if(HIVEMIND_BUILD_CLIENT)
     pkg_check_modules(GTKMM gtkmm-4.0)
     if(GTKMM_FOUND)
         add_subdirectory(hive-client)
+        add_subdirectory(hive-client-voice)
     else()
         message(WARNING
             "gtkmm-4.0 not found — skipping hive-client. "
