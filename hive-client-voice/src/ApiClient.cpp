@@ -70,12 +70,25 @@ std::vector<AgentInfo> ApiClient::listAgents() {
         i.role = jstr(a, "role");
         i.avatar = jstr(a, "avatar");
         i.state = jstr(a, "state");
+        i.worker = jstr(a, "worker");
         i.busy = a.value("busy", false);
         // The roster payload exposes state ("online"/"offline") rather
         // than a boolean — derive it, tolerating both shapes.
         const std::string state = jstr(a, "state");
         i.online = a.value("online", state != "offline");
         if (!i.id.empty()) out.push_back(std::move(i));
+    }
+    return out;
+}
+
+std::vector<WorkerInfo> ApiClient::listWorkers() {
+    auto j = request("GET", "/api/workers", nullptr, false);
+    std::vector<WorkerInfo> out;
+    for (const auto& w : envelope(j, "workers")) {
+        WorkerInfo i;
+        i.name = jstr(w, "name");
+        i.online = w.value("online", false);
+        if (!i.name.empty()) out.push_back(std::move(i));
     }
     return out;
 }
@@ -105,6 +118,18 @@ std::vector<ThreadMessage> ApiClient::messagesAfter(
         msg.body = jstr(m, "body");
         msg.createdAt = m.value("created_at", int64_t{0});
         out.push_back(std::move(msg));
+    }
+    return out;
+}
+
+std::vector<WorkerInfo> ApiClient::listWorkers() {
+    auto j = request("GET", "/api/workers", nullptr, false);
+    std::vector<WorkerInfo> out;
+    for (const auto& w : envelope(j, "workers")) {
+        WorkerInfo i;
+        i.name = jstr(w, "name");
+        i.online = w.value("online", false);
+        if (!i.name.empty()) out.push_back(std::move(i));
     }
     return out;
 }

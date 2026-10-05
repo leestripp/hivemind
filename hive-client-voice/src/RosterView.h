@@ -3,6 +3,7 @@
 #include <gtkmm.h>
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -40,7 +41,8 @@ class RosterView : public Gtk::Box {
     bool debugOpenVoice(const std::string& nameSub);
 
  private:
-    void rebuildList(const std::vector<AgentInfo>& agents);
+    void rebuildList(const std::vector<AgentInfo>& agents,
+                     const std::vector<WorkerInfo>& workers);
     void openVoice(const AgentInfo& agent);
     void openVoicePicker(const AgentInfo& agent);
     void openSettings();
@@ -51,6 +53,8 @@ class RosterView : public Gtk::Box {
     Prefs& prefs_;
     std::unique_ptr<ApiClient> api_;
     std::vector<AgentInfo> lastAgents_;
+    std::vector<WorkerInfo> lastWorkers_;
+    std::set<std::string> collapsedGroups_;  // worker names, user-preserved
     Gtk::Label* status_ = nullptr;
     Gtk::Label* error_ = nullptr;
     Gtk::Spinner* spinner_ = nullptr;

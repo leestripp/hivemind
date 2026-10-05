@@ -28,7 +28,14 @@ struct AgentInfo {
     std::string role;
     std::string avatar;  // stored choice; "" = name-hash auto (see Avatars.h)
     std::string state;   // fleet heartbeat state ("ready"/"down"/...)
+    std::string worker;  // home hive-worker; "" = homed on the hub itself
     bool busy = false;
+    bool online = false;
+};
+
+// One enrolled hive-worker (GET /api/workers).
+struct WorkerInfo {
+    std::string name;
     bool online = false;
 };
 
@@ -60,6 +67,7 @@ class ApiClient {
     }
 
     std::vector<AgentInfo> listAgents();
+    std::vector<WorkerInfo> listWorkers();
     // POST /api/threads with reuse_dm — opens (or reopens) the 1:1.
     std::string openDm(const std::string& agent_id);
     std::vector<ThreadMessage> messagesAfter(const std::string& thread_id,
