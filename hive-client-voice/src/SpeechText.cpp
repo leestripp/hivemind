@@ -137,7 +137,8 @@ std::vector<Clause> splitClauses(std::string_view raw) {
             continue;
         }
         if (c == '$' || c == '~' || c == '^' || c == '\\' ||
-            (c == '[' && i + 1 < n && raw[i + 1] == '^') || c == '【') {
+            (c == '[' && i + 1 < n && raw[i + 1] == '^') ||
+            (i + 3 <= n && raw.compare(i, 3, "\xE3\x80\x90") == 0)) {
             size_t j = i + 1;
             while (j < n && !std::isspace(static_cast<unsigned char>(raw[j])) &&
                    !std::ispunct(static_cast<unsigned char>(raw[j])))
@@ -170,16 +171,30 @@ std::vector<Clause> splitClauses(std::string_view raw) {
         if (startsWithAt(raw, i, "。。。")) {
             buf += " ... "; pushClause(out, buf, true); i += 3; continue;
         }
+        const bool cjkTerm =
+            (i + 3 <= n &&
+             (raw.compare(i, 3, "\xE3\x80\x82") == 0 ||  // 。
+              raw.compare(i, 3, "\xEF\xBC\x81") == 0 ||  // ！
+              raw.compare(i, 3, "\xEF\xBC\x9F") == 0 ||  // ？
+              raw.compare(i, 3, "\xEF\xBC\x9B") == 0 ||  // ；
+              raw.compare(i, 3, "\xEF\xBC\x9A") == 0));  // ：
         if (c == '.' || c == '!' || c == '?' || c == ';' || c == ':' ||
-            c == '。' || c == '！' || c == '？' || c == '；' || c == '：') {
-            buf += c;
+            cjkTerm) {
+            if (cjkTerm) {
+                buf.append(raw, i, 3);
+                i += 3;
+            } else {
+                buf += c;
+                ++i;
+            }
             pushClause(out, buf, true);
-            ++i;
             continue;
         }
-        if (c == ',' || c == '，') {
+        const bool cjkComma =
+            (i + 3 <= n && raw.compare(i, 3, "\xEF\xBC\x8C") == 0);  // ，
+        if (c == ',' || cjkComma) {
             pushClause(out, buf, false);
-            ++i;
+            i += cjkComma ? 3 : 1;
             continue;
         }
         if (std::isdigit(static_cast<unsigned char>(c)) &&
@@ -277,6 +292,24 @@ bool isAbortLike(std::string_view t) {
     std::string low = collapseWs(lowerAscii(t));
     return low == "stop" || low == "stop stop" || low == "cancel" ||
            low == "abort" || low == "never mind" || low == "forget it";
+}
+
+
+std::string forSpeech(std::string_view raw) {
+    const auto sentences = toSpeechSentences(raw);
+    std::string out;
+    for (const auto& s : sentences) {
+        if (!out.empty()) out += ' ';
+        out += s;
+    }
+    return out;
+}
+
+std::size_t commonPrefixLen(std::string_view a, std::string_view b) {
+    const std::size_t n = std::min(a.size(), b.size());
+    std::size_t i = 0;
+    while (i < n && a[i] == b[i]) ++i;
+    return i;
 }
 
 }  // namespace speech

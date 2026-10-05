@@ -36,6 +36,10 @@ public:
     void setGateClose(float v) { gate_close_ = v; }
     void setVadPeak(float v) { vad_peak_ = v; }
 
+
+    bool stateAnnounce() const { return state_announce_; }
+    void setStateAnnounce(bool v) { state_announce_ = v; }
+
     static std::string configPath();
     static std::string voiceDir();  // ~/.local/share/hive-client-voice/voices
 
@@ -49,4 +53,5 @@ private:
     float gate_open_{0.018f};
     float gate_close_{0.010f};
     float vad_peak_{0.012f};
+    bool state_announce_{true};
 };

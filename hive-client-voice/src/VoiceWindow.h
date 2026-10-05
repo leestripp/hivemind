@@ -1,0 +1,153 @@
+#pragma once
+
+#include "AgentStateAnnouncer.h"
+#include "ApiClient.h"
+#include "Prefs.h"
+#include "SphereArea.h"
+
+#include <gtkmm.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace hv {
+
+class AudioCapture;
+class AudioPlayback;
+class SttEngine;
+class TtsEngine;
+
+// Voice session with one agent — the 1:1 port of VoiceActivity.kt.
+//
+// Big round button: tap once to talk, tap again to send; while the
+// agent speaks it becomes an interrupt (cut off → straight back to
+// recording). Small side button: cancel / do not send.
+//
+// IDLE ─tap─▶ LISTENING ─tap─▶ THINKING ─first sentence─▶ STREAMING
+//   ─speech done─▶ IDLE; ✕ cancel anywhere → IDLE.
+class VoiceWindow : public Gtk::Window {
+ public:
+    VoiceWindow(BaseObjectType* cobject,
+                const Glib::RefPtr<Gtk::Builder>& builder, Prefs& prefs,
+                AgentInfo agent);
+    ~VoiceWindow() override;
+
+    static VoiceWindow* create(Prefs& prefs, const AgentInfo& agent);
+
+ private:
+    enum class Phase { Setup, Idle, Listening, Thinking, Streaming };
+
+    struct PendingNote {
+        std::string senderId;
+        std::string text;
+    };
+
+    // -- io plumbing -------------------------------------------------
+    void post(std::function<void()> work);  // onto the io thread
+    void toUi(std::function<void()> fn);    // back onto the UI thread
+    void ioLoop();
+
+    // -- setup / phases (UI thread) -----------------------------------
+    void openThread();
+    void toIdle(const std::string& message);
+    void maybeStartListening();
+    void sendTranscript();
+    void sendAndEnterWait(const std::string& text);
+    bool reresolveIfThreadGone(const std::exception& e);
+    void startIdleNarration();
+    void speakNotice(const std::string& text);
+    void speakPending();
+    void enterStreaming();
+    void onEngineStopped(const std::string& msg);
+    void interruptAndTalk();
+    void cancelCurrent();
+    void confirmStopThread();
+    void stopAgentAndConfirm();
+    void issueCancelAndResync();
+    std::string voiceNameFor(const std::string& senderId) const;
+
+    // -- ticks ---------------------------------------------------------
+    void scheduleInboxWatch(int ms);
+    void schedulePollTick(int ms);
+    void inboxWatchTick();
+    void pollTick();
+    void handleTick(bool busy, const std::string& error,
+                    const std::string& partial, bool cancelling, int gen,
+                    bool grew);
+
+    // -- speech ---------------------------------------------------------
+    void drainSpeech(bool flush);
+    void queueSpeech(const std::string& text);
+    void queueSpeechChunk(const std::string& text);
+    void startSpeakAnimator();
+    void stopSpeakAnimator();
+    float ttsLevelNow() const;
+
+    // -- widgets ---------------------------------------------------------
+    Prefs& prefs_;
+    AgentInfo agent_;
+    std::string agentName_;
+
+    Gtk::Label* name_ = nullptr;
+    Gtk::Label* status_ = nullptr;
+    Gtk::Button* talk_ = nullptr;
+    Gtk::Button* cancel_ = nullptr;
+    SphereArea* sphere_ = nullptr;
+
+    // -- engines ---------------------------------------------------------
+    std::unique_ptr<AudioCapture> capture_;
+    std::unique_ptr<AudioPlayback> playback_;
+    std::unique_ptr<SttEngine> stt_;
+    std::unique_ptr<TtsEngine> tts_;
+    std::unique_ptr<ApiClient> api_;
+    std::unique_ptr<AgentStateAnnouncer> announcer_;
+
+    // -- state ------------------------------------------------------------
+    Phase phase_ = Phase::Setup;
+    std::string thread_id_;
+    bool showingAgentBusy_ = false;
+    std::atomic<bool> stopping_{false};
+    bool queuedBehindStop_ = false;
+    std::string lastMessageId_;
+    std::string finalReply_;
+    std::map<std::string, std::string> agentNames_;
+    std::string inboxLastId_;
+    std::deque<PendingNote> pendingSpeech_;
+    std::string streamText_;
+    std::size_t spokenLen_ = 0;
+    bool turnDone_ = false;
+    long lastProgressMs_ = 0;
+    std::size_t lastPartialLen_ = 0;
+    std::size_t narrationGiveUpLen_ = 0;
+    std::string narratedPrefix_;
+    std::atomic<long> netFailSince_{0};
+    int turnGen_ = 0;
+    long lastStatusUpdate_ = 0;
+    long lastTalkClick_ = 0;
+    sigc::connection speakAnim_;
+    sigc::connection inboxConn_;
+    sigc::connection pollConn_;
+
+    // io worker: a queue of closures drained by one thread; results come
+    // back through a Glib::Dispatcher.
+    std::mutex ioMutex_;
+    std::deque<std::function<void()>> ioQueue_;
+    std::condition_variable ioCv_;
+    std::atomic<bool> ioRunning_{false};
+    std::thread ioThread_;
+    Glib::Dispatcher uiDispatch_;
+    std::mutex uiMutex_;
+    std::deque<std::function<void()>> uiQueue_;
+
+    // TTS speaking-envelope origin.
+    std::chrono::steady_clock::time_point speakStart_;
+};
+
+}  // namespace hv

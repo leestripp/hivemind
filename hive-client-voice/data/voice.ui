@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <object class="GtkWindow" id="voiceWindow">
+    <property name="title">Voice</property>
+    <property name="default-width">460</property>
+    <property name="default-height">640</property>
+    <property name="resizable">True</property>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="hexpand">True</property>
+        <child>
+          <object class="GtkLabel" id="agentName">
+            <property name="label">Agent</property>
+            <property name="margin-top">18</property>
+            <style>
+              <class name="title-1"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="statusText">
+            <property name="label">Connecting…</property>
+            <property name="wrap">True</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">6</property>
+            <property name="margin-bottom">6</property>
+            <style>
+              <class name="dim-label"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkGLArea" id="sphere">
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="halign">center</property>
+            <property name="spacing">18</property>
+            <property name="margin-bottom">28</property>
+            <child>
+              <object class="GtkButton" id="cancelButton">
+                <property name="label">✕</property>
+                <property name="width-request">64</property>
+                <property name="height-request">64</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="circular"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="talkButton">
+                <property name="label">TALK</property>
+                <property name="width-request">140</property>
+                <property name="height-request">140</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="circular"/>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="width-request">64</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

@@ -33,6 +33,7 @@ void Prefs::load() {
     gate_open_ = j.value("gate_open", gate_open_);
     gate_close_ = j.value("gate_close", gate_close_);
     vad_peak_ = j.value("vad_peak", vad_peak_);
+    state_announce_ = j.value("state_announce", true);
     if (j.contains("voices") && j["voices"].is_object())
         for (auto& [k, v] : j["voices"].items())
             if (v.is_string()) voices_[k] = v.get<std::string>();
@@ -48,6 +49,7 @@ void Prefs::save() const {
     j["gate_open"] = gate_open_;
     j["gate_close"] = gate_close_;
     j["vad_peak"] = vad_peak_;
+    j["state_announce"] = state_announce_;
     j["voices"] = voices_;
     std::filesystem::create_directories(
         std::filesystem::path(configPath()).parent_path());

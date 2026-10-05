@@ -9,13 +9,23 @@ cmake_minimum_required(VERSION 3.28)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
+# epoxy loads GL function pointers for the sphere shaders (GLSL 330).
+pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 # PipeWire is the audio backend (16 kHz mono capture + playback). The
 # whole app still builds without the dev package — voice I/O compiles to
 # a null backend and the app says so on startup — but install
 # libpipewire-0.3-dev for a functional client.
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
 
+set(VOICE_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/hive-voice-resources.c)
+add_custom_command(
+    OUTPUT ${VOICE_RESOURCES}
+    COMMAND glib-compile-resources --target=${VOICE_RESOURCES} --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/data --generate-source ${CMAKE_CURRENT_SOURCE_DIR}/data/hive-voice.gresource.xml
+    DEPENDS data/hive-voice.gresource.xml data/voice.ui
+    VERBATIM)
+
 add_executable(hive-client-voice
+    ${VOICE_RESOURCES}
     src/main.cpp
     src/HiveVoiceApp.cpp
     src/Prefs.cpp
@@ -41,8 +51,9 @@ target_include_directories(hive-client-voice PRIVATE src)
 
 target_link_libraries(hive-client-voice PRIVATE
     PkgConfig::GTKMM
+    PkgConfig::EPOXY
     nlohmann_json::nlohmann_json
-    OmniNet::OmniNet
+    OmniNet
     whisper
 )
 

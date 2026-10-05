@@ -1,2 +1,6 @@
-// Temporary entry point — full app wiring lands with the GTK windows.
-int main() { return 0; }
+#include "HiveVoiceApp.h"
+
+int main(int argc, char** argv) {
+    auto app = hv::HiveVoiceApp::create();
+    return app->run(argc, argv);
+}

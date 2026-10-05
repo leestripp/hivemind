@@ -37,4 +37,13 @@ std::string normalizeTranscript(std::string_view raw);
 // stop")? Matches the Android heuristic.
 bool isAbortLike(std::string_view t);
 
+
+// Convenience: raw text -> one speakable string (markdown stripped,
+// fillers dropped). Used for full-note playback.
+std::string forSpeech(std::string_view raw);
+
+// Length of the common prefix of a and b (used to avoid re-speaking
+// already-spoken streamed text).
+std::size_t commonPrefixLen(std::string_view a, std::string_view b);
+
 }  // namespace speech
