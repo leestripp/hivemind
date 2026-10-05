@@ -43,6 +43,9 @@ class RosterView : public Gtk::Box {
  private:
     void rebuildList(const std::vector<AgentInfo>& agents,
                      const std::vector<WorkerInfo>& workers);
+    void appendGroupHeader(const std::string& worker, bool online,
+                           std::size_t count, bool expanded);
+    void appendAgentCard(const AgentInfo& agent);
     void openVoice(const AgentInfo& agent);
     void openVoicePicker(const AgentInfo& agent);
     void openSettings();

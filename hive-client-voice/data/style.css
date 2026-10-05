@@ -74,3 +74,11 @@ button.hv-cancel { border-radius: 9999px;
                    background-color: #2A1218; border: 2px solid #E85D75;
                    color: #E85D75; font-size: 20px; padding: 0; }
 button.hv-cancel:hover { background-color: #3A1820; }
+
+/* Worker group headers (worker_header.xml) */
+.hv-group { padding: 6px 4px 2px 4px; }
+.hv-chevron { color: #7A8A99; font-size: 12px; }
+.hv-group-name { color: #33D6E8; font-weight: 600; font-size: 13px; }
+.hv-group-state { font-size: 11px; }
+.hv-group-on { color: #3DDC84; }
+.hv-group-off { color: #7A8A99; }

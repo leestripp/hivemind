@@ -122,17 +122,6 @@ std::vector<ThreadMessage> ApiClient::messagesAfter(
     return out;
 }
 
-std::vector<WorkerInfo> ApiClient::listWorkers() {
-    auto j = request("GET", "/api/workers", nullptr, false);
-    std::vector<WorkerInfo> out;
-    for (const auto& w : envelope(j, "workers")) {
-        WorkerInfo i;
-        i.name = jstr(w, "name");
-        i.online = w.value("online", false);
-        if (!i.name.empty()) out.push_back(std::move(i));
-    }
-    return out;
-}
 
 std::string ApiClient::latestMessageId(const std::string& thread_id) {
     auto j = request("GET", "/api/threads/" + thread_id +
