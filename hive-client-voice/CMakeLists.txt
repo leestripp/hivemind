@@ -28,6 +28,7 @@ add_executable(hive-client-voice
     ${VOICE_RESOURCES}
     src/main.cpp
     src/Avatars.cpp
+    src/DebugShell.cpp
     src/HiveVoiceApp.cpp
     src/Prefs.cpp
     src/ApiClient.cpp

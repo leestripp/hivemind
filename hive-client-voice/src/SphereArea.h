@@ -4,6 +4,7 @@
 #include <gtkmm/builder.h>
 
 #include <chrono>
+#include <string>
 
 namespace hv {
 
@@ -24,6 +25,30 @@ class SphereArea : public Gtk::GLArea {
     void setLevel(float level);        // 0..1 instantaneous target
     void setState(SphereState state);  // eased toward in the render loop
 
+    // GL renderer/version captured at initGL ("" until first render) —
+    // surfaced through the DebugShell for headless diagnosis.
+    static std::string glInfo() { return glInfo_; }
+
+    // Headless render diagnosis (DebugShell): frame count + periodic
+    // framebuffer readback proving whether the GPU drew anything.
+    // Probe runs only when HIVE_VOICE_GL_PROBE is set.
+    std::string debugStats() const;
+
+    // Queue a framebuffer-readback screenshot (saved on the next render —
+    // the GLArea framebuffer is only bound during on_render). This is the
+    // screenshot path that SEES GL content; GtkWidgetPaintable snapshots
+    // render GLAreas black.
+    void queueShot(const std::string& path) { pendingShot_ = path; }
+    bool shotPending() const { return !pendingShot_.empty(); }
+
+ private:
+    static std::string glInfo_;
+    unsigned int renderCount_ = 0;
+    float maxLum_ = -1.0f;
+    unsigned int lastGlError_ = 0;
+    bool probeEnabled_ = false;
+    std::string pendingShot_;
+
  protected:
     void on_realize() override;
     void on_unrealize() override;
@@ -40,6 +65,8 @@ class SphereArea : public Gtk::GLArea {
     // Render state (GL names only valid between realize/unrealize).
     unsigned int swarmProgram_ = 0, honeyProgram_ = 0;
     unsigned int swarmVbo_ = 0, honeyVbo_ = 0;
+    unsigned int vao_ = 0;  // core profile has NO default VAO — without
+                            // this every draw is GL_INVALID_OPERATION
     int aSeed0_ = -1, aSeed1_ = -1;
     int uProj_ = -1, uTime_ = -1, uLevel_ = -1, uState_ = -1;
     int uPointScale_ = -1, uCamDist_ = -1;

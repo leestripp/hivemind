@@ -4,6 +4,8 @@
 
 #include <gtkmm.h>
 
+#include <memory>
+
 namespace hv {
 
 // Gtk::Application shell: loads Prefs, opens the roster (or jumps
@@ -22,6 +24,7 @@ class HiveVoiceApp : public Gtk::Application {
     void openSavedSession();
 
     Prefs prefs_;
+    std::unique_ptr<class DebugShell> shell_;  // unix-socket test harness
 };
 
 }  // namespace hv

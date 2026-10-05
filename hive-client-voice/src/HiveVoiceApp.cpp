@@ -1,6 +1,7 @@
 #include "HiveVoiceApp.h"
 
 #include "ApiClient.h"
+#include "DebugShell.h"
 #include "RosterWindow.h"
 #include "SettingsWindow.h"
 #include "VoicePickerWindow.h"
@@ -26,6 +27,7 @@ HiveVoiceApp::HiveVoiceApp() : Gtk::Application("org.hivemind.voice") {
 }
 
 void HiveVoiceApp::on_activate() {
+    if (!shell_) shell_ = std::make_unique<DebugShell>(*this);
     // add_window() associates the window with the application — do NOT
     // wrap `this` in a RefPtr (it unrefs on destruction and frees the
     // app mid-activation).

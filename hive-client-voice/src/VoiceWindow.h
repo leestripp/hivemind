@@ -41,6 +41,16 @@ class VoiceWindow : public Gtk::Window {
 
     static VoiceWindow* create(Prefs& prefs, const AgentInfo& agent);
 
+    // DebugShell hooks.
+    std::string debugAgentName() const { return agentName_; }
+    std::string debugPhaseName() const;
+    std::string debugStatusText() const;
+    void debugSay(const std::string& text);  // as if STT produced it
+    void debugSetSphere(SphereState state, float level);
+    void debugSetSphereLevel(float level);
+    std::string debugSphereStats() const;
+    void debugSphereShot(const std::string& path);
+
  private:
     enum class Phase { Setup, Idle, Listening, Thinking, Streaming };
 

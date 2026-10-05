@@ -27,6 +27,10 @@ class RosterWindow : public Gtk::Window {
 
     void refresh();
 
+    // DebugShell hooks.
+    const std::vector<AgentInfo>& debugAgents() const { return lastAgents_; }
+    bool debugOpenVoice(const std::string& nameSub);
+
  private:
     void rebuildList(const std::vector<AgentInfo>& agents);
     void openVoice(const AgentInfo& agent);
@@ -36,6 +40,7 @@ class RosterWindow : public Gtk::Window {
 
     Prefs& prefs_;
     std::unique_ptr<ApiClient> api_;
+    std::vector<AgentInfo> lastAgents_;
     Gtk::Label* status_ = nullptr;
     Gtk::Label* error_ = nullptr;
     Gtk::Spinner* spinner_ = nullptr;

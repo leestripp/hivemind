@@ -1,5 +1,7 @@
 #include "VoiceWindow.h"
 
+#include "DebugShell.h"
+
 #include "AudioCapture.h"
 #include "Avatars.h"
 #include "AudioPlayback.h"
@@ -39,6 +41,7 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
                          const Glib::RefPtr<Gtk::Builder>& builder,
                          Prefs& prefs, AgentInfo agent)
     : Gtk::Window(cobject), prefs_(prefs), agent_(std::move(agent)) {
+    DebugShell::registerVoice(this);
     agentName_ = agent_.name.empty() ? "Agent" : agent_.name;
 
     avatar_ = builder->get_widget<Gtk::Image>("agentAvatar");
@@ -132,6 +135,7 @@ VoiceWindow::VoiceWindow(BaseObjectType* cobject,
 }
 
 VoiceWindow::~VoiceWindow() {
+    DebugShell::registerVoice(nullptr);
     stopSpeakAnimator();
     inboxConn_.disconnect();
     pollConn_.disconnect();
@@ -875,5 +879,79 @@ void VoiceWindow::startSpeakAnimator() {
 }
 
 void VoiceWindow::stopSpeakAnimator() { speakAnim_.disconnect(); }
+
+// -- DebugShell hooks -----------------------------------------------------
+
+std::string VoiceWindow::debugPhaseName() const {
+    switch (phase_) {
+        case Phase::Setup: return "setup";
+        case Phase::Idle: return "idle";
+        case Phase::Listening: return "listening";
+        case Phase::Thinking: return "thinking";
+        case Phase::Streaming: return "streaming";
+    }
+    return "?";
+}
+
+std::string VoiceWindow::debugStatusText() const {
+    return status_ ? std::string(status_->get_text()) : std::string();
+}
+
+void VoiceWindow::debugSay(const std::string& text) {
+    // Inject as if STT had produced it — same path as sendTranscript's
+    // post-STT branch, minus the microphone.
+    if (text.empty() || phase_ == Phase::Setup || phase_ == Phase::Thinking)
+        return;
+    if (sphere_) sphere_->setLevel(0.0f);
+    phase_ = Phase::Thinking;
+    ++turnGen_;
+    tts_->applyVoice(voiceNameFor(agent_.id));
+    if (sphere_) sphere_->setState(SphereState::Processing);
+    if (talk_) {
+        talk_->set_label("···");
+        talk_->set_sensitive(false);
+        talk_->remove_css_class("talk-active");
+    }
+    if (cancel_) cancel_->set_visible(true);
+    if (status_) status_->set_label("Sending…");
+    lastProgressMs_ = nowMs();
+    lastPartialLen_ = 0;
+    netFailSince_ = 0;
+    post([this, text] {
+        try {
+            sendAndEnterWait(text);
+        } catch (const std::exception& e) {
+            if (reresolveIfThreadGone(e)) {
+                try {
+                    sendAndEnterWait(text);
+                    return;
+                } catch (const std::exception&) {}
+            }
+            std::string msg = e.what();
+            toUi([this, msg = std::move(msg)] {
+                toIdle("Send failed: " + msg);
+            });
+        }
+    });
+}
+
+void VoiceWindow::debugSetSphere(SphereState state, float level) {
+    if (sphere_) {
+        sphere_->setState(state);
+        sphere_->setLevel(level);
+    }
+}
+
+void VoiceWindow::debugSetSphereLevel(float level) {
+    if (sphere_) sphere_->setLevel(level);
+}
+
+std::string VoiceWindow::debugSphereStats() const {
+    return sphere_ ? sphere_->debugStats() : std::string("no sphere widget");
+}
+
+void VoiceWindow::debugSphereShot(const std::string& path) {
+    if (sphere_) sphere_->queueShot(path);
+}
 
 }  // namespace hv

@@ -1,5 +1,7 @@
 #include "RosterWindow.h"
 
+#include "DebugShell.h"
+
 #include "AudioPlayback.h"
 #include "Avatars.h"
 #include "Prefs.h"
@@ -26,6 +28,7 @@ bool workingState(const std::string& st) {
 }  // namespace
 
 RosterWindow::RosterWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
+    DebugShell::registerRoster(this);
     set_title("HiveMind");
     set_default_size(440, 620);
 
@@ -81,7 +84,8 @@ RosterWindow::RosterWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
         kPollMs);
 }
 
-RosterWindow::~RosterWindow() { poll_.disconnect(); }
+RosterWindow::~RosterWindow() {
+    DebugShell::registerRoster(nullptr); poll_.disconnect(); }
 
 void RosterWindow::refresh() {
     spinner_->start();
@@ -117,6 +121,7 @@ void RosterWindow::refresh() {
 }
 
 void RosterWindow::rebuildList(const std::vector<AgentInfo>& agents) {
+    lastAgents_ = agents;
     while (auto* child = list_->get_first_child()) list_->remove(*child);
 
     if (agents.empty()) {
@@ -252,6 +257,19 @@ void RosterWindow::announce(const std::vector<AgentInfo>& agents) {
         tts_->applyVoice(prefs_.voiceFor(n.agentId));
         tts_->speakQueued(n.text);
     }
+}
+
+bool RosterWindow::debugOpenVoice(const std::string& nameSub) {
+    const Glib::ustring needle = Glib::ustring(nameSub).lowercase();
+    for (const auto& a : lastAgents_) {
+        if (!a.online) continue;
+        if (Glib::ustring(a.name).lowercase().find(needle) !=
+            Glib::ustring::npos) {
+            openVoice(a);
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace hv

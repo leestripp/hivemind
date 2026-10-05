@@ -5,13 +5,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace hv {
 
 namespace {
 
-constexpr int kPointCount = 2600;
+constexpr int kPointCount = 4200;
 
 // GLSL 330 core port of the GLES2 swarm vertex shader — same math,
 // `attribute`→`in`, `varying`→out, uniforms unchanged.
@@ -118,9 +119,9 @@ void main(){
     float bright = aSeed1.w * (0.85 + 0.75 * agit);
     bright = mix(bright, 0.75 + 0.25 * dartOn + 0.30 * pulse, procAmt);
 
-    float depthFade = 0.40 + 0.60 *
+    float depthFade = 0.55 + 0.45 *
         smoothstep(-(uCamDist + 1.3), -(uCamDist - 1.3), view.z);
-    vColor = vec4(col * max(0.30, bright), depthFade);
+    vColor = vec4(col * max(0.30, bright) * 1.55, depthFade);
 }
 )GLSL";
 
@@ -164,7 +165,7 @@ void main(){
 
     float voidMask = 1.0 - 0.90 * smoothstep(0.55, 0.20, length(ndc));
 
-    float a = line * (0.05 + 0.07 * uLevel) * (0.25 + 0.75 * vign) *
+    float a = line * (0.06 + 0.08 * uLevel) * (0.25 + 0.75 * vign) *
               (0.85 + 0.25 * cellHash) * voidMask;
     fragColor = vec4(vec3(1.0, 0.72, 0.25), a);
 }
@@ -179,7 +180,7 @@ out vec4 fragColor;
 void main(){
     vec2 d = gl_PointCoord - vec2(0.5);
     float r = length(d) * 2.0;
-    float alpha = exp(-r * r * 4.0);
+    float alpha = exp(-r * r * 2.2);
     if (alpha < 0.015) discard;
     fragColor = vec4(vColor.rgb, vColor.a * alpha);
 }
@@ -236,12 +237,19 @@ float prngFloat(uint32_t& s) {
 
 }  // namespace
 
-SphereArea::SphereArea() { set_required_version(3, 3); }
+// static
+std::string SphereArea::glInfo_;
+
+SphereArea::SphereArea() {
+    set_required_version(3, 3);
+    probeEnabled_ = std::getenv("HIVE_VOICE_GL_PROBE") != nullptr;
+}
 
 SphereArea::SphereArea(BaseObjectType* cobject,
                        const Glib::RefPtr<Gtk::Builder>&)
     : Gtk::GLArea(cobject) {
     set_required_version(3, 3);
+    probeEnabled_ = std::getenv("HIVE_VOICE_GL_PROBE") != nullptr;
 }
 
 SphereArea::~SphereArea() {
@@ -282,7 +290,7 @@ void SphereArea::on_resize(int width, int height) {
     // (same derivation as the Android nativeResize).
     camDist_ = std::max(3.1f, 1.30f / (0.4414f * aspect));
     pointScale_ = static_cast<float>(width < height ? width : height) *
-                  0.0125f * (camDist_ / 3.1f);
+                  0.024f * (camDist_ / 3.1f);
 }
 
 void SphereArea::perspective(float* m, float fovyRad, float aspect, float zn,
@@ -298,6 +306,14 @@ void SphereArea::perspective(float* m, float fovyRad, float aspect, float zn,
 
 bool SphereArea::initGL() {
     make_current();
+    if (glInfo_.empty()) {
+        const auto* rend = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const auto* vend = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+        glInfo_ = std::string(vend ? vend : "?") + " | " +
+                  (rend ? rend : "?") + " | " + (ver ? ver : "?");
+        fprintf(stderr, "hive-voice: GL: %s\n", glInfo_.c_str());
+    }
     swarmProgram_ = linkProgram(kSwarmVertexShader, kPointFragmentShader);
     honeyProgram_ = linkProgram(kHoneyVertexShader, kHoneyFragmentShader);
     if (!swarmProgram_ || !honeyProgram_) return false;
@@ -313,6 +329,16 @@ bool SphereArea::initGL() {
     uHoneyLevel_ = glGetUniformLocation(honeyProgram_, "uLevel");
 
     buildSeeds();
+
+    // Core profile (what GtkGLArea hands us on desktop Mesa) requires a
+    // bound VAO — GLES2 didn't, which is why the Android original worked
+    // without one. glGenVertexArrays via epoxy covers both.
+    glGenVertexArrays(1, &vao_);
+    // ...and in core profile the shader's gl_PointSize is IGNORED unless
+    // GL_PROGRAM_POINT_SIZE is enabled — without it every point clamps to
+    // 1px and the swarm reads as sparse dim stars. GLES2 applied shader
+    // point size implicitly.
+    glEnable(GL_PROGRAM_POINT_SIZE);
 
     const float quad[8] = {-1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f};
     glGenBuffers(1, &honeyVbo_);
@@ -380,6 +406,7 @@ bool SphereArea::on_render(const Glib::RefPtr<Gdk::GLContext>& context) {
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
+    glBindVertexArray(vao_);
 
     // 1) Honeycomb backdrop — normal alpha blending, under everything.
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -414,8 +441,68 @@ bool SphereArea::on_render(const Glib::RefPtr<Gdk::GLContext>& context) {
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // Queued readback screenshot — runs inside on_render while the GLArea
+    // framebuffer is still bound.
+    if (!pendingShot_.empty()) {
+        const int w = static_cast<int>(viewportW_),
+                  h = static_cast<int>(viewportH_);
+        if (w > 0 && h > 0) {
+            std::vector<unsigned char> px(static_cast<size_t>(w) * h * 4);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+            // glReadPixels is bottom-up — flip rows for the texture.
+            std::vector<unsigned char> flip(px.size());
+            const size_t stride = static_cast<size_t>(w) * 4;
+            for (int y = 0; y < h; ++y)
+                std::memcpy(flip.data() + static_cast<size_t>(y) * stride,
+                            px.data() + static_cast<size_t>(h - 1 - y) * stride,
+                            stride);
+            GBytes* bytes = g_bytes_new(flip.data(), flip.size());
+            GdkTexture* tex = gdk_memory_texture_new(
+                w, h, GDK_MEMORY_R8G8B8A8, bytes, stride);
+            gdk_texture_save_to_png(tex, pendingShot_.c_str());
+            g_object_unref(tex);
+            g_bytes_unref(bytes);
+        }
+        pendingShot_.clear();
+    }
+
+    // Periodic readback probe: the definitive answer to "did the GPU
+    // draw anything?" when the display path (HDR/compositor) is suspect.
+    if (probeEnabled_ && (renderCount_ % 60) == 0) {
+        const int w = static_cast<int>(viewportW_),
+                  h = static_cast<int>(viewportH_);
+        if (w > 0 && h > 0) {
+            std::vector<unsigned char> px(static_cast<size_t>(w) * h * 4);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+            float best = 0.0f;
+            for (size_t i = 0; i + 2 < px.size(); i += 4) {
+                const float l = 0.2126f * px[i] + 0.7152f * px[i + 1] +
+                                0.0722f * px[i + 2];
+                if (l > best) best = l;
+            }
+            maxLum_ = best;
+        }
+        lastGlError_ = glGetError();
+    }
+    ++renderCount_;
 
     return true;
+}
+
+std::string SphereArea::debugStats() const {
+    char buf[256];
+    std::snprintf(buf, sizeof(buf),
+                  "renders=%u viewport=%.0fx%.0f max_lum=%.1f/255 "
+                  "gl_error=0x%x programs=%u/%u vao=%u level=%.2f state=%.2f",
+                  renderCount_, static_cast<double>(viewportW_),
+                  static_cast<double>(viewportH_), static_cast<double>(maxLum_),
+                  lastGlError_, swarmProgram_, honeyProgram_, vao_,
+                  static_cast<double>(level_), static_cast<double>(state_));
+    return buf;
 }
 
 }  // namespace hv
