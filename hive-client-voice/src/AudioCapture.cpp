@@ -134,11 +134,20 @@ struct PwSource {
     }
 };
 
-const pw_stream_events PwSource::events = {
-    PW_VERSION_STREAM_EVENTS, nullptr, &PwSource::onStateChanged,
-    nullptr, &PwSource::onProcess, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-};
+// Zero-init first, then assign — the pipewire struct layout is
+// versioned (PW_VERSION_STREAM_EVENTS=2 has 12 members here), and
+// positional init both overflows on newer/older versions and silently
+// lands callbacks in the wrong slot (index 4 is io_changed, NOT
+// process). A factory also avoids -Wmissing-field-initializers.
+pw_stream_events makeEvents() {
+    pw_stream_events e{};
+    e.version = PW_VERSION_STREAM_EVENTS;
+    e.state_changed = &PwSource::onStateChanged;
+    e.process = &PwSource::onProcess;
+    return e;
+}
+
+const pw_stream_events PwSource::events = makeEvents();
 
 }  // namespace
 #endif  // HIVEMIND_VOICE_PIPEWIRE

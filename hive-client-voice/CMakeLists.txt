@@ -15,7 +15,7 @@ pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 # whole app still builds without the dev package — voice I/O compiles to
 # a null backend and the app says so on startup — but install
 # libpipewire-0.3-dev for a functional client.
-pkg_check_modules(PIPEWIRE libpipewire-0.3)
+pkg_check_modules(PIPEWIRE IMPORTED_TARGET libpipewire-0.3)
 
 set(VOICE_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/hive-voice-resources.c)
 add_custom_command(
