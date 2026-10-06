@@ -44,10 +44,14 @@ void MainWindow::showVoice(const AgentInfo& agent) {
 }
 
 bool MainWindow::on_close_request() {
-    // Persist the size the user actually left the window at.
-    prefs_.setWindowWidth(get_width());
-    prefs_.setWindowHeight(get_height());
-    prefs_.save();
+    // Persist the size the user actually left the window at. Guard
+    // against a never-mapped window reporting 0 (would clobber the
+    // saved size with "unset").
+    if (get_width() > 0 && get_height() > 0) {
+        prefs_.setWindowWidth(get_width());
+        prefs_.setWindowHeight(get_height());
+        prefs_.save();
+    }
     return Gtk::Window::on_close_request();
 }
 
