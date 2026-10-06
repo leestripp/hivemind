@@ -76,8 +76,8 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     api_ = std::make_unique<ApiClient>(prefs_.base(), prefs_.apiKey());
     playback_ = std::make_unique<AudioPlayback>();
     playback_->start();
-    tts_ = std::make_unique<TtsEngine>(*playback_);
-    tts_->setSpeed(prefs_.ttsSpeed());
+    tts_ = std::make_unique<TtsEngine>(*playback_, prefs_.chimpflowUrl(),
+                                       prefs_.chimpflowKey());
     tts_->onQueueEmpty = [this] {
         toUi([this] {
             if (phase_ == Phase::Streaming && turnDone_) toIdle("");
@@ -85,26 +85,10 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     };
     capture_ = std::make_unique<AudioCapture>();
     stt_ = std::make_unique<SttEngine>(
-        *capture_,
+        *capture_, prefs_.chimpflowUrl(), prefs_.chimpflowKey(),
         [this](float level) {
             toUi([this, level] {
                 if (phase_ == Phase::Listening && sphere_) sphere_->setLevel(level);
-            });
-        },
-        [this](const std::string& text) {
-            toUi([this, text] {
-                if (phase_ != Phase::Listening) return;
-                const long now = nowMs();
-                if (now - lastStatusUpdate_ > 300) {
-                    lastStatusUpdate_ = now;
-                    if (status_) {
-                        status_->set_label(text.empty()
-                            ? "Listening…"
-                            : "…" + Glib::ustring(text).substr(
-                                  std::max<std::size_t>(
-                                      text.size(), 160) - 160));
-                    }
-                }
             });
         },
         [this](const std::string& msg) { toUi([this, msg] { onEngineStopped(msg); }); });
@@ -267,7 +251,7 @@ void VoiceView::maybeStartListening() {
     if (cancel_) cancel_->set_visible(true);
     if (status_)
         status_->set_label(stt_->engineReady() ? "Listening…"
-                                               : "Loading speech model…");
+                                               : "Starting voice service…");
     stt_->start();
 }
 

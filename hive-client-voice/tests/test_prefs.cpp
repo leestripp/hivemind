@@ -20,8 +20,6 @@ TEST_CASE("prefs round trip", "[prefs]") {
     p.setAgentName("Scout");
     p.setOnboardingDone(true);
     p.setVoiceFor("agent-1", "en_US-lessac-medium");
-    p.setGateOpen(0.03f);
-    p.setVadPeak(0.02f);
     p.save();
 
     Prefs q;
@@ -33,8 +31,6 @@ TEST_CASE("prefs round trip", "[prefs]") {
     REQUIRE(q.onboardingDone());
     REQUIRE(q.voiceFor("agent-1") == "en_US-lessac-medium");
     REQUIRE(q.voiceFor("nope").empty());
-    REQUIRE(q.gateOpen() == 0.03f);
-    REQUIRE(q.vadPeak() == 0.02f);
 
     std::filesystem::remove_all(tmp);
 }

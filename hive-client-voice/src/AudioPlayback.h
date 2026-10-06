@@ -31,16 +31,30 @@ class AudioPlayback {
     void stop();    // halt + drain; pending tags never fire
     void clear();   // drop everything queued; pending tags never fire
 
-    void submit(std::uint64_t tag, Pcm16 samples);
+    // `rate` is the PCM's native sample rate (e.g. 24000 from the TTS
+    // WAV); the sink opens at that rate and the device resamples.
+    void submit(std::uint64_t tag, Pcm16 samples, int rate);
+
+    // Called by the PipeWire sink (process callback consumed the last
+    // sample of this tag). Not for general use.
+    void itemDone(std::uint64_t tag);
 
     void setOnTagDone(std::function<void(std::uint64_t)> cb);
 
  private:
+    struct Item {
+        std::uint64_t tag;
+        Pcm16 samples;
+        int rate;
+    };
+
     void workerLoop();
 
     std::function<void(std::uint64_t)> on_tag_done_;
     std::mutex m_;
-    std::deque<std::pair<std::uint64_t, Pcm16>> queue_;
+    std::deque<Item> queue_;
+    std::deque<std::uint64_t> done_;  // tags consumed by the sink
+    bool clearSink_ = false;          // worker must drop the sink's ring
     std::condition_variable cv_;
     bool running_ = false;
     std::uint64_t generation_ = 0;  // bumped on clear/stop

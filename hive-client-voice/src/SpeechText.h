@@ -29,14 +29,6 @@ std::vector<std::string> toSentences(const std::vector<Clause>& clauses);
 // Convenience: raw text -> sentence queue.
 std::vector<std::string> toSpeechSentences(std::string_view raw);
 
-// Transcript cleanup (STT side): lowercase, strip filler words at the
-// edges, collapse whitespace, drop empty brackets.
-std::string normalizeTranscript(std::string_view raw);
-
-// Does the STT transcript look like wake/abort gibberish ("stop stop
-// stop")? Matches the Android heuristic.
-bool isAbortLike(std::string_view t);
-
 
 // Convenience: raw text -> one speakable string (markdown stripped,
 // fillers dropped). Used for full-note playback.

@@ -234,67 +234,6 @@ std::vector<std::string> toSpeechSentences(std::string_view raw) {
     return toSentences(splitClauses(raw));
 }
 
-std::string normalizeTranscript(std::string_view raw) {
-    std::string t = collapseWs(std::string(raw));
-    std::string low = lowerAscii(t);
-    auto trimPrefix = [&](const char* w) {
-        size_t len = std::string_view(w).size();
-        if (low.rfind(w, 0) == 0 &&
-            (low.size() == len ||
-             !std::isalnum(static_cast<unsigned char>(low[len])))) {
-            t = collapseWs(t.substr(len));
-            low = lowerAscii(t);
-            return true;
-        }
-        return false;
-    };
-    auto trimSuffix = [&](const char* w) {
-        size_t len = std::string_view(w).size();
-        if (low.size() > len && low.compare(low.size() - len, len, w) == 0 &&
-            !std::isalnum(static_cast<unsigned char>(low[low.size() - len - 1]))) {
-            t = collapseWs(t.substr(0, low.size() - len));
-            low = lowerAscii(t);
-            return true;
-        }
-        return false;
-    };
-    for (int k = 0; k < 3; ++k) {
-        bool again = false;
-        again |= trimPrefix("um");   again |= trimPrefix("uh");
-        again |= trimPrefix("hmm");  again |= trimPrefix("so");
-        again |= trimPrefix("now");
-        again |= trimSuffix("thanks"); again |= trimSuffix("thank you");
-        again |= trimSuffix("please");
-        if (!again) break;
-    }
-    std::string r;
-    for (size_t i = 0; i < t.size();) {
-        if ((t[i] == '(' && i + 1 < t.size() && t[i + 1] == ')') ||
-            (t[i] == '[' && i + 1 < t.size() && t[i + 1] == ']')) {
-            i += 2;
-            continue;
-        }
-        r += t[i++];
-    }
-    r = collapseWs(r);
-    // Trim stray leading/trailing punctuation left by filler stripping.
-    auto edge = [](char ch) {
-        return !std::isalnum(static_cast<unsigned char>(ch)) &&
-               ch != '\'' && ch != '(' && ch != '[';
-    };
-    size_t b = 0, e = r.size();
-    while (b < e && edge(r[b])) ++b;
-    while (e > b && edge(r[e - 1])) --e;
-    return r.substr(b, e - b);
-}
-
-bool isAbortLike(std::string_view t) {
-    std::string low = collapseWs(lowerAscii(t));
-    return low == "stop" || low == "stop stop" || low == "cancel" ||
-           low == "abort" || low == "never mind" || low == "forget it";
-}
-
-
 std::string forSpeech(std::string_view raw) {
     const auto sentences = toSpeechSentences(raw);
     std::string out;

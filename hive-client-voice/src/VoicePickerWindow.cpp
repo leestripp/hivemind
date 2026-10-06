@@ -4,92 +4,118 @@
 #include "Prefs.h"
 #include "TtsEngine.h"
 
-#include <cstdio>
-
 namespace hv {
 
 VoicePickerWindow::VoicePickerWindow(Prefs& prefs, std::string agentId,
                                      std::string agentName)
-    : Gtk::Window(), prefs_(prefs), agentId_(std::move(agentId)) {
+    : Gtk::Window(), prefs_(prefs), agentId_(std::move(agentId)),
+      pending_(prefs_.voiceFor(agentId_)) {
     set_title("Voice for " + agentName);
-    set_default_size(400, 420);
+    set_default_size(420, 480);
     set_modal(true);
 
     auto* root = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 8);
     root->set_margin(16);
     set_child(*root);
-    auto* title = Gtk::make_managed<Gtk::Label>("Pick a voice");
+
+    auto* title =
+        Gtk::make_managed<Gtk::Label>("Pick a voice for " + agentName);
     title->add_css_class("title-3");
     root->append(*title);
 
-    // Global speech-rate slider (piper --length_scale under the hood).
-    // Applies to every voice; previews use it live.
-    auto* speedLabel = Gtk::make_managed<Gtk::Label>();
-    const auto fmtSpeed = [](double s) {
-        char b[40];
-        snprintf(b, sizeof b, "Speech speed: %.2f\xc3\x97", s);
-        return std::string(b);
-    };
-    speedLabel->set_text(fmtSpeed(prefs_.ttsSpeed()));
-    speedLabel->add_css_class("dim-label");
-    root->append(*speedLabel);
-    auto* speed = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
-    // 2.0x sits ~halfway: user reports max-as-normal, so leave
-    // headroom above (piper --length_scale floor 0.25).
-    speed->set_range(0.5, 4.0);
-    speed->set_increments(0.05, 0.5);
-    speed->set_value(prefs_.ttsSpeed());
-    speed->signal_value_changed().connect([this, speed, speedLabel, fmtSpeed] {
-        const double s = speed->get_value();
-        prefs_.setTtsSpeed(s);
-        prefs_.save();
-        tts_->setSpeed(s);
-        speedLabel->set_text(fmtSpeed(s));
-    });
-    root->append(*speed);
+    // Live indicator of the pending selection — updates on every click.
+    selected_ = Gtk::make_managed<Gtk::Label>();
+    selected_->add_css_class("dim-label");
+    root->append(*selected_);
 
     auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroll->set_vexpand(true);
-    list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
-    scroll->set_child(*list_);
     root->append(*scroll);
+    auto* list = Gtk::make_managed<Gtk::ListBox>();
+    list->set_selection_mode(Gtk::SelectionMode::NONE);
+    scroll->set_child(*list);
 
     playback_ = std::make_unique<AudioPlayback>();
     playback_->start();
-    tts_ = std::make_unique<TtsEngine>(*playback_);
-    tts_->setSpeed(prefs_.ttsSpeed());  // after construction — calling
-                                        // this before tts_ exists
-                                        // segfaulted on picker open
+    tts_ = std::make_unique<TtsEngine>(*playback_, prefs_.chimpflowUrl(),
+                                       prefs_.chimpflowKey());
 
-    const auto voices = TtsEngine::voiceOptions(Prefs::voiceDir());
-    const std::string current = prefs_.voiceFor(agentId_);
+    const auto voices = tts_->voices();
+
+    auto addRow = [this, list](const std::string& voice,
+                               const std::string& label) {
+        Row r;
+        r.voice = voice;
+        r.row = Gtk::make_managed<Gtk::ListBoxRow>();
+        auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+        box->set_margin(6);
+        r.mark = Gtk::make_managed<Gtk::Label>("");
+        r.mark->set_width_chars(1);
+        r.name = Gtk::make_managed<Gtk::Label>(label);
+        box->append(*r.mark);
+        box->append(*r.name);
+        r.row->set_child(*box);
+        list->append(*r.row);
+        rows_.push_back(r);
+    };
+
+    addRow("", "Default voice (engine default)");
     if (voices.empty()) {
         auto* hint = Gtk::make_managed<Gtk::Label>(
-            "No .onnx voices found in\n" + Prefs::voiceDir());
+            "No voices available — is the ChimpFlow voice service\nrunning at " +
+            prefs_.chimpflowUrl() + "?");
         hint->add_css_class("dim-label");
-        list_->append(*hint);
+        auto* hintRow = Gtk::make_managed<Gtk::ListBoxRow>();
+        hintRow->set_child(*hint);
+        hintRow->set_activatable(false);
+        list->append(*hintRow);
     }
-    for (const auto& v : voices) {
-        auto* row = Gtk::make_managed<Gtk::Button>(v.label +
-                                                   (v.path == current ? " ✓" : ""));
-        std::string path = v.path;
-        row->signal_clicked().connect([this, path] { pick(path); });
-        list_->append(*row);
-    }
-    auto* none = Gtk::make_managed<Gtk::Button>("Default voice");
-    none->signal_clicked().connect([this] { pick(""); });
-    root->append(*none);
+    for (const auto& v : voices) addRow(v, v);
+
+    list->signal_row_activated().connect([this](Gtk::ListBoxRow* activated) {
+        for (const auto& r : rows_)
+            if (r.row == activated) select(r.voice);
+    });
+
+    updateMarks();
+
+    // Commit bar: Cancel discards, OK saves. No silent persistence.
+    auto* buttons =
+        Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+    buttons->set_halign(Gtk::Align::END);
+    auto* cancel = Gtk::make_managed<Gtk::Button>("_Cancel", true);
+    auto* ok = Gtk::make_managed<Gtk::Button>("_OK", true);
+    ok->add_css_class("suggested-action");
+    cancel->signal_clicked().connect([this] { close(); });
+    ok->signal_clicked().connect([this] {
+        prefs_.setVoiceFor(agentId_, pending_);
+        prefs_.save();
+        close();
+    });
+    buttons->append(*cancel);
+    buttons->append(*ok);
+    root->append(*buttons);
 }
 
 VoicePickerWindow::~VoicePickerWindow() = default;
 
-void VoicePickerWindow::pick(const std::string& path) {
-    prefs_.setVoiceFor(agentId_, path);
-    prefs_.save();
-    if (!path.empty()) tts_->preview("Hi, this is my voice.", path);
-    // Stay open so the user can audition others; Close via the window
-    // manager. (The Android picker finishes immediately; keeping the
-    // preview window alive is a desktop nicety.)
+void VoicePickerWindow::select(const std::string& voice) {
+    pending_ = voice;
+    updateMarks();
+    tts_->preview("Hi, this is my voice.", voice);
+}
+
+void VoicePickerWindow::updateMarks() {
+    for (auto& r : rows_) {
+        const bool sel = r.voice == pending_;
+        const std::string label = r.voice.empty() ? "Default voice (engine default)"
+                                                  : r.voice;
+        r.mark->set_text(sel ? "✓" : "");
+        r.name->set_markup(sel ? "<b>" + label + "</b>" : label);
+    }
+    selected_->set_label("Selected: " +
+                         (pending_.empty() ? std::string("default (engine voice)")
+                                           : pending_));
 }
 
 }  // namespace hv

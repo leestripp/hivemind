@@ -1,6 +1,7 @@
 #include "AudioPlayback.h"
 
 #include <chrono>
+#include <cstdio>
 #include <utility>
 
 #ifdef HIVEMIND_VOICE_PIPEWIRE
@@ -45,12 +46,21 @@ void AudioPlayback::clear() {
     std::lock_guard<std::mutex> lk(m_);
     ++generation_;
     queue_.clear();
+    done_.clear();  // pending tags must never fire
+    clearSink_ = true;
+    cv_.notify_all();
 }
 
-void AudioPlayback::submit(std::uint64_t tag, Pcm16 samples) {
+void AudioPlayback::itemDone(std::uint64_t tag) {
+    std::lock_guard<std::mutex> lk(m_);
+    done_.push_back(tag);
+    cv_.notify_all();
+}
+
+void AudioPlayback::submit(std::uint64_t tag, Pcm16 samples, int rate) {
     {
         std::lock_guard<std::mutex> lk(m_);
-        queue_.emplace_back(tag, std::move(samples));
+        queue_.push_back({tag, std::move(samples), rate});
     }
     cv_.notify_one();
 }
@@ -63,19 +73,40 @@ void AudioPlayback::setOnTagDone(std::function<void(std::uint64_t)> cb) {
 #ifdef HIVEMIND_VOICE_PIPEWIRE
 namespace {
 
-// PipeWire playback sink, 16 kHz mono s16le, fed from the worker thread.
-// Canonical pw_thread_loop + process-callback pattern (per
-// pipewire examples/audio-play.c); the process callback dequeues
-// buffers and signals the feeder, which copies from the current
-// utterance into each dequeued buffer.
+// PipeWire playback sink fed from an internal ring buffer.
+//
+// Canonical pattern per docs.pipewire.org/page_streams.html ("It is
+// recommended to call pw_stream_dequeue_buffer() and
+// pw_stream_queue_buffer() from the process() callback") — the
+// process callback drains the ring and fills EVERY dequeued buffer
+// in one go; buffers queued outside process() are delayed a cycle,
+// and each delayed cycle is one more chance to underrun (pop).
+//
+// Buffers are padded with silence when the ring is momentarily dry
+// (next utterance still synthesizing). The device NEVER underruns:
+// underruns, not the silence itself, are what click. PW 1.6 headers
+// ship PW_STREAM_FLAG_EARLY_PROCESS (0.3.81+): "call process as soon
+// as there is a buffer to dequeue ... keep the maximum number of
+// buffers queued" — exactly what a push feeder wants, so we set it.
 struct PwSink {
     pw_thread_loop* loop = nullptr;
     pw_stream* stream = nullptr;
     bool ok = false;
 
+    std::mutex ringM_;
+    Pcm16 ring_;                    // pending samples, fed by worker
+    std::size_t ringPos_ = 0;       // read cursor into ring_
+    std::uint64_t ringTag_ = 0;     // tag of the utterance in the ring
+    std::size_t ringLeft_ = 0;      // samples of ringTag_ not yet played
+    bool starvedLogged_ = false;
+
+    AudioPlayback* owner = nullptr;
+
     static void onProcess(void* data) {
         auto* self = static_cast<PwSink*>(data);
-        pw_thread_loop_signal(self->loop, false);
+        pw_buffer* b = nullptr;
+        while ((b = pw_stream_dequeue_buffer(self->stream)) != nullptr)
+            self->fill(b);
     }
 
     static void onStateChanged(void* data, pw_stream_state /*old*/,
@@ -83,12 +114,12 @@ struct PwSink {
         auto* self = static_cast<PwSink*>(data);
         if (state == PW_STREAM_STATE_ERROR)
             fprintf(stderr, "hive-voice: playback stream error: %s\n", error);
-        pw_thread_loop_signal(self->loop, false);
+        if (state == PW_STREAM_STATE_STREAMING) self->starvedLogged_ = false;
     }
 
     static const pw_stream_events events;
 
-    bool open() {
+    bool open(int rate) {
         pw_init(0, nullptr);
         loop = pw_thread_loop_new("hive-voice-play", nullptr);
         if (!loop) return false;
@@ -98,9 +129,13 @@ struct PwSink {
             return false;
         }
         pw_thread_loop_lock(loop);
+        char latencyFrac[32];
+        std::snprintf(latencyFrac, sizeof(latencyFrac), "%d/%d", rate / 10,
+                      rate);
         pw_properties* props = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback",
-            PW_KEY_MEDIA_ROLE, "Notification", nullptr);
+            PW_KEY_MEDIA_ROLE, "Notification", PW_KEY_NODE_LATENCY,
+            latencyFrac, nullptr);
         stream = pw_stream_new_simple(pw_thread_loop_get_loop(loop),
                                       "hive-voice-play", props, &events,
                                       this);
@@ -114,14 +149,15 @@ struct PwSink {
         spa_audio_info_raw fmt = {};
         fmt.format = SPA_AUDIO_FORMAT_S16_LE;
         fmt.channels = kChannels;
-        fmt.rate = kSampleRate;
+        fmt.rate = rate;
         uint8_t buffer[1024];
         spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
         const spa_pod* params = spa_format_audio_raw_build(&b,
             SPA_PARAM_EnumFormat, &fmt);
-        int res = pw_stream_connect(stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
+        const int res = pw_stream_connect(
+            stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
             static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT |
-                PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS),
+                PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_EARLY_PROCESS),
             &params, 1);
         if (res < 0) {
             pw_stream_destroy(stream);
@@ -138,13 +174,9 @@ struct PwSink {
     }
 
     void close() {
-        // Canonical teardown: destroy the stream WHILE HOLDING the
-        // thread-loop lock, then stop the loop. Destroying unlocked
-        // (the old code) raced the in-flight process callback —
-        // PipeWire warned "pw_stream_destroy called from wrong
-        // context" and segfaulted when the race went badly, which is
-        // what crashed the app when a voice-picker preview playback
-        // was torn down.
+        // Destroy the stream WHILE HOLDING the thread-loop lock (the
+        // earlier unlocked teardown raced the process callback and
+        // segfaulted — see the 2026-10-05 picker-preview crash).
         if (loop) pw_thread_loop_lock(loop);
         if (stream) {
             pw_stream_destroy(stream);
@@ -157,32 +189,77 @@ struct PwSink {
             loop = nullptr;
         }
         pw_deinit();
+        std::lock_guard<std::mutex> lk(ringM_);
+        ring_.clear();
+        ringPos_ = 0;
+        ringLeft_ = 0;
     }
 
-    // Copy up to `avail` samples from `src` into the next stream buffer;
-    // returns samples written. Blocking while the device is full.
-    std::size_t feed(const int16_t* src, std::size_t avail) {
-        pw_thread_loop_lock(loop);
-        for (;;) {
-            pw_buffer* b = pw_stream_dequeue_buffer(stream);
-            if (b) {
-                std::size_t n = 0;
-                if (b->buffer->datas[0].data) {
-                    const std::size_t capacity =
-                        b->buffer->datas[0].maxsize / sizeof(int16_t);
-                    n = std::min(capacity, avail);
-                    std::copy_n(src, n,
-                                static_cast<int16_t*>(b->buffer->datas[0].data));
-                    b->buffer->datas[0].chunk->offset = 0;
-                    b->buffer->datas[0].chunk->stride = sizeof(int16_t);
-                    b->buffer->datas[0].chunk->size = n * sizeof(int16_t);
-                }
-                pw_stream_queue_buffer(stream, b);
-                pw_thread_loop_unlock(loop);
-                return n;
-            }
-            pw_thread_loop_wait(loop);
+    // Worker thread: append one utterance to the ring.
+    void feed(Pcm16 samples, std::uint64_t tag) {
+        std::lock_guard<std::mutex> lk(ringM_);
+        // The ring only ever holds ONE utterance's tail; by the time a
+        // new one arrives the old is normally fully consumed. If it
+        // isn't (long utterance, sink reopened), the stale remainder
+        // belongs to a discarded epoch — drop it to keep the mapping
+        // tag->samples exact.
+        if (ringPos_ > 0) {
+            ring_.erase(ring_.begin(), ring_.begin() + ringPos_);
+            ringPos_ = 0;
         }
+        if (ringLeft_ > 0) ring_.clear();  // stale tail, new epoch
+        ring_.insert(ring_.end(), samples.begin(), samples.end());
+        ringTag_ = tag;
+        ringLeft_ = samples.size();
+    }
+
+    // Drain the ring into every dequeued buffer; silence-pad the tail.
+    // Runs on the thread-loop thread inside process() — no RT
+    // restrictions, plain mutex is fine here.
+    void fill(pw_buffer* b) {
+        spa_data& d = b->buffer->datas[0];
+        if (!d.data) {  // unmapped buffer: return as explicit silence
+            d.chunk->offset = 0;
+            d.chunk->stride = sizeof(int16_t);
+            d.chunk->size = 0;
+            pw_stream_queue_buffer(stream, b);
+            return;
+        }
+        const std::size_t capacity = d.maxsize / sizeof(int16_t);
+        auto* dst = static_cast<int16_t*>(d.data);
+        std::size_t n = 0;
+        std::uint64_t finishedTag = 0;
+        {
+            std::lock_guard<std::mutex> lk(ringM_);
+            const std::size_t avail = ring_.size() - ringPos_;
+            n = std::min(capacity, avail);
+            std::copy_n(ring_.data() + ringPos_, n, dst);
+            ringPos_ += n;
+            ringLeft_ -= std::min(ringLeft_, n);
+            if (ringPos_ == ring_.size()) {
+                ring_.clear();
+                ringPos_ = 0;
+            }
+            if (ringLeft_ == 0 && ringTag_ != 0 && n > 0) {
+                finishedTag = ringTag_;
+                ringTag_ = 0;
+            }
+        }
+        if (n < capacity) {
+            // Starved: pad with silence so the device clock never
+            // gaps. One log line per stream, not per buffer.
+            std::fill_n(dst + n, capacity - n, 0);
+            if (!starvedLogged_ && n == 0) {
+                starvedLogged_ = true;
+                fprintf(stderr, "hive-voice: playback starved (TTS lag?) — "
+                                "padding silence\n");
+            }
+        }
+        d.chunk->offset = 0;
+        d.chunk->stride = sizeof(int16_t);
+        d.chunk->size = capacity * sizeof(int16_t);
+        pw_stream_queue_buffer(stream, b);
+        if (finishedTag && owner) owner->itemDone(finishedTag);
     }
 };
 
@@ -204,57 +281,87 @@ const pw_stream_events PwSink::events = makeEvents();
 }  // namespace
 #endif  // HIVEMIND_VOICE_PIPEWIRE
 
+namespace {
+
+// 5 ms linear fades on both edges of an utterance. Each TTS sentence
+// arrives as its own submission and starts/ends at arbitrary waveform
+// amplitude; a hard cut to the next sentence (or to silence while the
+// next one synthesizes) is exactly the "pop" heard between words.
+// 5 ms is below audibility in speech but enough to ramp the waveform
+// to/from zero without a discontinuity.
+void applyEdgeFades(Pcm16& s, int rate) {
+    const std::size_t fade = std::min<std::size_t>(rate / 200, s.size() / 4);
+    if (fade == 0) return;
+    for (std::size_t i = 0; i < fade; ++i) {
+        const float k = static_cast<float>(i + 1) / (fade + 1);
+        s[i] = static_cast<int16_t>(s[i] * k);
+        s[s.size() - 1 - i] = static_cast<int16_t>(s[s.size() - 1 - i] * k);
+    }
+}
+
+}  // namespace
+
 void AudioPlayback::workerLoop() {
 #ifdef HIVEMIND_VOICE_PIPEWIRE
     PwSink sink;
-    if (!sink.open()) {
-        // Fall through to the timed path below with pw_stream == nullptr.
-    }
+    sink.owner = this;
+    int openedRate = 0;
 #endif
     for (;;) {
-        std::pair<std::uint64_t, Pcm16> item;
-        {
-            std::unique_lock<std::mutex> lk(m_);
-            cv_.wait(lk, [&] { return !running_ || !queue_.empty(); });
-            if (!running_) break;
-            item = std::move(queue_.front());
-            queue_.pop_front();
-        }
-        std::size_t written = 0;
-        while (running_ && written < item.second.size()) {
-#ifdef HIVEMIND_VOICE_PIPEWIRE
-            const std::size_t n = sink.ok
-                ? sink.feed(item.second.data() + written,
-                            item.second.size() - written)
-                : 0;
-            if (n == 0) {
-                // No usable stream: advance by wall-clock instead.
-                const std::size_t step =
-                    std::min<std::size_t>(kSampleRate / 10,
-                                          item.second.size() - written);
-                written += step;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            } else {
-                written += n;
-            }
-#else
-            const std::size_t step =
-                std::min<std::size_t>(kSampleRate / 10,
-                                      item.second.size() - written);
-            written += step;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-#endif
-        }
+        Item item;
+        std::vector<std::uint64_t> doneTags;
         std::function<void(std::uint64_t)> cb;
         {
-            std::lock_guard<std::mutex> lk(m_);
+            std::unique_lock<std::mutex> lk(m_);
+            cv_.wait(lk, [&] {
+                return !running_ || !queue_.empty() || !done_.empty() ||
+                       clearSink_;
+            });
+            if (!running_) break;
+            if (clearSink_) {
+                clearSink_ = false;
+                // Sink ring is dropped by close/reopen below when the
+                // next item arrives; nothing to do here beyond the
+                // queue/done clears in clear() itself.
+            }
+            doneTags.assign(done_.begin(), done_.end());
+            done_.clear();
             cb = on_tag_done_;
+            if (!queue_.empty()) {
+                item = std::move(queue_.front());
+                queue_.pop_front();
+            }
         }
-        if (cb && running_) cb(item.first);
+        for (const auto t : doneTags)
+            if (cb) cb(t);
+        if (item.samples.empty()) continue;
+        applyEdgeFades(item.samples, item.rate);
+#ifdef HIVEMIND_VOICE_PIPEWIRE
+        // The TTS WAV's native rate can change (engine swap): reopen
+        // the sink so we never resample in software.
+        if (sink.ok && openedRate != item.rate) {
+            sink.close();
+            sink.ok = false;
+            openedRate = 0;
+        }
+        if (!sink.ok && sink.open(item.rate)) openedRate = item.rate;
+        if (sink.ok) {
+            sink.feed(std::move(item.samples), item.tag);
+            continue;
+        }
+#endif
+        // No usable stream: advance by wall-clock instead.
+        std::size_t written = 0;
+        while (running_ && written < item.samples.size()) {
+            const std::size_t step = std::min<std::size_t>(
+                item.rate / 10, item.samples.size() - written);
+            written += step;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (cb) cb(item.tag);
     }
 #ifdef HIVEMIND_VOICE_PIPEWIRE
     if (sink.ok) sink.close();
 #endif
 }
-
 }  // namespace hv

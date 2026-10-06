@@ -29,11 +29,12 @@ add_executable(test_avatars test_avatars.cpp
 target_link_libraries(test_avatars PRIVATE Catch2::Catch2WithMain
     PkgConfig::GTKMM)
 
-add_executable(test_stt_models test_stt_models.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/SttModelProbe.cpp)
-target_link_libraries(test_stt_models PRIVATE Catch2::Catch2WithMain)
+# WavCodec is header-only pure logic — the WAV parse/resample/encode
+# path the ChimpFlow client depends on.
+add_executable(test_wav_codec test_wav_codec.cpp)
+target_link_libraries(test_wav_codec PRIVATE Catch2::Catch2WithMain)
 
-foreach(t test_speech_text test_announcer test_prefs test_avatars test_stt_models)
+foreach(t test_speech_text test_announcer test_prefs test_avatars test_wav_codec)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()

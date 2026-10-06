@@ -49,13 +49,3 @@ TEST_CASE("ellipsis becomes a pause", "[speech]") {
     REQUIRE(s[0].find("...") != std::string::npos);
 }
 
-TEST_CASE("normalizeTranscript strips fillers", "[speech]") {
-    REQUIRE(normalizeTranscript("  Um, hello world, thanks  ") == "hello world");
-    REQUIRE(normalizeTranscript("So now what") == "what");
-}
-
-TEST_CASE("isAbortLike", "[speech]") {
-    REQUIRE(isAbortLike("stop"));
-    REQUIRE(isAbortLike("Stop stop"));
-    REQUIRE(!isAbortLike("stop by the store"));
-}

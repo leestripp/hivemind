@@ -15,7 +15,27 @@ std::string home() {
 }  // namespace
 
 std::string Prefs::configPath() { return home() + "/.config/hive-client-voice/prefs.json"; }
-std::string Prefs::voiceDir() { return home() + "/.local/share/hive-client-voice/voices"; }
+
+std::string Prefs::chimpflowUrl() {
+    if (const char* u = std::getenv("CHIMPFLOW_URL"))
+        if (*u) return u;
+    return "http://127.0.0.1:8090";
+}
+
+std::string Prefs::chimpflowKey() {
+    if (const char* k = std::getenv("CHIMPFLOW_KEY"))
+        if (*k) return k;
+    // File next to prefs.json (mode 600) — keeps the secret out of
+    // prefs.json and out of the process environment.
+    const std::string path = home() + "/.config/hive-client-voice/chimpflow.key";
+    std::ifstream f(path);
+    std::string key;
+    std::getline(f, key);
+    while (!key.empty() &&
+           (key.back() == '\n' || key.back() == '\r' || key.back() == ' '))
+        key.pop_back();
+    return key;
+}
 
 void Prefs::load() {
     std::ifstream f(configPath());
@@ -30,11 +50,7 @@ void Prefs::load() {
     agent_id_ = str("agent_id");
     agent_name_ = str("agent_name");
     onboarding_done_ = j.value("onboarding_done", false);
-    gate_open_ = j.value("gate_open", gate_open_);
-    gate_close_ = j.value("gate_close", gate_close_);
-    vad_peak_ = j.value("vad_peak", vad_peak_);
     state_announce_ = j.value("state_announce", false);
-    tts_speed_ = j.value("tts_speed", 1.0);
     if (j.contains("voices") && j["voices"].is_object())
         for (auto& [k, v] : j["voices"].items())
             if (v.is_string()) voices_[k] = v.get<std::string>();
@@ -47,11 +63,7 @@ void Prefs::save() const {
     j["agent_id"] = agent_id_;
     j["agent_name"] = agent_name_;
     j["onboarding_done"] = onboarding_done_;
-    j["gate_open"] = gate_open_;
-    j["gate_close"] = gate_close_;
-    j["vad_peak"] = vad_peak_;
     j["state_announce"] = state_announce_;
-    j["tts_speed"] = tts_speed_;
     j["voices"] = voices_;
     std::filesystem::create_directories(
         std::filesystem::path(configPath()).parent_path());

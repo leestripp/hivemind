@@ -1,51 +1,44 @@
 #pragma once
 
 #include "AudioCommon.h"
+#include "WavCodec.h"
 
-#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <vector>
 
 namespace hv {
 
 class AudioPlayback;
+class ChimpFlowClient;
 
-// Queued-utterance TTS for streamed replies, backed by a piper
-// subprocess (the desktop stand-in for Android's TextToSpeech engine —
-// same sentence-queue contract: speakQueued() while the agent streams,
-// onQueueEmpty fires once when everything queued has played).
+// Queued-utterance TTS for streamed replies, backed by the ChimpFlow
+// gateway (audio.cpp pocket-tts over localhost HTTP). Same
+// sentence-queue contract as before: speakQueued() while the agent
+// streams, onQueueEmpty fires once when everything queued has played.
 //
-// Each utterance spawns `piper --model <voice> --output-raw`, is fed the
-// sentence on stdin, and stdout (raw s16le PCM, EOF = utterance end) is
-// submitted to AudioPlayback under a monotonically increasing tag.
-// Voices are per-agent piper model (.onnx) paths from Prefs::voiceDir().
+// Each utterance is one POST /v1/audio/speech; the returned WAV is
+// decoded to 16 kHz mono s16le and submitted to AudioPlayback under a
+// monotonically increasing tag. Voices are ChimpFlow model ids
+// ("" = engine default); per-agent assignments come from Prefs.
 class TtsEngine {
  public:
-    struct VoiceOption {
-        std::string path;   // .onnx model path
-        std::string label;  // stem for display
-    };
-
-    explicit TtsEngine(AudioPlayback& playback);
+    TtsEngine(AudioPlayback& playback, std::string chimpflowBase,
+              std::string chimpflowKey);
     ~TtsEngine();
     TtsEngine(const TtsEngine&) = delete;
     TtsEngine& operator=(const TtsEngine&) = delete;
 
-    // Applied per spawned utterance (piper --model); "" = engine default.
-    void applyVoice(const std::string& modelPath);
+    // Applied per queued utterance (the request's `model` field);
+    // "" = engine default.
+    void applyVoice(const std::string& voice);
     std::string voice() const;
-
-    // Speech-rate multiplier (1.0 = normal). Read at spawn time, so a
-    // change applies to the NEXT utterance. Clamped to [0.5, 4.0].
-    void setSpeed(double multiplier) { speed_ = std::clamp(multiplier, 0.5, 4.0); }
-    double speed() const { return speed_.load(); }
 
     // Queue a chunk for speech (from any thread).
     void speakQueued(const std::string& text);
@@ -56,7 +49,7 @@ class TtsEngine {
     void stop();
 
     // One-off sample playback (voice picker); interrupts anything prior.
-    void preview(const std::string& text, const std::string& modelPath);
+    void preview(const std::string& text, const std::string& voice);
 
     // Animated 0..1 envelope for the sphere while the agent talks.
     float level(float nowSec) const;
@@ -64,8 +57,9 @@ class TtsEngine {
     int outstanding() const { return outstanding_; }
     bool speaking() const { return speaking_; }
 
-    // List .onnx voices in a directory (empty/missing dir → {}).
-    static std::vector<VoiceOption> voiceOptions(const std::string& voiceDir);
+    // TTS voices the gateway currently serves (GET /v1/models); empty
+    // when the gateway is unreachable.
+    std::vector<std::string> voices();
 
     std::function<void()> onQueueEmpty;  // fires on the playback thread
 
@@ -79,10 +73,11 @@ class TtsEngine {
 
     void workerLoop();
     void onTagDone(std::uint64_t tag);
-    // Spawn piper, write text on stdin, read raw PCM to EOF.
-    Pcm16 synthesize(const std::string& text, const std::string& voice);
+    // POST to ChimpFlow and decode the WAV; {} on failure (logged).
+    DecodedWav synthesize(const std::string& text, const std::string& voice);
 
     AudioPlayback& playback_;
+    std::unique_ptr<ChimpFlowClient> chimp_;
     mutable std::mutex m_;
     std::deque<Utterance> queue_;
     std::condition_variable cv_;
@@ -90,7 +85,6 @@ class TtsEngine {
     std::thread worker_;
 
     std::string voice_;  // under m_
-    std::atomic<double> speed_{1.0};
     std::uint64_t epoch_ = 0;
     std::uint64_t nextTag_ = 1;
     std::atomic<int> outstanding_{0};

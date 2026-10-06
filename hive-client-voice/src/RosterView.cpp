@@ -260,10 +260,14 @@ void RosterView::appendAgentCard(const AgentInfo& a) {
         spin->set_valign(Gtk::Align::CENTER);
         row->append(*spin);
     }
-    auto* voiceBtn = Gtk::make_managed<Gtk::Button>("\U0001F399");
+    // Mic button shows the agent's current voice right on the label —
+    // "Default" when none is picked. Tooltip explains the click.
+    const std::string v = prefs_.voiceFor(a.id);
+    auto* voiceBtn = Gtk::make_managed<Gtk::Button>(
+        "\U0001F399 " + (v.empty() ? std::string("Default") : v));
     voiceBtn->add_css_class("hv-voice-btn");
     voiceBtn->add_css_class("flat");
-    voiceBtn->set_tooltip_text("Pick a voice for " + a.name);
+    voiceBtn->set_tooltip_text("Change the voice for " + a.name);
     voiceBtn->set_valign(Gtk::Align::CENTER);
     voiceBtn->signal_clicked().connect([this, a] { openVoicePicker(a); });
     row->append(*voiceBtn);
@@ -299,6 +303,7 @@ void RosterView::openVoicePicker(const AgentInfo& agent) {
         win->set_transient_for(*top);
         win->set_modal(true);
     }
+    win->signal_hide().connect([this] { refresh(); });
     win->present();
 }
 
@@ -328,7 +333,8 @@ void RosterView::announce(const std::vector<AgentInfo>& agents) {
     if (!tts_) {
         playback_ = std::make_unique<AudioPlayback>();
         playback_->start();
-        tts_ = std::make_unique<TtsEngine>(*playback_);
+        tts_ = std::make_unique<TtsEngine>(*playback_, prefs_.chimpflowUrl(),
+                                           prefs_.chimpflowKey());
     }
     for (const auto& n : notes) {
         tts_->applyVoice(prefs_.voiceFor(n.agentId));

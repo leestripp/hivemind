@@ -22,28 +22,15 @@ functional client you need:
 1. **Audio I/O** — `libpipewire-0.3-dev` (Debian/Ubuntu). Without it the
    app compiles a null backend: playback completes by wall-clock (TTS
    flow works silently) and the mic reports unavailable.
-2. **STT models** — whisper.cpp ggml models into
-   `~/.local/share/hive-client-voice/models/`:
-   - `ggml-tiny.en-q8_0.bin`  (live partials)
-   - `ggml-base.en-q8_0.bin`  (final decode on SEND)
-
-   ```sh
-   D=~/.local/share/hive-client-voice/models
-   mkdir -p "$D"
-   WM=https://huggingface.co/ggerganov/whisper.cpp/resolve/main
-   for m in ggml-tiny.en-q8_0.bin ggml-base.en-q8_0.bin; do
-       curl -fSL -o "$D/$m" "$WM/$m"
-   done
-   ```
-
-   At startup the app probes both files and logs one line per probe
-   (`hive-stt: model probe — ...`); a missing or truncated model names
-   the exact file and the curl command to fix it in the UI status.
-3. **TTS voice** — a piper binary on `PATH` (or `~/.local/bin/piper`)
-   plus at least one piper `.onnx` model in
-   `~/.local/share/hive-client-voice/voices/`. The session default is
-   `default.onnx`, overridable with the `HIVEMIND_VOICE_DEFAULT` env var
-   or per-agent via the voice picker.
+2. **ChimpFlow voice service** — local TTS+STT gateway at
+   `http://127.0.0.1:8090` (audio.cpp pocket-tts + whisper.cpp behind
+   an OpenAI-compatible API; nothing leaves the machine). All models
+   live inside the service — the app downloads and loads nothing.
+   - URL: `CHIMPFLOW_URL` env var (default `http://127.0.0.1:8090`)
+   - API key: `CHIMPFLOW_KEY` env var, or a
+     `~/.config/hive-client-voice/chimpflow.key` file (mode 600)
+   - Voices: whatever `GET /v1/voices` reports; picked per-agent in the
+     voice picker
 
 ## First run
 
@@ -55,9 +42,11 @@ and API key live in Settings; they're persisted to
 
 | file | role |
 |------|------|
-| `src/VoiceWindow.*` | the voice session — full VoiceActivity.kt port (poll ticks, cancel-confirm, inbox watch, interrupt-and-talk) |
-| `src/SttEngine.*` | whisper.cpp partial + final decode, VAD gate |
-| `src/TtsEngine.*` | piper subprocess queue, epoch stop model |
+| `src/VoiceView.*` | the voice session — full VoiceActivity.kt port (poll ticks, cancel-confirm, inbox watch, interrupt-and-talk) |
+| `src/SttEngine.*` | mic capture + SEND-time transcription via ChimpFlow |
+| `src/TtsEngine.*` | ChimpFlow sentence queue, epoch stop model |
+| `src/ChimpFlowClient.*` | ChimpFlow gateway HTTP client (TTS WAV, STT multipart) |
+| `src/WavCodec.h` | WAV decode/encode + resample to the 16 kHz mono contract |
 | `src/SphereArea.*` | swarm + honeycomb shaders (GLSL 330, epoxy) |
 | `src/Audio*.*` | PipeWire 16 kHz mono capture/playback + null fallback |
 | `src/ApiClient.*` | hub REST (`/api/agents`, threads, activity, cancel) |
@@ -67,5 +56,6 @@ and API key live in Settings; they're persisted to
 
 ## Tests
 
-`test_speech_text`, `test_announcer`, `test_prefs` (pure-logic units;
-run via ctest from the top-level build).
+`test_speech_text`, `test_announcer`, `test_prefs`, `test_avatars`,
+`test_wav_codec` (pure-logic units; run via ctest from the top-level
+build).

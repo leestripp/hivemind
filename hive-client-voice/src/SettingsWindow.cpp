@@ -44,7 +44,8 @@ SettingsWindow::SettingsWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
     addRow("Announce agent state changes", *announce_);
 
     auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Voices: drop .onnx piper models into\n" + Prefs::voiceDir());
+        "Speech: ChimpFlow voice service at " + Prefs::chimpflowUrl() +
+        "\n(key from CHIMPFLOW_KEY or the chimpflow.key file)");
     hint->add_css_class("dim-label");
     root->append(*hint);
 

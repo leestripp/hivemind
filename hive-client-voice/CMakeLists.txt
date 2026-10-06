@@ -1,10 +1,10 @@
 # hive-client-voice — GTK4 voice client (1:1 port of the Android voice app).
 #
 # Target: native C++23 / gtkmm-4.0. Mirrors hive-client's CMake shape.
-# Audio capture/playback is PipeWire (16 kHz mono float, matching the
-# Android AudioRecord/AudioTrack contract); TTS is a piper subprocess fed
-# one sentence per line on stdin, raw s16le PCM framed on stdout (see
-# TtsEngine); STT is whisper.cpp vendored from the Android app.
+# Audio capture/playback is PipeWire (16 kHz mono, matching the Android
+# AudioRecord/AudioTrack contract); TTS and STT are both served by the
+# local ChimpFlow gateway (audio.cpp + whisper.cpp over localhost HTTP,
+# see ChimpFlowClient) — no local models, no subprocesses.
 cmake_minimum_required(VERSION 3.28)
 
 find_package(PkgConfig REQUIRED)
@@ -37,8 +37,8 @@ add_executable(hive-client-voice
     src/AudioCommon.cpp
     src/AudioCapture.cpp
     src/AudioPlayback.cpp
+    src/ChimpFlowClient.cpp
     src/SttEngine.cpp
-    src/SttModelProbe.cpp
     src/TtsEngine.cpp
     src/SphereArea.cpp
     src/MainWindow.cpp
@@ -58,7 +58,6 @@ target_link_libraries(hive-client-voice PRIVATE
     PkgConfig::EPOXY
     nlohmann_json::nlohmann_json
     OmniNet
-    whisper
 )
 
 if(PIPEWIRE_FOUND)
@@ -75,23 +74,8 @@ if(TARGET compile_options)
     target_link_libraries(hive-client-voice PRIVATE compile_options)
 endif()
 
-# whisper.cpp is vendored by the Android app; reuse that exact subtree so
-# both apps track one STT engine. OpenMP parallelises the encoder.
-if(NOT TARGET whisper)
-    set(WHISPER_SDL2 OFF CACHE BOOL "" FORCE)
-    add_subdirectory(
-        ${CMAKE_SOURCE_DIR}/hive-android/app/src/main/cpp/whisper-cpp
-        ${CMAKE_BINARY_DIR}/whisper-cpp)
-endif()
-
-# Installed binary lives in ~/.local/bin, its whisper/libggml shared
-# libs in ~/.local/lib — anchor the rpath to the binary so the loader
-# finds them without LD_LIBRARY_PATH or ldconfig.
 set_target_properties(hive-client-voice PROPERTIES
-    INSTALL_RPATH "$ORIGIN/../lib"
-    # DT_RPATH (not RUNPATH): RUNPATH is not transitive, and
-    # libwhisper.so has no rpath of its own for libggml.
-    LINK_OPTIONS "-Wl,--disable-new-dtags")
+    INSTALL_RPATH "$ORIGIN/../lib")
 install(TARGETS hive-client-voice RUNTIME DESTINATION bin)
 
 # Data: desktop entry + icon.
