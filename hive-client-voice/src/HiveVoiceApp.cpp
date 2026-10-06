@@ -37,14 +37,16 @@ void HiveVoiceApp::on_activate() {
     win->present();
 
     // System-wide push-to-talk via the XDG GlobalShortcuts portal.
-    // Works from any workspace/activity; the portal shows a one-time
-    // permission dialog, later launches restore silently. Only acts
-    // when a voice session is open (else nothing to talk to).
-    if (!keys_) {
+    // DISABLED by default: a prior enablement grabbed a global key and
+    // the resulting crash wedged the compositor's key handling, killing
+    // the user's screen-magnifier (accessibility) shortcut. Opt-in only
+    // via HIVE_VOICE_GLOBAL_KEY, and deliberately a key with NO modifier
+    // overlap with GNOME's accessibility bindings.
+    if (!keys_ && std::getenv("HIVE_VOICE_GLOBAL_KEY")) {
         keys_ = std::make_unique<GlobalShortcuts>([] {
             if (auto* v = DebugShell::voiceView()) v->toggleTalk();
         });
-        keys_->bind("<Super><Shift>t");
+        keys_->bind(std::getenv("HIVE_VOICE_GLOBAL_KEY"));
     }
 }
 
