@@ -36,6 +36,12 @@ public:
     bool stateAnnounce() const { return state_announce_; }
     void setStateAnnounce(bool v) { state_announce_ = v; }
 
+    // Last main-window size; 0 means "never saved, use the default".
+    int windowWidth() const { return window_width_; }
+    void setWindowWidth(int v) { window_width_ = v; }
+    int windowHeight() const { return window_height_; }
+    void setWindowHeight(int v) { window_height_ = v; }
+
     // ChimpFlow gateway. Not persisted: url falls back to the
     // CHIMPFLOW_URL env var (default http://127.0.0.1:8090); the key
     // comes from CHIMPFLOW_KEY or the chimpflow.key file next to
@@ -53,4 +59,6 @@ private:
     bool onboarding_done_{false};
     std::map<std::string, std::string> voices_;
     bool state_announce_{false};
+    int window_width_{0};
+    int window_height_{0};
 };

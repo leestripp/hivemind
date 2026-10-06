@@ -51,6 +51,8 @@ void Prefs::load() {
     agent_name_ = str("agent_name");
     onboarding_done_ = j.value("onboarding_done", false);
     state_announce_ = j.value("state_announce", false);
+    window_width_ = j.value("win_width", 0);
+    window_height_ = j.value("win_height", 0);
     if (j.contains("voices") && j["voices"].is_object())
         for (auto& [k, v] : j["voices"].items())
             if (v.is_string()) voices_[k] = v.get<std::string>();
@@ -64,6 +66,8 @@ void Prefs::save() const {
     j["agent_name"] = agent_name_;
     j["onboarding_done"] = onboarding_done_;
     j["state_announce"] = state_announce_;
+    j["win_width"] = window_width_;
+    j["win_height"] = window_height_;
     j["voices"] = voices_;
     std::filesystem::create_directories(
         std::filesystem::path(configPath()).parent_path());

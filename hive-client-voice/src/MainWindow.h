@@ -22,6 +22,10 @@ class MainWindow : public Gtk::Window {
     void showVoice(const AgentInfo& agent);
     void showRoster();
 
+ protected:
+    // Save the window size the user left the window at, then close.
+    bool on_close_request() override;
+
  private:
     Prefs& prefs_;
     Gtk::Stack* stack_ = nullptr;

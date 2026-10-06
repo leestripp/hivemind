@@ -8,7 +8,11 @@ namespace hv {
 
 MainWindow::MainWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
     set_title("HiveMind Voice");
-    set_default_size(440, 620);
+    // Restore the last-used size (prefs 0 = first run -> the default).
+    if (prefs_.windowWidth() > 0 && prefs_.windowHeight() > 0)
+        set_default_size(prefs_.windowWidth(), prefs_.windowHeight());
+    else
+        set_default_size(440, 620);
 
     stack_ = Gtk::make_managed<Gtk::Stack>();
     stack_->set_transition_type(Gtk::StackTransitionType::SLIDE_LEFT_RIGHT);
@@ -37,6 +41,14 @@ void MainWindow::showVoice(const AgentInfo& agent) {
     stack_->add(*voice_, "voice");
     stack_->set_visible_child("voice");
     set_title(agent.name + " — HiveMind Voice");
+}
+
+bool MainWindow::on_close_request() {
+    // Persist the size the user actually left the window at.
+    prefs_.setWindowWidth(get_width());
+    prefs_.setWindowHeight(get_height());
+    prefs_.save();
+    return Gtk::Window::on_close_request();
 }
 
 void MainWindow::showRoster() {
