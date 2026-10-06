@@ -134,6 +134,9 @@ DecodedWav TtsEngine::synthesize(const std::string& text,
                                   const std::string& voice) {
     try {
         DecodedWav d = chimp_->synthesize(text, voice);
+        // Same loudness whatever voice the agent wears — the catalog
+        // spans ~6 dB RMS voice-to-voice otherwise.
+        normalizeLoudness(d.pcm);
         speaking_ = true;
         return d;
     } catch (const std::exception& e) {

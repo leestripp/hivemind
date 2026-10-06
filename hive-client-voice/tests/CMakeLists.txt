@@ -34,7 +34,13 @@ target_link_libraries(test_avatars PRIVATE Catch2::Catch2WithMain
 add_executable(test_wav_codec test_wav_codec.cpp)
 target_link_libraries(test_wav_codec PRIVATE Catch2::Catch2WithMain)
 
-foreach(t test_speech_text test_announcer test_prefs test_avatars test_wav_codec)
+# Loudness normalization — the shared-volume DSP every TTS utterance
+# gets before playback.
+add_executable(test_audio_common test_audio_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/AudioCommon.cpp)
+target_link_libraries(test_audio_common PRIVATE Catch2::Catch2WithMain)
+
+foreach(t test_speech_text test_announcer test_prefs test_avatars test_wav_codec test_audio_common)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()
