@@ -26,6 +26,7 @@ namespace hv {
 //   phase <idle|listening|thinking|speaking|processing>
 //   level <0..1>
 //   glinfo                   GL renderer/version strings from the sphere
+//   talk                     toggle the Talk button (global-shortcut hook)
 //
 // Socket: $HIVE_VOICE_CTL, else $XDG_RUNTIME_DIR/hive-voice-ctl.sock,
 // else /tmp/hive-voice-ctl-<uid>.sock.

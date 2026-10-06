@@ -52,7 +52,7 @@ std::string jsonEscape(const std::string& s) {
 const char* kHelp =
     "commands: help | status | windows | shot <path.png> [title] | agents "
     "| open <agent> | say <text> | phase <idle|listening|thinking|speaking|"
-    "processing> | level <0..1> | glinfo\n";
+    "processing> | level <0..1> | glinfo | talk\n";
 }  // namespace
 
 void DebugShell::registerRoster(RosterView* w) { g_roster = w; }
@@ -288,6 +288,16 @@ std::string DebugShell::handle(const std::string& line) {
         } catch (...) {
             return "error: bad level\n";
         }
+    }
+
+    if (line == "talk") {
+        // Global-shortcut hook: GNOME's native custom keybinding runs a
+        // helper that pokes this socket. handle() already executes on the
+        // GTK main thread (the serve worker marshals every command through
+        // signal_idle), so toggleTalk is safe to call here directly.
+        if (!g_voice) return "error: no voice session open\n";
+        g_voice->toggleTalk();
+        return "ok\n";
     }
 
     return "error: unknown command — " + std::string(kHelp);
