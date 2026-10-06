@@ -75,9 +75,12 @@ void TtsEngine::preview(const std::string& text, const std::string& voice) {
 
 float TtsEngine::level(float nowSec) const {
     if (!speaking_) return 0.0f;
-    const float base = 0.38f + 0.22f * std::sin(nowSec * 7.3f) *
+    // Wide envelope: the sphere's brightness floor is deliberately low,
+    // so this swing IS the visual voice — let it breathe across most
+    // of the 0..1 range instead of hovering mid-band.
+    const float base = 0.42f + 0.36f * std::sin(nowSec * 7.3f) *
                                    std::sin(nowSec * 2.1f + 1.3f);
-    return std::clamp(base, 0.08f, 0.75f);
+    return std::clamp(base, 0.05f, 0.90f);
 }
 
 std::vector<std::string> TtsEngine::voices() { return chimp_->voices(); }

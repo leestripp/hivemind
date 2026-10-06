@@ -42,11 +42,17 @@ void main(){
     float thinkAmt  = max(0.0, 1.0 - abs(uState - 2.0));
     float speakAmt  = clamp(uState - 2.0, 0.0, 1.0) * clamp(4.0 - uState, 0.0, 1.0);
     float procAmt   = clamp(uState - 3.0, 0.0, 1.0);
+    float idleAmt   = clamp(1.0 - uState, 0.0, 1.0);
     float pulse = 0.5 + 0.5 * sin(uTime * 3.2);
+
+    // Idle is the "all is quiet" state: slower drift, smaller wander,
+    // slower spin, dimmer dots — but never frozen, the swarm keeps
+    // breathing. calm scales every motion term at once.
+    float calm = 1.0 - 0.45 * idleAmt;
 
     vec3  baseDir = normalize(aSeed0.xyz);
     float ph      = aSeed1.y;
-    float speed   = 0.55 + aSeed0.w * 1.45;
+    float speed   = (0.55 + aSeed0.w * 1.45) * calm;
     float t       = uTime * speed + ph * 113.0;
 
     float agit = clamp(uLevel + thinkAmt * 0.55 + procAmt * 0.45 * pulse, 0.0, 1.5);
@@ -55,7 +61,7 @@ void main(){
                             sin(uTime * 0.23),
                             sin(uTime * 0.19 + 4.2));
 
-    float wanderAmp = 0.08 + 0.10 * agit;
+    float wanderAmp = (0.08 + 0.10 * agit) * (1.0 - 0.35 * idleAmt);
     float f1 = 1.9 + 1.3 * hash1(ph * 3.1 + 0.7);
     float f2 = 2.6 + 1.5 * hash1(ph * 5.3 + 2.9);
     float f3 = 3.4 + 1.7 * hash1(ph * 7.7 + 5.1);
@@ -83,8 +89,8 @@ void main(){
 
     vec3 world = baseDir * radius + wander * wanderAmp + dart + core;
 
-    float rotSpeed = 0.25 + 0.15 * listenAmt + 1.30 * thinkAmt
-                   + 0.30 * speakAmt + 0.55 * procAmt;
+    float rotSpeed = (0.25 + 0.15 * listenAmt + 1.30 * thinkAmt
+                    + 0.30 * speakAmt + 0.55 * procAmt) * calm;
     float a = uTime * rotSpeed + baseDir.y * (thinkAmt + 0.4 * procAmt) * 2.0;
     float ca = cos(a), sa = sin(a);
     world = vec3(world.x * ca - world.z * sa, world.y,
@@ -116,12 +122,16 @@ void main(){
     float bee = step(0.88, hash1(ph * 29.1 + 3.3));
     col = mix(col, vec3(1.0, 0.72, 0.25), bee * 0.55);
 
-    float bright = aSeed1.w * (0.85 + 0.75 * agit);
+    // Brightness range: the floor sits LOW (dimmer still when idle) so
+    // the voice level owns most of the range — speech visibly swells
+    // and fades instead of riding an always-bright baseline.
+    float baseBright = 0.62 - 0.24 * idleAmt;   // 0.38 idle, 0.62 active
+    float bright = aSeed1.w * (baseBright + 1.45 * agit);
     bright = mix(bright, 0.75 + 0.25 * dartOn + 0.30 * pulse, procAmt);
 
     float depthFade = 0.55 + 0.45 *
         smoothstep(-(uCamDist + 1.3), -(uCamDist - 1.3), view.z);
-    vColor = vec4(col * max(0.30, bright) * 1.55, depthFade);
+    vColor = vec4(col * max(0.22, bright) * 1.55, depthFade);
 }
 )GLSL";
 
@@ -396,7 +406,7 @@ bool SphereArea::on_render(const Glib::RefPtr<Gdk::GLContext>& context) {
     state_ += (stateTarget_ - state_) * 0.08f;
     if (std::abs(stateTarget_ - state_) < 0.01f) state_ = stateTarget_;
     const float breathing = targetLevel_ < 0.02f
-        ? 0.06f + 0.05f * std::sin(t * 1.7f)
+        ? 0.045f + 0.035f * std::sin(t * 1.7f)
         : 0.0f;
     const float lvl = std::clamp(level_ + breathing, 0.0f, 1.0f);
 
