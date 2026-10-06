@@ -39,6 +39,7 @@ add_executable(hive-client-voice
     src/AudioCapture.cpp
     src/AudioPlayback.cpp
     src/ChimpFlowClient.cpp
+    src/SoundFx.cpp
     src/SttEngine.cpp
     src/TtsEngine.cpp
     src/SphereArea.cpp

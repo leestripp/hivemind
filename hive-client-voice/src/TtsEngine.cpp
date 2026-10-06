@@ -101,7 +101,18 @@ void TtsEngine::workerLoop() {
             std::lock_guard<std::mutex> lk(m_);
             if (epoch_ != epochAtSpawn) continue;
         }
-        if (!d.pcm.empty()) playback_.submit(u.tag, std::move(d.pcm), d.rate);
+        if (!d.pcm.empty()) {
+            playback_.submit(u.tag, std::move(d.pcm), d.rate);
+        } else {
+            // Synthesis failed: no playback item will ever carry this
+            // tag, so complete the queue slot HERE. Without this the
+            // speakQueued() increment of outstanding_ leaks — the app
+            // then waits for an onQueueEmpty that never comes and the
+            // turn never returns to Idle (Stop chrome stuck on screen
+            // long after the agent finished; polling has already
+            // stopped because the agent went idle).
+            onTagDone(u.tag);
+        }
     }
 }
 

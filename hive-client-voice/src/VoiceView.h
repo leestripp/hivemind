@@ -21,6 +21,7 @@ namespace hv {
 
 class AudioCapture;
 class AudioPlayback;
+class SoundFx;
 class SttEngine;
 class TtsEngine;
 
@@ -126,6 +127,7 @@ class VoiceView : public Gtk::Box {
     std::unique_ptr<AudioPlayback> playback_;
     std::unique_ptr<SttEngine> stt_;
     std::unique_ptr<TtsEngine> tts_;
+    std::unique_ptr<SoundFx> fx_;
     std::unique_ptr<ApiClient> api_;
     std::unique_ptr<AgentStateAnnouncer> announcer_;
 

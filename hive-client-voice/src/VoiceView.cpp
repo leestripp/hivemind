@@ -5,6 +5,7 @@
 #include "AudioCapture.h"
 #include "Avatars.h"
 #include "AudioPlayback.h"
+#include "SoundFx.h"
 #include "SpeechText.h"
 #include "SttEngine.h"
 #include "TtsEngine.h"
@@ -83,6 +84,9 @@ VoiceView::VoiceView(BaseObjectType* cobject,
             if (phase_ == Phase::Streaming && turnDone_) toIdle("");
         });
     };
+    // PTT confirmation beeps live on their own playback queue so they
+    // never interleave with (or delay) TTS utterances.
+    fx_ = std::make_unique<SoundFx>();
     capture_ = std::make_unique<AudioCapture>();
     stt_ = std::make_unique<SttEngine>(
         *capture_, prefs_.chimpflowUrl(), prefs_.chimpflowKey(),
@@ -240,11 +244,13 @@ void VoiceView::maybeStartListening() {
     if (status_)
         status_->set_label(stt_->engineReady() ? "Listening…"
                                                : "Starting voice service…");
+    if (fx_) fx_->recordingStarted();
     stt_->start();
 }
 
 void VoiceView::sendTranscript() {
     if (sphere_) sphere_->setLevel(0.0f);
+    if (fx_) fx_->recordingStopped();
     phase_ = Phase::Thinking;
     ++turnGen_;
     tts_->applyVoice(voiceNameFor(agent_.id));
@@ -425,6 +431,7 @@ void VoiceView::cancelCurrent() {
     pendingSpeech_.clear();
     switch (phase_) {
         case Phase::Listening:
+            if (fx_) fx_->recordingStopped();
             stt_->discard();
             toIdle("Cancelled");
             break;
