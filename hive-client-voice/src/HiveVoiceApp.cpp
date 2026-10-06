@@ -2,7 +2,9 @@
 
 #include "ApiClient.h"
 #include "DebugShell.h"
+#include "GlobalShortcuts.h"
 #include "MainWindow.h"
+#include "VoiceView.h"
 #include "SettingsWindow.h"
 #include "VoicePickerWindow.h"
 
@@ -33,6 +35,17 @@ void HiveVoiceApp::on_activate() {
     auto* win = Gtk::make_managed<MainWindow>(prefs_);
     add_window(*win);
     win->present();
+
+    // System-wide push-to-talk via the XDG GlobalShortcuts portal.
+    // Works from any workspace/activity; the portal shows a one-time
+    // permission dialog, later launches restore silently. Only acts
+    // when a voice session is open (else nothing to talk to).
+    if (!keys_) {
+        keys_ = std::make_unique<GlobalShortcuts>([] {
+            if (auto* v = DebugShell::voiceView()) v->toggleTalk();
+        });
+        keys_->bind("<Super><Shift>t");
+    }
 }
 
 void HiveVoiceApp::showSettings() {}

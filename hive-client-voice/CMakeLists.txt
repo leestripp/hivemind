@@ -29,6 +29,7 @@ add_executable(hive-client-voice
     src/main.cpp
     src/Avatars.cpp
     src/DebugShell.cpp
+    src/GlobalShortcuts.cpp
     src/HiveVoiceApp.cpp
     src/Prefs.cpp
     src/ApiClient.cpp

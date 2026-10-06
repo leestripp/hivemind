@@ -53,6 +53,7 @@ void Prefs::load() {
     state_announce_ = j.value("state_announce", false);
     window_width_ = j.value("win_width", 0);
     window_height_ = j.value("win_height", 0);
+    global_shortcut_token_ = j.value("global_shortcut_token", "");
     if (j.contains("voices") && j["voices"].is_object())
         for (auto& [k, v] : j["voices"].items())
             if (v.is_string()) voices_[k] = v.get<std::string>();
@@ -68,6 +69,7 @@ void Prefs::save() const {
     j["state_announce"] = state_announce_;
     j["win_width"] = window_width_;
     j["win_height"] = window_height_;
+    j["global_shortcut_token"] = global_shortcut_token_;
     j["voices"] = voices_;
     std::filesystem::create_directories(
         std::filesystem::path(configPath()).parent_path());

@@ -97,19 +97,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
 
     if (talk_) {
         talk_->set_sensitive(false);
-        talk_->signal_clicked().connect([this] {
-            const long now = nowMs();
-            if (now - lastTalkClick_ < 500) return;  // debounce
-            lastTalkClick_ = now;
-            switch (phase_) {
-                case Phase::Idle:
-                    if (!stopping_) maybeStartListening();
-                    break;
-                case Phase::Listening: sendTranscript(); break;
-                case Phase::Streaming: interruptAndTalk(); break;
-                default: break;  // Setup/Thinking: insensitive
-            }
-        });
+        talk_->signal_clicked().connect([this] { toggleTalk(); });
     }
     if (cancel_) {
         cancel_->set_visible(false);
@@ -407,6 +395,20 @@ void VoiceView::onEngineStopped(const std::string& msg) {
                                " — SEND keeps what you have, TALK restarts");
     } else {
         toIdle(msg);
+    }
+}
+
+void VoiceView::toggleTalk() {
+    const long now = nowMs();
+    if (now - lastTalkClick_ < 500) return;  // debounce
+    lastTalkClick_ = now;
+    switch (phase_) {
+        case Phase::Idle:
+            if (!stopping_) maybeStartListening();
+            break;
+        case Phase::Listening: sendTranscript(); break;
+        case Phase::Streaming: interruptAndTalk(); break;
+        default: break;  // Setup/Thinking: insensitive
     }
 }
 

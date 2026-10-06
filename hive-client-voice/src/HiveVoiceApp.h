@@ -24,7 +24,8 @@ class HiveVoiceApp : public Gtk::Application {
     void openSavedSession();
 
     Prefs prefs_;
-    std::unique_ptr<class DebugShell> shell_;  // unix-socket test harness
+    std::unique_ptr<class DebugShell> shell_;    // unix-socket test harness
+    std::unique_ptr<class GlobalShortcuts> keys_;  // portal global key
 };
 
 }  // namespace hv

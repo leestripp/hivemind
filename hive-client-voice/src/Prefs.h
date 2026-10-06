@@ -36,6 +36,14 @@ public:
     bool stateAnnounce() const { return state_announce_; }
     void setStateAnnounce(bool v) { state_announce_ = v; }
 
+    // XDG GlobalShortcuts session token — persisted after a successful
+    // bind so later launches restore the shortcut without a new
+    // permission dialog. Empty until the first successful bind.
+    std::string globalShortcutToken() const { return global_shortcut_token_; }
+    void setGlobalShortcutToken(const std::string& v) {
+        global_shortcut_token_ = v;
+    }
+
     // Last main-window size; 0 means "never saved, use the default".
     int windowWidth() const { return window_width_; }
     void setWindowWidth(int v) { window_width_ = v; }
@@ -58,6 +66,7 @@ private:
     std::string agent_name_;
     bool onboarding_done_{false};
     std::map<std::string, std::string> voices_;
+    std::string global_shortcut_token_;
     bool state_announce_{false};
     int window_width_{0};
     int window_height_{0};

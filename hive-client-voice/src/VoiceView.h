@@ -49,6 +49,10 @@ class VoiceView : public Gtk::Box {
     std::string debugPhaseName() const;
     std::string debugStatusText() const;
     void debugSay(const std::string& text);  // as if STT produced it
+
+    // What the TALK button does — same debounce + phase switch. Used by
+    // the button and the XDG global shortcut (portal Activated signal).
+    void toggleTalk();
     void debugSetSphere(SphereState state, float level);
     void debugSetSphereLevel(float level);
     std::string debugSphereStats() const;

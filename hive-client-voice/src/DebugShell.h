@@ -37,6 +37,7 @@ class DebugShell {
     // Page registry (single-window app; latest registration wins).
     static void registerRoster(class RosterView* w);
     static void registerVoice(class VoiceView* w);  // nullptr on page close
+    static class VoiceView* voiceView();  // current page, or nullptr
 
  private:
     void serveLoop();

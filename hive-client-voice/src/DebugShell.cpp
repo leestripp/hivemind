@@ -57,6 +57,7 @@ const char* kHelp =
 
 void DebugShell::registerRoster(RosterView* w) { g_roster = w; }
 void DebugShell::registerVoice(VoiceView* w) { g_voice = w; }
+VoiceView* DebugShell::voiceView() { return g_voice; }
 
 DebugShell::DebugShell(Gtk::Application& app) : app_(app), path_(socketPath()) {
     listenFd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
