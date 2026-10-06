@@ -96,8 +96,10 @@ struct PwSink {
     std::mutex ringM_;
     Pcm16 ring_;                    // pending samples, fed by worker
     std::size_t ringPos_ = 0;       // read cursor into ring_
-    std::uint64_t ringTag_ = 0;     // tag of the utterance in the ring
-    std::size_t ringLeft_ = 0;      // samples of ringTag_ not yet played
+    // (tag, unplayed sample count) in play order. The ring queues ANY
+    // number of utterances; a tag completes the moment its count
+    // reaches zero inside fill().
+    std::deque<std::pair<std::uint64_t, std::size_t>> ringTags_;
     bool starvedLogged_ = false;
 
     AudioPlayback* owner = nullptr;
@@ -192,25 +194,34 @@ struct PwSink {
         std::lock_guard<std::mutex> lk(ringM_);
         ring_.clear();
         ringPos_ = 0;
-        ringLeft_ = 0;
+        ringTags_.clear();
     }
 
-    // Worker thread: append one utterance to the ring.
+    // Worker thread: append one utterance to the ring. Utterances
+    // QUEUE behind whatever is playing — synthesis is often faster
+    // than playback, so the previous utterance's unplayed tail must
+    // survive. Dropping it (the old single-slot behaviour) both cut
+    // the audio mid-sentence and lost the tag completion the TTS
+    // engine's outstanding-utterance accounting waits on — the app
+    // then sat in Streaming with the Stop chrome showing forever.
     void feed(Pcm16 samples, std::uint64_t tag) {
         std::lock_guard<std::mutex> lk(ringM_);
-        // The ring only ever holds ONE utterance's tail; by the time a
-        // new one arrives the old is normally fully consumed. If it
-        // isn't (long utterance, sink reopened), the stale remainder
-        // belongs to a discarded epoch — drop it to keep the mapping
-        // tag->samples exact.
-        if (ringPos_ > 0) {
+        if (ringPos_ > 0) {  // compact the consumed prefix
             ring_.erase(ring_.begin(), ring_.begin() + ringPos_);
             ringPos_ = 0;
         }
-        if (ringLeft_ > 0) ring_.clear();  // stale tail, new epoch
         ring_.insert(ring_.end(), samples.begin(), samples.end());
-        ringTag_ = tag;
-        ringLeft_ = samples.size();
+        ringTags_.push_back({tag, samples.size()});
+    }
+
+    // Stop/clear: drop everything queued + playing. The dropped tags
+    // never fire — that is clear()'s contract ("pending tags never
+    // fire"); the caller has already zeroed its own accounting.
+    void dropRing() {
+        std::lock_guard<std::mutex> lk(ringM_);
+        ring_.clear();
+        ringPos_ = 0;
+        ringTags_.clear();
     }
 
     // Drain the ring into every dequeued buffer; silence-pad the tail.
@@ -228,21 +239,29 @@ struct PwSink {
         const std::size_t capacity = d.maxsize / sizeof(int16_t);
         auto* dst = static_cast<int16_t*>(d.data);
         std::size_t n = 0;
-        std::uint64_t finishedTag = 0;
+        std::vector<std::uint64_t> finishedTags;
         {
             std::lock_guard<std::mutex> lk(ringM_);
             const std::size_t avail = ring_.size() - ringPos_;
             n = std::min(capacity, avail);
             std::copy_n(ring_.data() + ringPos_, n, dst);
             ringPos_ += n;
-            ringLeft_ -= std::min(ringLeft_, n);
+            // Walk the play order: every tag whose last sample this
+            // buffer just consumed is complete.
+            std::size_t consumed = n;
+            while (consumed > 0 && !ringTags_.empty()) {
+                auto& [tag, left] = ringTags_.front();
+                const std::size_t take = std::min(left, consumed);
+                left -= take;
+                consumed -= take;
+                if (left == 0) {
+                    finishedTags.push_back(tag);
+                    ringTags_.pop_front();
+                }
+            }
             if (ringPos_ == ring_.size()) {
                 ring_.clear();
                 ringPos_ = 0;
-            }
-            if (ringLeft_ == 0 && ringTag_ != 0 && n > 0) {
-                finishedTag = ringTag_;
-                ringTag_ = 0;
             }
         }
         if (n < capacity) {
@@ -259,7 +278,10 @@ struct PwSink {
         d.chunk->stride = sizeof(int16_t);
         d.chunk->size = capacity * sizeof(int16_t);
         pw_stream_queue_buffer(stream, b);
-        if (finishedTag && owner) owner->itemDone(finishedTag);
+        // itemDone takes the owner's m_; fire AFTER releasing ringM_ so
+        // the two locks are never held together in this direction.
+        for (const auto t : finishedTags)
+            if (owner) owner->itemDone(t);
     }
 };
 
@@ -320,9 +342,13 @@ void AudioPlayback::workerLoop() {
             if (!running_) break;
             if (clearSink_) {
                 clearSink_ = false;
-                // Sink ring is dropped by close/reopen below when the
-                // next item arrives; nothing to do here beyond the
-                // queue/done clears in clear() itself.
+#ifdef HIVEMIND_VOICE_PIPEWIRE
+                // Stop means STOP: silence whatever the sink is still
+                // playing, not just the not-yet-fed queue. (m_ is held
+                // here, ringM_ inside dropRing — fill() never holds
+                // ringM_ while taking m_, so no lock-order inversion.)
+                if (sink.ok) sink.dropRing();
+#endif
             }
             doneTags.assign(done_.begin(), done_.end());
             done_.clear();
