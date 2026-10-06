@@ -1,13 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7C14D"/>
+      <stop offset="100%" stop-color="#D4930D"/>
+    </linearGradient>
+  </defs>
   <rect width="128" height="128" rx="24" fill="#0a0e14"/>
-  <g fill="#e6a817">
-    <circle cx="64" cy="52" r="7"/>
-    <circle cx="40" cy="66" r="5" opacity="0.85"/>
-    <circle cx="88" cy="66" r="5" opacity="0.85"/>
-    <circle cx="52" cy="88" r="4" opacity="0.7"/>
-    <circle cx="76" cy="88" r="4" opacity="0.7"/>
-    <circle cx="64" cy="106" r="3" opacity="0.55"/>
+  <!-- voice: mic dot + emanating sound arcs, hive amber -->
+  <circle cx="64" cy="64" r="9" fill="url(#wave)"/>
+  <g fill="none" stroke="url(#wave)" stroke-linecap="round">
+    <path d="M49 50 a21 21 0 0 0 0 28" stroke-width="6" opacity="0.9"/>
+    <path d="M79 50 a21 21 0 0 1 0 28" stroke-width="6" opacity="0.9"/>
+    <path d="M38 39 a37 37 0 0 0 0 50" stroke-width="5" opacity="0.55"/>
+    <path d="M90 39 a37 37 0 0 1 0 50" stroke-width="5" opacity="0.55"/>
+    <path d="M28 29 a51 51 0 0 0 0 70" stroke-width="4" opacity="0.3"/>
+    <path d="M100 29 a51 51 0 0 1 0 70" stroke-width="4" opacity="0.3"/>
   </g>
-  <circle cx="64" cy="52" r="16" fill="none" stroke="#e6a817" stroke-width="3" opacity="0.5"/>
-  <circle cx="64" cy="52" r="27" fill="none" stroke="#e6a817" stroke-width="2" opacity="0.25"/>
 </svg>

@@ -7,7 +7,7 @@
 namespace hv {
 
 MainWindow::MainWindow(Prefs& prefs) : Gtk::Window(), prefs_(prefs) {
-    set_title("HiveMind");
+    set_title("HiveMind Voice");
     set_default_size(440, 620);
 
     stack_ = Gtk::make_managed<Gtk::Stack>();
@@ -36,12 +36,12 @@ void MainWindow::showVoice(const AgentInfo& agent) {
     voice_->signal_back().connect([this] { showRoster(); });
     stack_->add(*voice_, "voice");
     stack_->set_visible_child("voice");
-    set_title(agent.name + " — HiveMind");
+    set_title(agent.name + " — HiveMind Voice");
 }
 
 void MainWindow::showRoster() {
     stack_->set_visible_child("roster");
-    set_title("HiveMind");
+    set_title("HiveMind Voice");
     if (voice_) {
         stack_->remove(*voice_);
         voice_ = nullptr;
