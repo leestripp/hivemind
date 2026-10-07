@@ -39,6 +39,12 @@ class SttEngine {
     bool listening() const { return listening_; }
     std::string transcript() const;
 
+    // Background warm-up at app launch: probe the gateway until it
+    // answers so the first TALK after a reboot is instant and the app
+    // self-heals when the voice service starts after the app does.
+    // Never touches the mic and never surfaces an error.
+    void prime();
+
     // TALK: never a silent no-op — arms capture when not ready.
     void start();
     // SEND: stop capturing, upload for the final transcription, keep
@@ -51,6 +57,13 @@ class SttEngine {
  private:
     void startCapture();
     void teardownCapture();
+    // /healthz probe with 5 s backoff (12 attempts ≈ 1 min). When
+    // captureOnReady is set this came from start(): bail if the session
+    // was cancelled, arm capture on success, and surface the failure via
+    // on_stopped_ after the last attempt. prime() passes false and only
+    // flips ready_. Every attempt is logged — a silent voice outage must
+    // never happen again (2026-10-08 post-reboot incident).
+    void readinessLoop(int session, bool captureOnReady);
 
     AudioCapture& capture_;
     std::unique_ptr<ChimpFlowClient> chimp_;

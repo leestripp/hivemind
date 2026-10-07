@@ -96,6 +96,9 @@ VoiceView::VoiceView(BaseObjectType* cobject,
             });
         },
         [this](const std::string& msg) { toUi([this, msg] { onEngineStopped(msg); }); });
+    // Warm the /healthz readiness probe in the background so a slow
+    // post-reboot gateway is picked up without a dead first TALK press.
+    stt_->prime();
     announcer_ = std::make_unique<AgentStateAnnouncer>();
     tts_->applyVoice(voiceNameFor(agent_.id));
 

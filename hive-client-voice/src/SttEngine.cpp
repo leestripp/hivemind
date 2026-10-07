@@ -34,30 +34,53 @@ std::string SttEngine::transcript() const {
     return transcript_;
 }
 
+void SttEngine::prime() {
+    // Launch-time warm-up: probe in the background so a gateway that
+    // starts late (or a network stack still coming up after reboot) is
+    // picked up without the user pressing TALK into a dead first attempt.
+    if (ready_) return;
+    readinessLoop(session_.load(), false);
+}
+
 void SttEngine::start() {
     want_listen_ = true;
     const int s = ++session_;
-    // The only "readiness" left is the gateway answering /healthz —
+    // The only "readiness" left is the gateway answering /healthz --
     // check it off the UI thread so start() never blocks.
     if (!ready_) {
-        std::thread([this, s] {
-            if (!want_listen_ || s != session_) return;
-            const bool up = chimp_->healthy();
-            if (!up) {
-                if (on_stopped_)
-                    on_stopped_("Voice service (ChimpFlow) is not "
-                                "responding at " + chimp_->base() +
-                                " — is it running?");
-                return;
-            }
-            ready_ = true;
-            if (want_listen_ && s == session_) startCapture();
-        }).detach();
+        readinessLoop(s, true);
         return;
     }
     startCapture();
 }
 
+void SttEngine::readinessLoop(const int s, const bool captureOnReady) {
+    std::thread([this, s, captureOnReady] {
+        constexpr int kMaxAttempts = 12;
+        constexpr auto kBackoff = std::chrono::seconds(5);
+        for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+            // A start()-driven probe dies the moment the session is
+            // cancelled; prime() only checks ready_ to avoid pile-up.
+            if (captureOnReady && (!want_listen_ || s != session_)) return;
+            if (!captureOnReady && ready_) return;
+            if (chimp_->healthy()) {
+                fprintf(stderr, "hive-voice: chimpflow healthy "
+                                "(attempt %d)\n", attempt);
+                ready_ = true;
+                if (captureOnReady && want_listen_ && s == session_)
+                    startCapture();
+                return;
+            }
+            fprintf(stderr, "hive-voice: chimpflow not responding, "
+                            "retry %d/%d in 5s\n", attempt, kMaxAttempts);
+            std::this_thread::sleep_for(kBackoff);
+        }
+        if (captureOnReady && on_stopped_)
+            on_stopped_("Voice service (ChimpFlow) is not "
+                        "responding at " + chimp_->base() +
+                        " -- is it running?");
+    }).detach();
+}
 void SttEngine::startCapture() {
     if (!ready_ || listening_) return;
     {
