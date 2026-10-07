@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <set>
@@ -189,6 +190,12 @@ private:
     // and persists to ~/.local/share/hivemind/client-ui.json.
     nlohmann::json thread_groups_ = nlohmann::json::array();
     std::unordered_set<std::string> collapsed_groups_;
+    /// Phase 67b: client-local bucket pins — thread id -> bucket id
+    /// ("smart:…" or a custom group id). Lets the user force a thread
+    /// into a bucket the hub data didn't pick up (e.g. a routine
+    /// mis-tagged dm); persisted to client-ui.json. Consulted only
+    /// when the hub carries no group_id for the thread.
+    std::unordered_map<std::string, std::string> thread_bucket_overrides_;
     bool group_ui_loaded_ = false;
     void load_group_ui_state();
     void save_group_ui_state() const;
@@ -200,6 +207,9 @@ private:
                          const std::string& group_name, double x, double y);
     void move_thread_to(const std::string& thread_id,
                         const std::string& group_id);
+    /// Effective bucket id (custom group id or "smart:…") for a
+    /// thread: hub group_id, else local override, else smart default.
+    std::string thread_bucket_id(const nlohmann::json& thread) const;
     std::unordered_set<std::string> known_workers_;
     std::string current_thread_;
     std::string last_message_id_;

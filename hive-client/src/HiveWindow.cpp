@@ -1485,20 +1485,29 @@ void HiveWindow::process_thread_activity() {
     activity_seeded_ = true;
 }
 
+// Phase 67: smart-bucket derivation (computed client-side, never
+// stored hub-side). Routine threads have repeatedly shipped with the
+// wrong kind on the hub (deploy lag ahead of the 2026-09-23 re-tag
+// migration, agent-created threads titled "routine: …" as plain dm),
+// but they all carry the "routine: " title prefix — trust the prefix
+// over kind so the Routines bucket can't silently empty out.
+static std::string thread_smart_bucket(const json& t) {
+    if (t.value("title", "").rfind("routine: ", 0) == 0)
+        return "smart:routines";
+    const std::string k = t.value("kind", "");
+    if (k == "user" || k == "dm") return "smart:you";
+    if (k == "group") return "smart:chatter";
+    return "smart:routines";
+}
+
 void HiveWindow::rebuild_thread_list() {
     if (!group_ui_loaded_) { load_group_ui_state(); group_ui_loaded_ = true; }
     while (auto* row = threads_list_.get_row_at_index(0))
         threads_list_.remove(*row);
 
-    // Phase 67: bucket threads into groups. Custom membership comes
-    // from the hub ("group_id"); everything else falls into a smart
-    // bucket derived from kind (computed here, never stored).
-    auto smart_of = [](const json& t) -> std::string {
-        const std::string k = t.value("kind", "");
-        if (k == "user" || k == "dm") return "smart:you";
-        if (k == "group") return "smart:chatter";
-        return "smart:routines";
-    };
+    // Phase 67: bucket threads into groups. Hub membership ("group_id")
+    // wins; then a client-local override (Phase 67b — a smart bucket the
+    // user forced via Move to group); then the smart bucket.
     struct Bucket { std::string id, name; bool custom; std::vector<json> items; };
     std::vector<Bucket> buckets{{"smart:you", "You & agents", false, {}}};
     for (auto& g : thread_groups_)
@@ -1506,19 +1515,35 @@ void HiveWindow::rebuild_thread_list() {
     buckets.push_back({"smart:chatter", "Agent chatter", false, {}});
     buckets.push_back({"smart:routines", "Routines", false, {}});
 
-    for (auto& t : threads_) {
-        std::string gid;
-        if (t.contains("group_id") && t["group_id"].is_string())
-            gid = t["group_id"].get<std::string>();
-        Bucket* home = nullptr;
-        if (!gid.empty())
-            for (auto& b : buckets)
-                if (b.custom && b.id == gid) { home = &b; break; }
-        if (!home) {
-            const std::string sid = smart_of(t);
-            for (auto& b : buckets)
-                if (b.id == sid) { home = &b; break; }
+    // Drop overrides for threads deleted while the client was closed.
+    // Guarded on a non-empty threads_: an empty list is a freshly
+    // started client mid-first-poll, not a wipe signal.
+    if (!threads_.empty()) {
+        bool pruned = false;
+        for (auto it = thread_bucket_overrides_.begin();
+             it != thread_bucket_overrides_.end();) {
+            const std::string& tid = it->first;
+            const bool alive = std::any_of(threads_.begin(), threads_.end(),
+                [&tid](const json& t) {
+                    return t.value("id", "") == tid;
+                });
+            if (alive) { ++it; continue; }
+            it = thread_bucket_overrides_.erase(it);
+            pruned = true;
         }
+        if (pruned) save_group_ui_state();
+    }
+
+    for (auto& t : threads_) {
+        const std::string bid = thread_bucket_id(t);
+        Bucket* home = nullptr;
+        for (auto& b : buckets)
+            if (b.id == bid) { home = &b; break; }
+        if (!home && bid.rfind("smart:", 0) != 0)
+            // Hub group_id names a group this client hasn't loaded
+            // (deleted elsewhere, refresh in flight) — fall back smart.
+            for (auto& b : buckets)
+                if (b.id == thread_smart_bucket(t)) { home = &b; break; }
         if (home) home->items.push_back(t);
     }
 
@@ -1636,6 +1661,10 @@ void HiveWindow::load_group_ui_state() {
     if (j.is_discarded()) return;
     for (auto& g : j.value("collapsed_groups", json::array()))
         if (g.is_string()) collapsed_groups_.insert(g.get<std::string>());
+    if (j.contains("bucket_overrides") && j["bucket_overrides"].is_object())
+        for (auto& [tid, bid] : j["bucket_overrides"].items())
+            if (bid.is_string())
+                thread_bucket_overrides_[tid] = bid.get<std::string>();
 }
 
 void HiveWindow::save_group_ui_state() const {
@@ -1643,14 +1672,42 @@ void HiveWindow::save_group_ui_state() const {
     std::filesystem::create_directories(group_ui_state_path().parent_path(), ec);
     json arr = json::array();
     for (auto& g : collapsed_groups_) arr.push_back(g);
+    json overrides = json::object();
+    for (auto& [tid, bid] : thread_bucket_overrides_) overrides[tid] = bid;
     std::ofstream out(group_ui_state_path());
-    out << json{{"collapsed_groups", arr}}.dump(2);
+    out << json{{"collapsed_groups", arr},
+                {"bucket_overrides", overrides}}.dump(2);
+}
+
+// Effective bucket for a thread: hub membership wins (other clients
+// see it too), then the client-local override, then the smart default.
+std::string HiveWindow::thread_bucket_id(const json& t) const {
+    if (t.contains("group_id") && t["group_id"].is_string()) {
+        const std::string gid = t["group_id"].get<std::string>();
+        if (!gid.empty()) return gid;
+    }
+    const auto it = thread_bucket_overrides_.find(t.value("id", ""));
+    if (it != thread_bucket_overrides_.end()) return it->second;
+    return thread_smart_bucket(t);
 }
 
 void HiveWindow::move_thread_to(const std::string& thread_id,
                                 const std::string& group_id) {
-    run_async([this, thread_id, group_id] {
-        try { api_.set_thread_group(thread_id, group_id); } catch (...) {}
+    // "smart:…" targets are client-local: pin the override here and
+    // CLEAR the hub membership so this client and every other surface
+    // agree. Custom group ids (and "" = smart default) persist
+    // hub-side; both also drop a stale local override.
+    const bool smart = group_id.rfind("smart:", 0) == 0;
+    if (smart)
+        thread_bucket_overrides_[thread_id] = group_id;
+    else
+        thread_bucket_overrides_.erase(thread_id);
+    save_group_ui_state();
+    rebuild_thread_list();   // immediate feedback, no poll wait
+    run_async([this, thread_id, smart, group_id] {
+        try {
+            api_.set_thread_group(thread_id, smart ? "" : group_id);
+        } catch (...) {}
         std::lock_guard<std::mutex> lk(queue_m_);
         done_queue_.push_back([this] { if (alive_) refresh_all(); });
     });
@@ -4204,8 +4261,18 @@ void HiveWindow::show_thread_menu(Gtk::Widget& anchor,
     const std::string title = thread.value("title", "");
     mk("\U0001F9F9 Clear history\u2026", nullptr,
        [this, tid, title] { on_clear_thread(tid, title); });
-    // Phase 67: Move to group (folders — one group per thread).
+    // Phase 67: Move to group (folders — one group per thread). Lists
+    // every custom group AND the three smart buckets, so a mis-tagged
+    // thread (e.g. a routine stuck with dm kind) can be forced where
+    // it belongs; ✓ marks the current bucket.
     {
+        const std::string cur = thread_bucket_id(thread);
+        auto mk_move = [&](const std::string& bid, const std::string& name) {
+            const std::string label =
+                (bid == cur ? "\u2713 " : "   ") + name;
+            mk(label.c_str(), nullptr,
+               [this, tid, bid] { move_thread_to(tid, bid); });
+        };
         auto* lbl = Gtk::make_managed<Gtk::Label>("Move to group");
         lbl->add_css_class("hv-group-meta");
         lbl->set_halign(Gtk::Align::START);
@@ -4213,12 +4280,17 @@ void HiveWindow::show_thread_menu(Gtk::Widget& anchor,
         box->append(*lbl);
         for (auto& g : thread_groups_) {
             const std::string gid = g.value("id", "");
-            const std::string gname = g.value("name", "");
-            mk(("\U0001F4C1 " + gname).c_str(), nullptr,
-               [this, tid, gid] { move_thread_to(tid, gid); });
+            // An empty bid would falsely match unbucketed threads in
+            // the checkmark comparison.
+            if (gid.empty()) continue;
+            mk_move(gid, "\U0001F4C1 " + g.value("name", ""));
         }
         mk("\u2795 New group\u2026", nullptr,
            [this, tid] { show_group_name_dialog("New group", "", "", tid); });
+        // Smart buckets — hub-derived defaults, forceable per thread.
+        mk_move("smart:you", "You & agents");
+        mk_move("smart:chatter", "Agent chatter");
+        mk_move("smart:routines", "Routines");
         mk("\u21A9 Smart default", nullptr,
            [this, tid] { move_thread_to(tid, ""); });
     }
