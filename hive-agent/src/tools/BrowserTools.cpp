@@ -101,6 +101,32 @@ std::vector<BrowserTool::Spec> BrowserTool::specs() {
         {"browser_press",
          "Press a keyboard key (e.g. Enter, Tab, Escape).",
          "press", {{"key", prop("Key name.")}}, {"key"}, {"key"}},
+        {"browser_type_keys",
+         "Type text one character at a time as REAL key presses "
+         "(keydown/keyup per character) into a field — for sites whose "
+         "composers only count physical key presses (e.g. X.com reply "
+         "box, Facebook profile composer), where browser_type leaves "
+         "the site blind to the text. Focuses the target first, does "
+         "NOT clear it by default (browser_type already clears). "
+         "Returns chars_sent and the target's resulting text length so "
+         "you can detect a silent failure without a follow-up eval.",
+         "typekeys",
+         {{"selector",
+           prop("CSS selector of the target field. Omit to type into "
+                "whatever element currently has focus.")},
+          {"text", prop("Text to type, one key press per character.")},
+          {"delay_ms",
+           prop("Milliseconds between key presses (default 75, min 20). "
+                "Don't go below ~25 on X.com — it rate-limits.")},
+          {"clear",
+           prop("true to select-all + delete the existing content "
+                "before typing (default false).")},
+          {"timeout",
+           prop("Overall timeout in seconds (default 150). Raise it "
+                "for very long texts: chars x delay_ms / 1000 + ~15s.")}},
+         {"text"},
+         {"selector", "text", "delay_ms", "clear"},
+         /*default_timeout=*/150},
         {"browser_read",
          "Read the page's visible text (truncated to ~6000 chars). Call "
          "after navigating to see what's on the page.",
@@ -129,18 +155,32 @@ std::vector<BrowserTool::Spec> BrowserTool::specs() {
 json BrowserTool::execute(const json& args, HostToolContext& /*ctx*/) {
     std::string cmdline = std::string("python3 ") + kDriver + " " +
                           spec_.action;
-    for (const auto& key : spec_.arg_keys) {
-        std::string v = args.value(key, "");
-        if (v.empty() && !args.contains(key)) {
+    for (size_t i = 0; i < spec_.arg_keys.size(); ++i) {
+        const auto& key = spec_.arg_keys[i];
+        if (!args.contains(key) || args[key].is_null()) {
             if (std::find(spec_.required.begin(), spec_.required.end(),
                           key) != spec_.required.end())
                 return {{"status", "error"},
                         {"error", "missing required argument: " + key}};
-            continue;  // optional arg not provided
+            // Skip only when no LATER positional arg is provided —
+            // dropping a middle arg would shift the remaining argv out
+            // of position (typekeys' optional selector sits first).
+            const bool later_provided =
+                std::any_of(spec_.arg_keys.begin() +
+                                static_cast<std::ptrdiff_t>(i + 1),
+                            spec_.arg_keys.end(),
+                            [&args](const std::string& k) {
+                                return args.contains(k) &&
+                                       !args[k].is_null();
+                            });
+            if (!later_provided) continue;  // trailing optional, safe to drop
+            cmdline += " ''";               // placeholder keeps positions
+            continue;
         }
-        cmdline += " " + q(v);
+        const json& v = args[key];
+        cmdline += " " + q(v.is_string() ? v.get<std::string>() : v.dump());
     }
-    const int timeout = args.value("timeout", 90);
+    const int timeout = args.value("timeout", spec_.default_timeout);
     return run_driver(cmdline, timeout);
 }
 

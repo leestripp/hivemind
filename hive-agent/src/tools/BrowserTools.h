@@ -34,6 +34,7 @@ public:
         json properties;                     // JSON-schema properties
         std::vector<std::string> required;
         std::vector<std::string> arg_keys;   // ordered → positional argv
+        int default_timeout = 90;            // seconds; clamped 5..180
     };
 
     explicit BrowserTool(Spec spec) : spec_(std::move(spec)) {}

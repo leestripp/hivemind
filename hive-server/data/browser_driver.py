@@ -151,6 +151,47 @@ def main():
             elif action == "press":
                 page.keyboard.press(args[0])
                 emit({"status": "ok"})
+            elif action == "typekeys":
+                # typekeys <selector> <text> [delay_ms] [clear]
+                # Types one character at a time as REAL key events
+                # (keydown/keypress/keyup per char) — for sites whose
+                # composers only count trusted key presses (X.com reply
+                # box, FB profile composer), where fill()'s bulk
+                # insertText leaves React state empty. Never paste:
+                # those sites fight paste events.
+                selector = args[0] if len(args) > 0 else ""
+                text = args[1] if len(args) > 1 else ""
+                delay = int(args[2]) if len(args) > 2 and args[2] else 75
+                delay = max(20, min(delay, 1000))
+                clear = (len(args) > 3 and
+                         args[3].lower() in ("true", "1", "yes"))
+                if not text:
+                    emit({"status": "error", "error": "text must not be empty"})
+                loc = None
+                if selector:
+                    # Click first: X/FB composers are contenteditable divs
+                    # that need real focus before keys land.
+                    loc = page.locator(selector).first
+                    loc.click(timeout=10000)
+                if clear:
+                    # Real keys, not fill("") — same trust reason.
+                    page.keyboard.press("Control+A")
+                    page.keyboard.press("Delete")
+                page.keyboard.type(text, delay=delay)
+                # Success signal: let the agent detect a silent fail
+                # without a follow-up eval.
+                probe = ("el => el.isContentEditable ? el.innerText : "
+                         "(el.value !== undefined ? el.value : el.innerText)")
+                if loc is not None:
+                    final = loc.evaluate(probe)
+                else:
+                    final = page.evaluate(
+                        "() => { const el = document.activeElement;"
+                        " return el ? (el.isContentEditable ? el.innerText :"
+                        " (el.value !== undefined ? el.value : el.innerText))"
+                        " : ''; }")
+                emit({"status": "ok", "chars_sent": len(text),
+                      "target_text_length": len(final or "")})
             elif action == "text":
                 body = page.inner_text("body")
                 emit({"status": "ok", "url": page.url, "title": page.title(),
