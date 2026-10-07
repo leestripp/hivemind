@@ -367,8 +367,17 @@ std::mutex& container_recreate_mutex() {
 // (a sidecar bridge cannot reach a pasta netns), so an agent serving a
 // webapp to the LAN needs its port published here. Empty (default) =
 // behavior unchanged.
-static std::vector<std::string> lan_publish_args() {
+static std::vector<std::string> lan_publish_args(const std::string& cname) {
     std::vector<std::string> out;
+    // $HIVE_LAN_PUBLISH_AGENT: optional uuid gate for multi-agent rigs.
+    // The publish spec alone is rig-wide, so a full-fleet recreate gave
+    // EVERY fresh container the port — the first to start won and the
+    // agent who actually serves (Bob/Slate Ape on ubuntu-pc) could
+    // never start: pasta "Listen failed ... Address already in use"
+    // (2026-10-07 OmniNet rollout). When set, only the container whose
+    // name carries this uuid gets the extra publishes.
+    const char* only = std::getenv("HIVE_LAN_PUBLISH_AGENT");
+    if (only && *only && cname.find(only) == std::string::npos) return out;
     const char* env = std::getenv("HIVE_LAN_PUBLISH");
     if (!env || !*env) return out;
     std::istringstream ss(env);
@@ -386,7 +395,7 @@ static std::vector<std::string> lan_publish_args() {
 // to roll a newly-set env var out to pre-existing containers via the
 // normal recreate path instead of a manual rm.
 static bool lan_ports_present(const std::string& cname) {
-    const auto specs = lan_publish_args();
+    const auto specs = lan_publish_args(cname);
     if (specs.empty()) return true;   // nothing wanted — never triggers
     std::string json;
     if (podman_simple({"inspect", "-f",
@@ -484,7 +493,7 @@ void ensure_container(const std::string& agent, std::string image,
                        "--shm-size", "1g", "--userns=keep-id",
                        "-p", "127.0.0.1::6080"};
     {
-        const auto lan_args = lan_publish_args();
+        const auto lan_args = lan_publish_args(cname);
         args.insert(args.end(), lan_args.begin(), lan_args.end());
     }
     if (gpu) {
@@ -762,7 +771,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                            "--userns=keep-id",
                            "-p", "127.0.0.1::6080"};
         {
-            const auto lan_args = lan_publish_args();
+            const auto lan_args = lan_publish_args(cname);
             cargs.insert(cargs.end(), lan_args.begin(), lan_args.end());
         }
         if (gpu)   // same passthrough contract as ensure_container
