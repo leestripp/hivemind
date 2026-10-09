@@ -219,6 +219,12 @@ Key architectural mapping:
 10. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
    ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
    keys (see `HiveWindow::follow_system_theme`).
+11. Agent web services get a STABLE LAN URL via the service-port range
+   (2026-10-09): containers publish 8000+ 1:1 to a persisted per-agent
+   host base; agents use share_service/list_services/unshare_service
+   and /workspace/.hivemind/boot.sh — never bolt on per-service
+   HIVE_LAN_PUBLISH specs or tunnels for this. See
+   docs/hive-worker.md "Agent service sharing".
 
 ## Agent Skills (§Skills-Global, 2026-09-30)
 

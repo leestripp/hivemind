@@ -231,6 +231,45 @@ inside Blender. Gotchas:
 - Executed code: `bpy` is NOT pre-imported; return data via the `result`
   variable (top-level `return` is a SyntaxError inside exec).
 
+## Agent service sharing (LAN)
+
+Every agent container gets a **fixed block of host ports** published 1:1
+onto its public-service range (container ports 8000+):
+
+    -p 0.0.0.0:<base>-<base+N-1>:8000-<8000+N-1>
+
+An agent that binds a service (web app, API, demo) to a port in its
+container range is immediately reachable on the LAN at
+`http://<worker-host>:<base + (port - 8000)>` — a **stable URL** that
+survives container recreation, image updates and worker restarts. No
+tunnels, no port allocation at use time, no recreate to add a service.
+
+- **Allocation**: the base port is allocated once per agent (lowest free)
+  and persisted in `<worker_dir>/service_ports.txt`
+  (`~/.local/share/hive-worker/service_ports.txt`).
+- **Agent-side discovery**: containers get `HIVEMIND_SERVICE_HOST`,
+  `HIVEMIND_SERVICE_PORT_BASE`, `HIVEMIND_SERVICE_PORT_COUNT`,
+  `HIVEMIND_SERVICE_CONTAINER_BASE` env at create. The agent's
+  `share_service(name, port, health_path?)` tool registers the service in
+  `/workspace/.hivemind/services.json` (health-checked) and returns the
+  URL; `list_services` / `unshare_service` manage the registry.
+- **Boot hook**: after every (re)create the worker runs
+  `/workspace/.hivemind/boot.sh` (detached, if present+executable) so
+  agent-owned services self-recover; output appends to
+  `/workspace/.hivemind/boot.log`.
+- **Rolling adoption**: containers created before the feature are
+  recreated once automatically (PortBindings probe beside
+  `lan_ports_present`).
+
+Knobs (worker process env): `HIVE_SERVICE_POOL_BASE` (default 18400),
+`HIVE_SERVICE_PORT_COUNT` (default 10; 0 disables),
+`HIVE_SERVICE_HOST` (default: first global non-loopback IPv4).
+
+`HIVE_LAN_PUBLISH` remains the manual escape hatch for one-off ports —
+keep its specs OUT of the pool range; the registry only tracks its own
+pool. LAN-only by design: workers stay outbound-only; public ingress is
+a separate phase-2 decision.
+
 ## Files
 
 - `file_fetch` / `file_push` / `file_list` ops move bytes between the hub
