@@ -19,3 +19,6 @@ set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
 
 # First-run workspace seeding (layout + default index.md, never overwrite).
 hive_worker_test(test_workspace_seed)
+
+# Per-agent service-port registry + advertised host address (2026-10-09).
+hive_worker_test(test_service_ports)

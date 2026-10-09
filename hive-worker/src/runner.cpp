@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <chrono>
 #include <climits>
 #include <cstdio>
@@ -412,6 +413,157 @@ static bool lan_ports_present(const std::string& cname) {
     return true;
 }
 
+// ── Agent service-port publishing (2026-10-09, Bob/SlateApe ingress) ──
+// Every agent container gets a FIXED block of host ports published 1:1
+// onto its public-service range (container ports 8000+):
+//   -p 0.0.0.0:<base>-<base+n-1>:8000-<8000+n-1>
+// <base> is allocated once per agent and persisted in
+// <worker_dir>/service_ports.txt, so http://<host>:<base+(port-8000)>
+// survives recreation, image updates and worker restarts. Agents read
+// their own mapping from the HIVEMIND_SERVICE_* env injected at create
+// (the share_service tool derives the URL from it) — no tunnels, no
+// allocation at use time, no recreate to expose a new service.
+// Knobs (worker process env):
+//   HIVE_SERVICE_POOL_BASE   first allocatable host port (default 18400)
+//   HIVE_SERVICE_PORT_COUNT  ports per agent / range size (default 10;
+//                            0 disables the feature)
+//   HIVE_SERVICE_HOST        advertised address override (default: first
+//                            non-loopback global IPv4)
+// HIVE_LAN_PUBLISH (above) remains the manual escape hatch; keep its
+// specs OUT of the pool range — the registry only tracks its own pool.
+static int service_pool_base() {
+    const char* env = std::getenv("HIVE_SERVICE_POOL_BASE");
+    if (env && *env) {
+        const int v = std::atoi(env);
+        if (v > 0 && v + 100 <= 65536) return v;
+    }
+    return 18400;
+}
+
+static int service_port_count() {
+    const char* env = std::getenv("HIVE_SERVICE_PORT_COUNT");
+    if (env && *env) {
+        const int v = std::atoi(env);
+        if (v >= 0 && v <= 100) return v;
+    }
+    return 10;
+}
+
+// First non-loopback, non-link-local global IPv4 — the address LAN
+// clients dial. Overridable via HIVE_SERVICE_HOST (DNS name, tailnet
+// IP, ...). Fallback loopback keeps the env well-formed on odd rigs.
+std::string service_host_addr() {
+    const char* env = std::getenv("HIVE_SERVICE_HOST");
+    if (env && *env) return env;
+    ifaddrs* ifs = nullptr;
+    std::string found;
+    if (getifaddrs(&ifs) == 0) {
+        for (const ifaddrs* it = ifs; it && found.empty(); it = it->ifa_next) {
+            if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET) continue;
+            const auto* sin =
+                reinterpret_cast<const sockaddr_in*>(it->ifa_addr);
+            const unsigned long ip = ntohl(sin->sin_addr.s_addr);
+            if ((ip >> 24) == 127 || (ip >> 16) == 0xA9FE) continue;
+            char buf[INET_ADDRSTRLEN];
+            if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof buf))
+                found = buf;
+        }
+        freeifaddrs(ifs);
+    }
+    return found.empty() ? "127.0.0.1" : found;
+}
+
+// Allocated base port for `agent`, read/allocate/persist via
+// <worker_dir>/service_ports.txt ("<uuid> <base>" lines). Lowest free
+// pool slot wins; an existing entry is stable forever.
+int service_port_base(const std::string& agent) {
+    static std::mutex reg_m;
+    std::lock_guard<std::mutex> lk(reg_m);
+    const int count = service_port_count();
+    if (count <= 0) return 0;
+    const fs::path reg = fs::path(worker_dir()) / "service_ports.txt";
+    std::vector<std::pair<std::string, int>> rows;
+    {
+        std::ifstream in(reg);
+        std::string id;
+        int base = 0;
+        while (in >> id >> base) rows.emplace_back(id, base);
+    }
+    for (const auto& [id, base] : rows)
+        if (id == agent) return base;
+    int base = service_pool_base();
+    while (std::any_of(rows.begin(), rows.end(),
+                       [&](const auto& r) { return r.second == base; }))
+        base += count;
+    rows.emplace_back(agent, base);
+    const fs::path tmp = reg.string() + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        for (const auto& [id, b] : rows) out << id << ' ' << b << '\n';
+    }
+    std::error_code ec;
+    fs::rename(tmp, reg, ec);
+    if (ec) {   // cross-fs or odd fs: fall back to copy
+        fs::copy_file(tmp, reg, fs::copy_options::overwrite_existing, ec);
+        fs::remove(tmp, ec);
+    }
+    return base;
+}
+
+// podman -p spec publishing the agent's whole service range 1:1, or
+// empty when the feature is disabled (HIVE_SERVICE_PORT_COUNT=0).
+static std::vector<std::string> service_publish_args(const std::string& agent) {
+    const int count = service_port_count();
+    if (count <= 0) return {};
+    const int base = service_port_base(agent);
+    return {"-p", "0.0.0.0:" + std::to_string(base) + "-" +
+                      std::to_string(base + count - 1) + ":" +
+                      std::to_string(kServiceContainerBase) + "-" +
+                      std::to_string(kServiceContainerBase + count - 1)};
+}
+
+// HIVEMIND_SERVICE_* env injected at create so the agent can derive its
+// own service URLs without asking anyone (share_service reads these).
+static std::vector<std::string> service_env_args(const std::string& agent) {
+    const int count = service_port_count();
+    if (count <= 0) return {};
+    return {"-e", "HIVEMIND_SERVICE_HOST=" + service_host_addr(),
+            "-e", "HIVEMIND_SERVICE_PORT_BASE=" +
+                      std::to_string(service_port_base(agent)),
+            "-e", "HIVEMIND_SERVICE_PORT_COUNT=" + std::to_string(count),
+            "-e", "HIVEMIND_SERVICE_CONTAINER_BASE=" +
+                      std::to_string(kServiceContainerBase)};
+}
+
+// True when the running container already publishes the container-side
+// service range (PortBindings key "8000/tcp"). Gates a one-time rolling
+// recreate after a worker upgrade adds the feature. Disabled feature =
+// never triggers.
+static bool service_range_present(const std::string& cname) {
+    if (service_port_count() <= 0) return true;
+    std::string json;
+    if (podman_simple({"inspect", "-f",
+                       "{{json .HostConfig.PortBindings}}", cname}, &json) != 0)
+        return false;
+    return json.find("\"" + std::to_string(kServiceContainerBase) + "/tcp\"")
+           != std::string::npos;
+}
+
+// Agent boot hook (2026-10-09, Bob/SlateApe): after a (re)create, run
+// /workspace/.hivemind/boot.sh detached when present+executable, so
+// agent-owned services (web apps, tunnel replacements) come back without
+// waiting for the agent's next turn. The hook is agent-OWNED — the
+// worker only triggers it; output appends to .hivemind/boot.log.
+void maybe_run_boot_hook(const std::string& agent) {
+    std::string out;
+    podman_simple({"exec", "-d", "-u", "hive", "-w", "/workspace",
+                   container_name(agent), "sh", "-c",
+                   "[ -x /workspace/.hivemind/boot.sh ] && "
+                   "/workspace/.hivemind/boot.sh "
+                   ">>/workspace/.hivemind/boot.log 2>&1 || true"},
+                  &out);
+}
+
 void ensure_container(const std::string& agent, std::string image,
                       bool gpu, const std::string& memory, double cpus) {
     const std::string cname = container_name(agent);
@@ -496,6 +648,12 @@ void ensure_container(const std::string& agent, std::string image,
         const auto lan_args = lan_publish_args(cname);
         args.insert(args.end(), lan_args.begin(), lan_args.end());
     }
+    {
+        const auto svc_args = service_publish_args(agent);
+        args.insert(args.end(), svc_args.begin(), svc_args.end());
+        const auto svc_env = service_env_args(agent);
+        args.insert(args.end(), svc_env.begin(), svc_env.end());
+    }
     if (gpu) {
         // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
         // without it rocminfo sees nothing), /dev/dri = GL/Vulkan render
@@ -519,6 +677,7 @@ void ensure_container(const std::string& agent, std::string image,
     if (podman_simple({"start", cname}, &out) != 0)
         throw std::runtime_error("podman start failed: " + out);
     reconcile_limits(cname, limits);   // Phase 69: no-op on fresh create
+    maybe_run_boot_hook(agent);
 }
 
 ExecOutcome run_container_exec(
@@ -744,7 +903,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         podman_simple({"inspect", "-f", "{{.Image}}", cname}, &cur_img);
         podman_simple({"image", "inspect", "-f", "{{.Id}}", image}, &new_img);
         if (screen_port_of(agent) == 0 || cur_img != new_img ||
-            !lan_ports_present(cname))
+            !lan_ports_present(cname) || !service_range_present(cname))
             recreate = true;
     }
     if (recreate) {
@@ -774,6 +933,12 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
             const auto lan_args = lan_publish_args(cname);
             cargs.insert(cargs.end(), lan_args.begin(), lan_args.end());
         }
+        {
+            const auto svc_args = service_publish_args(agent);
+            cargs.insert(cargs.end(), svc_args.begin(), svc_args.end());
+            const auto svc_env = service_env_args(agent);
+            cargs.insert(cargs.end(), svc_env.begin(), svc_env.end());
+        }
         if (gpu)   // same passthrough contract as ensure_container
             cargs.insert(cargs.end(), {"--device", "/dev/kfd",
                                        "--device", "/dev/dri",
@@ -802,6 +967,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
             r.error = "podman start failed: " + out;
             return r;
         }
+        maybe_run_boot_hook(agent);
     }
 
     r.port = screen_port_of(agent);

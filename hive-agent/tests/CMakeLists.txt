@@ -109,6 +109,7 @@ hive_agent_test(test_todo_public_api)
 hive_agent_test(test_token_counts_sse)
 hive_agent_test(test_token_usage_graceful)
 hive_agent_test(test_tool_definitions)
+hive_agent_test(test_service_tools)
 hive_agent_test(test_tool_factory_dedup)
 hive_agent_test(test_tool_progress)
 # NetworkTool.cpp is a TEST FIXTURE (daedalus demos/example-tools): the

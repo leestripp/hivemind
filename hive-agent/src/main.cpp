@@ -43,6 +43,7 @@
 #include "core/McpSeed.h"
 #include "tools/BrowserTools.h"
 #include "tools/SecretTools.h"
+#include "tools/ServiceTools.h"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -1045,6 +1046,13 @@ int main(int argc, char** argv) {
     // agent discover (secrets_list) and read (secrets_get) them.
     agent.register_tool(std::make_unique<hive::SecretsListTool>());
     agent.register_tool(std::make_unique<hive::SecretsGetTool>());
+
+    // Service sharing (2026-10-09): register a container service on a
+    // pre-published port and get its stable worker-host URL. See
+    // tools/ServiceTools.h and hive-worker/src/runner.cpp.
+    agent.register_tool(std::make_unique<hive::ShareServiceTool>());
+    agent.register_tool(std::make_unique<hive::ListServicesTool>());
+    agent.register_tool(std::make_unique<hive::UnshareServiceTool>());
     try {
         agent.initialize();
     } catch (const std::exception& e) {

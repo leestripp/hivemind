@@ -32,6 +32,24 @@ int podman_simple(const std::vector<std::string>& args, std::string* out);
 /// passed explicitly they are PINNED to disk so every recreate path
 /// (including screen_ctl) reuses them. A live container whose limits
 /// differ is reconciled IN PLACE via `podman update` — no recreate.
+// ── Agent service-port publishing (2026-10-09) ──────────────────────
+// Container-side base of the per-agent public service range: ports
+// 8000..8000+N-1 in the container appear on the host at
+// service_port_base(agent)..+N-1 (see runner.cpp for the full contract).
+inline constexpr int kServiceContainerBase = 8000;
+
+/// Allocated host base port for the agent's service range (persisted in
+/// <worker_dir>/service_ports.txt; 0 when the feature is disabled).
+int service_port_base(const std::string& agent);
+
+/// Address advertised to agents/clients for published services
+/// (HIVE_SERVICE_HOST override, else first global non-loopback IPv4).
+std::string service_host_addr();
+
+/// Run /workspace/.hivemind/boot.sh detached when present — called after
+/// every container (re)create+start so agent services self-recover.
+void maybe_run_boot_hook(const std::string& agent);
+
 void ensure_container(const std::string& agent,
                       std::string image = "localhost/hive-agent:latest",
                       bool gpu = false,
