@@ -27,7 +27,7 @@
 class AgentStore;
 class RoutineStore;
 class ThreadStore;
-namespace hivemind { class SecretStore; }
+namespace hivemind { class SecretStore; class ShareStore; }
 class WorkerChannel;
 class ApprovalStore;
 class ChatService;
@@ -66,6 +66,11 @@ public:
     /// model here and injects the full provider config into the frame.
     void set_llm_store(LlmStore* s) { llm_ = s; }
 
+    /// 2026-10-11 (Plan.md "Agent File Sharing"): share metadata store
+    /// for the share_file tool bridge. Setter-injected like chat_/llm_
+    /// so existing constructions (tests) keep compiling.
+    void set_share_store(hivemind::ShareStore* s) { shares_ = s; }
+
     /// Dispatch a task to the agent's worker. Returns the task id, or ""
     /// when the worker is offline (caller marks the live turn failed).
     /// virtual: tests subclass with a capturing mock (no worker needed).
@@ -98,6 +103,23 @@ public:
     void handle_secret_req(const std::string& worker,
                            const std::string& agent_id,
                            const nlohmann::json& frame);
+    /// 2026-10-11: share_file tool bridge (Plan.md "Agent File Sharing").
+    /// create/list/fetch/revoke mirror the msg_send_req reply style;
+    /// share_copy_ack completes a same-worker fetch (share_local_copy op).
+    void handle_share_create_req(const std::string& worker,
+                                 const std::string& agent_id,
+                                 const nlohmann::json& frame);
+    void handle_share_list_req(const std::string& worker,
+                               const std::string& agent_id,
+                               const nlohmann::json& frame);
+    void handle_share_fetch_req(const std::string& worker,
+                                const std::string& agent_id,
+                                const nlohmann::json& frame);
+    void handle_share_revoke_req(const std::string& worker,
+                                 const std::string& agent_id,
+                                 const nlohmann::json& frame);
+    void handle_share_copy_ack(const std::string& worker,
+                               const nlohmann::json& frame);
 
     /// WorkerChannel::on_heartbeat hook: per-agent states map.
     void on_heartbeat(const std::string& worker,
@@ -144,6 +166,7 @@ private:
     hivemind::SecretStore& secrets_;
     ChatService* chat_ = nullptr;
     LlmStore* llm_ = nullptr;
+    hivemind::ShareStore* shares_ = nullptr;
 
     mutable std::mutex m_;
     struct Task { std::string agent_id; std::string worker; };
@@ -156,6 +179,11 @@ private:
     // Agents whose grant-push spawn frame is waiting for their current
     // turn to finish (flush_pending_spawns: task_result + heartbeat).
     std::unordered_set<std::string> pending_spawn_;
+    // Same-worker share fetches waiting on the worker's share_copy_ack:
+    // share_id -> who asked (response relay target).
+    struct PendFetch { std::string worker; std::string agent_id;
+                       std::string req_id; };
+    std::unordered_map<std::string, PendFetch> pend_fetch_;
     void flush_pending_spawns();
     uint64_t next_task_ = 1;
 };

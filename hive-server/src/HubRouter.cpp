@@ -14,10 +14,12 @@
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/AgentTools.h"
+#include "hivemind/ShareStore.h"
 
 #include <filesystem>
 #include <iostream>
 #include <set>
+#include <thread>
 
 using nlohmann::json;
 
@@ -531,6 +533,26 @@ void HubRouter::on_worker_frame(const std::string& worker,
         handle_msg_status_req(worker, agent_id, frame);
         return;
     }
+    if (op == "share_create_req") {   // share_file tool (2026-10-11)
+        handle_share_create_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "share_list_req") {
+        handle_share_list_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "share_fetch_req") {
+        handle_share_fetch_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "share_revoke_req") {
+        handle_share_revoke_req(worker, agent_id, frame);
+        return;
+    }
+    if (op == "share_copy_ack") {   // same-worker fetch completion
+        handle_share_copy_ack(worker, frame);
+        return;
+    }
     if (op == "agent_msg") {
         // hive-agent's message_agent tool -> pair thread (async, v1 design)
         if (chat_) {
@@ -709,5 +731,319 @@ void HubRouter::handle_msg_status_req(const std::string& worker,
         resp["ok"] = false;
         resp["error"] = e.what();
     }
+    channel_.send(worker, resp);
+}
+
+// =============================================================================
+// share_file tool bridge (2026-10-11, Plan.md "Agent-to-Agent Secure File
+// Sharing"). Addressed shares: the worker stages the blob at
+// workspace/shared/<share_id>/<name> BEFORE calling us (path confinement,
+// 50 MB cap and the uuid are worker-side); the hub stores only metadata and
+// enforces fetch authorization. Fetches relay through the existing chunked
+// file_fetch/file_push ops — a same-worker fetch never leaves the rig
+// (share_local_copy op), a cross-worker fetch transits hub memory once.
+// =============================================================================
+
+namespace {
+
+constexpr int64_t kMaxShareBytes = 50LL * 1024 * 1024;
+
+/// UTF-8-safe text cap: never split a multi-byte character (the
+/// 2026-10-02 poison-wake lesson — byte truncation made a wake body
+/// that nlohmann could not serialize).
+std::string utf8_safe_prefix(const std::string& s, std::size_t max_bytes) {
+    if (s.size() <= max_bytes) return s;
+    std::size_t n = max_bytes;
+    while (n > 0 &&
+           (static_cast<unsigned char>(s[n]) & 0xC0) == 0x80)
+        --n;
+    return s.substr(0, n) + "...";
+}
+
+std::string fmt_bytes(int64_t n) {
+    if (n >= 1024 * 1024)
+        return std::to_string(n / (1024 * 1024)) + " MB";
+    if (n >= 1024)
+        return std::to_string(n / 1024) + " KB";
+    return std::to_string(n) + " B";
+}
+
+}  // namespace
+
+void HubRouter::handle_share_create_req(const std::string& worker,
+                                        const std::string& agent_id,
+                                        const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "share_create_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    auto fail = [&](const std::string& err) {
+        resp["ok"] = false;
+        resp["error"] = err;
+        channel_.send(worker, resp);
+    };
+    if (!shares_) { fail("share store unavailable"); return; }
+    if (!chat_)   { fail("chat service unavailable"); return; }
+    const std::string share_id = frame.value("share_id", "");
+    const std::string filename = frame.value("filename", "");
+    const std::string rel_path = frame.value("rel_path", "");
+    const int64_t size = frame.value("size", static_cast<int64_t>(0));
+    if (share_id.empty() || filename.empty() || rel_path.empty()) {
+        fail("missing share fields"); return;
+    }
+    if (size <= 0) { fail("empty file"); return; }
+    if (size > kMaxShareBytes) {   // defense in depth (worker enforces too)
+        fail("file too large (50 MB max)"); return;
+    }
+    // The staged copy must live under the shared/ staging dir.
+    if (rel_path.find("..") != std::string::npos ||
+        rel_path.rfind("shared/", 0) != 0) {
+        fail("bad staging path"); return;
+    }
+    const auto sender = agents_.get_agent(agent_id);
+    if (!sender) { fail("unknown sender"); return; }
+    // Identity pinning: the sender must be homed on the connection this
+    // request arrived on (same trust rule as msg_send_req's agent stamp).
+    if (sender->worker != worker) {
+        fail("sender not homed on this worker"); return;
+    }
+    // Target resolution mirrors handle_msg_send_req: roster id OR
+    // display name. Files are NOT redirected to the user inbox — an
+    // unresolvable target is an error (the user path is attachments).
+    std::string target = frame.value("target", "");
+    if (!agents_.get_agent(target)) {
+        if (auto by_name = agents_.get_agent_by_name(target))
+            target = by_name->id;
+    }
+    if (!agents_.get_agent(target)) {
+        fail("target not found: " + frame.value("target", "")); return;
+    }
+    if (target == agent_id) { fail("cannot share with yourself"); return; }
+
+    hivemind::Share sh;
+    sh.id              = share_id;
+    sh.sender_agent_id = agent_id;
+    sh.target_agent_id = target;
+    sh.filename        = filename;
+    sh.size_bytes      = size;
+    sh.note            = utf8_safe_prefix(frame.value("note", ""), 512);
+    sh.worker          = worker;
+    sh.rel_path        = rel_path;
+    try {
+        shares_->create_share(sh);
+    } catch (const std::exception& e) {
+        fail(std::string{"store: "} + e.what()); return;
+    }
+
+    // Notify the target through the durable Phase 66 wake path. A
+    // notification failure must not kill the share — the row exists and
+    // list_shared_files still surfaces it.
+    const std::string body =
+        "shared a file with you: " + filename + " (" + fmt_bytes(size) +
+        ") — fetch it with fetch_shared_file(\"" + share_id + "\")" +
+        (sh.note.empty() ? "" : "\nNote: " + sh.note);
+    try {
+        std::string delivery_id;
+        chat_->post_agent_message(agent_id, target, body, &delivery_id);
+    } catch (const std::exception& e) {
+        resp["notify_error"] = e.what();
+        std::cerr << "[hub] share " << share_id
+                  << " notification failed: " << e.what() << "\n";
+    }
+    resp["ok"] = true;
+    resp["share_id"] = share_id;
+    std::cerr << "[hub] share " << share_id << ": " << sender->name
+              << " -> " << target << " " << filename << " ("
+              << fmt_bytes(size) << ")\n";
+    channel_.send(worker, resp);
+}
+
+void HubRouter::handle_share_list_req(const std::string& worker,
+                                      const std::string& agent_id,
+                                      const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "share_list_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    if (!shares_) {
+        resp["ok"] = false;
+        resp["error"] = "share store unavailable";
+        channel_.send(worker, resp);
+        return;
+    }
+    try {
+        json arr = json::array();
+        for (const auto& sh : shares_->list_for_agent(agent_id, 50)) {
+            json j = hivemind::share_to_json(sh);
+            j["direction"] =
+                sh.sender_agent_id == agent_id ? "sent" : "received";
+            if (const auto peer = agents_.get_agent(
+                    j["direction"] == "sent" ? sh.target_agent_id
+                                             : sh.sender_agent_id))
+                j["peer_name"] = peer->name;
+            arr.push_back(std::move(j));
+        }
+        resp["ok"] = true;
+        resp["shares"] = std::move(arr);
+    } catch (const std::exception& e) {
+        resp["ok"] = false;
+        resp["error"] = e.what();
+    }
+    channel_.send(worker, resp);
+}
+
+void HubRouter::handle_share_fetch_req(const std::string& worker,
+                                       const std::string& agent_id,
+                                       const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "share_fetch_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    auto fail = [&](const std::string& err) {
+        resp["ok"] = false;
+        resp["error"] = err;
+        channel_.send(worker, resp);
+    };
+    if (!shares_) { fail("share store unavailable"); return; }
+    const std::string share_id = frame.value("share_id", "");
+    const auto sh = shares_->get_share(share_id);
+    if (!sh) { fail("share not found"); return; }
+    if (sh->state != "active") { fail("share was revoked"); return; }
+    // Addressed-share authorization: only the target (or the sender
+    // re-fetching their own share) may pull the blob.
+    if (sh->target_agent_id != agent_id && sh->sender_agent_id != agent_id) {
+        fail("share is not addressed to you"); return;
+    }
+
+    if (sh->worker == worker) {
+        // Same-rig fast path: the worker copies the staged file into
+        // incoming/ in place — a 50 MB blob must not round-trip through
+        // the hub (WAN, memory) when both agents share the workspace.
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pend_fetch_[share_id] = {worker, agent_id, id};
+        }
+        const bool sent = channel_.send(worker,
+            {{"op", "share_local_copy"},
+             {"id", share_id},
+             {"src", sh->rel_path},
+             {"dst", "incoming/" + share_id + "/" + sh->filename}});
+        if (!sent) {
+            std::lock_guard<std::mutex> lk(m_);
+            pend_fetch_.erase(share_id);
+            fail("worker went offline");
+        }
+        return;   // the response rides share_copy_ack
+    }
+
+    // Cross-worker relay. fetch_file/push_file are synchronous (up to
+    // 120 s each) — never run them on the channel read loop.
+    if (!channel_.is_online(sh->worker)) {
+        fail("sender worker offline"); return;
+    }
+    const hivemind::Share snap = *sh;
+    std::thread([this, worker, agent_id, id, snap] {
+        json r = {{"op", "share_fetch_resp"}, {"agent_id", agent_id},
+                  {"id", id}};
+        try {
+            auto fr = channel_.fetch_file(snap.worker, "", snap.rel_path);
+            if (!fr) {
+                r["ok"] = false;
+                r["error"] = "sender worker went offline";
+            } else if (!fr->ok) {
+                r["ok"] = false;
+                r["error"] = fr->error;
+            } else {
+                const std::string dst =
+                    "incoming/" + snap.id + "/" + snap.filename;
+                auto pr = channel_.push_file(worker, dst, fr->data);
+                if (!pr) {
+                    r["ok"] = false;
+                    r["error"] = "worker went offline";
+                } else if (!pr->ok) {
+                    r["ok"] = false;
+                    r["error"] = pr->error;
+                } else {
+                    shares_->mark_fetched(snap.id);
+                    r["ok"] = true;
+                    r["path"] = "/workspace/" + dst;
+                    r["name"] = snap.filename;
+                    r["size"] = snap.size_bytes;
+                }
+            }
+        } catch (const std::exception& e) {
+            r["ok"] = false;
+            r["error"] = e.what();
+        } catch (...) {
+            r["ok"] = false;
+            r["error"] = "relay failed";
+        }
+        try { channel_.send(worker, r); }
+        catch (const std::exception& e) {
+            std::cerr << "[hub] share_fetch_resp send failed: "
+                      << e.what() << "\n";
+        }
+    }).detach();
+}
+
+void HubRouter::handle_share_copy_ack(
+    const std::string& /*worker*/,   // response relays via pf.worker
+    const json& frame) {
+    const std::string share_id = frame.value("id", "");
+    PendFetch pf;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        const auto it = pend_fetch_.find(share_id);
+        if (it == pend_fetch_.end()) return;   // stale/unknown ack
+        pf = it->second;
+        pend_fetch_.erase(it);
+    }
+    json resp = {{"op", "share_fetch_resp"}, {"agent_id", pf.agent_id},
+                 {"id", pf.req_id}};
+    if (!frame.value("ok", false)) {
+        resp["ok"] = false;
+        resp["error"] = frame.value("error", "local copy failed");
+    } else {
+        const auto sh = shares_ ? shares_->get_share(share_id)
+                                : std::nullopt;
+        if (shares_ && sh) shares_->mark_fetched(share_id);
+        resp["ok"] = true;
+        resp["path"] = "/workspace/incoming/" + share_id + "/" +
+                       (sh ? sh->filename : "");
+        if (sh) {
+            resp["name"] = sh->filename;
+            resp["size"] = sh->size_bytes;
+        }
+    }
+    channel_.send(pf.worker, resp);
+}
+
+void HubRouter::handle_share_revoke_req(const std::string& worker,
+                                        const std::string& agent_id,
+                                        const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "share_revoke_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    auto fail = [&](const std::string& err) {
+        resp["ok"] = false;
+        resp["error"] = err;
+        channel_.send(worker, resp);
+    };
+    if (!shares_) { fail("share store unavailable"); return; }
+    const std::string share_id = frame.value("share_id", "");
+    const auto sh = shares_->get_share(share_id);
+    if (!sh) { fail("share not found"); return; }
+    if (sh->sender_agent_id != agent_id) {
+        fail("only the sender can revoke a share"); return;
+    }
+    try {
+        shares_->revoke(share_id);   // already-revoked is still success
+    } catch (const std::exception& e) {
+        fail(std::string{"store: "} + e.what()); return;
+    }
+    // Best-effort: drop the staged copy on the sender's worker. The
+    // share is revoked either way — a leftover file just wastes disk
+    // until the worker's next cleanup.
+    if (channel_.is_online(sh->worker))
+        channel_.send(sh->worker, {{"op", "share_delete"},
+                                   {"path", sh->rel_path}});
+    resp["ok"] = true;
     channel_.send(worker, resp);
 }

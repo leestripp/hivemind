@@ -282,6 +282,24 @@ message) idempotency. `message_agent` returns a `delivery_id`;
 fan-in/relay logic, run test_agent_relay + test_delivery_store — the
 single wake path (relay suppresses pair fan-in) is load-bearing.
 
+## Agent File Sharing (2026-10-11)
+
+Agents hand files to each other with four tools: `share_file(path,
+target, note?)` stages the blob worker-side at
+`workspace/shared/<uuid>/<name>` (50 MB cap, path confined to
+/workspace) and registers an ADDRESSED share — only sender and target
+can ever fetch; `list_shared_files` shows sent/received shares;
+`fetch_shared_file(share_id)` delivers to
+`/workspace/incoming/<share_id>/` (same-rig = in-place copy via
+`share_local_copy`, cross-rig = hub relay over the chunked
+file_fetch/file_push ops); `revoke_shared_file` deletes the staged copy
+(sender only). The hub stores metadata only (`shares.db`, ShareStore) —
+blob bytes never touch the hub DB; contents stay confined to the
+sender's rig until an authorized fetch. Target notification rides the
+durable Phase 66 delivery queue. Admin audit: `GET /api/shares?agent=`
+(admin scope). Files are NEVER redirected to the user inbox — that path
+is attachments.
+
 Read state (66c) is per-principal high-water marks in
 `thread_reads` (deliveries.db). A delivery's read receipt consults
 ONLY the target agent's mark (`delivery_is_read`) — never let any

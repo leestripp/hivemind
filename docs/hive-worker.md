@@ -63,6 +63,7 @@ Hub -> worker:
 | `agent_stop` / `agent_remove` | agent_id | stop exec / reap container + home |
 | `exec` | id, agent, argv, env, timeout_s | one-shot command in the agent's container (exec_chunk/exec_done back) |
 | `file_fetch` / `file_push` / `file_list` | | move bytes hub<->worker workspace, list dirs |
+| `share_local_copy` / `share_delete` | id, src, dst / path | same-rig share fetch (copy staged blob to `incoming/`, ack via `share_copy_ack`) and revoke cleanup of `shared/<id>/` (2026-10-11 share_file) |
 | `skill_begin` / `skill_file` / `skill_end` / `skill_remove` | | stream the skills library to the worker |
 | `screen_ctl` | | start/stop the agent's screen share |
 | `stream_open` / `stream_data` / `stream_close` | | bidirectional byte streams (VNC tunnel) |
@@ -81,6 +82,8 @@ Worker -> hub:
 | `agent_log` | anything else the agent emits |
 | `exec_chunk` / `exec_done` | exec output / completion |
 | `file_chunk` / `file_done` / `file_error` / `file_list_result` / `file_push_ack` | file transfer results |
+| `share_create_req` / `share_list_req` / `share_fetch_req` / `share_revoke_req` | share_file tool bridge (2026-10-11): the worker stages the blob at `workspace/shared/<uuid>/<name>` (path confinement + 50 MB cap) BEFORE forwarding create; the hub stores metadata only and enforces addressed-share fetch auth |
+| `share_copy_ack` | completes a same-worker share fetch (hub relays `share_fetch_resp` to the requester) |
 | `screen_result`, `skill_ack`, `stream_*` | screen control, skill sync, VNC streams |
 
 Transport rules that are LOAD-BEARING (both ends):

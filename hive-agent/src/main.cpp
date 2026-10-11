@@ -181,6 +181,53 @@ private:
 };
 MsgBridge g_msgbridge;
 
+// Share bridge (2026-10-11, Plan.md "Agent File Sharing"):
+// request/response to the hub for agent-to-agent file shares. Tools
+// emit {"ev":"share_*_req",...}; the worker forwards them as op frames
+// (share_create_req additionally stages the blob worker-side first) and
+// the hub replies {"op":"share_*_resp","id":...,"ok":bool,...} on stdin.
+// Same blocking pattern as MsgBridge, but a 120s timeout: a cross-rig
+// fetch relays up to 50 MB through the hub as chunked file ops.
+class ShareBridge {
+public:
+    json call(const std::string& ev_name, const json& payload) {
+        const std::string id = "f" + std::to_string(++seq_);
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            pending_[id] = std::nullopt;
+        }
+        json ev = {{"ev", ev_name}, {"id", id}};
+        for (auto& [k, v] : payload.items()) ev[k] = v;
+        emit(ev);
+        std::unique_lock<std::mutex> lk(m_);
+        const bool got = cv_.wait_for(lk, std::chrono::seconds(120), [&] {
+            return pending_[id].has_value();
+        });
+        json out = got
+            ? *pending_[id]
+            : json{{"ok", false},
+                   {"error", "share request timed out (hub offline?)"}};
+        pending_.erase(id);
+        return out;
+    }
+
+    void resolve(const std::string& id, const json& frame) {
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = pending_.find(id);
+        if (it != pending_.end()) {
+            it->second = frame;
+            cv_.notify_all();
+        }
+    }
+
+private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::map<std::string, std::optional<json>> pending_;
+    int seq_ = 0;
+};
+ShareBridge g_shares;
+
 // Secret bridge: request/response to the hub for secrets_create. Tools
 // emit {"ev":"secret_req",...}; the worker forwards it as an op frame;
 // the hub applies it against SecretStore and replies with
@@ -652,6 +699,178 @@ int main(int argc, char** argv) {
         }
     };
     agent.register_tool(std::make_unique<MessageStatusTool>());
+
+    // ── Agent file sharing (2026-10-11, Plan.md) ─────────────────────
+    // Four tools over the ShareBridge: share_file stages + registers +
+    // notifies; list_shared_files is the discovery surface;
+    // fetch_shared_file pulls the blob (same-rig = instant local copy,
+    // cross-rig = hub relay); revoke_shared_file cancels a sent share.
+
+    class ShareFileTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "share_file"; }
+        std::string get_description() const override {
+            return "Share a file with another agent. path: a /workspace/... "
+                   "file you can see (max 50 MB). target: the other agent's "
+                   "name or id. The file is staged and the target is "
+                   "notified automatically with the share_id; they download "
+                   "it with fetch_shared_file. Returns the share_id. "
+                   "Optional note: one line about what the file is. "
+                   "Only the two of you can ever fetch it — shares are "
+                   "addressed, not public.";
+        }
+        json get_definition() const override {
+            json path = {{"type","string"},
+                         {"description","Absolute /workspace/... path of "
+                                        "the file to share"}};
+            json target = {{"type","string"},
+                           {"description","Recipient agent name or id"}};
+            json note = {{"type","string"},
+                         {"description","Optional one-line description "
+                                        "for the recipient"}};
+            json params = {{"type","object"},
+                           {"properties",{{"path",path},{"target",target},
+                                          {"note",note}}},
+                           {"required",{"path","target"}}};
+            return {{"type","function"},
+                    {"function",{{"name","share_file"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string path   = args.value("path","");
+            const std::string target = args.value("target","");
+            if (path.empty() || target.empty())
+                return {{"status","error"},
+                        {"error","path and target required"}};
+            const json resp = g_shares.call("share_create_req",
+                {{"path", path}, {"target", target},
+                 {"note", args.value("note","")}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error",
+                                             "share failed (hub offline?)")}};
+            json out = {{"status","success"},
+                        {"share_id", resp.value("share_id","")},
+                        {"note","staged and registered; the target was "
+                                "notified and can fetch_shared_file(\"" +
+                                resp.value("share_id","") + "\") now."}};
+            if (resp.contains("notify_error"))
+                out["notify_error"] = resp["notify_error"];
+            return out;
+        }
+    };
+    agent.register_tool(std::make_unique<ShareFileTool>());
+
+    class ListSharedFilesTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "list_shared_files"; }
+        std::string get_description() const override {
+            return "List file shares involving you (newest first): files "
+                   "others shared WITH you and files YOU shared. Each row: "
+                   "share_id, filename, size_bytes, peer_name, direction "
+                   "(received/sent), state (active/revoked), created_at, "
+                   "fetched_at, fetch_count. Use fetch_shared_file with a "
+                   "received share_id to download it.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                           {"properties",json::object()}};
+            return {{"type","function"},
+                    {"function",{{"name","list_shared_files"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            (void)args;
+            const json resp = g_shares.call("share_list_req",
+                                            json::object());
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error", "list failed")}};
+            return {{"status","success"},
+                    {"shares", resp.value("shares", json::array())}};
+        }
+    };
+    agent.register_tool(std::make_unique<ListSharedFilesTool>());
+
+    class FetchSharedFileTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "fetch_shared_file"; }
+        std::string get_description() const override {
+            return "Download a file another agent shared with you (or "
+                   "re-fetch one you sent). share_id comes from a share "
+                   "notification or list_shared_files. The file lands at "
+                   "the returned /workspace/incoming/<share_id>/ path. A "
+                   "large file coming from another rig may take a while — "
+                   "that is normal, not an error. Revoked or wrongly "
+                   "addressed shares are refused.";
+        }
+        json get_definition() const override {
+            json sid = {{"type","string"},
+                        {"description","share_id from list_shared_files "
+                                       "or the share notification"}};
+            json params = {{"type","object"},
+                           {"properties",{{"share_id",sid}}},
+                           {"required",{"share_id"}}};
+            return {{"type","function"},
+                    {"function",{{"name","fetch_shared_file"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string sid = args.value("share_id","");
+            if (sid.empty())
+                return {{"status","error"},{"error","share_id required"}};
+            const json resp = g_shares.call("share_fetch_req",
+                                            {{"share_id", sid}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error", "fetch failed")}};
+            return {{"status","success"},
+                    {"path", resp.value("path","")},
+                    {"name", resp.value("name","")},
+                    {"size", resp.value("size", 0)}};
+        }
+    };
+    agent.register_tool(std::make_unique<FetchSharedFileTool>());
+
+    class RevokeSharedFileTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "revoke_shared_file"; }
+        std::string get_description() const override {
+            return "Revoke a file share YOU created (by share_id, from "
+                   "list_shared_files). The staged copy is deleted and "
+                   "fetch_shared_file stops working for it. Only the "
+                   "sender can revoke; already-fetched copies on the "
+                   "recipient's side are NOT removed.";
+        }
+        json get_definition() const override {
+            json sid = {{"type","string"},
+                        {"description","share_id of a share you sent"}};
+            json params = {{"type","object"},
+                           {"properties",{{"share_id",sid}}},
+                           {"required",{"share_id"}}};
+            return {{"type","function"},
+                    {"function",{{"name","revoke_shared_file"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string sid = args.value("share_id","");
+            if (sid.empty())
+                return {{"status","error"},{"error","share_id required"}};
+            const json resp = g_shares.call("share_revoke_req",
+                                            {{"share_id", sid}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error", resp.value("error", "revoke failed")}};
+            return {{"status","success"},
+                    {"note","share revoked; the staged copy is being "
+                            "deleted."}};
+        }
+    };
+    agent.register_tool(std::make_unique<RevokeSharedFileTool>());
 
     // message_user (Phase 44): the agent's direct line to the HUMAN.
     // Posts into the hub's singleton User Inbox thread — a one-way,
@@ -1216,6 +1435,9 @@ int main(int argc, char** argv) {
             g_secrets.resolve(op.value("id", ""), op);
         } else if (kind == "msg_send_resp" || kind == "msg_status_resp") {
             g_msgbridge.resolve(op.value("id", ""), op);
+        } else if (kind == "share_create_resp" || kind == "share_list_resp" ||
+                   kind == "share_fetch_resp" || kind == "share_revoke_resp") {
+            g_shares.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
         } else if (kind == "shutdown") {

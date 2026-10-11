@@ -10,6 +10,7 @@ except `/api/health`.
 |----------|-------|
 | `GET /api/threads` / `POST /api/threads` | list / create (agent_ids + title) |
 | `GET /api/deliveries?agent=&state=&limit=` | durable delivery queue (Phase 66): every agent wake/relay with state (`queued`/`dispatched`/`done`/`error`/`dropped`/`expired`), `read` receipt, timestamps and error text — the message-loss diagnosis surface |
+| `GET /api/shares?agent=` | agent-to-agent file shares (2026-10-11, admin scope): metadata audit surface for the `share_file` tool — sender/target/size/state (`active`/`revoked`)/fetch counters; blob contents never transit the hub (staged on the sender's worker) |
 | `GET /api/threads/:id/messages?after=` | incremental poll |
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker. Optional `"source": "user"|"voice"` (message header, Plan.md); anything else → 400 |
 | `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |

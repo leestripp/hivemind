@@ -33,6 +33,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <sstream>
+#include <random>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -61,6 +62,48 @@ static std::unordered_map<std::string, std::string> pushes;
 // are forwarded to the server; set once the channel is up (see below).
 static std::unique_ptr<hwfleet::Fleet> g_fleet;
 static std::function<void(const json&)> g_send_frame;  // set per connection
+
+// ── 2026-10-11 (Plan.md "Agent File Sharing") ─────────────────────────
+// share_file staging helpers: uuid + filename sanitizing. The blob is
+// staged worker-side at workspace/shared/<uuid>/<name> BEFORE the hub
+// learns the share exists; hub rows carry metadata only.
+
+/// 32 lowercase hex chars from the kernel uuid generator.
+static std::string share_uuid() {
+    std::ifstream in("/proc/sys/kernel/random/uuid");
+    std::string u;
+    in >> u;
+    std::string out;
+    for (const char c : u)
+        if (c != '-') out += c;
+    if (out.size() != 32) {   // paranoia fallback: random_device
+        std::random_device rd;
+        std::ostringstream oss;
+        for (int i = 0; i < 4; ++i)
+            oss << std::hex << rd();
+        out = oss.str().substr(0, 32);
+    }
+    return out;
+}
+
+/// Whitelist-sanitize a basename: ASCII [a-zA-Z0-9._-] only (anything
+/// else becomes '_'), so a later length cap can never split UTF-8.
+static std::string share_safe_name(std::string n) {
+    for (auto& c : n) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+                        c == '-';
+        if (!ok) c = '_';
+    }
+    if (n.empty() || n == "." || n == "..") n = "file";
+    if (n.size() > 128) n = n.substr(n.size() - 128);
+    return n;
+}
+
+/// The shared workspace root every agent container mounts at /workspace.
+static fs::path worker_workspace() {
+    return fs::path{std::getenv("HOME")} / ".local/share/hive-worker/workspace";
+}
 
 int main(int argc, char* argv[]) {
     std::string server = "ws://127.0.0.1:8423";
@@ -203,6 +246,74 @@ int main(int argc, char* argv[]) {
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
+            // 2026-10-11 (Plan.md "Agent File Sharing"): share_file tool.
+            // Path confinement + the 50 MB cap + staging happen HERE, on
+            // the worker, before the hub sees anything; the op forwarded
+            // onward carries the staged rel_path + measured size, not the
+            // agent's raw path. Worker-side validation failures answer the
+            // agent bridge directly (no hub round-trip).
+            else if (kind == "share_create_req") {
+                const std::string req_id = ev.value("id", "");
+                auto fail = [&](const std::string& err) {
+                    if (g_fleet)
+                        g_fleet->send_to(agent_id,
+                            {{"op","share_create_resp"},{"id",req_id},
+                             {"ok",false},{"error",err}});
+                    f = json();            // swallow: nothing to forward
+                    return true;
+                };
+                std::string rel = ev.value("path", "");
+                while (!rel.empty() && rel.front() == '/')
+                    rel.erase(rel.begin());
+                if (rel.rfind("workspace/", 0) == 0)
+                    rel.erase(0, 10);      // strip agent-visible prefix
+                if (rel.empty() || rel.find("..") != std::string::npos) {
+                    if (fail("bad path")) return;
+                }
+                if (rel.rfind("shared/", 0) == 0) {
+                    if (fail("cannot re-share the staging area")) return;
+                }
+                const fs::path ws = worker_workspace();
+                const fs::path src = ws / rel;
+                std::error_code ec;
+                if (!fs::is_regular_file(src, ec)) {
+                    if (fail("not found: /workspace/" + rel)) return;
+                }
+                const auto size = fs::file_size(src, ec);
+                if (ec) { if (fail("stat failed")) return; }
+                if (size == 0) { if (fail("empty file")) return; }
+                if (size > 50ll * 1024 * 1024) {
+                    if (fail("file too large (50 MB max)")) return;
+                }
+                const std::string share_id = share_uuid();
+                const std::string fname =
+                    share_safe_name(src.filename().string());
+                const std::string staged =
+                    "shared/" + share_id + "/" + fname;
+                const fs::path dst = ws / staged;
+                fs::create_directories(dst.parent_path(), ec);
+                if (ec) { if (fail("staging failed")) return; }
+                fs::copy_file(src, dst, ec);
+                if (ec) {
+                    if (fail("staging copy failed: " + ec.message())) return;
+                }
+                f = {{"op","share_create_req"},{"agent",agent_id},
+                     {"id",req_id},
+                     {"share_id",share_id},
+                     {"filename",fname},
+                     {"size",(int64_t)size},
+                     {"note",ev.value("note","")},
+                     {"target",ev.value("target","")},
+                     {"rel_path",staged}};
+            }
+            else if (kind == "share_list_req" ||
+                     kind == "share_fetch_req" ||
+                     kind == "share_revoke_req") {
+                f = ev;
+                f["op"] = kind;
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             else if (kind == "status")
                 f = {{"op","agent_status"},{"agent",agent_id},
                      {"state",ev.value("state","")},
@@ -210,6 +321,7 @@ int main(int argc, char* argv[]) {
             else
                 f = {{"op","agent_log"},{"agent",agent_id},
                      {"event",ev}};
+            if (f.is_null()) return;   // share_create_req worker-side fail
             try { g_send_frame(f); } catch (...) {}
         });
 
@@ -540,7 +652,9 @@ int main(int argc, char* argv[]) {
                 }
                 if (op == "task" || op == "approval_resp" || op == "cancel" ||
                     op == "routine_resp" || op == "secret_resp" ||
-                    op == "msg_send_resp" || op == "msg_status_resp") {
+                    op == "msg_send_resp" || op == "msg_status_resp" ||
+                    op == "share_create_resp" || op == "share_list_resp" ||
+                    op == "share_fetch_resp" || op == "share_revoke_resp") {
                     const std::string aid = frame.value("agent_id","");
                     if (!g_fleet || !g_fleet->send_to(aid, frame)) {
                         try {
@@ -663,6 +777,66 @@ int main(int argc, char* argv[]) {
                                         {"size",(int64_t)size}});
                         } catch (...) {}
                     }).detach();
+                } else if (op == "share_local_copy") {
+                    // 2026-10-11: same-rig share fetch fast path — copy
+                    // the staged blob into incoming/ in place (a 50 MB
+                    // file must not round-trip the hub over the WAN);
+                    // the ack completes the hub's pending fetch.
+                    const std::string id  = frame.value("id", "");
+                    const std::string src = frame.value("src", "");
+                    const std::string dst = frame.value("dst", "");
+                    // [&] for send_frame like file_fetch: it is a
+                    // connection-lifetime local, safe to capture by ref.
+                    std::thread([&, id, src, dst] {
+                        auto ack = [&](bool ok, const std::string& err) {
+                            try { send_frame({{"op","share_copy_ack"},
+                                {"id",id},{"ok",ok},{"error",err}}); }
+                            catch (...) {}
+                        };
+                        auto clean = [](std::string r) {
+                            while (!r.empty() && r.front() == '/')
+                                r.erase(r.begin());
+                            return r;
+                        };
+                        const std::string s = clean(src), d = clean(dst);
+                        if (s.empty() || d.empty() ||
+                            s.find("..") != std::string::npos ||
+                            d.find("..") != std::string::npos ||
+                            s.rfind("shared/", 0) != 0 ||
+                            d.rfind("incoming/", 0) != 0) {
+                            ack(false, "bad path"); return;
+                        }
+                        const fs::path ws = worker_workspace();
+                        std::error_code ec;
+                        if (!fs::is_regular_file(ws / s, ec)) {
+                            ack(false, "staged file gone"); return;
+                        }
+                        fs::create_directories((ws / d).parent_path(), ec);
+                        if (ec) { ack(false, "mkdir failed"); return; }
+                        fs::copy_file(ws / s, ws / d,
+                                      fs::copy_options::overwrite_existing,
+                                      ec);
+                        if (ec) {
+                            ack(false, "copy failed: " + ec.message());
+                            return;
+                        }
+                        ack(true, "");
+                    }).detach();
+                } else if (op == "share_delete") {
+                    // 2026-10-11: revoke cleanup — drop the whole
+                    // per-share staging dir (shared/<id>). Best effort;
+                    // a failure only wastes disk.
+                    std::string rel = frame.value("path", "");
+                    while (!rel.empty() && rel.front() == '/')
+                        rel.erase(rel.begin());
+                    if (rel.rfind("shared/", 0) == 0 &&
+                        rel.find("..") == std::string::npos) {
+                        const fs::path ws = worker_workspace();
+                        const fs::path dir = (ws / rel).parent_path();
+                        std::error_code ec;
+                        if (dir.parent_path() == ws / "shared")
+                            fs::remove_all(dir, ec);
+                    }
                 } else if (op == "file_list") {
                     // Phase H: list a dir in THIS rig's shared workspace.
                     const std::string id = frame.value("id", "");

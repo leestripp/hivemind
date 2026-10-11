@@ -53,6 +53,7 @@
 #include "hivemind/ThreadStore.h"
 #include "hivemind/ChatService.h"
 #include "hivemind/DeliveryStore.h"
+#include "hivemind/ShareStore.h"
 #include "hivemind/HubRouter.h"
 #include "hivemind/ApprovalStore.h"
 
@@ -169,6 +170,10 @@ int main(int argc, char* argv[]) {
                 "[delivery] boot: %d orphaned wake(s) requeued\n", requeued);
         delivery_store.prune_terminal_older_than(7);
     }
+    // 2026-10-11 (Plan.md "Agent File Sharing"): share metadata store
+    // for the share_file tool bridge (blobs stay on the workers).
+    hivemind::ShareStore share_store;
+    hub.set_share_store(&share_store);
     ChatService chat_service{agent_store, thread_store, hub,
                              delivery_store};
     hub.set_chat_service(&chat_service);
@@ -263,6 +268,7 @@ int main(int argc, char* argv[]) {
         const bool admin = AuthStore::has_scope(*scopes, "admin");
         if (path.rfind("/api/keys", 0) == 0 ||
             path.rfind("/api/secrets", 0) == 0 ||
+            path.rfind("/api/shares", 0) == 0 ||
             // Model-registry management is credential-adjacent
             // (relay to worker models.json/secrets.json) — admin only.
             (path.rfind("/api/workers/", 0) == 0 &&
@@ -318,6 +324,24 @@ int main(int argc, char* argv[]) {
             hub.push_spawn(agent_id);
         });
     register_screen_routes(server, agent_store, auth_store);
+
+    // 2026-10-11 (Plan.md "Agent File Sharing"): admin audit surface
+    // for agent-to-agent shares — metadata only, mirrors
+    // GET /api/deliveries; contents stay on the workers.
+    server.get("/api/shares",
+        [&share_store](const OmniNet::HTTP::Request& req,
+                       OmniNet::HTTP::Response& resp) {
+            try {
+                nlohmann::json arr = nlohmann::json::array();
+                for (const auto& sh : share_store.list_for_agent(
+                         req.queryParameter("agent", "")))
+                    arr.push_back(hivemind::share_to_json(sh));
+                hivemind::routes::send_json(resp,
+                    nlohmann::json{{"shares", std::move(arr)}});
+            } catch (const std::exception& e) {
+                hivemind::routes::send_error(resp, 500, e.what());
+            }
+        });
 
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     static SystemMonitor system_monitor;
