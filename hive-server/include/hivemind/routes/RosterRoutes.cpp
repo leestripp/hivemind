@@ -613,6 +613,24 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     std::cerr << "[roster] container teardown for " << id
                               << " failed: " << e.what() << "\n";
                 }
+                // Phase 72: deleting a host agent stops the process but
+                // deliberately does NOT remove the unix user — deprovision
+                // is manual/local/root-only. Leave a loud audit line so a
+                // forgotten sudo user is never silent.
+                if (existing->host_agent) {
+                    // Mirror of the worker's host_user() mapping (lowercase,
+                    // non-alnum -> '-').
+                    std::string uname;
+                    for (char ch : existing->name)
+                        uname += (isalnum((unsigned char)ch) || ch == '-')
+                                     ? (char)tolower((unsigned char)ch) : '-';
+                    std::cerr << "HOST AGENT deleted: '" << existing->name
+                              << "' — unix user hivex-" << uname
+                              << " on worker '" << existing->worker
+                              << "' NOT removed; run 'sudo hive-worker "
+                              << "deprovision-host-agent " << existing->name
+                              << "' on that rig\n";
+                }
             }
             agents.delete_agent(id);
             send_json(resp, json{

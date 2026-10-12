@@ -64,6 +64,13 @@ sudo hive-worker deprovision-host-agent rooty
 # /var/backups/hivex-rooty-<timestamp>.tar.gz, removes user + sudoers
 ```
 
+**Deleting the agent from the roster does NOT remove the unix user.**
+`DELETE /api/agents/:id` stops the process and drops the roster row, but
+`hivex-<name>`, its home and its sudoers entry stay on the rig — by
+design: nothing reachable via the API may destroy unix users. The hub
+logs a `HOST AGENT deleted … NOT removed` audit line as a reminder; run
+`deprovision-host-agent` on the rig to finish the cleanup.
+
 ## Runtime mechanics
 
 - The worker launches the agent as
