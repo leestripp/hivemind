@@ -1473,6 +1473,12 @@ int main(int argc, char** argv) {
             g_shares.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
+            // A turn wedged in ApprovalBroker::ask() must die with the
+            // turn: deny every pending approval so the broker wakes and
+            // the tool call unwinds as refused. Without this a cancelled
+            // agent sat mute for the broker's 10-minute safety timeout
+            // (QueenBee incident, 2026-10-12).
+            approvals.deny_all();
         } else if (kind == "shutdown") {
             break;
         }
