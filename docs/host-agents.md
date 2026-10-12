@@ -128,6 +128,44 @@ archived+removed on delete).
   plain process. Host agents skip `ensure_container` entirely.
 - `memory`/`cpus` caps are podman-only and do not apply to host agents.
 
+## Runtime descriptor env (2026-10-12)
+
+One hive-agent binary serves both worlds; the worker's env file says
+which one it landed in (`runtime_env_lines` in fleet.h renders these):
+
+| var | container | host agent |
+|-----|-----------|------------|
+| `HIVEMIND_RUNTIME` | `container` | `host` |
+| `HIVEMIND_WORKSPACE_ROOT` | `/workspace` | the shared `--host-workspace-root` path |
+| `HIVEMIND_SKILLS_DIR` | `/skills` (ro mount) | the worker's skill library by host path |
+| `HIVEMIND_SERVICE_*` | podman `-e` (8000+ → per-agent host block) | env file, **identity mapping** — the agent binds the advertised port directly (`CONTAINER_BASE == PORT_BASE`), same `service_ports.txt` registry so blocks never collide on the rig |
+
+Worker file ops resolve against the **agent's** workspace root
+(`Fleet::workspace_root`, "" → shared staging workspace):
+
+- `share_file` reads the SOURCE from the agent's workspace; the staged
+  blob still lands in the shared staging `shared/<share_id>/` so every
+  later fetch is runtime-agnostic.
+- Chat attachments: the worker's promote step reads
+  `attachments/<tid>/outgoing/` from the agent's workspace (this fixed
+  QueenBee's silent attach_file loss — the tool reported success while
+  the hub never received the file). The canonical copy stays in
+  staging; `attachments/` also joined the provisioning symlink mapping
+  (incoming/shared) so user→agent attachments land where the agent
+  reads them.
+- `file_fetch`/`file_list` accept an `agent` field (hub sends it);
+  agent workspace first, staging fallback.
+- Hub-driven `exec` for a host agent runs via the scoped sudo grant
+  (`timeout`+`env` wrapped), NEVER `ensure_container`.
+- Host spawn fires `<ws>/.hivemind/boot.sh` detached, same contract as
+  the container boot hook.
+- `POST /api/agents/:id/screen/start` returns **409** for host agents
+  (no container to project a screen out of).
+
+The agent's system prompt states the runtime explicitly (host agents
+kept prescribing container remedies for host-side gaps — QueenBee
+audit 2026-10-12).
+
 ## API
 
 `POST /api/agents` and `PATCH /api/agents/:id` accept:
