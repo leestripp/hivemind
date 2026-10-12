@@ -435,6 +435,12 @@ private:
 // Phase 35: current turn's thread id — set by the turn thread before
 // each turn, read by AttachFileTool. Single turn thread → no locking.
 static std::string g_thread_id;
+// Runtime descriptor (2026-10-12): the SAME binary serves containers and
+// bare-metal host agents; the worker's env says which. g_workspace_root
+// is the absolute project root (argv[1]) — tools must build paths from
+// it, never from a hard-coded /workspace literal.
+static fs::path g_workspace_root;
+static std::string g_runtime = "container";   // HIVEMIND_RUNTIME
 
 // Phase 40: company roster, cached from each task frame (hub injects it
 // in HubRouter::dispatch). The list_agents tool reads it so agents can
@@ -492,6 +498,9 @@ int main(int argc, char** argv) {
         log_err("HIVEMIND_AGENT_NAME is required");
         return 2;
     }
+
+    g_workspace_root = project_root;
+    if (auto rt = env_or("HIVEMIND_RUNTIME"); !rt.empty()) g_runtime = rt;
 
     hive::AgentConfig cfg;
     cfg.project_root = project_root;
@@ -596,10 +605,28 @@ int main(int argc, char** argv) {
     cfg.system_prompt +=
         "\n\n## Sharing files in chat\n"
         "To show the user a file (a rendered video, image, archive - any "
-        "deliverable), call attach_file with its /workspace path. It "
+        "deliverable), call attach_file with its path under your workspace "
+        "root (" + g_workspace_root.string() + "). It "
         "attaches the file to your reply: images and video render inline "
         "in the chat, other files appear as a download. Prefer this over "
         "only mentioning the file path.";
+
+    // 2026-10-12: host agents mis-modelled themselves as containers and
+    // prescribed container remedies ("recreate my container") for
+    // host-side gaps (QueenBee audit). State the runtime explicitly.
+    if (g_runtime == "host") {
+        cfg.system_prompt +=
+            "\n\n## Your runtime\n"
+            "You run BARE-METAL on this machine as the unix user for your "
+            "agent (hivex-<name>) - there is NO container. Your workspace "
+            "root is " + g_workspace_root.string() + " (a real host "
+            "directory, not a container mount). Container remedies do not "
+            "apply to you: there is no container to recreate, no container "
+            "image variant to switch to, and your environment is not "
+            "rebuilt from an image. If a tool or capability is missing, "
+            "report it as a host-side gap instead of prescribing a "
+            "container fix.";
+    }
 
     // 2026-09-16 routing-noise report: routing is thread-scoped and
     // correct host-side, but agents NARRATED other threads' activity into
@@ -755,8 +782,9 @@ int main(int argc, char** argv) {
     public:
         std::string get_name() const override { return "share_file"; }
         std::string get_description() const override {
-            return "Share a file with another agent. path: a /workspace/... "
-                   "file you can see (max 50 MB). target: the other agent's "
+            return "Share a file with another agent. path: a file under "
+                   "your workspace root (" + g_workspace_root.string() +
+                   "), max 50 MB. target: the other agent's "
                    "name or id. The file is staged and the target is "
                    "notified automatically with the share_id; they download "
                    "it with fetch_shared_file. Returns the share_id. "
@@ -766,8 +794,9 @@ int main(int argc, char** argv) {
         }
         json get_definition() const override {
             json path = {{"type","string"},
-                         {"description","Absolute /workspace/... path of "
-                                        "the file to share"}};
+                         {"description","Absolute path (under your "
+                                        "workspace root) of the file to "
+                                        "share"}};
             json target = {{"type","string"},
                            {"description","Recipient agent name or id"}};
             json note = {{"type","string"},
@@ -1023,7 +1052,8 @@ int main(int argc, char** argv) {
     public:
         std::string get_name() const override { return "attach_file"; }
         std::string get_description() const override {
-            return "Attach a file from /workspace to your reply so the user "
+            return "Attach a file from your workspace (" +
+                   g_workspace_root.string() + ") to your reply so the user "
                    "sees it in the chat (images and video render inline; "
                    "other files appear as a download). Use it for "
                    "deliverables (rendered videos, images, archives) "
@@ -1031,8 +1061,9 @@ int main(int argc, char** argv) {
         }
         json get_definition() const override {
             json path = {{"type","string"},
-                         {"description","File to attach: absolute "
-                          "/workspace/... path or workspace-relative"}};
+                         {"description","File to attach: absolute path "
+                          "under your workspace root, or "
+                          "workspace-relative"}};
             json params = {{"type","object"},
                            {"properties",{{"path",path}}},
                            {"required",{"path"}}};
@@ -1047,20 +1078,27 @@ int main(int argc, char** argv) {
                 return {{"status","error"},{"error","path required"}};
             if (g_thread_id.empty())
                 return {{"status","error"},{"error","no active thread"}};
-            if (p.rfind("/workspace/", 0) == 0) p = p.substr(11);
+            // Accept an absolute path under the workspace root, the
+            // legacy container-style /workspace/... spelling, or a
+            // workspace-relative path.
+            const std::string root_str = g_workspace_root.string();
+            if (p.rfind(root_str + "/", 0) == 0)
+                p = p.substr(root_str.size() + 1);
+            else if (p.rfind("/workspace/", 0) == 0)
+                p = p.substr(11);
             std::error_code ec;
             const fs::path rel = fs::path(p).lexically_normal();
             bool traversal = rel.empty() || rel.is_absolute();
             for (const auto& c : rel) if (c == "..") traversal = true;
             if (traversal)
                 return {{"status","error"},
-                        {"error","path must stay under /workspace"}};
-            const fs::path src = fs::path("/workspace") / rel;
+                        {"error","path must stay under the workspace root"}};
+            const fs::path src = g_workspace_root / rel;
             if (!fs::is_regular_file(src, ec))
                 return {{"status","error"},
-                        {"error","not a file: /workspace/" +
+                        {"error","not a file: " + root_str + "/" +
                          rel.generic_string()}};
-            const fs::path outdir = fs::path("/workspace/attachments") /
+            const fs::path outdir = g_workspace_root / "attachments" /
                                     g_thread_id / "outgoing";
             fs::create_directories(outdir, ec);
             if (ec) return {{"status","error"},{"error",ec.message()}};

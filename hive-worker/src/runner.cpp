@@ -544,7 +544,7 @@ static int service_pool_base() {
     return 18400;
 }
 
-static int service_port_count() {
+int service_port_count() {
     const char* env = std::getenv("HIVE_SERVICE_PORT_COUNT");
     if (env && *env) {
         const int v = std::atoi(env);

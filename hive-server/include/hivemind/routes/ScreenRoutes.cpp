@@ -232,8 +232,18 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
     server.post("/api/agents/:id/screen/start",
         [&agents](const Request& req, Response& resp) {
             const std::string id = agent_id_from_api(req);
-            if (id.empty() || !agents.get_agent(id)) {
+            const auto agent_rec = id.empty() ? std::nullopt
+                                              : agents.get_agent(id);
+            if (id.empty() || !agent_rec) {
                 routes::send_error(resp, 404, "agent not found"); return;
+            }
+            // Phase 72: host agents have no container to project a
+            // screen out of — fail CLEAN here instead of letting
+            // screen_ctl try to recreate a container for them.
+            if (agent_rec->host_agent) {
+                routes::send_error(resp, 409,
+                    "screen is not available for host agents (no "
+                    "container; the host's own desktop is theirs)"); return;
             }
             try {
                 // 30.4: worker-assigned → screen_ctl start over channel.

@@ -89,7 +89,8 @@ public:
                         std::string error; };
     std::optional<ListResult> list_files(const std::string& worker,
                                          const std::string& path,
-                                         int timeout_s = 30);
+                                         int timeout_s = 30,
+                                         const std::string& agent = "");
 
     /// §Skills-Global: synchronous listing of a worker's workspace global
     /// skills (/workspace/.agents/skills). Relay-only — the hub persists

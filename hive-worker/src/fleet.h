@@ -75,6 +75,45 @@ inline std::string resolved_image(const AgentSpec& s) {
     return s.type == "gpu" ? kImageGpu : kImageLatest;
 }
 
+// ── Runtime descriptor (2026-10-12, Plan.md "one binary, environment-
+// aware tools") ─────────────────────────────────────────────────────
+// The SAME hive-agent binary runs in containers and bare-metal; the
+// worker tells it which world it landed in via env. Pure + inline so
+// tests/v2/test_fleet can verify the rendering without a worker.
+struct RuntimeEnv {
+    std::string runtime;          // "container" | "host"
+    std::string workspace_root;   // "/workspace" or the host path
+    std::string skills_dir;       // "/skills" or the host library path
+    std::string service_host;     // "" -> service sharing disabled
+    int service_port_base = 0;    // host: identity mapping (agent binds
+    int service_port_count = 0;   // the advertised port directly)
+};
+
+// Newline-flattening matches fleet.cpp's env_line (env files are
+// line-based; all rendered values are single-line by contract).
+inline std::string runtime_env_lines(const RuntimeEnv& e) {
+    std::string out;
+    auto line = [&out](const char* key, const std::string& v) {
+        if (v.empty()) return;
+        out += key;
+        out += "=";
+        for (char c : v) out += (c == '\n') ? ' ' : c;
+        out += "\n";
+    };
+    line("HIVEMIND_RUNTIME", e.runtime);
+    line("HIVEMIND_WORKSPACE_ROOT", e.workspace_root);
+    line("HIVEMIND_SKILLS_DIR", e.skills_dir);
+    if (e.service_port_base > 0 && e.service_port_count > 0) {
+        line("HIVEMIND_SERVICE_HOST", e.service_host);
+        line("HIVEMIND_SERVICE_PORT_BASE", std::to_string(e.service_port_base));
+        line("HIVEMIND_SERVICE_PORT_COUNT", std::to_string(e.service_port_count));
+        // Identity mapping: no NAT outside a container, the agent binds
+        // the advertised port itself (container_base == port_base).
+        line("HIVEMIND_SERVICE_CONTAINER_BASE", std::to_string(e.service_port_base));
+    }
+    return out;
+}
+
 /// One running (or restarting) hive-agent session.
 class AgentProcess {
 public:
@@ -163,6 +202,14 @@ public:
 
     /// {agent_id: state} for heartbeats.
     nlohmann::json statuses() const;
+
+    /// File-op workspace root for an agent: the HOST agent's real
+    /// workspace, "" for container agents (caller falls back to the
+    /// shared staging workspace) and unknown ids.
+    std::string workspace_root(const std::string& agent_id) const;
+    /// The hivex-<name> unix user of a HOST agent running here;
+    /// "" for container agents and unknown ids.
+    std::string host_user_of(const std::string& agent_id) const;
 
 private:
     EventFn on_event_;

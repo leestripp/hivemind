@@ -23,6 +23,7 @@
 #include <mutex>
 #include <set>
 #include <chrono>
+#include <sstream>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -104,6 +105,18 @@ static std::string share_safe_name(std::string n) {
 /// The shared workspace root every agent container mounts at /workspace.
 static fs::path worker_workspace() {
     return fs::path{std::getenv("HOME")} / ".local/share/hive-worker/workspace";
+}
+
+/// Per-agent file-op root (2026-10-12): HOST agents (Phase 72) live
+/// OUTSIDE the shared staging workspace — their file ops resolve against
+/// their real workspace. Container agents and unknown ids get the
+/// staging workspace ("" agent on a frame = staging, as before).
+static fs::path agent_workspace(const std::string& agent_id) {
+    if (g_fleet && !agent_id.empty()) {
+        const std::string root = g_fleet->workspace_root(agent_id);
+        if (!root.empty()) return fs::path(root);
+    }
+    return worker_workspace();
 }
 
 int main(int argc, char* argv[]) {
@@ -242,9 +255,13 @@ int main(int argc, char* argv[]) {
                 json atts = json::array();
                 const std::string tid = ev.value("thread_id", "");
                 if (!tid.empty() && std::getenv("HOME")) {
+                    // attach_file writes into the AGENT's workspace (host
+                    // agents: outside staging); the canonical copy the hub
+                    // fetches stays in the shared staging workspace.
                     const fs::path ws = fs::path{std::getenv("HOME")} /
                         ".local/share/hive-worker/workspace";
-                    const fs::path outdir = ws / "attachments" / tid / "outgoing";
+                    const fs::path outdir = agent_workspace(agent_id) /
+                        "attachments" / tid / "outgoing";
                     const fs::path canon  = ws / "attachments" / tid;
                     std::error_code ec;
                     if (fs::is_directory(outdir, ec)) {
@@ -348,7 +365,14 @@ int main(int argc, char* argv[]) {
                     f = json();            // swallow: nothing to forward
                     return true;
                 };
+                // Normalise to workspace-relative: the agent may pass an
+                // absolute path under ITS OWN root (host agents: a real
+                // host path), the container-style /workspace/... spelling,
+                // or a relative path.
+                const fs::path src_ws = agent_workspace(agent_id);
                 std::string rel = ev.value("path", "");
+                if (rel.rfind(src_ws.string() + "/", 0) == 0)
+                    rel.erase(0, src_ws.string().size() + 1);
                 while (!rel.empty() && rel.front() == '/')
                     rel.erase(rel.begin());
                 if (rel.rfind("workspace/", 0) == 0)
@@ -359,8 +383,12 @@ int main(int argc, char* argv[]) {
                 if (rel.rfind("shared/", 0) == 0) {
                     if (fail("cannot re-share the staging area")) return;
                 }
+                // Source resolves against the AGENT's workspace (host
+                // agents write outside staging); the staging area itself
+                // stays shared — every later fetch finds the blob at
+                // shared/<share_id>/ on THIS worker regardless of runtime.
                 const fs::path ws = worker_workspace();
-                const fs::path src = ws / rel;
+                const fs::path src = src_ws / rel;
                 std::error_code ec;
                 if (!fs::is_regular_file(src, ec)) {
                     if (fail("not found: /workspace/" + rel)) return;
@@ -772,6 +800,49 @@ int main(int argc, char* argv[]) {
                     const std::string env = frame.value("env", "");
                     const int timeout = frame.value("timeout_s", 120);
                     std::thread([&, id, agent, argv, env, timeout] {
+                        // Phase 72: host agents have no container — run
+                        // on the host as hivex-<name> via the scoped sudo
+                        // grant, NEVER ensure_container. No chunk
+                        // streaming (one chunk at exit); timeout(1)
+                        // bounds the run. env_content (KEY=VAL lines) is
+                        // applied via env(1).
+                        const std::string huser =
+                            g_fleet ? g_fleet->host_user_of(agent) : "";
+                        if (!huser.empty()) {
+                            const auto t0 = std::chrono::steady_clock::now();
+                            std::vector<std::string> full{
+                                "timeout", "-s", "TERM",
+                                std::to_string(timeout)};
+                            if (!env.empty()) {
+                                full.push_back("env");
+                                std::istringstream is(env);
+                                std::string line;
+                                while (std::getline(is, line))
+                                    if (!line.empty()) full.push_back(line);
+                            }
+                            full.insert(full.end(), argv.begin(), argv.end());
+                            std::string out;
+                            const int rc = hwrunner::run_as_user(
+                                huser, full, "", &out);
+                            const auto dur = std::chrono::duration_cast<
+                                std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+                            if (!out.empty()) {
+                                try {
+                                    send_frame({{"op","exec_chunk"},
+                                        {"id",id},{"stream","stdout"},
+                                        {"data",out}});
+                                } catch (...) {}
+                            }
+                            json hdone{{"op","exec_done"},{"id",id},
+                                       {"exit_code",rc},
+                                       {"duration_ms",(int64_t)dur}};
+                            if (rc == 124) hdone["timed_out"] = true;
+                            try { send_frame(hdone); } catch (...) {}
+                            std::cerr << "worker: exec " << id
+                                      << " done (host), exit=" << rc << "\n";
+                            return;
+                        }
                         auto outcome = hwrunner::run_container_exec(
                             agent, argv, env, timeout,
                             [&](std::string_view chunk) {
@@ -843,7 +914,8 @@ int main(int argc, char* argv[]) {
                     // workspace and stream it back as base64 chunks.
                     const std::string id = frame.value("id", "");
                     const std::string path = frame.value("path", "");
-                    std::thread([&, id, path] {
+                    const std::string agent = frame.value("agent", "");
+                    std::thread([&, id, path, agent] {
                         auto fail = [&](const std::string& err) {
                             try { send_frame({{"op","file_error"},
                                               {"id",id},{"error",err}}); }
@@ -860,10 +932,16 @@ int main(int argc, char* argv[]) {
                             fail("bad path");
                             return;
                         }
-                        const fs::path fpath =
-                            fs::path{std::getenv("HOME")} /
-                            ".local/share/hive-worker/workspace" / rel;
+                        // Host agents (2026-10-12): try the agent's own
+                        // workspace first, then the shared staging
+                        // workspace (canon attachments + share blobs live
+                        // in staging only).
                         std::error_code ec;
+                        fs::path fpath = agent_workspace(agent) / rel;
+                        if (!fs::is_regular_file(fpath, ec)) {
+                            ec.clear();
+                            fpath = worker_workspace() / rel;
+                        }
                         if (!fs::is_regular_file(fpath, ec)) {
                             fail("not found: /workspace/" + rel);
                             return;
@@ -956,6 +1034,7 @@ int main(int argc, char* argv[]) {
                     // Phase H: list a dir in THIS rig's shared workspace.
                     const std::string id = frame.value("id", "");
                     const std::string path = frame.value("path", "");
+                    const std::string agent = frame.value("agent", "");
                     auto fail = [&](const std::string& err) {
                         try { send_frame({{"op","file_error"},
                                           {"id",id},{"error",err}}); }
@@ -971,10 +1050,14 @@ int main(int argc, char* argv[]) {
                         fail("bad path");
                         return;
                     }
-                    const fs::path dpath =
-                        fs::path{std::getenv("HOME")} /
-                        ".local/share/hive-worker/workspace" / rel;
+                    // Host agents: their workspace first, staging
+                    // fallback (same rule as file_fetch).
                     std::error_code ec;
+                    fs::path dpath = agent_workspace(agent) / rel;
+                    if (!fs::is_directory(dpath, ec)) {
+                        ec.clear();
+                        dpath = worker_workspace() / rel;
+                    }
                     if (!rel.empty() && !fs::is_directory(dpath, ec)) {
                         fail("not a dir: /workspace/" + rel);
                         return;

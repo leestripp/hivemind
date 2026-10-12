@@ -113,6 +113,46 @@ int main() {
         std::cout << "test_fleet: host_workspace OK\n";
     }
 
+    // 2026-10-12: runtime descriptor env (pure). Container agents keep
+    // the mount paths + no service env (that rides podman -e); host
+    // agents get their real workspace root, the host skill library path,
+    // and an IDENTITY service-port mapping (container_base == port_base).
+    {
+        hwfleet::RuntimeEnv c;
+        c.runtime = "container"; c.workspace_root = "/workspace";
+        c.skills_dir = "/skills";
+        const std::string cl = hwfleet::runtime_env_lines(c);
+        assert(cl.find("HIVEMIND_RUNTIME=container\n") != std::string::npos);
+        assert(cl.find("HIVEMIND_WORKSPACE_ROOT=/workspace\n") != std::string::npos);
+        assert(cl.find("HIVEMIND_SKILLS_DIR=/skills\n") != std::string::npos);
+        assert(cl.find("HIVEMIND_SERVICE") == std::string::npos);   // unset
+
+        hwfleet::RuntimeEnv h;
+        h.runtime = "host"; h.workspace_root = "/workspace";
+        h.skills_dir = "/home/lee/.local/share/hive-worker/skills";
+        h.service_host = "192.168.1.10";
+        h.service_port_base = 18400; h.service_port_count = 10;
+        const std::string hl = hwfleet::runtime_env_lines(h);
+        assert(hl.find("HIVEMIND_RUNTIME=host\n") != std::string::npos);
+        assert(hl.find("HIVEMIND_SKILLS_DIR=/home/lee/.local/share/"
+                       "hive-worker/skills\n") != std::string::npos);
+        assert(hl.find("HIVEMIND_SERVICE_HOST=192.168.1.10\n") != std::string::npos);
+        assert(hl.find("HIVEMIND_SERVICE_PORT_BASE=18400\n") != std::string::npos);
+        assert(hl.find("HIVEMIND_SERVICE_PORT_COUNT=10\n") != std::string::npos);
+        // identity: agent binds the advertised port directly
+        assert(hl.find("HIVEMIND_SERVICE_CONTAINER_BASE=18400\n") != std::string::npos);
+
+        // Newlines are flattened (env files are line-based).
+        hwfleet::RuntimeEnv n;
+        n.runtime = "host"; n.workspace_root = "/ws\nevil=1";
+        n.skills_dir = "/skills";
+        const std::string nl = hwfleet::runtime_env_lines(n);
+        // ...so it can never become a KEY=VALUE line of its own.
+        assert(nl.find("\nevil=") == std::string::npos);
+        assert(nl.find("/ws evil=1\n") != std::string::npos);
+        std::cout << "test_fleet: runtime_env_lines OK\n";
+    }
+
     // Phase 72: spawn-path gating — a host agent must be REFUSED when the
     // worker hasn't opted in, and when opted in but the hivex user isn't
     // provisioned. Both throw from start() before any fork happens (pure:

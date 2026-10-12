@@ -41,6 +41,9 @@ inline constexpr int kServiceContainerBase = 8000;
 /// Allocated host base port for the agent's service range (persisted in
 /// <worker_dir>/service_ports.txt; 0 when the feature is disabled).
 int service_port_base(const std::string& agent);
+/// Ports per agent / range size (HIVE_SERVICE_PORT_COUNT, default 10;
+/// 0 disables the feature).
+int service_port_count();
 
 /// Address advertised to agents/clients for published services
 /// (HIVE_SERVICE_HOST override, else first global non-loopback IPv4).

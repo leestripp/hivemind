@@ -83,10 +83,33 @@ std::string AgentProcess::build_env_file() {
     // actively drop previously-seeded hub servers. Agent-local rows
     // (origin='local') are unaffected.
     env_line(body, "HIVEMIND_MCP_SERVERS", spec_.mcp_servers.dump());
-    // The synced canonical skill library is mounted read-only at /skills
-    // (ensure_container). Project-local /workspace/.agents/skills/ is
-    // auto-scanned by hive-brain on its own.
-    env_line(body, "HIVEMIND_SKILLS_DIR", "/skills");
+    // Runtime descriptor (2026-10-12): ONE binary, environment-aware
+    // tools. Containers keep the mount paths; host agents get their real
+    // workspace root, the worker's skill library by HOST path, and their
+    // service ports as an identity mapping (no NAT outside a container).
+    RuntimeEnv renv;
+    if (spec_.host_agent) {
+        renv.runtime = "host";
+        renv.workspace_root = hwrunner::host_workspace(spec_.name);
+        const fs::path sk = fs::path(hwrunner::worker_dir()) / "skills";
+        std::error_code sk_ec;
+        fs::create_directories(sk, sk_ec);   // containers get it via ensure_container
+        renv.skills_dir = sk.string();
+        const int svc_base = hwrunner::service_port_base(spec_.id);
+        if (svc_base > 0) {
+            renv.service_host = hwrunner::service_host_addr();
+            renv.service_port_base = svc_base;
+            renv.service_port_count = hwrunner::service_port_count();
+        }
+    } else {
+        renv.runtime = "container";
+        renv.workspace_root = "/workspace";
+        // Synced canonical library, mounted read-only at /skills
+        // (ensure_container). Container service env rides podman -e
+        // (service_env_args) instead — 8000+ -> per-agent host block.
+        renv.skills_dir = "/skills";
+    }
+    body += runtime_env_lines(renv);
     // Phase 60: hub-rendered granted secrets (HIVE_SECRET_<NAME>=…,
     // pre-escaped) — appended verbatim; the file is 0600 worker-local.
     if (!spec_.secret_env.empty())
@@ -201,6 +224,24 @@ void AgentProcess::spawn_exec() {
             hwrunner::run_as_user(user, {"/usr/bin/chmod", "600", staged},
                                   "", &out) != 0)
             throw std::runtime_error("host env staging failed: " + out);
+        // Boot hook parity with containers (maybe_run_boot_hook): fire
+        // <ws>/.hivemind/boot.sh detached as the agent user so agent-owned
+        // services come back on respawn. Fds are redirected away so the
+        // hook never holds run_as_user's pipe open. Best-effort.
+        {
+            std::string bout;
+            const int brc = hwrunner::run_as_user(user,
+                {"sh", "-c",
+                 "cd \"$1\" || exit 0; "
+                 "[ -x .hivemind/boot.sh ] || exit 0; "
+                 "setsid nohup .hivemind/boot.sh >>.hivemind/boot.log 2>&1 "
+                 "</dev/null &",
+                 "hive-boot", ws},
+                "", &bout);
+            if (brc != 0)
+                std::cerr << "HOST AGENT boot hook rc=" << brc << ": "
+                          << bout << "\n";
+        }
         // No -D/--chdir: sudo-rs (ubuntu-pc) rejects it even with a
         // sudoers CWD= tag. hive-agent chdirs into the project root
         // itself (parity with podman -w /workspace).
@@ -582,6 +623,21 @@ json Fleet::statuses() const {
     std::lock_guard<std::mutex> lk(m_);
     for (const auto& kv : agents_) out[kv.first] = kv.second->state();
     return out;
+}
+
+
+std::string Fleet::workspace_root(const std::string& agent_id) const {
+    std::lock_guard<std::mutex> lk(m_);
+    const auto it = agents_.find(agent_id);
+    if (it == agents_.end() || !it->second->spec().host_agent) return {};
+    return hwrunner::host_workspace(it->second->spec().name);
+}
+
+std::string Fleet::host_user_of(const std::string& agent_id) const {
+    std::lock_guard<std::mutex> lk(m_);
+    const auto it = agents_.find(agent_id);
+    if (it == agents_.end() || !it->second->spec().host_agent) return {};
+    return hwrunner::host_user(it->second->spec().name);
 }
 
 } // namespace hwfleet

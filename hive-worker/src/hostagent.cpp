@@ -131,12 +131,15 @@ rm -f "$tmp"
 # workspace — map incoming/ + shared/ to the staging dirs and grant the
 # agent rwx on the workspace plus traverse-only on the staging path
 # under the worker user's home (home itself stays unreadable).
+# attachments/ is mapped too (2026-10-12): user->agent chat attachments
+# land in staging attachments/<tid>/ and the agent reads them at
+# <ws>/attachments/<tid>/.
 wsroot="${4:-}"
 ws="/home/$wuser/.local/share/hive-worker/workspace"
 if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
     /usr/bin/install -d -m 0775 -o "$wuser" -g "$wuser" \
-        "$ws/incoming" "$ws/shared"
-    for d in incoming shared; do
+        "$ws/incoming" "$ws/shared" "$ws/attachments"
+    for d in incoming shared attachments; do
         if [ ! -e "$wsroot/$d" ] && [ ! -L "$wsroot/$d" ]; then
             /usr/bin/ln -s "$ws/$d" "$wsroot/$d"
         fi
@@ -256,14 +259,17 @@ int provision(const std::string& agent_name,
         //    the REAL workspace — map incoming/ + shared/ to the
         //    staging dirs, grant rwx on the workspace, and traverse-
         //    only on the staging path under the worker user's home.
+        //    attachments/ joined the mapping 2026-10-12 (user->agent
+        //    chat attachments land in staging attachments/<tid>/).
         const std::string hwbase =
             "/home/" + worker_user + "/.local/share/hive-worker";
         const std::string staging = hwbase + "/workspace";
         if (std::filesystem::is_directory(staging)) {
             run({"/usr/bin/install", "-d", "-m", "0775", "-o",
                  worker_user, "-g", worker_user,
-                 staging + "/incoming", staging + "/shared"});
-            for (const char* d : {"incoming", "shared"}) {
+                 staging + "/incoming", staging + "/shared",
+                 staging + "/attachments"});
+            for (const char* d : {"incoming", "shared", "attachments"}) {
                 const std::string p = workspace_root + "/" + d;
                 std::error_code ec;
                 if (!std::filesystem::exists(p, ec) &&

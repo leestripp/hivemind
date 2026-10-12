@@ -583,7 +583,7 @@ WorkerChannel::fetch_file(const std::string& worker, const std::string& agent,
 // Phase H: workspace directory listing (worker to server)
 std::optional<WorkerChannel::ListResult>
 WorkerChannel::list_files(const std::string& worker, const std::string& path,
-                          int timeout_s) {
+                          int timeout_s, const std::string& agent) {
     auto job = std::make_shared<FileJob>();
     std::string id;
     {
@@ -593,7 +593,7 @@ WorkerChannel::list_files(const std::string& worker, const std::string& path,
         file_jobs_[id] = job;
     }
     bool sent = send(worker, json{{"op","file_list"},{"id",id},
-                                  {"path",path}});
+                                  {"agent",agent},{"path",path}});
     if (!sent) {
         std::lock_guard lk(m_);
         file_jobs_.erase(id);
