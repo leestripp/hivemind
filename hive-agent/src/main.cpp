@@ -465,6 +465,16 @@ int main(int argc, char** argv) {
     const fs::path project_root =
         fs::absolute(!positional.empty() ? fs::path(positional.front())
                                          : fs::current_path());
+    // Phase 72: run WITH the project root as cwd — the container spawn
+    // path gets this from podman's -w /workspace; the host-agent spawn
+    // can't use sudo -D (sudo-rs rejects --chdir), so the binary chdirs
+    // itself. A no-op for containers (cwd is already the same dir).
+    {
+        std::error_code ec;
+        fs::current_path(project_root, ec);
+        if (ec) log_err("warning: chdir to project root failed: " +
+                        ec.message());
+    }
     const std::string name = env_or("HIVEMIND_AGENT_NAME");
     if (name.empty()) {
         log_err("HIVEMIND_AGENT_NAME is required");

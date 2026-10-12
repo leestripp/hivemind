@@ -174,8 +174,11 @@ void AgentProcess::spawn_exec() {
             hwrunner::run_as_user(user, {"/usr/bin/chmod", "600", staged},
                                   "", &out) != 0)
             throw std::runtime_error("host env staging failed: " + out);
+        // No -D/--chdir: sudo-rs (ubuntu-pc) rejects it even with a
+        // sudoers CWD= tag. hive-agent chdirs into the project root
+        // itself (parity with podman -w /workspace).
         prog = "sudo";
-        args = {"-n", "-H", "-D", home, "-u", user,
+        args = {"-n", "-H", "-u", user,
                 "/usr/local/bin/hive-agent", home, "--env-file", staged};
     } else {
         args = {"exec", "-i", "-u", "hive", "-w", "/workspace",
