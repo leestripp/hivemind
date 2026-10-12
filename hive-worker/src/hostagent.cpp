@@ -122,10 +122,13 @@ int provision(const std::string& agent_name,
         "provision-host-agent.\n"
         "# UNSANDBOXED: this user is effectively root. Machine = expendable.\n"
         + user + " ALL=(ALL) NOPASSWD: ALL\n"
+        // CWD= (sudo's Chdir_Spec) is REQUIRED for the spawn's -D flag —
+        // sudo rejects --chdir without it ("you are not allowed to use
+        // '--chdir'"). It applies to the hive-agent cmnd only.
         + worker_user + " ALL=(" + user + ") NOPASSWD: "
         "/usr/bin/tee " + home + "/.hive-env, "
         "/usr/bin/chmod 600 " + home + "/.hive-env, "
-        "/usr/local/bin/hive-agent\n";
+        "CWD=" + home + " /usr/local/bin/hive-agent\n";
     {
         // Write to a temp file, visudo-check, THEN install — a broken
         // sudoers.d entry can lock out sudo on the whole box.
