@@ -35,11 +35,14 @@ containment:
    `--allow-host-agents` (or `HIVE_ALLOW_HOST_AGENTS=1`). Default is OFF;
    a hub frame alone can never conjure one. Opted-in workers advertise
    `host_agents: true` in their hello capabilities.
-2. **Manual local provisioning** — only `sudo hive-worker
-   provision-host-agent <name>` on the rig creates the unix user, the
-   sudoers entry and installs the binary. Nothing reachable via the hub
-   API can mint a sudo user. The command prints a red warning and
-   requires typing the machine's hostname.
+2. **Rig-level root opt-in** — `sudo hive-worker
+   install-host-agent-support --worker-user <account>` on the rig
+   installs two root-owned helper scripts (`hivex-provision`,
+   `hivex-deprovision`) plus a scoped sudoers grant covering exactly
+   those scripts. Nothing reachable via the hub API can mint a sudo
+   user on a rig that never ran this — the helpers + grant ARE the
+   consent. After it, creating a host agent in a client auto-provisions
+   the unix user at spawn; deleting one auto-deprovisions.
 3. **API ack gate** — creating (or converting) a host agent requires the
    literal string `I UNDERSTAND` in `host_agent_ack`; without it the hub
    answers **400**. On a worker without the capability it answers **409**.
@@ -56,24 +59,30 @@ containment:
    (memory/CPU caps). Existing host agents show a red **HOST ⚠** badge
    wherever they appear.
 
-## Provisioning (on the worker rig)
+## Setup (on the worker rig)
+
+```sh
+# ONCE per rig, as root — helpers + scoped sudoers grant:
+sudo hive-worker install-host-agent-support --worker-user <account>
+```
+
+After that, **creating a host agent in a client is the whole flow**:
+Type → Bare-Metal ⚠ → type `I UNDERSTAND` → save. At spawn the worker
+auto-provisions via the `hivex-provision` helper, creating:
+
+| Piece | Where |
+|-------|-------|
+| unix user | `hivex-<name>` (home `/home/hivex-<name>`, password **locked**) |
+| sudoers | `/etc/sudoers.d/hivex-<name>` — `NOPASSWD: ALL` (validated with `visudo -c` before install) |
+| worker launch rights | the hive-worker account may `sudo -u hivex-<name>` run exactly: `tee`/`chmod` of `/home/hivex-<name>/.hive-env` and `/usr/local/bin/hive-agent` |
+| binary | `/usr/local/bin/hive-agent` (shared by all host agents on the rig; source: `--host-agent-binary` / `HIVE_HOST_AGENT_BINARY`, default auto-resolved next to the worker executable) |
+
+Manual per-agent provisioning remains for repair/audits:
 
 ```sh
 sudo hive-worker provision-host-agent rooty
 # prints the red warning; type the machine's hostname to proceed
 ```
-
-This creates:
-
-| Piece | Where |
-|-------|-------|
-| unix user | `hivex-rooty` (home `/home/hivex-rooty`, password **locked**) |
-| sudoers | `/etc/sudoers.d/hivex-rooty` — `NOPASSWD: ALL` (validated with `visudo -c` before install) |
-| worker launch rights | the hive-worker account may `sudo -u hivex-rooty` run exactly: `tee`/`chmod` of `/home/hivex-rooty/.hive-env` and `/usr/local/bin/hive-agent` |
-| binary | `/usr/local/bin/hive-agent` (shared by all host agents on the rig) |
-
-Then create the agent in the UI (worker dropdown → enable "Host agent" →
-type `I UNDERSTAND`) or via the API.
 
 Removing one:
 

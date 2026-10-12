@@ -21,6 +21,13 @@ int provision(const std::string& agent_name,
               const std::string& binary_path,
               const std::string& workspace_root = "");
 
+/// Once-per-rig ROOT setup: install the two /usr/local/sbin/hivex-*
+/// helper scripts + a single /etc/sudoers.d/hivex-helpers grant letting
+/// the WORKER user run exactly those scripts as root. After this, agent
+/// create/delete through the hub auto-provisions/deprovisions — the
+/// rig-level opt-in that keeps per-agent operations self-service.
+int install_support(const std::string& worker_user);
+
 /// Stop the agent's processes, archive the home to
 /// /var/backups/hivex-<name>-<date>.tar.gz, remove the user and its
 /// sudoers file. Requires root; same hostname confirmation.

@@ -201,6 +201,28 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
 // hub-side roster flag. See Plan.md "Host Agents (Phase 72)".
 
 bool g_allow_host_agents = false;
+std::string g_host_agent_binary;
+
+std::string hive_agent_binary() {
+    if (!g_host_agent_binary.empty()) return g_host_agent_binary;
+    char buf[4096];
+    const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof buf - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        const fs::path dir = fs::path(buf).parent_path();
+        // Installed layout: hive-agent next to hive-worker; build tree:
+        // <build>/hive-agent/hive-agent next to <build>/hive-worker/.
+        for (const fs::path& p : {dir / "hive-agent",
+                                  dir.parent_path() / "hive-agent" / "hive-agent"})
+            if (fs::exists(p)) return p.lexically_normal().string();
+    }
+    return "/usr/local/bin/hive-agent";   // already-installed fallback
+}
+
+std::string current_user() {
+    if (const passwd* pw = ::getpwuid(::geteuid())) return pw->pw_name;
+    return {};
+}
 
 std::string host_user(const std::string& agent) {
     std::string u = "hivex-";

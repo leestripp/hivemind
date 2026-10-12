@@ -93,6 +93,40 @@ rm  "/etc/sudoers.d/$user"
 echo "hivex-deprovision: removed $user (home archived to /var/backups/$user-$stamp.tar.gz; workspace untouched)"
 )SH";
 
+/// Root helper installed by install_support: provisions ONE host-agent
+/// unix user (useradd, locked password, per-user sudoers, binary install).
+/// The worker calls it via `sudo -n` when a host agent spawns
+/// unprovisioned — the grant covers exactly this validated script.
+/// Args: <hivex-user> <worker-user> <hive-agent-binary-src>
+constexpr const char* kProvisionHelper = R"SH(#!/bin/sh
+# HiveMind Phase 72: auto-provision one host-agent unix user. Root-only
+# via /etc/sudoers.d/hivex-helpers. NEVER touches the workspace drive.
+set -eu
+user="${1:-}"; wuser="${2:-}"; src="${3:-}"
+echo "$user" | grep -Eq '^hivex-[a-z0-9-]{1,26}$' \
+    || { echo "bad user name: '$user'" >&2; exit 2; }
+[ -n "$wuser" ] && [ "$wuser" != "root" ] \
+    || { echo "bad worker user: '$wuser'" >&2; exit 2; }
+[ -f "$src" ] || { echo "hive-agent binary missing: $src" >&2; exit 2; }
+home="/home/$user"
+if ! id "$user" >/dev/null 2>&1; then
+    /usr/sbin/useradd -m -s /bin/bash -c "HiveMind host agent" "$user"
+    /usr/bin/passwd -l "$user" >/dev/null 2>&1 || true
+fi
+/usr/bin/install -m 0755 -o root -g root "$src" /usr/local/bin/hive-agent
+tmp="/tmp/hivex-prov-sudoers-$$"
+{
+    echo "# HiveMind Phase 72 host agent - auto-provisioned by hivex-provision."
+    echo "# UNSANDBOXED: this user is effectively root. Machine = expendable."
+    echo "$user ALL=(ALL) NOPASSWD: ALL"
+    echo "$wuser ALL=($user) NOPASSWD: /usr/bin/tee $home/.hive-env, /usr/bin/chmod 600 $home/.hive-env, /usr/local/bin/hive-agent"
+} > "$tmp"
+/usr/sbin/visudo -c -f "$tmp" >/dev/null
+/usr/bin/install -m 0440 -o root -g root "$tmp" "/etc/sudoers.d/$user"
+rm -f "$tmp"
+echo "hivex-provision: $user ready (sudo NOPASSWD, /usr/local/bin/hive-agent)"
+)SH";
+
 bool require_root() {
     if (geteuid() == 0) return true;
     std::cerr << "must run as root: sudo hive-worker <subcommand> ...\n";
@@ -194,35 +228,9 @@ int provision(const std::string& agent_name,
                      "--host-workspace-root on the worker to match)\n";
     }
 
-    // 5. Deprovision helper + sudoers grant for the WORKER user — this
-    //    is what makes roster-delete auto-cleanup possible without the
-    //    hub ever touching root itself. Root-owned script validates the
-    //    hivex-* arg; the grant covers exactly this script.
-    {
-        const char* hp = "/usr/local/sbin/hivex-deprovision";
-        FILE* f = fopen(hp, "w");
-        if (!f) { std::cerr << "cannot write " << hp << "\n"; return 1; }
-        fputs(kHelper, f);
-        fclose(f);
-        run({"/usr/bin/chmod", "0755", hp});
-        run({"/usr/bin/chown", "root:root", hp});
-        const std::string grant =
-            "# HiveMind Phase 72: the worker may auto-deprovision host\n"
-            "# agents on roster delete. Script validates its own args.\n"
-            + worker_user + " ALL=(root) NOPASSWD: " + hp + "\n";
-        std::string tmpl = "/tmp/hivex-deprov-XXXXXX";
-        int fd = mkstemp(tmpl.data());
-        FILE* gf = fdopen(fd, "w");
-        fputs(grant.c_str(), gf);
-        fclose(gf);
-        if (run({"/usr/sbin/visudo", "-c", "-f", tmpl}) == 0)
-            run({"/usr/bin/install", "-m", "0440", "-o", "root", "-g",
-                 "root", tmpl, "/etc/sudoers.d/hivex-deprovision"});
-        else
-            std::cerr << "warning: deprovision grant rejected by visudo "
-                         "— roster delete will NOT auto-clean\n";
-        unlink(tmpl.c_str());
-    }
+    // 5. Rig-level support: root helpers + the worker's sudoers grant —
+    //    enables auto-provision at spawn AND auto-deprovision on delete.
+    if (install_support(worker_user) != 0) return 1;
 
     std::cerr << "\nHost agent '" << agent_name << "' provisioned:\n"
               << "  user:    " << user << " (home " << home
@@ -234,6 +242,64 @@ int provision(const std::string& agent_name,
               << "Remember: this worker must also run with "
               << "--allow-host-agents (or HIVE_ALLOW_HOST_AGENTS=1) or "
               << "spawns are refused.\n";
+    return 0;
+}
+
+int install_support(const std::string& worker_user) {
+    if (!require_root()) return 2;
+    if (worker_user.empty() || worker_user == "root") {
+        std::cerr << "worker user unknown — pass --worker-user "
+                     "<account hive-worker runs as>\n";
+        return 2;
+    }
+    // Both helpers are root-owned, argument-validating scripts; the
+    // grant below covers EXACTLY these two paths and nothing else.
+    const struct { const char* path; const char* body; } helpers[] = {
+        {"/usr/local/sbin/hivex-provision",   kProvisionHelper},
+        {"/usr/local/sbin/hivex-deprovision", kHelper},
+    };
+    for (const auto& h : helpers) {
+        FILE* f = fopen(h.path, "w");
+        if (!f) { std::cerr << "cannot write " << h.path << "\n"; return 1; }
+        fputs(h.body, f);
+        fclose(f);
+        run({"/usr/bin/chmod", "0755", h.path});
+        run({"/usr/bin/chown", "root:root", h.path});
+    }
+    const std::string grant =
+        "# HiveMind Phase 72: the worker may auto-provision host agents\n"
+        "# at spawn and auto-deprovision them on roster delete. Both\n"
+        "# scripts are root-owned and validate their own args.\n"
+        + worker_user + " ALL=(root) NOPASSWD: "
+        "/usr/local/sbin/hivex-provision, "
+        "/usr/local/sbin/hivex-deprovision\n";
+    std::string tmpl = "/tmp/hivex-helpers-XXXXXX";
+    const int fd = mkstemp(tmpl.data());
+    if (fd < 0) { std::cerr << "mkstemp failed\n"; return 1; }
+    FILE* gf = fdopen(fd, "w");
+    fputs(grant.c_str(), gf);
+    fclose(gf);
+    if (run({"/usr/sbin/visudo", "-c", "-f", tmpl}) != 0) {
+        std::cerr << "visudo rejected the helper grant — NOT installing\n";
+        unlink(tmpl.c_str());
+        return 1;
+    }
+    if (run({"/usr/bin/install", "-m", "0440", "-o", "root", "-g", "root",
+             tmpl, "/etc/sudoers.d/hivex-helpers"}) != 0) {
+        unlink(tmpl.c_str());
+        return 1;
+    }
+    unlink(tmpl.c_str());
+    // Superseded by hivex-helpers (older installs only granted the
+    // deprovision script).
+    unlink("/etc/sudoers.d/hivex-deprovision");
+    std::cerr << "Host-agent support installed:\n"
+              << "  helpers: /usr/local/sbin/hivex-provision, "
+                 "/usr/local/sbin/hivex-deprovision (root:root 0755)\n"
+              << "  grant:   /etc/sudoers.d/hivex-helpers ("
+              << worker_user << " may run exactly those as root)\n"
+              << "Host agents now auto-provision at spawn and "
+                 "auto-deprovision on roster delete.\n";
     return 0;
 }
 

@@ -107,6 +107,18 @@ static fs::path worker_workspace() {
 }
 
 int main(int argc, char* argv[]) {
+    // Phase 72: once-per-rig host-agent support install — root-only,
+    // LOCAL. Installs the hivex-* helpers + sudoers grant so per-agent
+    // provision/deprovision becomes automatic from then on.
+    if (argc > 1 && std::string(argv[1]) == "install-host-agent-support") {
+        std::string worker_user;
+        for (int i = 2; i < argc; ++i)
+            if (std::string(argv[i]) == "--worker-user" && i + 1 < argc)
+                worker_user = argv[++i];
+        if (worker_user.empty())
+            if (const char* su = std::getenv("SUDO_USER")) worker_user = su;
+        return hwhostagent::install_support(worker_user);
+    }
     // Phase 72: host-agent provisioning subcommands — LOCAL, root-only,
     // never reachable via the hub. Handled before any WS work.
     if (argc > 1 && (std::string(argv[1]) == "provision-host-agent" ||
@@ -163,6 +175,10 @@ int main(int argc, char* argv[]) {
     // /projects RAID). NEVER cleaned up — it is the agents' drive.
     if (const char* e = std::getenv("HIVE_HOST_WORKSPACE_ROOT"))
         hwrunner::g_host_workspace_root = e;
+    // Phase 72: hive-agent binary auto-provision installs (default:
+    // auto-resolve next to this executable).
+    if (const char* e = std::getenv("HIVE_HOST_AGENT_BINARY"))
+        hwrunner::g_host_agent_binary = e;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--allow-host-agents") {
@@ -176,6 +192,8 @@ int main(int argc, char* argv[]) {
         else if (a == "--caps") caps = argv[++i];
         else if (a == "--host-workspace-root")
             hwrunner::g_host_workspace_root = argv[++i];
+        else if (a == "--host-agent-binary")
+            hwrunner::g_host_agent_binary = argv[++i];
     }
     if (key.empty() || name.empty()) {
         std::cerr << "usage: hive-worker --server ws://host:8423 "

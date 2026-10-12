@@ -130,11 +130,28 @@ void AgentProcess::start() {
             throw std::runtime_error(
                 "host agent '" + spec_.name + "' refused: this worker has "
                 "NOT opted in (--allow-host-agents)");
-        if (!hwrunner::host_agent_provisioned(spec_.name))
-            throw std::runtime_error(
-                "host agent '" + spec_.name + "' refused: run "
-                "'sudo hive-worker provision-host-agent " + spec_.name +
-                "' on this rig first");
+        if (!hwrunner::host_agent_provisioned(spec_.name)) {
+            // Auto-provision via the root helper — installed ONCE per rig
+            // by 'sudo hive-worker install-host-agent-support'. Nothing
+            // reachable via the hub can mint a sudo user on a rig that
+            // never ran that local root command: the helper scripts and
+            // the scoped sudoers grant ARE the opt-in.
+            const std::string user = hwrunner::host_user(spec_.name);
+            std::string out;
+            const int rc = hwrunner::run_as_user(
+                "root",
+                {"/usr/local/sbin/hivex-provision", user,
+                 hwrunner::current_user(), hwrunner::hive_agent_binary()},
+                "", &out);
+            if (rc != 0 || !hwrunner::host_agent_provisioned(spec_.name))
+                throw std::runtime_error(
+                    "host agent '" + spec_.name + "' refused: not "
+                    "provisioned and auto-provision failed (" + out +
+                    ") — run 'sudo hive-worker install-host-agent-support' "
+                    "once on this rig");
+            std::cerr << "HOST AGENT auto-provisioned: " << user << " — "
+                      << out << "\n";   // journal audit
+        }
         std::cerr << "HOST AGENT spawn: " << spec_.name << " as "
                   << hwrunner::host_user(spec_.name)
                   << " (sudo, unsandboxed)\n";

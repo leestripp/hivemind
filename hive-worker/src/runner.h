@@ -77,6 +77,20 @@ bool host_agent_provisioned(const std::string& agent);
 /// bind-mounted /workspace. NEVER deleted by deprovision/remove.
 extern std::string g_host_workspace_root;
 
+/// Override for the hive-agent binary installed for host agents — set
+/// from --host-agent-binary / HIVE_HOST_AGENT_BINARY in main.cpp.
+/// Empty = auto-resolve (sibling of the worker binary).
+extern std::string g_host_agent_binary;
+
+/// The hive-agent binary auto-provision installs to /usr/local/bin:
+/// g_host_agent_binary when set, else a hive-agent next to the worker
+/// executable (installed layout or the build tree), else
+/// /usr/local/bin/hive-agent.
+std::string hive_agent_binary();
+
+/// The account the worker process runs as (for sudoers grants).
+std::string current_user();
+
 /// Where a host agent runs (its cwd / project root): the shared
 /// g_host_workspace_root when set, else /home/hivex-<name>.
 std::string host_workspace(const std::string& agent);
