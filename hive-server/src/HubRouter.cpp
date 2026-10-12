@@ -520,6 +520,31 @@ void HubRouter::on_worker_frame(const std::string& worker,
                   << frame.value("command", "").substr(0, 80) << "\n";
         return;
     }
+    if (op == "approval_resolved") {
+        // The agent settled this approval itself (cancel/shutdown deny
+        // or the broker safety timeout) — clear the pending row so the
+        // client doesn't show ghosts. No approval_resp relay: the agent
+        // already knows.
+        const std::string agent_id = frame.value("agent", "");
+        const std::string req_id = frame.value("id", "");
+        std::string store_id;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            for (auto it = pend_appr_.begin(); it != pend_appr_.end(); ++it)
+                if (it->second.agent_id == agent_id &&
+                    it->second.req_id == req_id) {
+                    store_id = it->first;
+                    pend_appr_.erase(it);
+                    break;
+                }
+        }
+        if (!store_id.empty()) {
+            approvals_.resolve(store_id, frame.value("allow", false));
+            std::cerr << "[hub] approval " << store_id
+                      << " settled agent-side (deny)\n";
+        }
+        return;
+    }
     if (op == "agent_status") {
         const std::string st = frame.value("state", "");
         {

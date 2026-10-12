@@ -62,6 +62,7 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 
 using nlohmann::json;
 namespace fs = std::filesystem;
@@ -290,6 +291,15 @@ public:
         });
         const bool allow = decided && *pending_[id];
         pending_.erase(id);
+        // Resolved locally (cancel/shutdown deny_all, or the safety
+        // timeout) rather than by a hub approval_resp: tell the hub to
+        // clear its pending row, or the client accumulates ghost
+        // approvals (QueenBee incident, 2026-10-12).
+        const bool local = !hub_answered_.erase(id);
+        lk.unlock();
+        if (local)
+            emit({{"ev", "approval_resolved"}, {"id", id},
+                  {"allow", allow}});
         return allow;
     }
 
@@ -298,6 +308,7 @@ public:
         auto it = pending_.find(id);
         if (it != pending_.end()) {
             it->second = allow;
+            hub_answered_.insert(id);
             cv_.notify_all();
         }
     }
@@ -313,6 +324,7 @@ private:
     std::mutex m_;
     std::condition_variable cv_;
     std::unordered_map<std::string, std::optional<bool>> pending_;
+    std::unordered_set<std::string> hub_answered_;
     std::atomic<int> seq_{0};
 };
 

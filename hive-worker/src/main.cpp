@@ -282,6 +282,10 @@ int main(int argc, char* argv[]) {
                 f = {{"op","approval_req"},{"agent",agent_id},
                      {"id",ev.value("id","")},
                      {"command",ev.value("command","")}};
+            else if (kind == "approval_resolved")
+                f = {{"op","approval_resolved"},{"agent",agent_id},
+                     {"id",ev.value("id","")},
+                     {"allow",ev.value("allow",false)}};
             else if (kind == "send_agent_message")
                 f = {{"op","agent_msg"},{"agent",agent_id},
                      {"target",ev.value("target","")},
