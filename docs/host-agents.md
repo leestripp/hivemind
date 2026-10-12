@@ -67,8 +67,11 @@ sudo hive-worker deprovision-host-agent rooty
 ## Runtime mechanics
 
 - The worker launches the agent as
-  `sudo -n -H -D /home/hivex-<name> -u hivex-<name> /usr/local/bin/hive-agent
+  `sudo -n -H -u hivex-<name> /usr/local/bin/hive-agent
   /home/hivex-<name> --env-file /home/hivex-<name>/.hive-env`.
+  No `-D`/`--chdir`: sudo-rs (Ubuntu 25.x default) rejects it even with a
+  sudoers `CWD=` tag — hive-agent chdirs into the project root itself,
+  matching the container path's `podman -w /workspace` exactly.
 - Secrets ride the **0600 env file** (staged via the worker's sudoers
   `tee`/`chmod` grant), never argv — `ps` is world-readable.
 - `hive-agent --env-file` applies `KEY=VALUE` lines before config load;
