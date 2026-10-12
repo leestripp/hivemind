@@ -16,6 +16,25 @@ manual and local only: `sudo hive-worker provision-host-agent <name>`
 installs the binary). The hub gates creation on both the worker's
 advertised `host_agents` capability and a typed `I UNDERSTAND` ack.
 
+Two operational flags round the story out:
+
+- `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) — where
+  host agents' persistent workspaces live, one dir per agent
+  (`<DIR>/hivex-<name>`, created by
+  `provision-host-agent --workspace-root DIR`). E.g. the `/projects`
+  RAID on ubuntu-pc. The workspace is the agents' permanent drive, like
+  the containers' shared `/workspace`: **neither roster delete nor
+  deprovision ever touches it.** Without the flag the agent runs in its
+  home dir instead.
+- **Roster delete auto-cleans the unix side.** Deleting a host agent via
+  the API makes the worker run the root helper
+  (`/usr/local/sbin/hivex-deprovision`, installed by provisioning, with
+  a scoped NOPASSWD sudoers grant): processes killed, home archived to
+  `/var/backups/hivex-<name>-<timestamp>.tar.gz`, user and sudoers
+  entry removed — workspace untouched. If the worker is offline at
+  delete time the hub logs an audit line telling you to run
+  `sudo hive-worker deprovision-host-agent <name>` manually.
+
 ## Running as a service (systemd user unit)
 
 A ready template lives at `hive-server/deploy/hive-worker.service` —
