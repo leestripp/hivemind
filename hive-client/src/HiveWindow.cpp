@@ -4096,15 +4096,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     if (!editing) add_row("Template", tpl, row_i++);
     Gtk::Label* mem_lbl = nullptr;
     Gtk::Label* cpu_lbl = nullptr;
-    if (show_worker_row)
-        add_row("Type", type_dd, row_i++);   // Phase 72: FIRST choice
+    if (show_worker_row) {
+        add_row("Worker", worker, row_i++);  // FIRST: Type depends on it
+        add_row("Type", type_dd, row_i++);
+    }
     add_row("Name", name, row_i++);
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
     add_row("Model", model, row_i++);
     add_row("Thinking", think_dd, row_i++);   // 2026-10-01
     if (show_worker_row) {
-        add_row("Worker", worker, row_i++);
         mem_lbl = add_row("Memory cap", memory_entry, row_i++);  // Phase 69
         cpu_lbl = add_row("CPU cap", cpus_entry, row_i++);       // Phase 69
     }
