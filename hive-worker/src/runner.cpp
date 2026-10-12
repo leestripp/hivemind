@@ -216,6 +216,14 @@ std::string host_user(const std::string& agent) {
     return u;
 }
 
+std::string g_host_workspace_root;
+
+std::string host_workspace(const std::string& agent) {
+    if (!g_host_workspace_root.empty())
+        return g_host_workspace_root + "/" + host_user(agent);
+    return "/home/" + host_user(agent);
+}
+
 bool host_agent_provisioned(const std::string& agent) {
     return ::getpwnam(host_user(agent).c_str()) != nullptr;
 }

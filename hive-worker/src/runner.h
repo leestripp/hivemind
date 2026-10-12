@@ -70,6 +70,18 @@ std::string host_user(const std::string& agent);
 /// True when hivex-<name> exists (someone ran provision-host-agent).
 bool host_agent_provisioned(const std::string& agent);
 
+/// Workspace root for host agents — set from --host-workspace-root /
+/// HIVE_HOST_WORKSPACE_ROOT in main.cpp. Empty = the agent's home dir.
+/// Per-agent dirs live DIRECTLY under this root
+/// (<root>/hivex-<name>) and are NEVER deleted by deprovision/remove —
+/// the workspace is the agents' persistent drive (e.g. /projects).
+extern std::string g_host_workspace_root;
+
+/// Where a host agent runs (its cwd / project root):
+/// <g_host_workspace_root>/hivex-<name> when the root is set, else
+/// /home/hivex-<name>.
+std::string host_workspace(const std::string& agent);
+
 /// Quick synchronous `sudo -n -H -u <user> <args...>` — no shell,
 /// stdin optionally redirected from stdin_path, combined stdout/stderr
 /// captured into out. Returns the exit code (-1 = infra failure).

@@ -18,7 +18,8 @@ namespace hwhostagent {
 /// Returns 0 on success; prints diagnostics to stderr.
 int provision(const std::string& agent_name,
               const std::string& worker_user,
-              const std::string& binary_path);
+              const std::string& binary_path,
+              const std::string& workspace_root = "");
 
 /// Stop the agent's processes, archive the home to
 /// /var/backups/hivex-<name>-<date>.tar.gz, remove the user and its

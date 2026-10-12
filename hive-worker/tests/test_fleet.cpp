@@ -99,6 +99,19 @@ int main() {
         std::cout << "test_fleet: host_user OK\n";
     }
 
+    // Phase 72: host_workspace — per-agent dir under the configured root,
+    // home dir when unset. NEVER cleaned up (workspace is permanent).
+    {
+        using hwrunner::host_workspace;
+        hwrunner::g_host_workspace_root = "";
+        assert(host_workspace("TestBot") == "/home/hivex-testbot");
+        hwrunner::g_host_workspace_root = "/projects/hive-agents";
+        assert(host_workspace("TestBot") ==
+               "/projects/hive-agents/hivex-testbot");
+        hwrunner::g_host_workspace_root = "";   // leave clean
+        std::cout << "test_fleet: host_workspace OK\n";
+    }
+
     // Phase 72: spawn-path gating — a host agent must be REFUSED when the
     // worker hasn't opted in, and when opted in but the hivex user isn't
     // provisioned. Both throw from start() before any fork happens (pure:

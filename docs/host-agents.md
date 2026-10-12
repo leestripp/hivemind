@@ -64,12 +64,22 @@ sudo hive-worker deprovision-host-agent rooty
 # /var/backups/hivex-rooty-<timestamp>.tar.gz, removes user + sudoers
 ```
 
-**Deleting the agent from the roster does NOT remove the unix user.**
-`DELETE /api/agents/:id` stops the process and drops the roster row, but
-`hivex-<name>`, its home and its sudoers entry stay on the rig — by
-design: nothing reachable via the API may destroy unix users. The hub
-logs a `HOST AGENT deleted … NOT removed` audit line as a reminder; run
-`deprovision-host-agent` on the rig to finish the cleanup.
+**Deleting the agent from the roster cleans everything up.** `DELETE
+/api/agents/:id` stops the process, drops the roster row, and the worker
+auto-deprovisions: processes killed, home archived to
+`/var/backups/hivex-<name>-<timestamp>.tar.gz`, unix user and sudoers
+entry removed. The hub logs a `HOST AGENT deleted …` audit line. If the
+worker was offline at delete time the cleanup can't be delivered — the
+audit line says so; run `deprovision-host-agent` on the rig to finish.
+
+**The workspace is NEVER cleaned up.** With the worker's
+`--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) each host
+agent runs in `<DIR>/hivex-<name>` (created by
+`provision-host-agent --workspace-root DIR`, owned by the agent) — e.g.
+the `/projects` RAID. That drive is the agents' permanent storage, like
+the containers' shared `/workspace`; neither roster delete nor
+deprovision touches it. Without the flag the agent's cwd is its home
+dir (which IS archived+removed on delete).
 
 ## Runtime mechanics
 

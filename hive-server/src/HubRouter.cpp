@@ -373,8 +373,11 @@ void HubRouter::stop_agent(const RosterAgent& agent) {
 }
 
 void HubRouter::remove_agent(const RosterAgent& agent) {
+    // Phase 72: host_agent + name let the worker auto-deprovision the
+    // unix user on roster delete (workspace never touched).
     channel_.send(agent.worker,
-                  {{"op", "agent_remove"}, {"agent_id", agent.id}});
+                  {{"op", "agent_remove"}, {"agent_id", agent.id},
+                   {"host_agent", agent.host_agent}, {"name", agent.name}});
     std::lock_guard<std::mutex> lk(m_);
     states_.erase(agent.id);
 }

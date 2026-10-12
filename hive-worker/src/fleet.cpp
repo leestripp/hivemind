@@ -168,6 +168,17 @@ void AgentProcess::spawn_exec() {
         const std::string user = hwrunner::host_user(spec_.name);
         const std::string home = "/home/" + user;
         const std::string staged = home + "/.hive-env";
+        // Workspace (cwd / project root): <root>/hivex-<name> when the
+        // operator configured --host-workspace-root (e.g. the /projects
+        // RAID), else the home dir. The workspace is NEVER deleted — not
+        // by remove(), not by deprovision; it is the agents' drive.
+        const std::string ws = hwrunner::host_workspace(spec_.name);
+        if (!fs::is_directory(ws))
+            throw std::runtime_error(
+                "host workspace missing: " + ws +
+                " — re-run: sudo hive-worker provision-host-agent " +
+                spec_.name + " --workspace-root " +
+                hwrunner::g_host_workspace_root);
         std::string out;
         if (hwrunner::run_as_user(user, {"/usr/bin/tee", staged},
                                   env_path, &out) != 0 ||
@@ -179,7 +190,7 @@ void AgentProcess::spawn_exec() {
         // itself (parity with podman -w /workspace).
         prog = "sudo";
         args = {"-n", "-H", "-u", user,
-                "/usr/local/bin/hive-agent", home, "--env-file", staged};
+                "/usr/local/bin/hive-agent", ws, "--env-file", staged};
     } else {
         args = {"exec", "-i", "-u", "hive", "-w", "/workspace",
                 "--env-file", env_path,

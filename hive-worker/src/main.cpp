@@ -112,13 +112,15 @@ int main(int argc, char* argv[]) {
     if (argc > 1 && (std::string(argv[1]) == "provision-host-agent" ||
                      std::string(argv[1]) == "deprovision-host-agent")) {
         const bool prov = std::string(argv[1]) == "provision-host-agent";
-        std::string agent, worker_user, binary;
+        std::string agent, worker_user, binary, ws_root;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             if (a == "--worker-user" && i + 1 < argc)
                 worker_user = argv[++i];
             else if (a == "--binary" && i + 1 < argc)
                 binary = argv[++i];
+            else if (a == "--workspace-root" && i + 1 < argc)
+                ws_root = argv[++i];
             else if (!a.empty() && a[0] != '-' && agent.empty())
                 agent = a;
         }
@@ -142,7 +144,8 @@ int main(int argc, char* argv[]) {
             if (binary.empty())
                 binary = "/usr/local/bin/hive-agent";   // reinstall in place
         }
-        return prov ? hwhostagent::provision(agent, worker_user, binary)
+        return prov ? hwhostagent::provision(agent, worker_user, binary,
+                                             ws_root)
                     : hwhostagent::deprovision(agent);
     }
 
@@ -156,6 +159,10 @@ int main(int argc, char* argv[]) {
                 return true;
         return false;
     }();
+    // Phase 72: where host agents' persistent workspaces live (e.g. the
+    // /projects RAID). NEVER cleaned up — it is the agents' drive.
+    if (const char* e = std::getenv("HIVE_HOST_WORKSPACE_ROOT"))
+        hwrunner::g_host_workspace_root = e;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--allow-host-agents") {
@@ -167,6 +174,8 @@ int main(int argc, char* argv[]) {
         else if (a == "--key") key = argv[++i];
         else if (a == "--name") name = argv[++i];
         else if (a == "--caps") caps = argv[++i];
+        else if (a == "--host-workspace-root")
+            hwrunner::g_host_workspace_root = argv[++i];
     }
     if (key.empty() || name.empty()) {
         std::cerr << "usage: hive-worker --server ws://host:8423 "
@@ -781,6 +790,31 @@ int main(int argc, char* argv[]) {
                     } catch (const std::exception& e) {
                         std::cerr << "fleet: remove " << aid
                                   << " failed: " << e.what() << "\n";
+                    }
+                    // Phase 72: roster delete of a HOST agent also cleans
+                    // up the unix side — user, home (archived to
+                    // /var/backups first), sudoers — via the root helper
+                    // provisioning installed. The agent's WORKSPACE is
+                    // never touched. Best-effort: a failure (old helper,
+                    // revoked grant) is logged loudly, never fatal.
+                    if (frame.value("host_agent", false) &&
+                        hwrunner::g_allow_host_agents) {
+                        const std::string user =
+                            hwrunner::host_user(frame.value("name", ""));
+                        std::string out;
+                        const int rc = hwrunner::run_as_user(
+                            "root", {"/usr/local/sbin/hivex-deprovision",
+                                     user}, "", &out);
+                        if (rc == 0)
+                            std::cerr << "HOST AGENT deprovisioned on "
+                                      << "roster delete: " << user << " — "
+                                      << out;
+                        else
+                            std::cerr << "HOST AGENT auto-deprovision of "
+                                      << user << " FAILED (rc=" << rc
+                                      << "): " << out << " — run 'sudo "
+                                      << "hive-worker deprovision-host-agent' "
+                                      << "manually\n";
                     }
                 } else if (op == "file_fetch") {
                     // Phase 31: read a file from THIS rig's shared

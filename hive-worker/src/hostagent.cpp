@@ -67,6 +67,31 @@ bool confirm() {
     return true;
 }
 
+/// Root helper installed by provision: removes a host-agent unix user
+/// (processes, home — archived first — and its sudoers entry). The
+/// workspace under --host-workspace-root is NEVER touched. The worker
+/// invokes this via `sudo -n` on roster delete (auto-cleanup); the
+/// sudoers grant is limited to exactly this root-owned, validated script.
+constexpr const char* kHelper = R"SH(#!/bin/sh
+# HiveMind Phase 72: remove one host-agent unix user. Root-only via
+# /etc/sudoers.d/hivex-deprovision. NEVER touches the agent workspace
+# (<host-workspace-root>/hivex-<name>) — that drive is permanent.
+set -eu
+user="${1:-}"
+echo "$user" | grep -Eq '^hivex-[a-z0-9-]{1,26}$' \
+    || { echo "bad user name: '$user'" >&2; exit 2; }
+id "$user" >/dev/null 2>&1 || { echo "no such user: $user" >&2; exit 1; }
+pkill -u "$user" 2>/dev/null || true
+stamp=$(date -u +%Y%m%d-%H%M%S)
+if [ -d "/home/$user" ]; then
+    tar -czf "/var/backups/$user-$stamp.tar.gz" -C /home "$user" \
+        || echo "warning: home archive failed" >&2
+fi
+userdel -r "$user" 2>/dev/null || userdel "$user"
+rm  "/etc/sudoers.d/$user"
+echo "hivex-deprovision: removed $user (home archived to /var/backups/$user-$stamp.tar.gz; workspace untouched)"
+)SH";
+
 bool require_root() {
     if (geteuid() == 0) return true;
     std::cerr << "must run as root: sudo hive-worker <subcommand> ...\n";
@@ -77,7 +102,8 @@ bool require_root() {
 
 int provision(const std::string& agent_name,
               const std::string& worker_user,
-              const std::string& binary_path) {
+              const std::string& binary_path,
+              const std::string& workspace_root) {
     if (!require_root()) return 2;
     const std::string user = hwrunner::host_user(agent_name);
     if (worker_user.empty() || worker_user == "root") {
@@ -149,6 +175,50 @@ int provision(const std::string& agent_name,
             unlink(tmpl.c_str());
             return 1;
         }
+        unlink(tmpl.c_str());
+    }
+
+    // 4. Workspace — the agent's persistent drive. NEVER deleted by
+    //    deprovision/remove. Default: the home dir; with
+    //    --workspace-root, <root>/hivex-<name> owned by the agent.
+    if (!workspace_root.empty()) {
+        const std::string ws = workspace_root + "/" + user;
+        if (run({"/usr/bin/install", "-d", "-m", "0755", "-o", user,
+                 "-g", user, ws}) != 0) {
+            std::cerr << "workspace creation failed\n";
+            return 1;
+        }
+        std::cerr << "  workspace: " << ws
+                  << " (persistent — never cleaned)\n";
+    }
+
+    // 5. Deprovision helper + sudoers grant for the WORKER user — this
+    //    is what makes roster-delete auto-cleanup possible without the
+    //    hub ever touching root itself. Root-owned script validates the
+    //    hivex-* arg; the grant covers exactly this script.
+    {
+        const char* hp = "/usr/local/sbin/hivex-deprovision";
+        FILE* f = fopen(hp, "w");
+        if (!f) { std::cerr << "cannot write " << hp << "\n"; return 1; }
+        fputs(kHelper, f);
+        fclose(f);
+        run({"/usr/bin/chmod", "0755", hp});
+        run({"/usr/bin/chown", "root:root", hp});
+        const std::string grant =
+            "# HiveMind Phase 72: the worker may auto-deprovision host\n"
+            "# agents on roster delete. Script validates its own args.\n"
+            + worker_user + " ALL=(root) NOPASSWD: " + hp + "\n";
+        std::string tmpl = "/tmp/hivex-deprov-XXXXXX";
+        int fd = mkstemp(tmpl.data());
+        FILE* gf = fdopen(fd, "w");
+        fputs(grant.c_str(), gf);
+        fclose(gf);
+        if (run({"/usr/sbin/visudo", "-c", "-f", tmpl}) == 0)
+            run({"/usr/bin/install", "-m", "0440", "-o", "root", "-g",
+                 "root", tmpl, "/etc/sudoers.d/hivex-deprovision"});
+        else
+            std::cerr << "warning: deprovision grant rejected by visudo "
+                         "— roster delete will NOT auto-clean\n";
         unlink(tmpl.c_str());
     }
 

@@ -625,11 +625,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                         uname += (isalnum((unsigned char)ch) || ch == '-')
                                      ? (char)tolower((unsigned char)ch) : '-';
                     std::cerr << "HOST AGENT deleted: '" << existing->name
-                              << "' — unix user hivex-" << uname
-                              << " on worker '" << existing->worker
-                              << "' NOT removed; run 'sudo hive-worker "
-                              << "deprovision-host-agent " << existing->name
-                              << "' on that rig\n";
+                              << "' — worker '" << existing->worker
+                              << "' asked to deprovision unix user hivex-"
+                              << uname << " (home archived; workspace never "
+                              << "touched). If the worker was offline, run "
+                              << "'sudo hive-worker deprovision-host-agent "
+                              << existing->name << "' on that rig\n";
                 }
             }
             agents.delete_agent(id);
