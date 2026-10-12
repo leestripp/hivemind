@@ -80,12 +80,12 @@ conventions — create it when the department is created, keep it current.
 
 ## Host agents (Phase 72)
 
-Bare-metal host agents do NOT use this shared workspace — each runs in
-its own persistent workspace: the home dir by default, or
-`<root>/hivex-<name>` when the worker has `--host-workspace-root`
-configured (e.g. the `/workspace` RAID mount on ubuntu-pc). That workspace is
-permanent: roster delete and deprovision never touch it. See
-[host-agents.md](host-agents.md).
+Bare-metal host agents share this workspace directly: with the worker's
+`--host-workspace-root` pointed at the host's `/workspace` RAID mount
+(ubuntu-pc), every host agent runs with cwd = `/workspace` — the same
+company drive, no per-agent split. It is permanent: roster delete and
+deprovision never touch it. Without the flag a host agent runs in its
+home dir instead. See [host-agents.md](host-agents.md).
 
 ## Related
 

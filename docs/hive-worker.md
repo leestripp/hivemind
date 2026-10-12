@@ -18,12 +18,11 @@ advertised `host_agents` capability and a typed `I UNDERSTAND` ack.
 
 Two operational flags round the story out:
 
-- `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) — where
-  host agents' persistent workspaces live, one dir per agent
-  (`<DIR>/hivex-<name>`, created by
-  `provision-host-agent --workspace-root DIR`). E.g. the `/workspace`
-  RAID mount on ubuntu-pc. The workspace is the agents' permanent drive, like
-  the containers' shared `/workspace`: **neither roster delete nor
+- `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) — the
+  SHARED workspace every host agent on the rig runs in (cwd = `DIR`
+  itself), exactly like the containers' bind-mounted `/workspace`. On
+  ubuntu-pc that's the host's `/workspace` RAID mount. It is the
+  agents' permanent company drive: **neither roster delete nor
   deprovision ever touches it.** Without the flag the agent runs in its
   home dir instead.
 - **Roster delete auto-cleans the unix side.** Deleting a host agent via

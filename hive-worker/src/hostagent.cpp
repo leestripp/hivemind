@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -178,18 +179,19 @@ int provision(const std::string& agent_name,
         unlink(tmpl.c_str());
     }
 
-    // 4. Workspace — the agent's persistent drive. NEVER deleted by
-    //    deprovision/remove. Default: the home dir; with
-    //    --workspace-root, <root>/hivex-<name> owned by the agent.
+    // 4. Workspace — the SHARED drive every host agent runs in (the
+    //    same /workspace the containers see), NEVER deleted. The worker
+    //    must be started with --host-workspace-root pointing at the same
+    //    path; provision just verifies the mount exists.
     if (!workspace_root.empty()) {
-        const std::string ws = workspace_root + "/" + user;
-        if (run({"/usr/bin/install", "-d", "-m", "0755", "-o", user,
-                 "-g", user, ws}) != 0) {
-            std::cerr << "workspace creation failed\n";
+        if (!std::filesystem::is_directory(workspace_root)) {
+            std::cerr << "workspace root missing: " << workspace_root
+                      << "\n";
             return 1;
         }
-        std::cerr << "  workspace: " << ws
-                  << " (persistent — never cleaned)\n";
+        std::cerr << "  workspace: " << workspace_root
+                  << " (SHARED by all host agents — never cleaned; set "
+                     "--host-workspace-root on the worker to match)\n";
     }
 
     // 5. Deprovision helper + sudoers grant for the WORKER user — this

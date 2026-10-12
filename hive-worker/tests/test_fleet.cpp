@@ -105,9 +105,10 @@ int main() {
         using hwrunner::host_workspace;
         hwrunner::g_host_workspace_root = "";
         assert(host_workspace("TestBot") == "/home/hivex-testbot");
-        hwrunner::g_host_workspace_root = "/projects/hive-agents";
-        assert(host_workspace("TestBot") ==
-               "/projects/hive-agents/hivex-testbot");
+        // Shared: the root IS the workspace, for every agent alike.
+        hwrunner::g_host_workspace_root = "/workspace";
+        assert(host_workspace("TestBot") == "/workspace");
+        assert(host_workspace("OtherBot") == "/workspace");
         hwrunner::g_host_workspace_root = "";   // leave clean
         std::cout << "test_fleet: host_workspace OK\n";
     }

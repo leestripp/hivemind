@@ -341,9 +341,10 @@ Safety model (several independent gates):
   ON (explicitly disabling it needs the ack again). Both UIs show red
   HOST ⚠ badges/warnings.
 
-Lifecycle: the agent's workspace is **permanent** — with the worker's
-`--host-workspace-root DIR` (e.g. `/workspace` on ubuntu-pc)
-each agent gets `<DIR>/hivex-<name>`, never deleted by anything. A
+Lifecycle: the workspace is **shared and permanent** — with the
+worker's `--host-workspace-root DIR` (e.g. the host's `/workspace` RAID
+mount on ubuntu-pc) every host agent runs in `DIR` itself, the same
+company drive the containers see. Never deleted by anything. A
 roster **delete auto-cleans the unix side** via a root helper the worker
 runs (`/usr/local/sbin/hivex-deprovision`): processes killed, home
 archived to `/var/backups/`, user + sudoers removed. Offline worker at

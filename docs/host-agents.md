@@ -72,14 +72,15 @@ entry removed. The hub logs a `HOST AGENT deleted …` audit line. If the
 worker was offline at delete time the cleanup can't be delivered — the
 audit line says so; run `deprovision-host-agent` on the rig to finish.
 
-**The workspace is NEVER cleaned up.** With the worker's
-`--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) each host
-agent runs in `<DIR>/hivex-<name>` (created by
-`provision-host-agent --workspace-root DIR`, owned by the agent) — e.g.
-the `/workspace` RAID mount. That drive is the agents' permanent storage, like
-the containers' shared `/workspace`; neither roster delete nor
-deprovision touches it. Without the flag the agent's cwd is its home
-dir (which IS archived+removed on delete).
+**The workspace is SHARED and NEVER cleaned up.** With the worker's
+`--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) every host
+agent on the rig runs with cwd = `DIR` itself — the same shared company
+drive the containers see bind-mounted at `/workspace` (on ubuntu-pc that
+IS the host's `/workspace` RAID mount). Provision's `--workspace-root
+DIR` just verifies the mount exists; nothing per-agent is created, and
+neither roster delete nor deprovision ever touches the workspace.
+Without the flag the agent's cwd is its home dir (which IS
+archived+removed on delete).
 
 ## Runtime mechanics
 

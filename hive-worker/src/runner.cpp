@@ -219,8 +219,9 @@ std::string host_user(const std::string& agent) {
 std::string g_host_workspace_root;
 
 std::string host_workspace(const std::string& agent) {
-    if (!g_host_workspace_root.empty())
-        return g_host_workspace_root + "/" + host_user(agent);
+    // Shared, like the containers' /workspace bind-mount — every host
+    // agent on the rig runs in the SAME directory.
+    if (!g_host_workspace_root.empty()) return g_host_workspace_root;
     return "/home/" + host_user(agent);
 }
 
