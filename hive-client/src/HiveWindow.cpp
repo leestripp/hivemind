@@ -3905,32 +3905,63 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     }
     const bool show_worker_row = !worker_names->empty();
 
-    // Phase 35: agent type. "GPU workhorse" is only selectable when the
-    // SELECTED worker advertises a gpu cap (hello frame); otherwise the
-    // dropdown is disabled and pinned to Standard. Hub enforces too (400).
-    auto worker_has_gpu = [all_workers](const std::string& wname) {
+    // Phase 35+72: agent TYPE — the dialog's first choice. Standard and
+    // GPU workhorse are containers; Host is bare-metal with sudo. GPU is
+    // only offered when the selected worker advertises a gpu cap, Host
+    // only with a host_agents cap (hello frame) — the hub enforces both.
+    // The list is REBUILT on worker change; type_vals maps row -> value.
+    const bool was_host = existing && existing->value("host_agent", false);
+    auto* type_dd = Gtk::make_managed<Gtk::DropDown>();
+    auto* type_vals = new std::vector<std::string>();   // dialog lifetime
+    const std::string cur_type = editing ? existing->value("type", "") : "";
+    auto worker_has_cap = [all_workers](const std::string& wname,
+                                        const char* key) {
         for (auto& w : all_workers) {
             if (w.name != wname) continue;
             try {
                 auto c = nlohmann::json::parse(w.caps);
-                return c.is_object() && c.contains("gpu");
+                return c.is_object() && c.contains(key);
             } catch (...) { return false; }
         }
         return false;
     };
-    auto* type_dd = Gtk::make_managed<Gtk::DropDown>(
-        Gtk::StringList::create({"Standard", "GPU workhorse (render/compute)"}));
-    const std::string cur_type = editing ? existing->value("type", "") : "";
-    if (cur_type == "gpu") type_dd->set_selected(1);
-    auto refresh_type = [type_dd, worker, worker_names, worker_has_gpu] {
+    auto rebuild_types = [type_dd, type_vals, worker, worker_names,
+                          worker_has_cap, was_host] {
         const auto sel = worker->get_selected();
-        const bool ok = sel < worker_names->size() &&
-                        worker_has_gpu((*worker_names)[sel]);
-        type_dd->set_sensitive(ok);
-        if (!ok) type_dd->set_selected(0);   // pin to Standard
+        const std::string wname =
+            sel < worker_names->size() ? (*worker_names)[sel] : "";
+        const std::string prev =
+            type_dd->get_selected() < type_vals->size()
+                ? (*type_vals)[type_dd->get_selected()] : "";
+        std::vector<Glib::ustring> items;
+        type_vals->clear();
+        items.push_back("Standard (container)");
+        type_vals->push_back("");
+        if (worker_has_cap(wname, "gpu")) {
+            items.push_back("GPU workhorse (render/compute)");
+            type_vals->push_back("gpu");
+        }
+        if (worker_has_cap(wname, "host_agents") || was_host) {
+            items.push_back("Host (bare-metal, sudo — NO sandbox)");
+            type_vals->push_back("host");
+        }
+        type_dd->set_model(Gtk::StringList::create(items));
+        guint pick = 0;
+        for (size_t i = 0; i < type_vals->size(); ++i)
+            if ((*type_vals)[i] == prev) { pick = (guint)i; break; }
+        type_dd->set_selected(pick);
     };
-    worker->property_selected().signal_changed().connect(refresh_type);
-    refresh_type();   // initial state for the preselected worker
+    worker->property_selected().signal_changed().connect(
+        [rebuild_types] { rebuild_types(); });
+    rebuild_types();   // initial list for the preselected worker
+    // Edit-mode preselect: the host flag wins over the gpu type.
+    const std::string want_type = was_host ? "host" : cur_type;
+    if (!want_type.empty())
+        for (size_t i = 0; i < type_vals->size(); ++i)
+            if ((*type_vals)[i] == want_type) {
+                type_dd->set_selected((guint)i);
+                break;
+            }
 
     // Phase 69: per-agent container resource caps. Blank = worker default
     // (4g / 2 cpus). Edit semantics mirror the web UI: clearing a
@@ -3948,38 +3979,27 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         cpus_entry->set_text(buf);
     }
 
-    // Host mode removed (2026-08-25): agents always run containerized.
+    // Phase 72: host agents are the "Host" entry in the Type dropdown.
     auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
     if (existing) {
         appr->set_active(existing->value("require_approval", false));
     }
 
-    // Phase 72: host agent — bare-metal on the worker with sudo, NO
-    // sandbox. The warning + typed ack are part of the feature.
-    auto* host_check = Gtk::make_managed<Gtk::CheckButton>(
-        "Host agent (bare-metal, sudo — NO sandbox)");
+    // Phase 72: Host is a TYPE (dropdown at the top). The red warning +
+    // typed ack live at the bottom and appear only while Host is
+    // selected — see refresh_type_ui after the layout below.
     auto* host_warn = Gtk::make_managed<Gtk::Label>(
-        "⚠ This agent runs DIRECTLY on the worker machine as a real user "
-        "with passwordless sudo. It can install software, modify system "
-        "files, and DESTROY the machine — through error, hallucination, or "
-        "prompt injection. Only use this on a machine you don't mind "
-        "losing. The worker must run with --allow-host-agents.\n"
+        "⚠ HOST AGENT: runs DIRECTLY on the worker machine as a real user "
+        "with passwordless sudo — NO container, NO sandbox. It can install "
+        "software, modify system files, and DESTROY the machine — through "
+        "error, hallucination, or prompt injection. Only use this on a "
+        "machine you don't mind losing.\n"
         "Type I UNDERSTAND to enable:");
     host_warn->set_wrap(true);
     host_warn->set_xalign(0);
     host_warn->add_css_class("error-label");
     auto* host_ack = Gtk::make_managed<Gtk::Entry>();
     host_ack->set_placeholder_text("I UNDERSTAND");
-    const bool was_host = existing && existing->value("host_agent", false);
-    host_check->set_active(was_host);
-    host_warn->set_visible(was_host);
-    host_ack->set_visible(was_host);
-    host_check->signal_toggled().connect([host_check, host_warn, host_ack, appr] {
-        const bool on = host_check->get_active();
-        host_warn->set_visible(on);
-        host_ack->set_visible(on);
-        if (on) appr->set_active(true);   // host agents are gated by default
-    });
 
     // Avatar picker: the 20 department-head SVGs (10 depts x male/female).
     // "Auto" (default) hashes the agent name into the set. ToggleButton
@@ -4068,9 +4088,14 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         grid->attach(*l, 0, row);
         w->set_hexpand(true);
         grid->attach(*w, 1, row);
+        return l;
     };
     int row_i = 0;
     if (!editing) add_row("Template", tpl, row_i++);
+    Gtk::Label* mem_lbl = nullptr;
+    Gtk::Label* cpu_lbl = nullptr;
+    if (show_worker_row)
+        add_row("Type", type_dd, row_i++);   // Phase 72: FIRST choice
     add_row("Name", name, row_i++);
     add_row("Role", role, row_i++);
     add_row("Provider", provider, row_i++);
@@ -4078,9 +4103,8 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Thinking", think_dd, row_i++);   // 2026-10-01
     if (show_worker_row) {
         add_row("Worker", worker, row_i++);
-        add_row("Type", type_dd, row_i++);
-        add_row("Memory cap", memory_entry, row_i++);   // Phase 69
-        add_row("CPU cap", cpus_entry, row_i++);        // Phase 69
+        mem_lbl = add_row("Memory cap", memory_entry, row_i++);  // Phase 69
+        cpu_lbl = add_row("CPU cap", cpus_entry, row_i++);       // Phase 69
     }
     else if (!editing) {
         // No worker online: creation is impossible (the hub rejects unknown
@@ -4096,15 +4120,32 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     add_row("Avatar", avatar_grid, row_i++);
     grid->attach(*appr, 1, row_i);
     ++row_i;
-    grid->attach(*host_check, 1, row_i);
-    ++row_i;
     grid->attach(*host_warn, 1, row_i);
     ++row_i;
     grid->attach(*host_ack, 1, row_i);
 
+    // Phase 72: type-driven visibility. Host selected -> red warn + ack
+    // shown, approvals forced on, and the container-only Memory/CPU rows
+    // hidden (meaningless off-container). Worker switches rebuild the
+    // type list, whose set_selected refires this via property_selected.
+    auto refresh_type_ui = [type_dd, type_vals, host_warn, host_ack, appr,
+                            memory_entry, cpus_entry, mem_lbl, cpu_lbl] {
+        const bool host = type_dd->get_selected() < type_vals->size() &&
+                          (*type_vals)[type_dd->get_selected()] == "host";
+        host_warn->set_visible(host);
+        host_ack->set_visible(host);
+        if (host) appr->set_active(true);   // host agents are gated
+        memory_entry->set_visible(!host);
+        cpus_entry->set_visible(!host);
+        if (mem_lbl) mem_lbl->set_visible(!host);
+        if (cpu_lbl) cpu_lbl->set_visible(!host);
+    };
+    type_dd->property_selected().signal_changed().connect(refresh_type_ui);
+    refresh_type_ui();   // initial state (Host preselected when editing)
+
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, host_check, host_ack, was_host](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, type_vals, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, host_ack, was_host](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -4114,11 +4155,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 const auto wsel = worker->get_selected();
                 const std::string wk = wsel < worker_names->size() ? (*worker_names)[wsel] : "";
                 const std::string av = *chosen_avatar;
-                // Phase 35: insensitive row = don't touch; gpu picked = "gpu";
-                // switched back to Standard on an edit = "default" (clears).
+                // Phase 35+72: the Type list carries values in parallel
+                // ("" standard / "gpu" / "host"). Host is its own flag,
+                // so ty stays "" for it; Standard after gpu = "default"
+                // (clears).
+                const std::string tval =
+                    type_dd->get_selected() < type_vals->size()
+                        ? (*type_vals)[type_dd->get_selected()] : "";
                 const std::string ty =
-                    !type_dd->get_sensitive() ? "" :
-                    type_dd->get_selected() == 1 ? "gpu"
+                    tval == "gpu" ? "gpu"
+                    : tval == "host" ? ""
                     : (!cur_type.empty() ? "default" : "");
                 // Phase 69: blank on create = worker default; blank on
                 // edit with a previously-set value = explicit reset
@@ -4136,6 +4182,12 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 } else if (editing && cur_cpus > 0) {
                     cp = 0;   // cleared -> reset to worker default
                 }
+                if (tval == "host") {
+                    // container caps are meaningless off-container:
+                    // hidden rows reset any previously-set values
+                    if (editing && !cur_memory.empty()) mem = "default";
+                    if (editing && cur_cpus > 0) cp = 0;
+                }
                 // 2026-10-01: edit semantics — unchanged inherit = keep
                 // (""), explicit Inherit after an override = "default"
                 // (clear), a level = set. Create always sends the value.
@@ -4149,7 +4201,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 // validated client-side for UX, re-validated by the hub.
                 int host = -1;   // -1 = omit (keep)
                 std::string host_ack_str;
-                if (host_check->get_active() && !was_host) {
+                if (tval == "host" && !was_host) {
                     host_ack_str = host_ack->get_text();
                     if (host_ack_str != "I UNDERSTAND") {
                         auto* err = Gtk::make_managed<Gtk::MessageDialog>(
@@ -4163,7 +4215,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                         return;   // stay in the dialog
                     }
                     host = 1;
-                } else if (host_check->get_active() && was_host) {
+                } else if (tval == "host" && was_host) {
                     host = 1;   // keep; hub only re-asks if approvals drop
                     if (!appr->get_active())
                         host_ack_str = host_ack->get_text();
@@ -4175,6 +4227,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete worker_names;
                 delete templates_json;
                 delete avatar_tiles;
+                delete type_vals;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
                            ap = appr->get_active(), mem, cp, think,
@@ -4195,9 +4248,11 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         }
         if (r != (int)Gtk::ResponseType::OK) {
             delete chosen_avatar;
+            delete model_names;
             delete worker_names;
             delete templates_json;
             delete avatar_tiles;
+            delete type_vals;
         }
         dialog->destroy();
     });
