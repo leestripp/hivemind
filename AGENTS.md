@@ -319,3 +319,36 @@ groups `smart:you`/`smart:chatter`/`smart:routines` are computed
 client-side, never stored). Deleting a group reverts members. The
 list route reads membership via ONE `thread_group_map()` query —
 never per-row in a list route.
+
+## Host Agents (bare-metal, sudo, NO sandbox) — Phase 72
+
+The strongest capability in the fleet and the most dangerous: a host
+agent is a bare-metal `hive-agent` running as a dedicated unix user
+`hivex-<name>` with passwordless sudo on a worker rig — no container, no
+sandbox, direct root. It exists for work containers can't do (desktop
+apps, Android builds with KVM, drivers, system services).
+
+Safety model (several independent gates):
+
+- **Worker opt-in**: the worker refuses host spawns unless started with
+  `--allow-host-agents` / `HIVE_ALLOW_HOST_AGENTS=1`.
+- **Manual local provisioning**: `sudo hive-worker provision-host-agent
+  <name> --worker-user <worker> --binary <path>` (red warning +
+  hostname type-to-confirm; creates the user with a locked password,
+  sudoers via `visudo -c`, installs the binary).
+- **Hub gates**: creation requires the worker's advertised `host_agents`
+  capability + a typed `I UNDERSTAND` ack; `require_approval` is FORCED
+  ON (explicitly disabling it needs the ack again). Both UIs show red
+  HOST ⚠ badges/warnings.
+
+Lifecycle: the agent's workspace is **permanent** — with the worker's
+`--host-workspace-root DIR` (e.g. `/projects/hive-agents` on ubuntu-pc)
+each agent gets `<DIR>/hivex-<name>`, never deleted by anything. A
+roster **delete auto-cleans the unix side** via a root helper the worker
+runs (`/usr/local/sbin/hivex-deprovision`): processes killed, home
+archived to `/var/backups/`, user + sudoers removed. Offline worker at
+delete time → hub audit line says to run
+`sudo hive-worker deprovision-host-agent <name>` manually.
+
+Full reference: [docs/host-agents.md](docs/host-agents.md) — read it
+before enabling any of this.
