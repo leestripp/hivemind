@@ -49,8 +49,8 @@ containment:
 5. **Journal audit** — every creation/enable/disable writes a
    `HOST AGENT …` line to the hub log.
 6. **Unmissable UI** — host agents are a first-class **Type** choice in
-   the clients' agent dialog ("Host (bare-metal, sudo — NO sandbox)",
-   offered only when the selected worker advertises the capability).
+   the clients' agent dialog ("Bare-Metal ⚠", offered only when the
+   selected worker advertises the capability).
    Selecting it reveals the red warning block + `I UNDERSTAND` entry at
    the bottom, forces approvals on, and hides the container-only rows
    (memory/CPU caps). Existing host agents show a red **HOST ⚠** badge

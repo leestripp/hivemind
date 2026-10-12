@@ -3935,14 +3935,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 ? (*type_vals)[type_dd->get_selected()] : "";
         std::vector<Glib::ustring> items;
         type_vals->clear();
-        items.push_back("Standard (container)");
+        items.push_back("Standard Container");
         type_vals->push_back("");
         if (worker_has_cap(wname, "gpu")) {
-            items.push_back("GPU workhorse (render/compute)");
+            items.push_back("GPU Container (render/compute)");
             type_vals->push_back("gpu");
         }
         if (worker_has_cap(wname, "host_agents") || was_host) {
-            items.push_back("Host (bare-metal, sudo — NO sandbox)");
+            // The ⚠ flags the danger BEFORE selection; the red warning
+            // block below the form does the heavy lifting after it.
+            items.push_back("Bare-Metal ⚠ (host — sudo, NO sandbox)");
             type_vals->push_back("host");
         }
         type_dd->set_model(Gtk::StringList::create(items));
