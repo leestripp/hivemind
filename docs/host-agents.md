@@ -76,7 +76,7 @@ audit line says so; run `deprovision-host-agent` on the rig to finish.
 `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) each host
 agent runs in `<DIR>/hivex-<name>` (created by
 `provision-host-agent --workspace-root DIR`, owned by the agent) — e.g.
-the `/projects` RAID. That drive is the agents' permanent storage, like
+the `/workspace` RAID mount. That drive is the agents' permanent storage, like
 the containers' shared `/workspace`; neither roster delete nor
 deprovision touches it. Without the flag the agent's cwd is its home
 dir (which IS archived+removed on delete).

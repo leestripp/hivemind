@@ -21,8 +21,8 @@ Two operational flags round the story out:
 - `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) — where
   host agents' persistent workspaces live, one dir per agent
   (`<DIR>/hivex-<name>`, created by
-  `provision-host-agent --workspace-root DIR`). E.g. the `/projects`
-  RAID on ubuntu-pc. The workspace is the agents' permanent drive, like
+  `provision-host-agent --workspace-root DIR`). E.g. the `/workspace`
+  RAID mount on ubuntu-pc. The workspace is the agents' permanent drive, like
   the containers' shared `/workspace`: **neither roster delete nor
   deprovision ever touches it.** Without the flag the agent runs in its
   home dir instead.

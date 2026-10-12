@@ -342,7 +342,7 @@ Safety model (several independent gates):
   HOST ⚠ badges/warnings.
 
 Lifecycle: the agent's workspace is **permanent** — with the worker's
-`--host-workspace-root DIR` (e.g. `/projects/hive-agents` on ubuntu-pc)
+`--host-workspace-root DIR` (e.g. `/workspace` on ubuntu-pc)
 each agent gets `<DIR>/hivex-<name>`, never deleted by anything. A
 roster **delete auto-cleans the unix side** via a root helper the worker
 runs (`/usr/local/sbin/hivex-deprovision`): processes killed, home

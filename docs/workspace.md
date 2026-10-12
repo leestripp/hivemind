@@ -83,7 +83,7 @@ conventions — create it when the department is created, keep it current.
 Bare-metal host agents do NOT use this shared workspace — each runs in
 its own persistent workspace: the home dir by default, or
 `<root>/hivex-<name>` when the worker has `--host-workspace-root`
-configured (e.g. the `/projects` RAID on ubuntu-pc). That workspace is
+configured (e.g. the `/workspace` RAID mount on ubuntu-pc). That workspace is
 permanent: roster delete and deprovision never touch it. See
 [host-agents.md](host-agents.md).
 
