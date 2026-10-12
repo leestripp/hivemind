@@ -122,25 +122,67 @@ void AgentProcess::start() {
     stopping_ = false;
     // Phase 43: no model resolution here — the hub injects the full
     // provider/model config into every task frame (llm).
-    // Phase 35: type "gpu" -> gpu image + device passthrough flags
-    hwrunner::ensure_container(spec_.id, resolved_image(spec_),
-                               spec_.type == "gpu",
-                               spec_.memory, spec_.cpus);   // Phase 69
+    if (spec_.host_agent) {
+        // Phase 72: bare-metal spawn — the worker's OWN opt-in and the
+        // provisioned hivex-<name> user are both mandatory, checked here
+        // (defense in depth: the hub's route gate is not trusted).
+        if (!hwrunner::g_allow_host_agents)
+            throw std::runtime_error(
+                "host agent '" + spec_.name + "' refused: this worker has "
+                "NOT opted in (--allow-host-agents)");
+        if (!hwrunner::host_agent_provisioned(spec_.name))
+            throw std::runtime_error(
+                "host agent '" + spec_.name + "' refused: run "
+                "'sudo hive-worker provision-host-agent " + spec_.name +
+                "' on this rig first");
+        std::cerr << "HOST AGENT spawn: " << spec_.name << " as "
+                  << hwrunner::host_user(spec_.name)
+                  << " (sudo, unsandboxed)\n";
+    } else {
+        // Phase 35: type "gpu" -> gpu image + device passthrough flags
+        hwrunner::ensure_container(spec_.id, resolved_image(spec_),
+                                   spec_.type == "gpu",
+                                   spec_.memory, spec_.cpus);   // Phase 69
+    }
     spawn_exec();
     monitor_ = std::thread(&AgentProcess::monitor_loop, this);
 }
 
 void AgentProcess::spawn_exec() {
     const std::string env_path = build_env_file();
-    const std::string cname = hwrunner::container_name(spec_.id);
 
     int to_child[2], from_child[2];
     if (pipe(to_child) != 0 || pipe(from_child) != 0)
         throw std::runtime_error("pipe failed");
 
-    std::vector<std::string> args{
-        "exec", "-i", "-u", "hive", "-w", "/workspace",
-        "--env-file", env_path, cname, "hive-agent", "/workspace"};
+    // Phase 72: host agents bypass podman entirely. The env file (0600,
+    // worker-owned — may carry HIVE_SECRET_* lines) is staged into the
+    // hivex home as that user, and hive-agent reads it via --env-file so
+    // secrets NEVER appear in argv (world-readable via ps). The staged
+    // file stays (0600, hivex-owned) — same posture as the worker-local
+    // env dir, and respawns re-stage over it.
+    const bool host = spec_.host_agent;
+    std::vector<std::string> args;         // full argv for the child exec
+    const char* prog = "podman";
+    if (host) {
+        const std::string user = hwrunner::host_user(spec_.name);
+        const std::string home = "/home/" + user;
+        const std::string staged = home + "/.hive-env";
+        std::string out;
+        if (hwrunner::run_as_user(user, {"/usr/bin/tee", staged},
+                                  env_path, &out) != 0 ||
+            hwrunner::run_as_user(user, {"/usr/bin/chmod", "600", staged},
+                                  "", &out) != 0)
+            throw std::runtime_error("host env staging failed: " + out);
+        prog = "sudo";
+        args = {"-n", "-H", "-D", home, "-u", user,
+                "/usr/local/bin/hive-agent", home, "--env-file", staged};
+    } else {
+        args = {"exec", "-i", "-u", "hive", "-w", "/workspace",
+                "--env-file", env_path,
+                hwrunner::container_name(spec_.id), "hive-agent",
+                "/workspace"};
+    }
 
     pid_t pid = fork();
     if (pid == 0) {
@@ -150,10 +192,10 @@ void AgentProcess::spawn_exec() {
         ::close(to_child[0]); ::close(to_child[1]);
         ::close(from_child[0]); ::close(from_child[1]);
         std::vector<char*> cargs;
-        cargs.push_back(const_cast<char*>("podman"));
+        cargs.push_back(const_cast<char*>(prog));
         for (auto& a : args) cargs.push_back(const_cast<char*>(a.c_str()));
         cargs.push_back(nullptr);
-        execvp("podman", cargs.data());
+        execvp(prog, cargs.data());
         _exit(127);
     }
     ::close(to_child[0]);
@@ -295,9 +337,13 @@ void AgentProcess::monitor_loop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         if (stopping_) { set_state(m_, state_, "down"); return; }
         try {
-            hwrunner::ensure_container(spec_.id, resolved_image(spec_),
-                                       spec_.type == "gpu",
-                                       spec_.memory, spec_.cpus);  // Phase 69
+            // Phase 72: host agents have no container to ensure — the
+            // bare-metal checks run in start() and stay valid across a
+            // crash-respawn.
+            if (!spec_.host_agent)
+                hwrunner::ensure_container(spec_.id, resolved_image(spec_),
+                                           spec_.type == "gpu",
+                                           spec_.memory, spec_.cpus);  // Phase 69
             spawn_exec();                // creates a fresh reader_ thread
             // A stop() that landed mid-respawn (spec-change restart)
             // couldn't kill a child that didn't exist yet — do it now

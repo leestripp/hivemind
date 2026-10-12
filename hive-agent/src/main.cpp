@@ -439,9 +439,32 @@ static json g_user_inbox = json::array();
 static std::mutex g_inbox_mu;
 
 int main(int argc, char** argv) {
+    // Phase 72: --env-file <path> — KEY=VALUE lines setenv()'d before any
+    // config is read. The host-agent spawn path uses this so secrets never
+    // appear in the process argv (visible to every user via ps). Container
+    // spawns keep using podman's --env-file; both paths end with the same
+    // process environment. Positional argv[1] stays the project root, so
+    // this option is scanned first and skipped over.
+    std::vector<std::string> positional;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--env-file" && i + 1 < argc) {
+            std::ifstream in(argv[++i]);
+            std::string line;
+            while (std::getline(in, line)) {
+                const auto eq = line.find('=');
+                if (eq == std::string::npos || eq == 0) continue;
+                ::setenv(line.substr(0, eq).c_str(),
+                         line.substr(eq + 1).c_str(), 1);
+            }
+            continue;
+        }
+        positional.push_back(a);
+    }
     // -- config ----------------------------------------------------------
     const fs::path project_root =
-        fs::absolute(argc > 1 ? fs::path(argv[1]) : fs::current_path());
+        fs::absolute(!positional.empty() ? fs::path(positional.front())
+                                         : fs::current_path());
     const std::string name = env_or("HIVEMIND_AGENT_NAME");
     if (name.empty()) {
         log_err("HIVEMIND_AGENT_NAME is required");

@@ -56,6 +56,27 @@ void ensure_container(const std::string& agent,
                       const std::string& memory = "",
                       double cpus = 0);
 
+// ── Phase 72: host agents (bare-metal, sudo, NO sandbox) ─────────────
+/// Worker-level opt-in for host agents — set from --allow-host-agents /
+/// HIVE_ALLOW_HOST_AGENTS=1 in main.cpp BEFORE the WS connect. Default
+/// false: a hub frame alone can never conjure a host agent on a rig
+/// whose operator didn't opt in.
+extern bool g_allow_host_agents;
+
+/// The dedicated unix user a host agent runs as: "hivex-" + lowercased
+/// name, unsafe chars clamped to '-', 32-char username cap.
+std::string host_user(const std::string& agent);
+
+/// True when hivex-<name> exists (someone ran provision-host-agent).
+bool host_agent_provisioned(const std::string& agent);
+
+/// Quick synchronous `sudo -n -H -u <user> <args...>` — no shell,
+/// stdin optionally redirected from stdin_path, combined stdout/stderr
+/// captured into out. Returns the exit code (-1 = infra failure).
+int run_as_user(const std::string& user,
+                const std::vector<std::string>& args,
+                const std::string& stdin_path, std::string* out);
+
 /// Phase 69: parse a podman size string ("4g", "1536m", "512") to bytes.
 /// Returns -1 on garbage. Exposed for tests.
 long long parse_memory_bytes(const std::string& s);

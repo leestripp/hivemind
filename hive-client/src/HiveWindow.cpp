@@ -3189,6 +3189,14 @@ void HiveWindow::show_inspector(const nlohmann::json& agent) {
     kv("Model", agent.value("model", ""));
     kv("Workspace mode", agent.value("workspace_mode", ""));
     kv("Require approval", agent.value("require_approval", false) ? "yes" : "no");
+    // Phase 72: host agents run bare-metal with sudo — make it unmissable.
+    if (agent.value("host_agent", false)) {
+        auto* hl = Gtk::make_managed<Gtk::Label>(
+            "⚠ HOST AGENT — bare-metal with sudo, NO sandbox");
+        hl->add_css_class("error-label");
+        hl->set_halign(Gtk::Align::START);
+        outer->append(*hl);
+    }
     kv("Created", agent.value("created_at", ""));
     kv("Updated", agent.value("updated_at", ""));
     kv("Data directory", "~/.local/share/hivemind/agents/" + agent_id + "/");
@@ -3946,6 +3954,33 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         appr->set_active(existing->value("require_approval", false));
     }
 
+    // Phase 72: host agent — bare-metal on the worker with sudo, NO
+    // sandbox. The warning + typed ack are part of the feature.
+    auto* host_check = Gtk::make_managed<Gtk::CheckButton>(
+        "Host agent (bare-metal, sudo — NO sandbox)");
+    auto* host_warn = Gtk::make_managed<Gtk::Label>(
+        "⚠ This agent runs DIRECTLY on the worker machine as a real user "
+        "with passwordless sudo. It can install software, modify system "
+        "files, and DESTROY the machine — through error, hallucination, or "
+        "prompt injection. Only use this on a machine you don't mind "
+        "losing. The worker must run with --allow-host-agents.\n"
+        "Type I UNDERSTAND to enable:");
+    host_warn->set_wrap(true);
+    host_warn->set_xalign(0);
+    host_warn->add_css_class("error-label");
+    auto* host_ack = Gtk::make_managed<Gtk::Entry>();
+    host_ack->set_placeholder_text("I UNDERSTAND");
+    const bool was_host = existing && existing->value("host_agent", false);
+    host_check->set_active(was_host);
+    host_warn->set_visible(was_host);
+    host_ack->set_visible(was_host);
+    host_check->signal_toggled().connect([host_check, host_warn, host_ack, appr] {
+        const bool on = host_check->get_active();
+        host_warn->set_visible(on);
+        host_ack->set_visible(on);
+        if (on) appr->set_active(true);   // host agents are gated by default
+    });
+
     // Avatar picker: the 20 department-head SVGs (10 depts x male/female).
     // "Auto" (default) hashes the agent name into the set. ToggleButton
     // group = radio behavior. Layout: full-width Auto row, then dept pairs
@@ -4060,10 +4095,16 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     // (no Workspace row — always containerized)
     add_row("Avatar", avatar_grid, row_i++);
     grid->attach(*appr, 1, row_i);
+    ++row_i;
+    grid->attach(*host_check, 1, row_i);
+    ++row_i;
+    grid->attach(*host_warn, 1, row_i);
+    ++row_i;
+    grid->attach(*host_ack, 1, row_i);
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, host_check, host_ack, was_host](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -4104,6 +4145,31 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 if (editing && think.empty() &&
                     !existing->value("thinking_level", "").empty())
                     think = "default";
+                // Phase 72: enabling a host agent needs the typed ack —
+                // validated client-side for UX, re-validated by the hub.
+                int host = -1;   // -1 = omit (keep)
+                std::string host_ack_str;
+                if (host_check->get_active() && !was_host) {
+                    host_ack_str = host_ack->get_text();
+                    if (host_ack_str != "I UNDERSTAND") {
+                        auto* err = Gtk::make_managed<Gtk::MessageDialog>(
+                            *dialog, "Type I UNDERSTAND in the red box to "
+                            "enable a host agent.", false,
+                            Gtk::MessageType::WARNING,
+                            Gtk::ButtonsType::OK, true);
+                        err->signal_response().connect(
+                            [err](int) { err->destroy(); });
+                        err->present();
+                        return;   // stay in the dialog
+                    }
+                    host = 1;
+                } else if (host_check->get_active() && was_host) {
+                    host = 1;   // keep; hub only re-asks if approvals drop
+                    if (!appr->get_active())
+                        host_ack_str = host_ack->get_text();
+                } else if (was_host) {
+                    host = 0;   // clearing — safe direction, no ack
+                }
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
@@ -4111,11 +4177,14 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete avatar_tiles;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
-                           ap = appr->get_active(), mem, cp, think] {
+                           ap = appr->get_active(), mem, cp, think,
+                           host, host_ack = host_ack_str] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp, think);
+                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp, think,
+                                          host, host_ack);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp, think);
+                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp, think,
+                                          host, host_ack);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });

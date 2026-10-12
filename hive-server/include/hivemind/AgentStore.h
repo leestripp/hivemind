@@ -33,6 +33,11 @@ struct RosterAgent {
     // "" = inherit from the model's own thinking_level.
     std::string thinking_level;
     bool require_approval = false; // Phase 3: gate shell commands for human review
+    // Phase 72 (2026-10-12): host agent — runs bare-metal on the worker as
+    // user hivex-<name> with passwordless sudo. NO sandbox. Two-level opt-in
+    // (worker allow_host_agents + this flag) and the "I UNDERSTAND" ack are
+    // enforced in RosterRoutes; the store just persists the flag.
+    bool host_agent = false;
     std::string created_at;
     std::string updated_at;
 };
@@ -56,7 +61,8 @@ public:
                              const std::string& type = "",   // Phase 35: "gpu" = workhorse
                              const std::string& memory = "", // Phase 69: "" = worker default
                              double cpus = 0,                 // Phase 69: 0 = worker default
-                             const std::string& thinking_level = ""); // 2026-10-01
+                             const std::string& thinking_level = "", // 2026-10-01
+                             bool host_agent = false);       // Phase 72
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);
@@ -76,7 +82,8 @@ public:
                              const std::string& type = "",       // "" = keep, "default" = clear (Phase 35)
                              const std::string& memory = "",     // "" = keep, "default" = clear (Phase 69)
                              double cpus = -1,                    // -1 = keep, 0 = worker default (Phase 69)
-                             const std::string& thinking_level = ""); // "" = keep, "default" = clear
+                             const std::string& thinking_level = "", // "" = keep, "default" = clear
+                             int host_agent = -1);               // Phase 72: -1 = keep, 0/1 = set
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

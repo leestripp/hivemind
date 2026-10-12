@@ -12,6 +12,7 @@
 #include "net/Socket.h"
 #include "OmniNet.h"
 #include "runner.h"
+#include "hostagent.h"
 #include "fleet.h"
 
 #include <nlohmann/json.hpp>
@@ -106,14 +107,66 @@ static fs::path worker_workspace() {
 }
 
 int main(int argc, char* argv[]) {
+    // Phase 72: host-agent provisioning subcommands — LOCAL, root-only,
+    // never reachable via the hub. Handled before any WS work.
+    if (argc > 1 && (std::string(argv[1]) == "provision-host-agent" ||
+                     std::string(argv[1]) == "deprovision-host-agent")) {
+        const bool prov = std::string(argv[1]) == "provision-host-agent";
+        std::string agent, worker_user, binary;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--worker-user" && i + 1 < argc)
+                worker_user = argv[++i];
+            else if (a == "--binary" && i + 1 < argc)
+                binary = argv[++i];
+            else if (!a.empty() && a[0] != '-' && agent.empty())
+                agent = a;
+        }
+        if (agent.empty()) {
+            std::cerr << "usage: hive-worker " << argv[1]
+                      << " <agent-name> [--worker-user U] [--binary PATH]\n";
+            return 2;
+        }
+        if (worker_user.empty()) {
+            if (const char* su = std::getenv("SUDO_USER")) worker_user = su;
+        }
+        if (binary.empty()) {
+            // Default: the hive-agent binary next to this executable.
+            std::error_code ec;
+            fs::path self = fs::read_symlink("/proc/self/exe", ec);
+            if (!ec) {
+                fs::path cand = self.parent_path().parent_path()
+                                / "hive-agent" / "hive-agent";
+                if (fs::exists(cand)) binary = cand.string();
+            }
+            if (binary.empty())
+                binary = "/usr/local/bin/hive-agent";   // reinstall in place
+        }
+        return prov ? hwhostagent::provision(agent, worker_user, binary)
+                    : hwhostagent::deprovision(agent);
+    }
+
     std::string server = "ws://127.0.0.1:8423";
     std::string key, name, caps = R"({"arch":"x86_64"})";
-    for (int i = 1; i + 1 < argc; i += 2) {
+    // Phase 72: worker opt-in for host agents (default OFF — a hub frame
+    // alone can never conjure one). Flag OR env var.
+    hwrunner::g_allow_host_agents = [] {
+        if (const char* e = std::getenv("HIVE_ALLOW_HOST_AGENTS"))
+            if (std::string(e) == "1" || std::string(e) == "true")
+                return true;
+        return false;
+    }();
+    for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "--server") server = argv[i + 1];
-        else if (a == "--key") key = argv[i + 1];
-        else if (a == "--name") name = argv[i + 1];
-        else if (a == "--caps") caps = argv[i + 1];
+        if (a == "--allow-host-agents") {
+            hwrunner::g_allow_host_agents = true;
+            continue;   // flag, no value
+        }
+        if (i + 1 >= argc) break;
+        if (a == "--server") server = argv[++i];
+        else if (a == "--key") key = argv[++i];
+        else if (a == "--name") name = argv[++i];
+        else if (a == "--caps") caps = argv[++i];
     }
     if (key.empty() || name.empty()) {
         std::cerr << "usage: hive-worker --server ws://host:8423 "
@@ -128,6 +181,8 @@ int main(int argc, char* argv[]) {
         if (!c.is_object()) c = json::object();
         if (!c.contains("gpu") && fs::exists("/dev/kfd"))
             c["gpu"] = "amd";
+        // Phase 72: the hub gates host-agent creation/moves on this cap.
+        c["host_agents"] = hwrunner::g_allow_host_agents;
         caps = c.dump();
     }
     // First-run workspace seeding: create the company-drive layout and
@@ -555,6 +610,9 @@ int main(int argc, char* argv[]) {
                             spec.type          = specj.value("type","");   // Phase 35
                             spec.memory        = specj.value("memory",""); // Phase 69
                             spec.cpus          = specj.value("cpus",0.0);   // Phase 69
+                            // Phase 72: bare-metal host agent (verified
+                            // against the worker's own opt-in at spawn).
+                            spec.host_agent    = specj.value("host_agent",false);
                             // Phase 60: granted secrets (rendered env text)
                             spec.secret_env    = specj.value("secret_env","");
                             // Phase 50: per-skill gate from the hub
@@ -574,7 +632,8 @@ int main(int argc, char* argv[]) {
                             // refresh re-spawns must not double-start
                             // websockify. Best-effort — a screen
                             // failure must never fail the spawn.
-                            if (!hwrunner::screen_pinned_image(aid).empty()) {
+                            if (!spec.host_agent &&
+                                !hwrunner::screen_pinned_image(aid).empty()) {
                                 // This handler body runs on a detached
                                 // thread — a grace sleep here is safe.
                                 // First attempt races the fresh

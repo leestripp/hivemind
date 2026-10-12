@@ -87,6 +87,41 @@ int main() {
         std::cout << "test_fleet: parse_memory_bytes/format_cpus OK\n";
     }
 
+    // Phase 72: host-agent unix user mapping (pure).
+    {
+        using hwrunner::host_user;
+        assert(host_user("Rooty")      == "hivex-rooty");   // lowercased
+        assert(host_user("SysAdmin-2") == "hivex-sysadmin-2");
+        assert(host_user("Odd Name!")  == "hivex-odd-name-");  // clamped
+        // Linux username cap: 32 chars total.
+        assert(host_user(std::string(40, 'a')) ==
+               "hivex-" + std::string(26, 'a'));
+        std::cout << "test_fleet: host_user OK\n";
+    }
+
+    // Phase 72: spawn-path gating — a host agent must be REFUSED when the
+    // worker hasn't opted in, and when opted in but the hivex user isn't
+    // provisioned. Both throw from start() before any fork happens (pure:
+    // no podman, no sudo, no user creation in the test).
+    {
+        hwfleet::AgentSpec hs;
+        hs.id = "hostbee"; hs.name = "HostBee-NoSuchUser-Xyz";
+        hs.host_agent = true;
+        hwfleet::AgentProcess proc(hs, [](const std::string&, const json&) {});
+
+        hwrunner::g_allow_host_agents = false;
+        bool threw = false;
+        try { proc.start(); } catch (const std::runtime_error&) { threw = true; }
+        assert(threw);   // refused: worker not opted in
+
+        hwrunner::g_allow_host_agents = true;
+        threw = false;
+        try { proc.start(); } catch (const std::runtime_error&) { threw = true; }
+        assert(threw);   // refused: hivex-hostbee-nosuchuser-xyz not provisioned
+        hwrunner::g_allow_host_agents = false;   // leave the global clean
+        std::cout << "test_fleet: host-agent spawn gating OK\n";
+    }
+
     // Phase 65b: a task queued while the exec is down must not wedge its
     // hub-side turn when the process is stopped — stop() fails pending
     // task frames with a synthetic error "message" event (regression:

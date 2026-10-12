@@ -158,6 +158,7 @@ async function refresh() {
             <div class="agent-name">${a.busy ? '<span class="busy-dot" title="Working…">●</span> ' : ''}${esc(a.name)}</div>
             <div class="agent-role">${esc(a.role || '—')}</div>
           </div>
+          ${a.host_agent ? '<span class="badge" style="background:#b91c1c;color:#fff" title="HOST AGENT — runs bare-metal with sudo, NO sandbox">HOST ⚠</span>' : ''}
           <span class="badge st-${status}" title="state: ${esc(brain || 'idle')}">${label}</span>
         </div>
         <div class="agent-meta">
@@ -389,6 +390,20 @@ function ensureAgentModal() {
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="am-appr" style="width:auto">
           Require my approval for commands</label></div>
+      <div class="form-row" id="am-host-row">
+        <label style="flex-direction:row;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="am-host" style="width:auto">
+          <span style="color:#f87171;font-weight:600">Host agent (bare-metal, sudo — NO sandbox)</span></label>
+        <div id="am-host-warn" class="hidden" style="margin-top:8px;padding:10px;border:1px solid #b91c1c;border-radius:6px;background:#450a0a;color:#fecaca;font-size:13px">
+          ⚠ This agent runs DIRECTLY on the worker machine as a real user
+          with passwordless sudo. It can install software, modify system
+          files, and DESTROY the machine — through error, hallucination, or
+          prompt injection. <b>Only use this on a machine you don't mind
+          losing.</b> The worker must also be started with
+          <code>--allow-host-agents</code>.<br><br>
+          Type <b>I UNDERSTAND</b> to enable:
+          <input id="am-host-ack" style="margin-left:8px;width:140px" placeholder="I UNDERSTAND" autocomplete="off">
+        </div></div>
     </div>`;
   document.body.appendChild(agentModal);
   agentModal.querySelector('#am-cancel').addEventListener('click', () =>
@@ -406,6 +421,16 @@ async function openAgentModal(existing = null, prefill = null) {
   $('am-role').value = existing?.role ?? prefill?.role ?? '';
   $('am-appr').checked = existing ? !!existing.require_approval
                                   : !!prefill?.require_approval;
+  // Phase 72: host agent — the ack box is shown while the checkbox is on;
+  // approvals follow (host agents are gated by default, server-enforced).
+  $('am-host').checked = !!existing?.host_agent;
+  $('am-host-ack').value = '';
+  $('am-host-warn').classList.toggle('hidden', !$('am-host').checked);
+  $('am-host').onchange = () => {
+    const on = $('am-host').checked;
+    $('am-host-warn').classList.toggle('hidden', !on);
+    if (on) $('am-appr').checked = true;
+  };
   const avatar = existing?.avatar ?? prefill?.avatar ?? '';
   // Phase 69: resource caps — blank = worker default (hub stores ""/0).
   $('am-memory').value = existing?.memory ?? '';
@@ -510,6 +535,26 @@ async function openAgentModal(existing = null, prefill = null) {
       if (!editing) body.thinking_level = tv;
       else if (tv) body.thinking_level = tv;
       else if (curThink) body.thinking_level = 'default';
+    }
+    // Phase 72: host_agent — enabling (or keeping enabled while turning
+    // approvals off) needs the typed ack; clearing never does.
+    {
+      const wantHost = $('am-host').checked;
+      const wasHost = !!existing?.host_agent;
+      if (wantHost) {
+        const ack = $('am-host-ack').value.trim();
+        if (!wasHost || (body.require_approval === false && existing.require_approval)) {
+          if (ack !== 'I UNDERSTAND') {
+            alert('Type I UNDERSTAND in the red box to enable a host agent.');
+            return;
+          }
+          body.host_agent = true;
+          body.host_agent_ack = ack;
+        } else if (!editing) {
+          body.host_agent = true;
+          body.host_agent_ack = ack;   // server re-validates anyway
+        }
+      } else if (wasHost) body.host_agent = false;
     }
     $('am-save').disabled = true;
     try {

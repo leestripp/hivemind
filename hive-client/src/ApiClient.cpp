@@ -88,11 +88,19 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& type,
                                        const std::string& memory,
                                        double cpus,
-                                       const std::string& thinking_level) {
+                                       const std::string& thinking_level,
+                                       int host_agent,
+                                       const std::string& host_agent_ack) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
                         {"avatar", avatar}};
+    // Phase 72: host agent (bare-metal sudo) — the hub 400s without the
+    // ack; we only send the flag when the dialog set it.
+    if (host_agent >= 0) {
+        body["host_agent"] = host_agent == 1;
+        if (!host_agent_ack.empty()) body["host_agent_ack"] = host_agent_ack;
+    }
     if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
     if (!type.empty())   body["type"]   = type;     // Phase 35
     if (!memory.empty()) body["memory"] = memory;   // Phase 69
@@ -112,7 +120,9 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& type,
                                        const std::string& memory,
                                        double cpus,
-                                       const std::string& thinking_level) {
+                                       const std::string& thinking_level,
+                                       int host_agent,
+                                       const std::string& host_agent_ack) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"require_approval", require_approval},
@@ -124,6 +134,12 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
     // 2026-10-01: the dialog always sends the effective selection —
     // "" (inherit), "default" (clear), or a level.
     body["thinking_level"] = thinking_level;
+    // Phase 72: -1 = omit (keep); 0/1 = set (clearing needs no ack,
+    // enabling does — the hub enforces).
+    if (host_agent >= 0) {
+        body["host_agent"] = host_agent == 1;
+        if (!host_agent_ack.empty()) body["host_agent_ack"] = host_agent_ack;
+    }
     return request("PATCH", "/api/agents/" + id, &body);
 }
 

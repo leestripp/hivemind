@@ -54,6 +54,11 @@ struct AgentSpec {
     double cpus = 0;           // Phase 69: CPU cap; 0 -> worker default
     std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
     std::string secret_env;      // Phase 60: hub-rendered HIVE_SECRET_* lines
+    // Phase 72: run bare-metal as unix user hivex-<name> (sudo, NO
+    // sandbox) instead of a podman container. The worker's own
+    // --allow-host-agents opt-in is verified at spawn — this flag alone
+    // is never sufficient.
+    bool    host_agent = false;
 
     /// Whole-spec compare: a re-sent agent_spawn with an IDENTICAL spec is
     /// a no-op (hub restart reconcile replays every spawn); a changed one

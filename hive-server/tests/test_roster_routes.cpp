@@ -292,6 +292,69 @@ int main() {
     for (const auto& m : im["messages"])
         assert(m.value("sender_kind", "") == "agent");
 
+    // ── Phase 72: host agents (bare-metal, sudo — ack-gated) ─────────────
+    // No ack -> 400 (the ack string is informed consent).
+    r = request("POST", port, "/api/agents",
+                {{"name", "Rooty"}, {"worker", "testrig"},
+                 {"host_agent", true}});
+    assert(r.statusCode() == 400);
+    // Wrong ack -> still 400.
+    r = request("POST", port, "/api/agents",
+                {{"name", "Rooty"}, {"worker", "testrig"},
+                 {"host_agent", true}, {"host_agent_ack", "yes"}});
+    assert(r.statusCode() == 400);
+    // Correct ack but worker has NOT opted in (no host_agents cap) -> 409.
+    r = request("POST", port, "/api/agents",
+                {{"name", "Rooty"}, {"worker", "testrig"},
+                 {"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
+    assert(r.statusCode() == 409);
+
+    // Worker opts in (hello cap) -> 201, approvals forced on, flag exposed.
+    wstore.validate(wkey,
+                    R"({"arch":"x86_64","gpu":"amd","host_agents":true})");
+    r = request("POST", port, "/api/agents",
+                {{"name", "Rooty"}, {"worker", "testrig"},
+                 {"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
+    assert(r.statusCode() == 201);
+    const std::string a4 = json::parse(r.bodyAsString())["id"];
+    {
+        auto j = jget(port, "/api/agents/" + a4);
+        assert(j["host_agent"] == true);
+        assert(j["require_approval"] == true);   // forced at creation
+    }
+
+    // PATCH enable without ack -> 400; with ack -> 200 + approvals forced.
+    r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", true}});
+    assert(r.statusCode() == 400);
+    r = request("PATCH", port, "/api/agents/" + a2,
+                {{"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a2)["host_agent"] == true);
+    assert(jget(port, "/api/agents/" + a2)["require_approval"] == true);
+
+    // Disabling approvals on a host agent needs the ack too.
+    r = request("PATCH", port, "/api/agents/" + a2,
+                {{"require_approval", false}});
+    assert(r.statusCode() == 400);
+    r = request("PATCH", port, "/api/agents/" + a2,
+                {{"require_approval", false},
+                 {"host_agent_ack", "I UNDERSTAND"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a2)["require_approval"] == false);
+
+    // Moving a host agent to a non-opted-in worker -> 409.
+    r = request("PATCH", port, "/api/agents/" + a2, {{"worker", "plainrig"}});
+    assert(r.statusCode() == 409);
+
+    // Clearing host_agent (safe direction) needs no ack.
+    r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", false}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a2)["host_agent"] == false);
+
+    // Non-boolean host_agent -> 400.
+    r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", "yes"}});
+    assert(r.statusCode() == 400);
+
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
 

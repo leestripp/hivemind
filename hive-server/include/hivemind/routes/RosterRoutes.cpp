@@ -48,6 +48,7 @@ json agent_json(const RosterAgent& a) {
         {"worker", a.worker}, {"type", a.type},                   // Phase 35
         {"memory", a.memory}, {"cpus", a.cpus},                  // Phase 69
         {"thinking_level", a.thinking_level},                     // 2026-10-01
+        {"host_agent", a.host_agent},                               // Phase 72
         {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
@@ -110,6 +111,29 @@ static bool validate_type(WorkerStore& workers, const std::string& w,
     if (caps.is_object() && caps.contains(type)) return true;
     err = "worker '" + w + "' has no '" + type + "' capability"
           " (its caps: " + (caps.is_object() ? caps.dump() : "{}") + ")";
+    return false;
+}
+
+// Phase 72: host agents run BARE-METAL with passwordless sudo — no sandbox.
+// Two-level opt-in: the per-agent roster flag (ack-gated below) AND the
+// worker's own allow_host_agents config, advertised as the "host_agents"
+// hello cap. A hub route can never conjure a host agent on a rig whose
+// operator didn't opt in.
+constexpr std::string_view kHostAgentAck = "I UNDERSTAND";
+constexpr std::string_view kHostAgentWarning =
+    "a host agent runs WITHOUT a sandbox, as a real user with sudo, and can "
+    "install software, modify system files, and DESTROY the machine. Only "
+    "use it on a machine you don't mind losing.";
+
+static bool validate_host_capable(WorkerStore& workers,
+                                  const std::string& w, std::string& err) {
+    auto wi = workers.get(w);
+    json caps;
+    if (wi) { try { caps = json::parse(wi->caps); } catch (...) {} }
+    if (caps.is_object() && caps.value("host_agents", false)) return true;
+    err = "worker '" + w + "' has NOT opted in to host agents "
+          "(set allow_host_agents in its config; its caps: " +
+          (caps.is_object() ? caps.dump() : "{}") + ")";
     return false;
 }
 
@@ -281,11 +305,32 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     send_error(resp, 400, werr); return;
                 }
             }
+            // Phase 72: host agent gate — ack + worker opt-in + forced
+            // approvals. The ack string is an act of informed consent, so
+            // a client can never flip this flag silently.
+            const bool host_agent = body.value("host_agent", false);
+            if (host_agent) {
+                if (body.value("host_agent_ack", "") != kHostAgentAck) {
+                    send_error(resp, 400,
+                        std::string("host_agent requires host_agent_ack: \"") +
+                        std::string(kHostAgentAck) + "\" — " +
+                        std::string(kHostAgentWarning));
+                    return;
+                }
+                std::string herr;
+                if (!validate_host_capable(workers, worker, herr)) {
+                    send_error(resp, 409, herr); return;
+                }
+                req_appr = true;   // shell commands park in the approval queue
+                std::cerr << "HOST AGENT created: '" << name << "' on worker '"
+                          << worker << "' — ack received ("
+                          << kHostAgentAck << "); unsandboxed sudo\n";
+            }
             try {
                 auto a = agents.create_agent(name, role, model, ws, req_appr,
                                              body.value("avatar", ""), worker,
                                              type, memory, cpus,
-                                             thinking_level);
+                                             thinking_level, host_agent);
                 // Phase C: spawn the brain on its worker right away
                 // (idempotent; offline worker spawns on reconnect).
                 hub.reconcile_worker(a.worker);
@@ -369,8 +414,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     "thinking_level must be one of default|none|low|high|max");
                 return;
             }
+            const std::string pw = body.value("worker", "");
             {
-                const std::string pw = body.value("worker", "");
                 if (!pw.empty()) {
                     std::string werr;
                     if (!validate_worker(workers, pw, werr)) {
@@ -390,13 +435,67 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     }
                 }
             }
+            // Phase 72: host_agent tri-state — absent = keep, false = clear
+            // (safe direction, no ack), true = enable (ack + caps).
+            int phost = -1;
+            if (body.contains("host_agent")) {
+                if (!body["host_agent"].is_boolean()) {
+                    send_error(resp, 400, "host_agent must be a boolean");
+                    return;
+                }
+                phost = body["host_agent"].get<bool>() ? 1 : 0;
+            }
+            const bool eff_host = phost == 1 ||
+                                  (phost < 0 && existing->host_agent);
+            if (phost == 1 &&
+                body.value("host_agent_ack", "") != kHostAgentAck) {
+                send_error(resp, 400,
+                    std::string("enabling host_agent requires host_agent_ack: "
+                                "\"") + std::string(kHostAgentAck) + "\" — " +
+                    std::string(kHostAgentWarning));
+                return;
+            }
+            if (eff_host) {
+                // Caps must hold on the EFFECTIVE worker — covers enabling
+                // AND moving an existing host agent to a new rig.
+                std::string herr;
+                const std::string effw = pw.empty() ? existing->worker : pw;
+                if (!validate_host_capable(workers, effw, herr)) {
+                    send_error(resp, 409, herr); return;
+                }
+            }
+            bool preq_appr = body.value("require_approval",
+                                        existing->require_approval);
+            if (eff_host && !preq_appr) {
+                if (body.contains("require_approval")) {
+                    // Explicitly disabling approvals on a host agent is the
+                    // other dangerous direction — same ack gate.
+                    if (body.value("host_agent_ack", "") != kHostAgentAck) {
+                        send_error(resp, 400,
+                            std::string("disabling require_approval on a host "
+                                        "agent requires host_agent_ack: \"") +
+                            std::string(kHostAgentAck) + "\"");
+                        return;
+                    }
+                    std::cerr << "HOST AGENT approvals disabled: '"
+                              << existing->name << "' — ack received\n";
+                } else {
+                    // Enabling host (or updating one) with no explicit
+                    // approvals choice: the gate is forced ON.
+                    preq_appr = true;
+                }
+            }
+            if (phost == 1 && !existing->host_agent)
+                std::cerr << "HOST AGENT enabled: '" << existing->name
+                          << "' — ack received (" << kHostAgentAck
+                          << "); unsandboxed sudo\n";
             try {
                 auto a = agents.update_agent(seg[2],
                     body.value("name", existing->name),
                     body.value("role", existing->role),
                     body.value("model", existing->model),
                     body.value("workspace_mode", existing->workspace_mode),
-                    body.value("require_approval", existing->require_approval),
+                    preq_appr,
                     body.value("avatar", existing->avatar),
                     body.value("worker", ""),   // "" = keep current
                     // Phase 33: accept array or string; "" = keep current
@@ -407,7 +506,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                         : "",
                     ptype,   // "" = keep, "default" = clear
                     pmemory, pcpus,    // Phase 69
-                    pthinking);        // 2026-10-01
+                    pthinking,         // 2026-10-01
+                    phost);            // Phase 72
                 // Name/model changes must not leak into a live brain:
                 // stop, then respawn with the new config (worker dedups).
                 hub.stop_agent(a);

@@ -187,6 +187,7 @@ Key architectural mapping:
 | `docs/hive-worker.md` | Worker enrollment, channel protocol, exec/screen ops |
 | `docs/deploy.md` | VPS deployment, systemd, TLS, lockdown |
 | `docs/containers.md` | Podman sandboxing |
+| `docs/host-agents.md` | Phase 72 host agents (bare-metal, sudo, NO sandbox — read before enabling) |
 | `docs/computer-use.md` | Live screen share (Xvfb/noVNC) |
 | `docs/skills.md` | Global skill library design |
 | `docs/client.md` / `docs/web.md` | GTK client / web dashboard guides |

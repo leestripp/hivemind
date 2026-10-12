@@ -4,6 +4,18 @@ A hive-worker runs on any Linux machine (including the hive-server host
 itself, for always-online agents) and owns everything compute: podman
 containers, the agents inside them, and the files they produce.
 
+## Host agents (Phase 72)
+
+With `--allow-host-agents` (or `HIVE_ALLOW_HOST_AGENTS=1`) the worker
+additionally accepts **host agents**: bare-metal `hive-agent` processes
+running as a dedicated unix user `hivex-<name>` with passwordless sudo —
+NO container, NO sandbox. Machine-destroying power; see
+[docs/host-agents.md](host-agents.md) before opting in. Provisioning is
+manual and local only: `sudo hive-worker provision-host-agent <name>`
+(hostname type-to-confirm; creates user, sudoers entry via `visudo -c`,
+installs the binary). The hub gates creation on both the worker's
+advertised `host_agents` capability and a typed `I UNDERSTAND` ack.
+
 ## Running as a service (systemd user unit)
 
 A ready template lives at `hive-server/deploy/hive-worker.service` —

@@ -37,6 +37,10 @@ stores the records with the reply message (injecting the worker name).
 | `GET /api/agents` | list; includes `worker` placement + live status |
 | `POST /api/agents` | create (name, role, model, worker, memory, cpus) |
 | `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills/memory/cpus edits |
+
+Both also accept `host_agent` (+ `host_agent_ack: "I UNDERSTAND"`) — see
+[host-agents.md](host-agents.md): 400 without the ack, 409 when the
+worker lacks the `host_agents` capability.
 | `DELETE /api/agents/:id` | remove (worker reaps the container) |
 | `GET /api/agents/:id/activity` | per-agent live state |
 

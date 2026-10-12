@@ -21,6 +21,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <pwd.h>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
 
 #include <algorithm>
 #include <chrono>
@@ -187,6 +191,75 @@ int podman_simple(const std::vector<std::string>& args, std::string* out) {
     while (fgets(buf, sizeof buf, p)) { if (out) *out += buf; }
     int rc = pclose(p);
     return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+}
+
+// ── Phase 72: host agents (bare-metal, sudo, NO sandbox) ─────────────
+// A host agent runs the SAME hive-agent binary directly on this rig as a
+// dedicated unix user (hivex-<name>) with passwordless sudo. There is no
+// container. The two-level opt-in is: this worker's --allow-host-agents
+// (g_allow_host_agents, advertised as the "host_agents" hello cap) AND the
+// hub-side roster flag. See Plan.md "Host Agents (Phase 72)".
+
+bool g_allow_host_agents = false;
+
+std::string host_user(const std::string& agent) {
+    std::string u = "hivex-";
+    for (char c : agent) {
+        const char l = (char)std::tolower((unsigned char)c);
+        if ((l >= 'a' && l <= 'z') || (l >= '0' && l <= '9') ||
+            l == '_' || l == '-')
+            u += l;
+        else
+            u += '-';
+    }
+    if (u.size() > 32) u.resize(32);   // Linux username cap
+    return u;
+}
+
+bool host_agent_provisioned(const std::string& agent) {
+    return ::getpwnam(host_user(agent).c_str()) != nullptr;
+}
+
+int run_as_user(const std::string& user,
+                const std::vector<std::string>& args,
+                const std::string& stdin_path, std::string* out) {
+    int outfd[2];
+    if (pipe(outfd) != 0) return -1;
+    int infd = -1;
+    if (!stdin_path.empty()) {
+        infd = ::open(stdin_path.c_str(), O_RDONLY);
+        if (infd < 0) { ::close(outfd[0]); ::close(outfd[1]); return -1; }
+    }
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (infd >= 0) dup2(infd, STDIN_FILENO);
+        dup2(outfd[1], STDOUT_FILENO);
+        dup2(outfd[1], STDERR_FILENO);
+        ::close(outfd[0]); ::close(outfd[1]);
+        if (infd >= 0) ::close(infd);
+        // -n: never prompt (NOPASSWD rule is provisioned); -H: target's
+        // home as $HOME. argv VERBATIM, no shell — same discipline as the
+        // podman exec path.
+        std::vector<std::string> full{"-n", "-H", "-u", user};
+        full.insert(full.end(), args.begin(), args.end());
+        std::vector<char*> cargs;
+        cargs.push_back(const_cast<char*>("sudo"));
+        for (auto& a : full) cargs.push_back(const_cast<char*>(a.c_str()));
+        cargs.push_back(nullptr);
+        execvp("sudo", cargs.data());
+        _exit(127);
+    }
+    ::close(outfd[1]);
+    if (infd >= 0) ::close(infd);
+    if (pid < 0) { ::close(outfd[0]); return -1; }
+    char buf[512];
+    ssize_t n;
+    while ((n = ::read(outfd[0], buf, sizeof buf)) > 0)
+        if (out) out->append(buf, (size_t)n);
+    ::close(outfd[0]);
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
 // Phase 35: build any missing image in the chain. ALL Containerfiles
