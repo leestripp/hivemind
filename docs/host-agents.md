@@ -6,6 +6,21 @@ sandbox, no noVNC screen. It exists for agents that must administer the
 machine itself: installing packages, managing services, touching files
 outside any container.
 
+## The model: containers and host agents are the same shape
+
+A host agent is NOT a new concept — it is the container model with real
+unix parts substituted for podman parts:
+
+| | Container agent | Host agent |
+|---|---|---|
+| **Per-agent state** | `home-<id>` dir → bind-mounted `/home/hive` | real unix home `/home/hivex-<name>` (sudo `-H`) |
+| **Shared workspace** | worker workspace → bind-mounted `/workspace` | the host's real `/workspace` mount — cwd for every host agent on the rig |
+| **On delete** | container + `home-<id>` removed; workspace untouched | unix user + home removed (home archived to `/var/backups/`); `/workspace` untouched |
+
+Same shape, same cleanup boundaries: per-agent state dies with the
+agent; the shared company drive is permanent. If you understand what a
+container agent gets, you already understand what a host agent gets.
+
 ## ⚠ READ THIS BEFORE ENABLING
 
 A host agent can do **anything root can do**. Through error,

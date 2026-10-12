@@ -328,6 +328,13 @@ agent is a bare-metal `hive-agent` running as a dedicated unix user
 sandbox, direct root. It exists for work containers can't do (desktop
 apps, Android builds with KVM, drivers, system services).
 
+The model is the container model 1:1: per-agent state lives in the real
+unix home `/home/hivex-<name>` (≈ the container's bind-mounted
+/home/hive), and every host agent shares the host's `/workspace` mount
+as its cwd (≈ the containers' shared /workspace bind-mount). Deleting
+the agent removes the per-agent half (user+home, archived) and never
+touches the shared half — same cleanup boundaries as podman.
+
 Safety model (several independent gates):
 
 - **Worker opt-in**: the worker refuses host spawns unless started with
