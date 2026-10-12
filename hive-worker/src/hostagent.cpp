@@ -97,10 +97,11 @@ echo "hivex-deprovision: removed $user (home archived to /var/backups/$user-$sta
 /// unix user (useradd, locked password, per-user sudoers, binary install).
 /// The worker calls it via `sudo -n` when a host agent spawns
 /// unprovisioned — the grant covers exactly this validated script.
-/// Args: <hivex-user> <worker-user> <hive-agent-binary-src>
+/// Args: <hivex-user> <worker-user> <hive-agent-binary-src> [workspace-root]
 constexpr const char* kProvisionHelper = R"SH(#!/bin/sh
 # HiveMind Phase 72: auto-provision one host-agent unix user. Root-only
-# via /etc/sudoers.d/hivex-helpers. NEVER touches the workspace drive.
+# via /etc/sudoers.d/hivex-helpers. When a workspace root is given, maps
+# the share-transport dirs into it and grants the agent ACLs (only).
 set -eu
 user="${1:-}"; wuser="${2:-}"; src="${3:-}"
 echo "$user" | grep -Eq '^hivex-[a-z0-9-]{1,26}$' \
@@ -124,6 +125,27 @@ tmp="/tmp/hivex-prov-sudoers-$$"
 /usr/sbin/visudo -c -f "$tmp" >/dev/null
 /usr/bin/install -m 0440 -o root -g root "$tmp" "/etc/sudoers.d/$user"
 rm -f "$tmp"
+# Workspace-share mapping (2026-10-12 QueenBee incident): share_file
+# staging lives in the worker's private staging workspace, which
+# containers bind-mount as /workspace. Host agents run in the REAL
+# workspace — map incoming/ + shared/ to the staging dirs and grant the
+# agent rwx on the workspace plus traverse-only on the staging path
+# under the worker user's home (home itself stays unreadable).
+wsroot="${4:-}"
+ws="/home/$wuser/.local/share/hive-worker/workspace"
+if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
+    /usr/bin/install -d -m 0775 -o "$wuser" -g "$wuser" \
+        "$ws/incoming" "$ws/shared"
+    for d in incoming shared; do
+        if [ ! -e "$wsroot/$d" ] && [ ! -L "$wsroot/$d" ]; then
+            /usr/bin/ln -s "$ws/$d" "$wsroot/$d"
+        fi
+    done
+    /usr/bin/setfacl -m "u:$user:rwx" -d -m "u:$user:rwx" "$wsroot"
+    /usr/bin/setfacl -m "u:$user:x" "/home/$wuser" \
+        "/home/$wuser/.local" "/home/$wuser/.local/share" \
+        "/home/$wuser/.local/share/hive-worker"
+fi
 echo "hivex-provision: $user ready (sudo NOPASSWD, /usr/local/bin/hive-agent)"
 )SH";
 
@@ -226,6 +248,35 @@ int provision(const std::string& agent_name,
         std::cerr << "  workspace: " << workspace_root
                   << " (SHARED by all host agents — never cleaned; set "
                      "--host-workspace-root on the worker to match)\n";
+
+        // 5. Share-transport mapping (2026-10-12 QueenBee incident):
+        //    share_file stages into the worker's private staging
+        //    workspace (~/.local/share/hive-worker/workspace), which
+        //    containers bind-mount as /workspace. Host agents run in
+        //    the REAL workspace — map incoming/ + shared/ to the
+        //    staging dirs, grant rwx on the workspace, and traverse-
+        //    only on the staging path under the worker user's home.
+        const std::string hwbase =
+            "/home/" + worker_user + "/.local/share/hive-worker";
+        const std::string staging = hwbase + "/workspace";
+        if (std::filesystem::is_directory(staging)) {
+            run({"/usr/bin/install", "-d", "-m", "0775", "-o",
+                 worker_user, "-g", worker_user,
+                 staging + "/incoming", staging + "/shared"});
+            for (const char* d : {"incoming", "shared"}) {
+                const std::string p = workspace_root + "/" + d;
+                std::error_code ec;
+                if (!std::filesystem::exists(p, ec) &&
+                    !std::filesystem::is_symlink(p, ec))
+                    run({"/usr/bin/ln", "-s", staging + "/" + d, p});
+            }
+            run({"/usr/bin/setfacl", "-m", "u:" + user + ":rwx",
+                 "-d", "-m", "u:" + user + ":rwx", workspace_root});
+            run({"/usr/bin/setfacl", "-m", "u:" + user + ":x",
+                 "/home/" + worker_user, "/home/" + worker_user +
+                 "/.local", "/home/" + worker_user + "/.local/share",
+                 hwbase});
+        }
     }
 
     // 5. Rig-level support: root helpers + the worker's sudoers grant —

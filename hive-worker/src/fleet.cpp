@@ -141,7 +141,8 @@ void AgentProcess::start() {
             const int rc = hwrunner::run_as_user(
                 "root",
                 {"/usr/local/sbin/hivex-provision", user,
-                 hwrunner::current_user(), hwrunner::hive_agent_binary()},
+                 hwrunner::current_user(), hwrunner::hive_agent_binary(),
+                 hwrunner::host_workspace(spec_.name)},
                 "", &out);
             if (rc != 0 || !hwrunner::host_agent_provisioned(spec_.name))
                 throw std::runtime_error(
