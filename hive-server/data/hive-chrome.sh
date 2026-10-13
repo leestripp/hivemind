@@ -56,4 +56,4 @@ nohup "$CHROME" --remote-debugging-port="$CDP" \
     --start-maximized \
     --renderer-process-limit=6 \
     --js-flags=--max-old-space-size=384 \
-    "$URL" >/tmp/chromium.log 2>&1 &
+    "$URL" >/tmp/chromium.$SLOT.log 2>&1 &

@@ -80,14 +80,14 @@ alive() {  # alive <exact-process-name> — zombies don't count
 }
 
 RES="${1:-1280x800}"   # Phase 28: server passes ServerConfig screen_resolution
-alive Xvfb || nohup Xvfb "$DISPLAY" -screen 0 ${RES}x24 >/tmp/xvfb.log 2>&1 &
+alive Xvfb || nohup Xvfb "$DISPLAY" -screen 0 ${RES}x24 >/tmp/xvfb.$SLOT.log 2>&1 &
 sleep 1
-alive openbox || nohup openbox >/tmp/openbox.log 2>&1 &
+alive openbox || nohup openbox >/tmp/openbox.$SLOT.log 2>&1 &
 
 # x11vnc + watchdog (restarts it if it dies)
 if ! alive x11vnc; then
     nohup x11vnc -display "$DISPLAY" -rfbport "$RFB" -forever -shared \
-        -passwd "$PW" -localhost -wait 50 >/tmp/x11vnc.log 2>&1 &
+        -passwd "$PW" -localhost -wait 50 >/tmp/x11vnc.$SLOT.log 2>&1 &
     nohup bash -c 'while true; do
         up=0
         for p in $(pgrep -xu "$(id -u)" x11vnc 2>/dev/null); do
@@ -95,7 +95,7 @@ if ! alive x11vnc; then
         done
         [ "$up" -eq 0 ] && exec x11vnc -display '"$DISPLAY"' \
             -rfbport '"$RFB"' -forever -shared -passwd "'"$PW"'" \
-            -localhost -wait 50 >>/tmp/x11vnc.log 2>&1
+            -localhost -wait 50 >>/tmp/x11vnc.$SLOT.log 2>&1
         sleep 5
     done' >/dev/null 2>&1 &
     echo $! > "$WATCHDOG_PID"   # stop kills it first
@@ -103,7 +103,7 @@ fi
 
 if ! pgrep -fu "$(id -u)" "websockify.* $WS " >/dev/null 2>&1; then
     nohup websockify --web /usr/share/novnc "$WS" "localhost:$RFB" \
-        >/tmp/websockify.log 2>&1 &
+        >/tmp/websockify.$SLOT.log 2>&1 &
 fi
 
 # The shared browser: maximized on this display, CDP port for
@@ -121,5 +121,5 @@ for _ in $(seq 1 30); do
     { echo "PASSWORD=$PW"; exit 0; }
     sleep 0.5
 done
-echo "hive-screen: stack did not come up — see /tmp/*.log" >&2
+echo "hive-screen: stack did not come up — see /tmp/*.$SLOT.log" >&2
 exit 1
