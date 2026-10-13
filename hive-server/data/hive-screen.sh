@@ -80,15 +80,16 @@ alive() {  # alive <exact-process-name> — zombies don't count
 }
 
 RES="${1:-1280x800}"   # Phase 28: server passes ServerConfig screen_resolution
-alive Xvfb || nohup Xvfb "$DISPLAY" -screen 0 ${RES}x24 >/tmp/xvfb.$SLOT.log 2>&1 &
+alive Xvfb || setsid nohup Xvfb "$DISPLAY" -screen 0 ${RES}x24 >/tmp/xvfb.$SLOT.log 2>&1 &
 sleep 1
-alive openbox || nohup openbox >/tmp/openbox.$SLOT.log 2>&1 &
+alive openbox || setsid nohup openbox >/tmp/openbox.$SLOT.log 2>&1 &
 
 # x11vnc + watchdog (restarts it if it dies)
 if ! alive x11vnc; then
-    nohup x11vnc -display "$DISPLAY" -rfbport "$RFB" -forever -shared \
+    setsid nohup x11vnc -display "$DISPLAY" -rfbport "$RFB" -forever -shared \
         -passwd "$PW" -localhost -wait 50 >/tmp/x11vnc.$SLOT.log 2>&1 &
-    nohup bash -c 'while true; do
+    { [ -f "$WATCHDOG_PID" ] && kill -0 "$(cat "$WATCHDOG_PID" 2>/dev/null)" 2>/dev/null; } || \
+    setsid nohup bash -c 'while true; do
         up=0
         for p in $(pgrep -xu "$(id -u)" x11vnc 2>/dev/null); do
             [ "$(cut -d" " -f3 /proc/$p/stat 2>/dev/null)" != "Z" ] && up=1
@@ -102,7 +103,7 @@ if ! alive x11vnc; then
 fi
 
 if ! pgrep -fu "$(id -u)" "websockify.* $WS " >/dev/null 2>&1; then
-    nohup websockify --web /usr/share/novnc "$WS" "localhost:$RFB" \
+    setsid nohup websockify --web /usr/share/novnc "$WS" "localhost:$RFB" \
         >/tmp/websockify.$SLOT.log 2>&1 &
 fi
 

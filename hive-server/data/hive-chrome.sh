@@ -39,7 +39,7 @@ URL="${1:-about:blank}"
 if curl -sf --max-time 2 "http://127.0.0.1:$CDP/json/version" >/dev/null 2>&1; then
     # Live instance on this profile — singleton forwards a new-window
     # request to it. No CDP flags needed on this side.
-    nohup "$CHROME" --user-data-dir="$PROFILE" "$URL" \
+    setsid nohup "$CHROME" --user-data-dir="$PROFILE" "$URL" \
         >/dev/null 2>&1 &
     exit 0
 fi
@@ -47,7 +47,7 @@ fi
 # Fresh launch. --no-sandbox: rootless podman can't run Chrome's SUID
 # sandbox (the container is the sandbox boundary).
 rm -f "$PROFILE"/Singleton{Lock,Socket,Cookie} 2>/dev/null || true
-nohup "$CHROME" --remote-debugging-port="$CDP" \
+setsid nohup "$CHROME" --remote-debugging-port="$CDP" \
     --user-data-dir="$PROFILE" --no-first-run \
     --no-default-browser-check --disable-session-crashed-bubble \
     --disable-dev-shm-usage --no-sandbox --disable-gpu --noerrdialogs \
