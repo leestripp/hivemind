@@ -237,14 +237,11 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             if (id.empty() || !agent_rec) {
                 routes::send_error(resp, 404, "agent not found"); return;
             }
-            // Phase 72: host agents have no container to project a
-            // screen out of — fail CLEAN here instead of letting
-            // screen_ctl try to recreate a container for them.
-            if (agent_rec->host_agent) {
-                routes::send_error(resp, 409,
-                    "screen is not available for host agents (no "
-                    "container; the host's own desktop is theirs)"); return;
-            }
+            // Phase 72.2: host agents DO have a screen — each hivex
+            // user gets its own Xvfb slot on the worker host (display
+            // :99+slot, websockify 6080+slot); the worker's
+            // screen_ctl_host drives it. No hub-side gate.
+            (void)agent_rec;
             try {
                 // 30.4: worker-assigned → screen_ctl start over channel.
                 if (auto r = WorkerRouter::screen_ctl(id, "start")) {
