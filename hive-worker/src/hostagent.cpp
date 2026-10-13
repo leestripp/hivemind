@@ -115,12 +115,29 @@ if ! id "$user" >/dev/null 2>&1; then
     /usr/bin/passwd -l "$user" >/dev/null 2>&1 || true
 fi
 /usr/bin/install -m 0755 -o root -g root "$src" /usr/local/bin/hive-agent
+# Bounded-exec helper for the worker's hub exec op (Phase 72.1) — the
+# sudoers entry below whitelists it, replacing the Phase 72 approach of
+# wrapping commands in timeout(1)/env(1) (matched no grant; exec always
+# failed "interactive authentication is required").
+helper="/tmp/hivex-exec-helper-$$"
+cat > "$helper" <<'EOS'
+#!/bin/sh
+# HiveMind Phase 72.1: bounded exec as this hivex user for the worker's
+# hub "exec" op. argv: <timeout_s> <argv...> — env(1) wrappers for env
+# content belong in <argv...> (env is a normal command here).
+set -eu
+t="${1:-120}"; [ $# -ge 2 ] || { echo "usage: hivex-exec <timeout_s> <argv...>" >&2; exit 2; }
+shift
+exec /usr/bin/timeout -s TERM --kill-after=5 "$t" "$@"
+EOS
+/usr/bin/install -m 0755 -o root -g root "$helper" /usr/local/sbin/hivex-exec
+rm -f "$helper"
 tmp="/tmp/hivex-prov-sudoers-$$"
 {
     echo "# HiveMind Phase 72 host agent - auto-provisioned by hivex-provision."
     echo "# UNSANDBOXED: this user is effectively root. Machine = expendable."
     echo "$user ALL=(ALL) NOPASSWD: ALL"
-    echo "$wuser ALL=($user) NOPASSWD: /usr/bin/tee $home/.hive-env, /usr/bin/chmod 600 $home/.hive-env, /usr/local/bin/hive-agent"
+    echo "$wuser ALL=($user) NOPASSWD: /usr/bin/tee $home/.hive-env, /usr/bin/chmod 600 $home/.hive-env, /usr/local/bin/hive-agent, /usr/local/sbin/hivex-exec"
 } > "$tmp"
 /usr/sbin/visudo -c -f "$tmp" >/dev/null
 /usr/bin/install -m 0440 -o root -g root "$tmp" "/etc/sudoers.d/$user"

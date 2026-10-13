@@ -810,8 +810,14 @@ int main(int argc, char* argv[]) {
                             g_fleet ? g_fleet->host_user_of(agent) : "";
                         if (!huser.empty()) {
                             const auto t0 = std::chrono::steady_clock::now();
+                            // Phase 72.1: go through /usr/local/sbin/hivex-exec
+                            // — the ONE command the worker's sudoers grant
+                            // whitelists for hivex users. Phase 72 wrapped in
+                            // bare timeout(1)/env(1), which matched NO grant,
+                            // so every host-agent exec failed with sudo's
+                            // "interactive authentication is required".
                             std::vector<std::string> full{
-                                "timeout", "-s", "TERM",
+                                "/usr/local/sbin/hivex-exec",
                                 std::to_string(timeout)};
                             if (!env.empty()) {
                                 full.push_back("env");
