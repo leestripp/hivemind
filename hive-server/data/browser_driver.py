@@ -53,23 +53,48 @@ def chromium_binary():
     return hits[-1]  # newest
 
 
-def ensure_display():
-    """Bring up the Xvfb screen stack if :99 has no X server.
+def target_display():
+    """Which X display the browser renders on.
+
+    Default :99 (the Xvfb screen stack). HIVE_BROWSER_DISPLAY overrides
+    everything — the host-agent login-handoff knob (2026-10-13 QueenBee):
+    a bare-metal agent's browser can be pointed at the user's real desktop
+    (e.g. :0) so the human can watch/take over/log in, then pointed back.
+    Set it in the agent's env file; unset = invisible Xvfb operation.
+    Plain DISPLAY is honoured too, matching pre-host behaviour.
+    """
+    return os.environ.get("HIVE_BROWSER_DISPLAY",
+                          os.environ.get("DISPLAY", ":99"))
+
+
+def _x_socket(display):
+    num = display.lstrip(":").split(".")[0]
+    return f"/tmp/.X11-unix/X{num}"
+
+
+def ensure_display(display):
+    """Bring up the Xvfb screen stack if the target display has no server.
 
     The worker runs screens on demand (hub screen_ctl op when the user
     opens Computer view, torn down after idle) — so :99 usually is NOT up
     when a browser tool fires. hive-screen.sh is idempotent: it spawns
     Xvfb/Xvnc/websockify then watchdogs them. Detach it so the watchdog
     outlives this driver invocation.
+
+    Only the default :99 gets auto-started: a HIVE_BROWSER_DISPLAY target
+    is the user's REAL session — if its socket is missing, spawning Xvfb
+    would be the wrong fix (and Xvfb would grab the number first).
     """
-    if os.path.exists("/tmp/.X11-unix/X99"):
+    if os.path.exists(_x_socket(display)):
         return
+    if display != ":99":
+        return  # let chromium's own launch error say the display is down
     subprocess.Popen(
         ["hive-screen.sh", os.environ.get("HIVE_SCREEN_RES", "1280x800")],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True)
     for _ in range(40):  # up to ~20s for Xvfb to create its socket
-        if os.path.exists("/tmp/.X11-unix/X99"):
+        if os.path.exists(_x_socket(display)):
             return
         time.sleep(0.5)
 
@@ -80,11 +105,13 @@ def ensure_browser(pw):
         return pw.chromium.connect_over_cdp(CDP_URL)
     except Exception:
         pass
-    ensure_display()
+    display = target_display()
+    ensure_display(display)
     os.makedirs(PROFILE, exist_ok=True)
     env = {**os.environ,
-           # X11 stack (Phase 25): the Xvfb display the user sees via noVNC.
-           "DISPLAY": os.environ.get("DISPLAY", ":99")}
+           # X11 stack (Phase 25): the Xvfb display the user sees via noVNC;
+           # HIVE_BROWSER_DISPLAY points host agents at a real desktop.
+           "DISPLAY": display}
     subprocess.Popen(
         [chromium_binary(), "--remote-debugging-port=9222",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
