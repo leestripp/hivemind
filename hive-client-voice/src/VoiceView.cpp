@@ -256,6 +256,7 @@ void VoiceView::sendTranscript() {
     if (fx_) fx_->recordingStopped();
     phase_ = Phase::Thinking;
     ++turnGen_;
+    narratedPrefix_.clear();  // new turn: old live text must not trim new messages
     tts_->applyVoice(voiceNameFor(agent_.id));
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {
@@ -344,6 +345,7 @@ bool VoiceView::reresolveIfThreadGone(const std::exception& e) {
 void VoiceView::startIdleNarration() {
     if (phase_ != Phase::Idle) return;
     ++turnGen_;
+    narratedPrefix_.clear();
     finalReply_.clear();
     streamText_.clear();
     spokenLen_ = 0;
@@ -799,6 +801,11 @@ void VoiceView::handleTick(bool busy, const std::string& error,
         streamText_ = next;
     }
     drainSpeech(!busy);
+    // The posted message for this turn arrives after the turn ends (or via
+    // the inbox watch mid-turn); remember what the live feed already spoke
+    // so the message handler can trim it down to the unheard tail instead
+    // of re-reading the whole reply.
+    if (spokenLen_ > 0) narratedPrefix_ = streamText_;
     if (busy) {
         schedulePollTick(kPollMs);
     } else {
@@ -898,6 +905,7 @@ void VoiceView::debugSay(const std::string& text) {
     if (sphere_) sphere_->setLevel(0.0f);
     phase_ = Phase::Thinking;
     ++turnGen_;
+    narratedPrefix_.clear();
     tts_->applyVoice(voiceNameFor(agent_.id));
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {
