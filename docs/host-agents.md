@@ -166,6 +166,46 @@ The agent's system prompt states the runtime explicitly (host agents
 kept prescribing container remedies for host-side gaps — QueenBee
 audit 2026-10-12).
 
+## Browser tools on host agents (2026-10-13)
+
+The container browser stack is baked into the image; a host agent has no
+image, so the four layers land on the HOST instead (first done by
+QueenBee on ubuntu-pc, self-provisioned with her NOPASSWD sudo):
+
+1. **Driver**: `/usr/local/bin/browser_driver.py` (canonical copy from
+   `hive-server/data/`; root-owned). The agent binary hardcodes this
+   path — no driver file = every `browser_*` call errors.
+2. **Screen helper**: `/usr/local/bin/hive-screen.sh` — HOST EDITION:
+   Xvfb :99 only (no Xvnc/websockify; hub screen/Computer view stays
+   409 for host agents by design). Auto-invoked by the driver when the
+   X99 socket is missing; self-heals cold starts, no boot hook needed.
+3. **Playwright + chromium**: system-wide, mirroring the Containerfile —
+   `pip install --break-system-packages playwright`, then
+   `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright playwright install
+   chromium --with-deps` (root for /opt + apt deps; on a GNOME desktop
+   host the libs are already present). The driver globs
+   /opt/ms-playwright first, then `~/.cache/ms-playwright`, then
+   google-chrome/chromium on PATH.
+4. **Display isolation**: the agent's chromium runs on Xvfb :99 owned by
+   the hivex user — it NEVER touches the user's GNOME session unless
+   explicitly pointed there (below). CDP is host-loopback :9222;
+   container browsers are isolated by their own netns, so no clash.
+
+**Login handoff onto the user's desktop** (the noVNC "Computer view"
+equivalent for host agents): set `HIVE_BROWSER_DISPLAY=:0` (or the
+session's display) in the agent's env file via the worker and respawn.
+The user must first grant X access from their session:
+`xhost +SI:localuser:hivex-<name>`. Unset the knob to go back to
+invisible Xvfb. The driver never auto-starts Xvfb over a non-:99 target.
+
+**Hub admin exec on host agents**: `POST /api/agents/:id/container/exec`
+routes through `/usr/local/sbin/hivex-exec` (root-owned, timeout-bounded)
+— the ONE command the worker's sudoers grant whitelists per hivex user
+(Phase 72.1; the Phase 72 timeout(1)/env(1) wrap matched no grant and
+always failed). Refresh helpers after upgrade:
+`sudo <worker-binary> install-host-agent-support --worker-user <user>`,
+then re-run `hivex-provision` for each host agent.
+
 ## API
 
 `POST /api/agents` and `PATCH /api/agents/:id` accept:
