@@ -162,6 +162,13 @@ if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
         fi
     done
     /usr/bin/setfacl -m "u:$user:rwx" -d -m "u:$user:rwx" "$wsroot"
+    # 2026-10-13 Bob/Forge attach incident: subdirs created BEFORE this
+    # agent's default grant (attachments/, departments/, scratch/) never
+    # inherit it — attach_file stages at <wsroot>/attachments/<tid>/
+    # outgoing and EACCESed for every host agent but the first. Recurse
+    # rwX over the existing tree and seed defaults on its dirs.
+    /usr/bin/setfacl -R   -m "u:$user:rwX" "$wsroot"
+    /usr/bin/setfacl -R -d -m "u:$user:rwx" "$wsroot"
     # Agent state dir root: owned by whichever agent first created it,
     # so later agents could not mkdir their own (2026-10-13 spawn
     # crash). Root-own it and ACL-grant each provisioned agent rwx.
@@ -302,6 +309,16 @@ int provision(const std::string& agent_name,
             }
             run({"/usr/bin/setfacl", "-m", "u:" + user + ":rwx",
                  "-d", "-m", "u:" + user + ":rwx", workspace_root});
+            // 2026-10-13 Bob/Forge attach incident: subdirs created
+            // BEFORE this agent's default grant (attachments/,
+            // departments/, scratch/) never inherit it — attach_file
+            // stages at <root>/attachments/<tid>/outgoing and EACCESed
+            // for every host agent but the first. Recurse rwX over the
+            // existing tree and seed defaults on its dirs.
+            run({"/usr/bin/setfacl", "-R", "-m", "u:" + user + ":rwX",
+                 workspace_root});
+            run({"/usr/bin/setfacl", "-R", "-d", "-m",
+                 "u:" + user + ":rwx", workspace_root});
             run({"/usr/bin/setfacl", "-m", "u:" + user + ":x",
                  "/home/" + worker_user, "/home/" + worker_user +
                  "/.local", "/home/" + worker_user + "/.local/share",
