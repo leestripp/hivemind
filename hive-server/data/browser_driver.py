@@ -23,7 +23,25 @@ import subprocess
 import sys
 import time
 
-CDP_URL = "http://127.0.0.1:9222"
+def _default_slot():
+    """Per-user browser slot so several bare-metal agents can share one box.
+
+    Each agent's browser needs its OWN CDP port and X display — two hivex
+    users grabbing 127.0.0.1:9222 at once collide (2026-10-13: Bob/Forge
+    joined QueenBee on ubuntu-pc bare metal). hivex-queenbee keeps slot 0
+    (legacy :99 / 9222 — her stack predates the knob); everyone else gets a
+    deterministic 1..50 from their username. HIVE_BROWSER_SLOT overrides.
+    """
+    import getpass
+    u = getpass.getuser()
+    if u == "hivex-queenbee":
+        return 0
+    return sum(u.encode("utf-8", "ignore")) % 50 + 1
+
+
+SLOT = int(os.environ.get("HIVE_BROWSER_SLOT") or _default_slot())
+CDP_PORT = int(os.environ.get("HIVE_BROWSER_CDP_PORT") or (9222 + SLOT))
+CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 PROFILE = os.path.expanduser("~/.browser-profile")
 TEXT_LIMIT = 6000  # chars returned to the agent — protect the LLM context
 
@@ -64,7 +82,7 @@ def target_display():
     Plain DISPLAY is honoured too, matching pre-host behaviour.
     """
     return os.environ.get("HIVE_BROWSER_DISPLAY",
-                          os.environ.get("DISPLAY", ":99"))
+                          os.environ.get("DISPLAY", f":{99 + SLOT}"))
 
 
 def _x_socket(display):
@@ -81,22 +99,35 @@ def ensure_display(display):
     Xvfb/Xvnc/websockify then watchdogs them. Detach it so the watchdog
     outlives this driver invocation.
 
-    Only the default :99 gets auto-started: a HIVE_BROWSER_DISPLAY target
-    is the user's REAL session — if its socket is missing, spawning Xvfb
-    would be the wrong fix (and Xvfb would grab the number first).
+    Auto-start covers :99 (hive-screen.sh, with noVNC) and the agent's own
+    slot display :99+SLOT (bare Xvfb — multi-agent bare-metal boxes give each
+    hivex user their own display). Any other HIVE_BROWSER_DISPLAY target is
+    the user's REAL session — if its socket is missing, spawning Xvfb would
+    be the wrong fix (and Xvfb would grab the number first).
     """
     if os.path.exists(_x_socket(display)):
         return
-    if display != ":99":
-        return  # let chromium's own launch error say the display is down
-    subprocess.Popen(
-        ["hive-screen.sh", os.environ.get("HIVE_SCREEN_RES", "1280x800")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True)
+    own = f":{99 + SLOT}"
+    if display == ":99":
+        subprocess.Popen(
+            ["hive-screen.sh", os.environ.get("HIVE_SCREEN_RES", "1280x800")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+    elif display == own:
+        # Non-:99 slot display (bare-metal multi-agent box): bare Xvfb is
+        # enough — no noVNC screen stack per agent.
+        subprocess.Popen(
+            ["Xvfb", display, "-screen", "0",
+             os.environ.get("HIVE_SCREEN_RES", "1280x800") + "x24"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+    else:
+        return  # HIVE_BROWSER_DISPLAY target = user's real session; don't spawn
     for _ in range(40):  # up to ~20s for Xvfb to create its socket
         if os.path.exists(_x_socket(display)):
             return
         time.sleep(0.5)
+    return
 
 
 def ensure_browser(pw):
@@ -113,7 +144,7 @@ def ensure_browser(pw):
            # HIVE_BROWSER_DISPLAY points host agents at a real desktop.
            "DISPLAY": display}
     subprocess.Popen(
-        [chromium_binary(), "--remote-debugging-port=9222",
+        [chromium_binary(), f"--remote-debugging-port={CDP_PORT}",
          f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
          "--disable-session-crashed-bubble", "--disable-dev-shm-usage",
          # Rootless podman can't run Chrome's SUID/namespace sandbox — the
