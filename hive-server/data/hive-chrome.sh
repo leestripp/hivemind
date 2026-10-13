@@ -19,7 +19,7 @@ set -u
 _slot() {
     case "$(id -un)" in
         hivex-queenbee) echo 0;;
-        hivex-*) id -un | od -An -v -tu1 \
+        hivex-*) id -un | tr -d '\n' | od -An -v -tu1 \
                  | awk '{for(i=1;i<=NF;i++)s+=$i} END{print s%50+1}';;
         *) echo 0;;
     esac
