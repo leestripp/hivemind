@@ -283,6 +283,7 @@ class VoiceActivity : Activity() {
         sphere.setLevel(0f)
         phase = Phase.THINKING
         turnGen++
+        narratedPrefix = ""  // new turn: old live text must not trim new messages
         // The streamed reply comes from the SESSION agent — re-apply its
         // voice (a just-spoken inbox note may have left another agent's
         // voice active on the engine).
@@ -538,6 +539,7 @@ class VoiceActivity : Activity() {
     private fun startIdleNarration() {
         if (phase != Phase.IDLE) return
         turnGen++
+        narratedPrefix = ""
         finalReply.clear()
         streamText = ""
         spokenLen = 0
@@ -731,6 +733,11 @@ class VoiceActivity : Activity() {
             streamText = next
         }
         drainSpeech(flush = !busy)
+        // The posted message for this turn arrives after the turn ends (or
+        // via the inbox watch mid-turn); remember what the live feed
+        // already spoke so the message handler can trim it down to the
+        // unheard tail instead of re-reading the whole reply.
+        if (spokenLen > 0) narratedPrefix = streamText
         if (busy) {
             ui.postDelayed(pollTick, POLL_MS)
         } else {
