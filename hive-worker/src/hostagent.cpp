@@ -137,7 +137,7 @@ tmp="/tmp/hivex-prov-sudoers-$$"
     echo "# HiveMind Phase 72 host agent - auto-provisioned by hivex-provision."
     echo "# UNSANDBOXED: this user is effectively root. Machine = expendable."
     echo "$user ALL=(ALL) NOPASSWD: ALL"
-    echo "$wuser ALL=($user) NOPASSWD: /usr/bin/tee $home/.hive-env, /usr/bin/chmod 600 $home/.hive-env, /usr/local/bin/hive-agent, /usr/local/sbin/hivex-exec"
+    echo "$wuser ALL=($user) NOPASSWD: /usr/bin/tee $home/.hive-env, /usr/bin/chmod 600 $home/.hive-env, /usr/local/bin/hive-agent, /usr/local/sbin/hivex-exec, /usr/local/bin/hive-screen.sh"
 } > "$tmp"
 /usr/sbin/visudo -c -f "$tmp" >/dev/null
 /usr/bin/install -m 0440 -o root -g root "$tmp" "/etc/sudoers.d/$user"
@@ -162,6 +162,13 @@ if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
         fi
     done
     /usr/bin/setfacl -m "u:$user:rwx" -d -m "u:$user:rwx" "$wsroot"
+    # Agent state dir root: owned by whichever agent first created it,
+    # so later agents could not mkdir their own (2026-10-13 spawn
+    # crash). Root-own it and ACL-grant each provisioned agent rwx.
+    [ -d "$wsroot/.hive-agent" ] || \
+        /usr/bin/install -d -m 0755 -o root -g root "$wsroot/.hive-agent"
+    /usr/bin/setfacl -m "u:$user:rwx" -d -m "u:$user:rwx" \
+        "$wsroot/.hive-agent"
     /usr/bin/setfacl -m "u:$user:x" "/home/$wuser" \
         "/home/$wuser/.local" "/home/$wuser/.local/share" \
         "/home/$wuser/.local/share/hive-worker"
@@ -230,7 +237,7 @@ int provision(const std::string& agent_name,
         + worker_user + " ALL=(" + user + ") NOPASSWD: "
         "/usr/bin/tee " + home + "/.hive-env, "
         "/usr/bin/chmod 600 " + home + "/.hive-env, "
-        "/usr/local/bin/hive-agent\n";
+        "/usr/local/bin/hive-agent, /usr/local/bin/hive-screen.sh\n";
     {
         // Write to a temp file, visudo-check, THEN install — a broken
         // sudoers.d entry can lock out sudo on the whole box.
@@ -367,6 +374,16 @@ int install_support(const std::string& worker_user) {
     // Superseded by hivex-helpers (older installs only granted the
     // deprovision script).
     unlink("/etc/sudoers.d/hivex-deprovision");
+    // Phase 72.2: screen-stack scripts for host agents (noVNC + shared
+    // browser). Installed from the repo data dir when run from the
+    // repository root; best-effort — a missing tree just skips them.
+    for (const char* s :
+         {"hive-screen.sh", "hive-chrome.sh", "browser_driver.py"}) {
+        const std::string src = std::string("hive-server/data/") + s;
+        if (std::filesystem::exists(src))
+            run({"/usr/bin/install", "-m", "0755", "-o", "root", "-g",
+                 "root", src, std::string("/usr/local/bin/") + s});
+    }
     std::cerr << "Host-agent support installed:\n"
               << "  helpers: /usr/local/sbin/hivex-provision, "
                  "/usr/local/sbin/hivex-deprovision (root:root 0755)\n"

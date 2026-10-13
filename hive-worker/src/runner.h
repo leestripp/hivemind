@@ -157,4 +157,14 @@ std::string screen_pinned_image(const std::string& agent);
 ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                         const std::string& type, const std::string& resolution);
 
+/// Phase 72.2: screen control for a HOST agent (bare-metal, no
+/// container). Runs hive-screen.sh as the hivex-<name> user via the
+/// provisioned sudoers grant (the script self-derives its slot);
+/// port = 6080 + slot, password cached under the worker dir.
+/// action: "status" | "start" | "stop".
+ScreenResult screen_ctl_host(const std::string& agent_id,
+                             const std::string& user,
+                             const std::string& action,
+                             const std::string& resolution);
+
 } // namespace hwrunner

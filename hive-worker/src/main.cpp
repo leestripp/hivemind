@@ -1350,10 +1350,19 @@ int main(int argc, char* argv[]) {
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");
-                    auto r = hwrunner::screen_ctl(
-                        frame.value("agent", ""), frame.value("action", ""),
-                        frame.value("type", ""),
-                        frame.value("resolution", "1280x800"));
+                    const std::string aid = frame.value("agent", "");
+                    // Phase 72.2: HOST agents have no container — the
+                    // screen stack runs on the host as the hivex user.
+                    const std::string huser =
+                        g_fleet ? g_fleet->host_user_of(aid) : "";
+                    auto r = huser.empty()
+                        ? hwrunner::screen_ctl(
+                              aid, frame.value("action", ""),
+                              frame.value("type", ""),
+                              frame.value("resolution", "1280x800"))
+                        : hwrunner::screen_ctl_host(
+                              aid, huser, frame.value("action", ""),
+                              frame.value("resolution", "1280x800"));
                     json resp{{"op","screen_result"},{"id",id},
                               {"running",r.running},{"port",r.port},
                               {"password",r.password}};

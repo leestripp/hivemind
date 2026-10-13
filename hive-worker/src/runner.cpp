@@ -1114,4 +1114,99 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
     return r;
 }
 
+// ── Phase 72.2: bare-metal host-agent screens ─────────────────────────
+// No container, no published port: hive-screen.sh runs ON this host as
+// the hivex-<name> user (sudoers grant provisioned by hivex-provision)
+// and websockify binds 6080+SLOT directly. The slot formula MUST match
+// browser_driver.py::_default_slot and hive-screen.sh:_slot — the three
+// implementations derive the same ports independently; change all or
+// none. hivex-queenbee is pinned to slot 0 (her stack predates slots).
+static int host_screen_slot(const std::string& user) {
+    if (user == "hivex-queenbee") return 0;
+    if (user.rfind("hivex-", 0) != 0) return 0;
+    unsigned sum = 0;
+    for (const unsigned char c : user) sum += c;
+    return int(sum % 50) + 1;
+}
+
+ScreenResult screen_ctl_host(const std::string& agent_id,
+                             const std::string& user,
+                             const std::string& action,
+                             const std::string& resolution) {
+    ScreenResult r;
+    const uint16_t port =
+        static_cast<uint16_t>(6080 + host_screen_slot(user));
+    // Password cache: the script writes the 8-char RFB password into the
+    // agent's unreadable home; it prints it on start ("PASSWORD=…") and
+    // on the whitelisted "password" action, and we cache it here so
+    // status polls stay cheap (the container path re-reads per status).
+    const fs::path pwcache =
+        fs::path(worker_dir()) / ("screen-" + agent_id + ".pw");
+    auto read_cached_pw = [&]() -> std::string {
+        std::ifstream in(pwcache);
+        std::string pw;
+        std::getline(in, pw);
+        return pw;
+    };
+    auto fetch_pw = [&]() -> std::string {
+        std::string pw = read_cached_pw();
+        if (!pw.empty()) return pw;
+        std::string out;
+        if (run_as_user(user, {"/usr/local/bin/hive-screen.sh",
+                               "password"}, "", &out) == 0) {
+            while (!out.empty() && isspace((unsigned char)out.back()))
+                out.pop_back();
+            if (!out.empty()) {
+                std::ofstream f(pwcache);
+                f << out << "\n";
+                pw = out;
+            }
+        }
+        return pw;
+    };
+
+    if (action == "status") {
+        // No published mapping to lie here — the listener IS websockify.
+        if (port_accepts(port)) {
+            r.port = port;
+            r.running = true;
+            r.password = fetch_pw();
+        }
+        return r;
+    }
+
+    if (action == "stop") {
+        std::string out;
+        run_as_user(user, {"/usr/local/bin/hive-screen.sh", "stop"},
+                    "", &out);
+        fs::remove(pwcache);
+        r.running = false;
+        return r;
+    }
+
+    if (action != "start") { r.error = "unknown action"; return r; }
+
+    std::string out;
+    if (run_as_user(user, {"/usr/local/bin/hive-screen.sh", resolution},
+                    "", &out) != 0) {
+        r.error = "host screen stack failed to start: " + out;
+        return r;
+    }
+    // The script's last line on success is PASSWORD=<pw>.
+    auto pos = out.rfind("PASSWORD=");
+    if (pos != std::string::npos) {
+        std::string pw = out.substr(pos + 9);
+        while (!pw.empty() && isspace((unsigned char)pw.back()))
+            pw.pop_back();
+        if (!pw.empty()) {
+            std::ofstream f(pwcache);
+            f << pw << "\n";
+        }
+    }
+    r.port = port;
+    r.running = true;
+    r.password = read_cached_pw();
+    return r;
+}
+
 } // namespace hwrunner
