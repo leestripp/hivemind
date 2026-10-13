@@ -30,7 +30,7 @@ _slot() {
         *) echo 0;;                # containers + anything else: legacy
     esac
 }
-SLOT="${HIVE_BROWSER_SLOT:-$(_slot)}"
+export SLOT="${HIVE_BROWSER_SLOT:-$(_slot)}"  # watchdog expands $SLOT at runtime
 export DISPLAY="${HIVE_BROWSER_DISPLAY:-:$((99 + SLOT))}"
 RFB=$((5900 + SLOT))
 WS=$((6080 + SLOT))
