@@ -264,13 +264,33 @@ int main(int argc, char* argv[]) {
                         "attachments" / tid / "outgoing";
                     const fs::path canon  = ws / "attachments" / tid;
                     std::error_code ec;
+                    // Host agents stage into the REAL workspace, so the
+                    // staging-side <tid> dir may not exist yet — without
+                    // this every rename below failed ENOENT and the
+                    // attachment was silently dropped (2026-10-13
+                    // Bob/Forge "attachments:[]" incident).
+                    fs::create_directories(canon, ec);
+                    ec.clear();
                     if (fs::is_directory(outdir, ec)) {
                         for (const auto& e : fs::directory_iterator(outdir, ec)) {
                             if (!e.is_regular_file(ec)) continue;
                             const std::string fname =
                                 e.path().filename().string();
                             fs::rename(e.path(), canon / fname, ec);
-                            if (ec) { ec.clear(); continue; }
+                            if (ec == std::errc::cross_device_link) {
+                                // /workspace and the staging dir may be
+                                // different filesystems — copy+remove.
+                                ec.clear();
+                                fs::copy_file(e.path(), canon / fname, ec);
+                                if (!ec) fs::remove(e.path(), ec);
+                            }
+                            if (ec) {
+                                std::cerr << "attachments: promote failed for "
+                                          << fname << ": " << ec.message()
+                                          << "\n";
+                                ec.clear();
+                                continue;
+                            }
                             const auto sz = fs::file_size(canon / fname, ec);
                             atts.push_back({
                                 {"name", fname},
