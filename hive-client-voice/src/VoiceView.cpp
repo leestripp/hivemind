@@ -857,6 +857,7 @@ void VoiceView::queueSpeech(const std::string& text) {
 
 void VoiceView::queueSpeechChunk(const std::string& text) {
     if (text.empty()) return;
+    fprintf(stderr, "hive-voice: tts << %s\n", text.c_str());
     tts_->speakQueued(text);
     if (phase_ == Phase::Thinking || phase_ == Phase::Idle) enterStreaming();
 }
