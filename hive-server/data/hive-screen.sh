@@ -61,20 +61,19 @@ if [ "${1:-}" = "stop" ]; then
         kill "$(cat "$WATCHDOG_PID")" 2>/dev/null || true
         rm  "$WATCHDOG_PID"
     fi
-    # Fallback for a watchdog that lost its pidfile (matches its loop).
-    pkill  'pgrep -x x11vnc' 2>/dev/null || true
-    pkill -x x11vnc 2>/dev/null || true
-    pkill websockify 2>/dev/null || true
+    pkill -xu "$(id -u)" x11vnc 2>/dev/null || true
+    pkill -fu "$(id -u)" "websockify.* $WS " 2>/dev/null || true
     # The shared Chromium (CDP port) lives on this X display — the
     # biggest RAM consumer, and dead anyway once Xvfb goes.
-    pkill  "remote-debugging-port=$CDP" 2>/dev/null || true
+    pkill -fu "$(id -u)" "remote-debugging-port=$CDP" 2>/dev/null || true
     pkill -x openbox 2>/dev/null || true
     pkill -x Xvfb 2>/dev/null || true
     exit 0
 fi
 
 alive() {  # alive <exact-process-name> — zombies don't count
-    for p in $(pgrep -x "$1" 2>/dev/null); do
+    # User-scoped: a multi-agent host runs other agents' daemons too.
+    for p in $(pgrep -xu "$(id -u)" "$1" 2>/dev/null); do
         [ "$(cut -d' ' -f3 /proc/$p/stat 2>/dev/null)" != "Z" ] && return 0
     done
     return 1
@@ -91,7 +90,7 @@ if ! alive x11vnc; then
         -passwd "$PW" -localhost -wait 50 >/tmp/x11vnc.log 2>&1 &
     nohup bash -c 'while true; do
         up=0
-        for p in $(pgrep -x x11vnc 2>/dev/null); do
+        for p in $(pgrep -xu "$(id -u)" x11vnc 2>/dev/null); do
             [ "$(cut -d" " -f3 /proc/$p/stat 2>/dev/null)" != "Z" ] && up=1
         done
         [ "$up" -eq 0 ] && exec x11vnc -display '"$DISPLAY"' \
@@ -102,9 +101,10 @@ if ! alive x11vnc; then
     echo $! > "$WATCHDOG_PID"   # stop kills it first
 fi
 
-alive websockify || \
+if ! pgrep -fu "$(id -u)" "websockify.* $WS " >/dev/null 2>&1; then
     nohup websockify --web /usr/share/novnc "$WS" "localhost:$RFB" \
         >/tmp/websockify.log 2>&1 &
+fi
 
 # The shared browser: maximized on this display, CDP port for
 # browser_driver.py. The wrapper owns the flags (incl. --no-sandbox)
@@ -115,7 +115,8 @@ HIVE_BROWSER_CDP_PORT="$CDP" hive-chrome.sh || true
 
 # Readiness: x11vnc + websockify alive and the RFB port answering.
 for _ in $(seq 1 30); do
-    alive x11vnc && alive websockify && \
+    alive x11vnc && pgrep -fu "$(id -u)" "websockify.* $WS " \
+        >/dev/null 2>&1 && \
     (exec 3<>/dev/tcp/127.0.0.1/$RFB) 2>/dev/null && \
     { echo "PASSWORD=$PW"; exit 0; }
     sleep 0.5
