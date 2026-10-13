@@ -169,6 +169,17 @@ if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
     # rwX over the existing tree and seed defaults on its dirs.
     /usr/bin/setfacl -R   -m "u:$user:rwX" "$wsroot"
     /usr/bin/setfacl -R -d -m "u:$user:rwx" "$wsroot"
+    # Shared-group model (2026-10-13, lee directive): every host agent
+    # joins group hivex; the workspace is group-hivex, group-rwX, with
+    # setgid dirs + group-rwX default ACLs so new entries inherit the
+    # group regardless of umask — all agents read/write the tree while
+    # per-file ownership still shows who made what.
+    /usr/sbin/groupadd -f hivex
+    /usr/sbin/usermod -aG hivex "$user"
+    /usr/bin/chgrp -R hivex "$wsroot"
+    /usr/bin/chmod -R g+rwX "$wsroot"
+    /usr/bin/find "$wsroot" -type d -exec /usr/bin/chmod g+s {} +
+    /usr/bin/setfacl -R -d -m "g::rwX" "$wsroot"
     # Agent state dir root: owned by whichever agent first created it,
     # so later agents could not mkdir their own (2026-10-13 spawn
     # crash). Root-own it and ACL-grant each provisioned agent rwx.
@@ -319,6 +330,18 @@ int provision(const std::string& agent_name,
                  workspace_root});
             run({"/usr/bin/setfacl", "-R", "-d", "-m",
                  "u:" + user + ":rwx", workspace_root});
+            // Shared-group model (2026-10-13, lee directive): every
+            // host agent joins group hivex; the workspace is group-
+            // hivex, group-rwX, setgid dirs + group-rwX default ACLs
+            // so new entries inherit the group regardless of umask.
+            run({"/usr/sbin/groupadd", "-f", "hivex"});
+            run({"/usr/sbin/usermod", "-aG", "hivex", user});
+            run({"/usr/bin/chgrp", "-R", "hivex", workspace_root});
+            run({"/usr/bin/chmod", "-R", "g+rwX", workspace_root});
+            run({"/usr/bin/find", workspace_root, "-type", "d",
+                 "-exec", "/usr/bin/chmod", "g+s", "{}", "+"});
+            run({"/usr/bin/setfacl", "-R", "-d", "-m", "g::rwX",
+                 workspace_root});
             run({"/usr/bin/setfacl", "-m", "u:" + user + ":x",
                  "/home/" + worker_user, "/home/" + worker_user +
                  "/.local", "/home/" + worker_user + "/.local/share",
