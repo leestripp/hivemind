@@ -48,12 +48,67 @@
             android:textSize="14sp" />
     </LinearLayout>
 
+    <!-- Full chat panel (toggled by the bottom mode bar). Covers the
+         sphere; own opaque background so the conversation is readable. -->
     <LinearLayout
+        android:id="@+id/chatPanel"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/bg"
+        android:paddingTop="96dp"
+        android:visibility="gone">
+
+        <ListView
+            android:id="@+id/chatList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@android:color/transparent"
+            android:dividerHeight="6dp"
+            android:padding="12dp"
+            android:paddingBottom="72dp"
+            android:clipToPadding="false"
+            android:stackFromBottom="true"
+            android:transcriptMode="normal" />
+    </LinearLayout>
+
+    <!-- Voice / chat mode switch. Visible in both modes; z-ordered last
+         so it floats above the chat panel. -->
+    <LinearLayout
+        android:id="@+id/modeBar"
         android:orientation="horizontal"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="48dp"
+        android:layout_marginBottom="10dp"
+        android:gravity="center_vertical">
+
+        <ImageButton
+            android:id="@+id/modeVoiceButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="28dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Voice chat"
+            android:src="@drawable/ic_mic" />
+
+        <ImageButton
+            android:id="@+id/modeChatButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Full chat"
+            android:src="@drawable/ic_chat" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/buttonRow"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="76dp"
         android:gravity="center_vertical">
 
         <Button

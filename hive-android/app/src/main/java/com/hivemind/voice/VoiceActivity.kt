@@ -150,6 +150,10 @@ class VoiceActivity : Activity() {
         sphere = findViewById(R.id.sphereView)
         status = findViewById(R.id.statusText)
         talk = findViewById(R.id.talkButton)
+        findViewById<android.widget.ImageButton>(R.id.modeVoiceButton)
+            .setOnClickListener { showVoiceMode() }
+        findViewById<android.widget.ImageButton>(R.id.modeChatButton)
+            .setOnClickListener { showChatMode() }
         cancel = findViewById(R.id.cancelButton)
 
         api = ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
@@ -218,6 +222,33 @@ class VoiceActivity : Activity() {
     }
 
     // -- Setup ------------------------------------------------------------
+
+    /** Chat mode: full history panel over the sphere. Voice capture /
+     *  TTS keep running underneath — this is a VIEW switch, not a
+     *  session change. */
+    private fun showChatMode() {
+        if (chatMode) return
+        chatMode = true
+        sphere.visibility = android.view.View.GONE
+        findViewById<android.view.View>(R.id.buttonRow).visibility = android.view.View.GONE
+        findViewById<android.view.View>(R.id.chatPanel).visibility = android.view.View.VISIBLE
+        if (chatPanel == null)
+            chatPanel = ChatPanel(this, api, threadId, agentName,
+                findViewById(R.id.chatList))
+        chatPanel?.refresh()
+    }
+
+    private fun showVoiceMode() {
+        if (!chatMode) return
+        chatMode = false
+        findViewById<android.view.View>(R.id.chatPanel).visibility = android.view.View.GONE
+        sphere.visibility = android.view.View.VISIBLE
+        findViewById<android.view.View>(R.id.buttonRow).visibility = android.view.View.VISIBLE
+    }
+
+    override fun onBackPressed() {
+        if (chatMode) showVoiceMode() else super.onBackPressed()
+    }
 
     private fun openThread() {
         io.execute {
@@ -406,6 +437,10 @@ class VoiceActivity : Activity() {
      * queue). While the user records or a reply streams, arriving notes
      * wait silently: voices never mix.
      */
+    /** Full-chat panel (bottom-bar chat icon, 2026-10-14). */
+    private var chatPanel: ChatPanel? = null
+    private var chatMode = false
+
     private val inboxWatch = object : Runnable {
         override fun run() {
             if (phase != Phase.IDLE) {
@@ -432,6 +467,7 @@ class VoiceActivity : Activity() {
                                 fresh.add(PendingNote(m.senderId, body))
                         }
                     }
+                    if (chatMode && dmConsumed) chatPanel?.refresh()
                     // Live-turn watch: a reply STARTED ELSEWHERE (desktop /
                     // web / routine) streams into the hub's partial feed —
                     // narrate it as it grows instead of waiting for the

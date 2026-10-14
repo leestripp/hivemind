@@ -12,6 +12,7 @@
 
 #include <mutex>
 #include <string>
+#include <cmath>
 #include <vector>
 
 #define LOG_TAG "PocketTts"
@@ -111,6 +112,30 @@ Java_com_hivemind_voice_PocketTts_nativeSynthesize(JNIEnv* env, jobject /*thiz*/
         return nullptr;
     }
     g_rate = rate > 0 ? rate : 24000;
+
+    /* Loudness normalization (2026-10-14): pocket voices vary wildly in
+     * output level (lee: "the voice volumes do vary a lot"). RMS-normalize
+     * each chunk to a fixed target so every voice lands at the same
+     * perceived loudness; gain clamped to [-12dB, +12dB] so near-silent
+     * chunks aren't blown up, then peak-limited so hot voices never clip. */
+    {
+        const float target_rms = 0.09f;
+        double sum = 0.0;
+        const size_t n = frames * channels;
+        for (size_t i = 0; i < n; ++i) sum += double(samples[i]) * samples[i];
+        const float rms = n ? float(std::sqrt(sum / n)) : 0.f;
+        if (rms > 1e-4f) {
+            float gain = target_rms / rms;
+            if (gain < 0.25f) gain = 0.25f;
+            if (gain > 4.0f)  gain = 4.0f;
+            for (size_t i = 0; i < n; ++i) {
+                float s2 = samples[i] * gain;
+                if (s2 >  0.97f) s2 =  0.97f;
+                if (s2 < -0.97f) s2 = -0.97f;
+                const_cast<float*>(samples)[i] = s2;
+            }
+        }
+    }
 
     jfloatArray out = env->NewFloatArray(static_cast<jsize>(frames * channels));
     if (out) {

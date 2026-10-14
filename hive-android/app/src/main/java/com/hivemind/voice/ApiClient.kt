@@ -28,7 +28,12 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
 
     data class Message(
         val id: String, val senderKind: String, val body: String,
-        val senderId: String
+        val senderId: String,
+        val createdAt: String = "",
+        /** Raw attachments array: [{name, caption, path ("/workspace/…"),
+         *  worker}] — see hive-client HiveWindow::show_image for the
+         *  contract. Empty when none. */
+        val attachments: JSONArray = JSONArray(),
     )
 
     data class Activity(
@@ -39,6 +44,24 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
          *  minutes), so "cancel accepted" != free. */
         val cancelling: Boolean = false,
     )
+
+    /** Byte-returning sibling of [request] for file downloads. */
+    private fun requestBytes(method: String, path: String): ByteArray {
+        val conn = java.net.URL(base + path).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = method
+        conn.setRequestProperty("Authorization", "Bearer $apiKey")
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 60_000          // images/videos can be big
+        val code = conn.responseCode
+        if (code >= 400) {
+            val err = conn.errorStream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
+            conn.disconnect()
+            throw ApiException(code, err)
+        }
+        val data = conn.inputStream.readBytes()
+        conn.disconnect()
+        return data
+    }
 
     private fun request(method: String, path: String, body: JSONObject? = null): String {
         val conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
@@ -148,6 +171,29 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         return parseMessages(arr)
     }
 
+    /** Full thread history for the chat panel (newest last). */
+    fun history(threadId: String, limit: Int = 300): List<Message> {
+        val arr = JSONObject(request("GET",
+            "/api/threads/$threadId/messages?limit=$limit"))
+            .getJSONArray("messages")
+        return parseMessages(arr)
+    }
+
+    /** GET /api/files/download?path=…[&worker=…] → raw bytes. The
+     *  desktop contract: attachment "path" is "/workspace/<rel>", the
+     *  endpoint wants the workspace-relative form. */
+    fun downloadFile(att: JSONObject): ByteArray {
+        var rel = att.optString("path", "")
+        if (rel.startsWith("/workspace/")) rel = rel.removePrefix("/workspace/")
+        val name = att.optString("name", "file")
+        if (rel.isEmpty()) rel = "attachments/$name"
+        val worker = att.optString("worker", "")
+        val path = "/api/files/download?path=" +
+            URLEncoder.encode(rel, "UTF-8") +
+            if (worker.isEmpty()) "" else "&worker=" + URLEncoder.encode(worker, "UTF-8")
+        return requestBytes("GET", path)
+    }
+
     /** Latest message id in the thread ("" when empty) — poll baseline. */
     fun latestMessageId(threadId: String): String {
         val obj = JSONObject(request("GET", "/api/threads/$threadId/messages?limit=1"))
@@ -210,6 +256,8 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
                 senderKind = m.optString("sender_kind", ""),
                 body = m.optString("body", ""),
                 senderId = m.optString("sender_id", ""),
+                createdAt = m.optString("created_at", ""),
+                attachments = m.optJSONArray("attachments") ?: JSONArray(),
             ))
         }
     }
