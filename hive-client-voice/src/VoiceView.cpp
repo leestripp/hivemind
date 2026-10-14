@@ -96,6 +96,15 @@ VoiceView::VoiceView(BaseObjectType* cobject,
             });
         },
         [this](const std::string& msg) { toUi([this, msg] { onEngineStopped(msg); }); });
+    // Push-to-talk playback hold (2026-10-14): agents must not talk
+    // over the user's recording. The recording listener drives a
+    // shared flag; the playback hold probe reads it. Both lambdas
+    // hold a shared_ptr copy, so the flag outlives whichever engine
+    // dies first — no set/forget, no dangling.
+    stt_->setRecordingListener(
+        [flag = recording_flag_](bool rec) { flag->store(rec); });
+    playback_->setHoldProbe(
+        [flag = recording_flag_] { return flag->load(); });
     // Warm the /healthz readiness probe in the background so a slow
     // post-reboot gateway is picked up without a dead first TALK press.
     stt_->prime();

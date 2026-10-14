@@ -70,6 +70,10 @@ void AudioPlayback::setOnTagDone(std::function<void(std::uint64_t)> cb) {
     on_tag_done_ = std::move(cb);
 }
 
+void AudioPlayback::setHoldProbe(std::function<bool()> probe) {
+    hold_probe_ = std::move(probe);
+}
+
 #ifdef HIVEMIND_VOICE_PIPEWIRE
 namespace {
 
@@ -238,6 +242,18 @@ struct PwSink {
         }
         const std::size_t capacity = d.maxsize / sizeof(int16_t);
         auto* dst = static_cast<int16_t*>(d.data);
+        // Push-to-talk hold: the user is recording — freeze here. Pad
+        // silence WITHOUT consuming the ring: the agent's voice must
+        // not talk over the recording, and it must not be LOST either
+        // (consuming would complete tags for audio nobody heard).
+        if (owner && owner->held()) {
+            std::fill_n(dst, capacity, 0);
+            d.chunk->offset = 0;
+            d.chunk->stride = sizeof(int16_t);
+            d.chunk->size = capacity * sizeof(int16_t);
+            pw_stream_queue_buffer(stream, b);
+            return;
+        }
         std::size_t n = 0;
         std::vector<std::uint64_t> finishedTags;
         {
@@ -379,6 +395,10 @@ void AudioPlayback::workerLoop() {
         // No usable stream: advance by wall-clock instead.
         std::size_t written = 0;
         while (running_ && written < item.samples.size()) {
+            if (held()) {  // push-to-talk: freeze, don't lose it
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
             const std::size_t step = std::min<std::size_t>(
                 item.rate / 10, item.samples.size() - written);
             written += step;

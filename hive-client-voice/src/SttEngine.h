@@ -37,6 +37,14 @@ class SttEngine {
 
     bool engineReady() const { return ready_; }
     bool listening() const { return listening_; }
+
+    // Push-to-talk playback hold (2026-10-14): fires on every capture
+    // transition (true = recording started, false = stopped/failed) so
+    // the owner can gate TTS playback — agents must not talk over the
+    // user's recording. Fires on whatever thread starts/stops capture;
+    // the callback must be lock-free (atomic store is the intended
+    // use).
+    void setRecordingListener(std::function<void(bool)> cb);
     std::string transcript() const;
 
     // Background warm-up at app launch: probe the gateway until it
@@ -69,6 +77,7 @@ class SttEngine {
     std::unique_ptr<ChimpFlowClient> chimp_;
     std::function<void(float)> on_level_;
     std::function<void(const std::string&)> on_stopped_;
+    std::function<void(bool)> on_recording_;  // atomic store only
 
     mutable std::mutex m_;
     std::vector<int16_t> pcm_;  // growing buffer, capped at MAX

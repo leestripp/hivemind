@@ -108,12 +108,18 @@ void SttEngine::startCapture() {
         [this, s](float level) {
             if (s == session_ && on_level_) on_level_(level);
         });
+    if (on_recording_) on_recording_(listening_);
     if (!listening_ && on_stopped_)
         on_stopped_("Microphone unavailable — no audio capture backend");
 }
 
+void SttEngine::setRecordingListener(std::function<void(bool)> cb) {
+    on_recording_ = std::move(cb);
+}
+
 void SttEngine::teardownCapture() {
     listening_ = false;
+    if (on_recording_) on_recording_(false);
     capture_.stop();
 }
 

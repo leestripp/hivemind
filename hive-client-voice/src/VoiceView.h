@@ -124,6 +124,8 @@ class VoiceView : public Gtk::Box {
 
     // -- engines ---------------------------------------------------------
     std::unique_ptr<AudioCapture> capture_;
+    std::shared_ptr<std::atomic<bool>> recording_flag_{
+        std::make_shared<std::atomic<bool>>(false)};
     std::unique_ptr<AudioPlayback> playback_;
     std::unique_ptr<SttEngine> stt_;
     std::unique_ptr<TtsEngine> tts_;

@@ -41,6 +41,16 @@ class AudioPlayback {
 
     void setOnTagDone(std::function<void(std::uint64_t)> cb);
 
+    // Push-to-talk hold (2026-10-14): while the probe reports the user
+    // is recording, playback FREEZES — the sink pads silence WITHOUT
+    // consuming the ring (no samples move, no tags complete, nothing
+    // is lost) and resumes mid-word when recording ends. A derived-
+    // state probe, not set/forget flags: a missed setHeld(false)
+    // would mute the app forever. Set once at startup, before audio
+    // starts; the probe must be lock-free (atomic load).
+    void setHoldProbe(std::function<bool()> probe);
+    bool held() const { return hold_probe_ ? hold_probe_() : false; }
+
  private:
     struct Item {
         std::uint64_t tag;
@@ -51,6 +61,7 @@ class AudioPlayback {
     void workerLoop();
 
     std::function<void(std::uint64_t)> on_tag_done_;
+    std::function<bool()> hold_probe_;  // set once at startup
     std::mutex m_;
     std::deque<Item> queue_;
     std::deque<std::uint64_t> done_;  // tags consumed by the sink
