@@ -25,7 +25,12 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   keep GTK's default.
 - **Video** (Phase 34 follow-up): video attachments show a thumbnail +
   play/download affordance (stream from the hub or fetch and play
-  locally).
+  locally). Rendered at a pinned 640x360 (16:9), click toggles
+  play/pause, "open in player" hands off to the system player.
+- **Audio** — audio attachments (mp3/flac/wav/ogg/m4a/aac/opus/wma)
+  render as a card: big round play/pause button + filename + size,
+  playing in place via Gtk::MediaFile (GStreamer). On a media error the
+  card falls back to a chip that opens the file externally.
 - **Approvals** — agents run with approval gates in-container; requests
   relay hub→client and the decision routes back.
 - **Skills page** — browse the hub's library, install from the registry,

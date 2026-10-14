@@ -54,6 +54,12 @@ const char* kCss = R"(
   background: alpha(@window_fg_color, 0.06);
   border-bottom: 1px solid alpha(@window_fg_color, 0.08); }
 .hv-time   { color: alpha(@window_fg_color, 0.45); font-size: 0.75em; }
+.hv-audio-card { background: alpha(@window_fg_color, 0.06);
+  border: 1px solid alpha(@accent_color, 0.45); border-radius: 14px;
+  padding: 10px 14px 10px 10px; margin: 4px 0; }
+.hv-audio-play { border-radius: 50%; min-width: 48px; min-height: 48px;
+  font-size: 1.3em; padding: 0;
+  box-shadow: inset 0 0 0 2px @accent_color; }
 .hv-code   { font-family: monospace; background: alpha(@window_fg_color, 0.08);
              border-radius: 8px; padding: 8px 10px; margin: 4px 0; }
 .hv-tool   { color: alpha(@window_fg_color, 0.45); font-family: monospace;
@@ -2017,6 +2023,15 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                 load_video_attachment(holder, a);
                 continue;
             }
+            if (ext == ".mp3" || ext == ".flac" || ext == ".wav" ||
+                ext == ".ogg" || ext == ".oga" || ext == ".m4a" ||
+                ext == ".aac" || ext == ".opus" || ext == ".wma") {
+                auto* holder = Gtk::make_managed<Gtk::Box>(
+                    Gtk::Orientation::VERTICAL, 4);
+                box->append(*holder);
+                load_audio_attachment(holder, a);
+                continue;
+            }
             // 2026-09-17: the old chip opened file://host_path — the
             // WORKER's path, meaningless on this machine, and empty for
             // agent-originated records (no click handler at all → dead
@@ -2386,7 +2401,13 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
     auto* video = Gtk::make_managed<Gtk::Video>();
     video->set_media_stream(media);
     video->set_autoplay(false);
-    video->set_size_request(320, 180);
+    // lee 2026-10-14: 320x180 with no alignment let the widget stretch to
+    // the chat width while keeping the short height ("very wide, not tall
+    // enough"). Pin it left at a real 16:9 size.
+    video->set_size_request(640, 360);
+    video->set_hexpand(false);
+    video->set_vexpand(false);
+    video->set_halign(Gtk::Align::START);
     video->set_tooltip_text(name + "  -  click to play/pause");
 
     // Click toggles play/pause.
@@ -2486,6 +2507,133 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
             } else {
                 auto* el = Gtk::make_managed<Gtk::Label>(
                     "video unavailable: " + err);
+                el->add_css_class("hv-time");
+                el->set_halign(Gtk::Align::START);
+                (*weak)->append(*el);
+            }
+        });
+        dispatcher_.emit();
+    });
+}
+
+// ── Audio attachment cards ─────────────────────────────────────────────────
+// Same download/cache pattern as video (Phase E), via the shared
+// resolve_attachment/download_to_cache helpers. The card mirrors the
+// Android audio card: a big round play/pause button plus filename and
+// size. Playback is Gtk::MediaFile (GStreamer) — no separate window;
+// on a media error the card swaps to a chip that opens the file in the
+// system player, exactly like the video fallback.
+
+void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
+                                   const std::string& name) {
+    namespace fs = std::filesystem;
+    auto media = Gtk::MediaFile::create_for_filename(file);
+
+    auto* card = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
+    card->add_css_class("hv-audio-card");
+    card->set_halign(Gtk::Align::START);
+
+    auto* play = Gtk::make_managed<Gtk::Button>("\u25b6");
+    play->add_css_class("hv-audio-play");
+    play->set_tooltip_text("Play " + name);
+    card->append(*play);
+
+    auto* text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    text->set_valign(Gtk::Align::CENTER);
+    auto* title = Gtk::make_managed<Gtk::Label>(name);
+    title->set_halign(Gtk::Align::START);
+    title->set_ellipsize(Pango::EllipsizeMode::MIDDLE);
+    title->set_max_width_chars(44);
+    text->append(*title);
+    std::error_code ec;
+    const auto bytes = fs::file_size(file, ec);
+    if (!ec && bytes > 0) {
+        char buf[32];
+        if (bytes >= 1 << 20)
+            std::snprintf(buf, sizeof buf, "%.1f MB", bytes / 1048576.0);
+        else
+            std::snprintf(buf, sizeof buf, "%.0f KB", bytes / 1024.0);
+        auto* size = Gtk::make_managed<Gtk::Label>(buf);
+        size->add_css_class("hv-time");
+        size->set_halign(Gtk::Align::START);
+        text->append(*size);
+    }
+    card->append(*text);
+    holder->append(*card);
+
+    // Play/pause toggle; the glyph follows the stream state so a natural
+    // end-of-stream flips it back to the play triangle.
+    play->signal_clicked().connect([media] {
+        if (media->get_playing()) media->pause(); else media->play();
+    });
+    media->property_playing().signal_changed().connect([play, media] {
+        play->set_label(media->get_playing() ? "\u23f8" : "\u25b6");
+    });
+
+    // Media error (no gstreamer backend etc.) -> swap the card for a
+    // plain chip that opens the cached copy in the system player.
+    auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
+    chip->add_css_class("flat");
+    chip->set_halign(Gtk::Align::START);
+    chip->set_visible(false);
+    chip->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
+    });
+    holder->append(*chip);
+    media->property_error().signal_changed().connect([card, chip] {
+        if (card->get_parent()) card->unparent();
+        chip->set_visible(true);
+    });
+
+    auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
+    open_btn->add_css_class("flat");
+    open_btn->set_halign(Gtk::Align::START);
+    open_btn->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
+    });
+    holder->append(*open_btn);
+}
+
+void HiveWindow::load_audio_attachment(Gtk::Box* holder,
+                                       const nlohmann::json& att) {
+    namespace fs = std::filesystem;
+    const std::string name = att.value("name", "audio");
+    std::string rel, worker;
+    fs::path cache;
+    resolve_attachment(att, current_thread_, rel, worker, cache);
+
+    std::error_code ec;
+    if (fs::is_regular_file(cache, ec) && fs::file_size(cache, ec) > 0) {
+        show_audio_widget(holder, cache.string(), name);
+        return;
+    }
+
+    auto* ph = Gtk::make_managed<Gtk::Label>("loading audio: " + name);
+    ph->add_css_class("hv-time");
+    ph->set_halign(Gtk::Align::START);
+    holder->append(*ph);
+
+    const std::string key = cache.string();
+    if (!image_downloads_.insert(key).second)
+        return;   // already downloading (re-render)
+
+    auto weak = std::make_shared<Gtk::Box*>(holder);
+    holder->signal_destroy().connect([weak] { *weak = nullptr; });
+
+    const std::string tid = current_thread_;
+    run_async([this, rel, worker, cache, key, tid, name, weak] {
+        const std::string err = download_to_cache(api_, rel, worker, cache);
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, key, tid, name, weak, err] {
+            image_downloads_.erase(key);
+            if (!alive_ || !*weak || tid != current_thread_) return;
+            while (auto* child = (*weak)->get_first_child())
+                (*weak)->remove(*child);
+            if (err.empty()) {
+                show_audio_widget(*weak, key, name);
+            } else {
+                auto* el = Gtk::make_managed<Gtk::Label>(
+                    "audio unavailable: " + err);
                 el->add_css_class("hv-time");
                 el->set_halign(Gtk::Align::START);
                 (*weak)->append(*el);

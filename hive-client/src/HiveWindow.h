@@ -172,6 +172,11 @@ private:
                           const std::string& tid);
     void show_video_widget(Gtk::Box* holder, const std::string& file,
                            const std::string& name);
+    // Audio attachments: card with a big round play/pause button plus
+    // filename and size (Gtk::MediaFile playback, in place).
+    void load_audio_attachment(Gtk::Box* holder, const nlohmann::json& att);
+    void show_audio_widget(Gtk::Box* holder, const std::string& file,
+                           const std::string& name);
     void set_status(const std::string& text);
 
     ApiClient api_;
