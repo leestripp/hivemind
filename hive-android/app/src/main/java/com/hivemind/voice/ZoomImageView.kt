@@ -79,7 +79,12 @@ class ZoomImageView @JvmOverloads constructor(
         base.reset()
         base.setScale(fit, fit)
         base.postTranslate((vw - iw * fit) / 2f, (vh - ih * fit) / 2f)
-        mat.set(base)
+        // mat holds USER adjustments only — apply() composes base x mat.
+        // (2026-10-14 lee: images opened bottom-anchored — mat.set(base)
+        // here made apply() render base x base, fitting TWICE and scaling
+        // the centering translate off-centre. Pinch "fixed" it because
+        // clampPan uses the same composition.)
+        mat.reset()
         scale = 1f
         ready = true
         apply()

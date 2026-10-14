@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
@@ -49,10 +50,39 @@ class ChatPanel(
         // unreliable — observed dead chips 2026-10-14): tapping a message
         // opens its first attachment fullscreen (image viewer / video
         // player). Chips stay visual affordances, not click targets.
-        list.setOnItemClickListener { _, _, pos, _ ->
+        // Row-level tap is the contract (ListView child-click delivery is
+        // unreliable — observed dead chips 2026-10-14). The row records the
+        // tap's y so a multi-attachment message opens the attachment that
+        // was actually tapped, not always the first (lee 2026-10-14: "tap
+        // the second video, only the first plays").
+        list.setOnItemClickListener { _, view, pos, _ ->
             val m = messages.getOrNull(pos) ?: return@setOnItemClickListener
-            if (m.attachments.length() > 0)
-                openAttachment(m.attachments.getJSONObject(0))
+            if (m.attachments.length() == 0) return@setOnItemClickListener
+            val row = view as? AttRow
+            val tapped = row?.attAt(row.lastDownY)
+            openAttachment(tapped ?: m.attachments.getJSONObject(0))
+        }
+    }
+
+    /** Message row that remembers where the tap landed and which view
+     *  renders which attachment. */
+    inner class AttRow(ctx: android.content.Context) : LinearLayout(ctx) {
+        var lastDownY = Float.MAX_VALUE
+        val attViews = mutableListOf<Pair<View, JSONObject>>()
+
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastDownY = ev.y
+            return super.onInterceptTouchEvent(ev)
+        }
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastDownY = ev.y
+            return super.dispatchTouchEvent(ev)
+        }
+
+        fun attAt(y: Float): JSONObject? {
+            for ((v, att) in attViews)
+                if (y >= v.top && y <= v.bottom) return att
+            return null
         }
     }
 
@@ -61,7 +91,7 @@ class ChatPanel(
         Log.i(TAG, "open attachment: $name")
         Thread {
             try {
-                val cache = cacheFile(name)
+                val cache = cacheFile(att)
                 if (!cache.exists() || cache.length() == 0L) {
                     cache.parentFile?.mkdirs()
                     cache.writeBytes(api.downloadFile(att))
@@ -77,32 +107,6 @@ class ChatPanel(
                 Log.w(TAG, "attachment download failed: ${e.message}")
             }
         }.start()
-    }
-
-    /** Fullscreen image viewer: pinch-zoom / pan / double-tap via
-     *  ZoomImageView; long-press dismisses (a plain tap is zoom input). */
-    private fun showImage(file: File) {
-        val iv = ZoomImageView(activity).apply {
-            setImageBitmap(BitmapFactory.decodeFile(file.absolutePath))
-        }
-        val dlg = AlertDialog.Builder(activity,
-            android.R.style.Theme_Black_NoTitleBar_Fullscreen).setView(iv).create()
-        iv.setOnLongClickListener { dlg.dismiss(); true }
-        dlg.show()
-    }
-
-    private fun playVideo(file: File) {
-        val vv = VideoView(activity)
-        val dlg = AlertDialog.Builder(activity,
-            android.R.style.Theme_Black_NoTitleBar_Fullscreen).setView(vv).create()
-        vv.setVideoPath(file.absolutePath)
-        val mc = MediaController(activity)
-        mc.setAnchorView(vv)
-        vv.setMediaController(mc)
-        vv.setOnCompletionListener { dlg.dismiss() }
-        dlg.setOnDismissListener { vv.stopPlayback() }
-        dlg.show()
-        vv.start()
     }
 
     /** Reload full history (bg). Safe to call from the poll loop on
@@ -134,24 +138,31 @@ class ChatPanel(
 
         override fun getView(pos: Int, convert: View?, parent: ViewGroup): View {
             val m = messages[pos]
-            val row = (convert as? LinearLayout) ?: LinearLayout(activity).apply {
+            val row = (convert as? AttRow) ?: AttRow(activity).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = android.widget.AbsListView.LayoutParams(
                     android.widget.AbsListView.LayoutParams.MATCH_PARENT,
                     android.widget.AbsListView.LayoutParams.WRAP_CONTENT)
             }
             row.removeAllViews()
+            row.attViews.clear()
+            row.lastDownY = Float.MAX_VALUE
             if (m.senderKind != "user" && m.senderKind != "agent") {
-                row += centered(m.body, Color.parseColor("#7A8A99"))
+                row.addView(centered(m.body, Color.parseColor("#7A8A99")))
                 return row
             }
             val isUser = m.senderKind == "user"
             row.gravity = if (isUser) Gravity.END else Gravity.START
             val who = if (isUser) "You" else agentName
-            row += centered("$who · ${shortTime(m.createdAt)}", Color.parseColor("#7A8A99"), 11f)
-            if (m.body.isNotBlank()) row += bubble(m.body, isUser)
-            for (i in 0 until m.attachments.length())
-                row += attachmentView(m.attachments.getJSONObject(i), isUser)
+            row.addView(centered("$who · ${shortTime(m.createdAt)}",
+                Color.parseColor("#7A8A99"), 11f))
+            if (m.body.isNotBlank()) row.addView(bubble(m.body, isUser))
+            for (i in 0 until m.attachments.length()) {
+                val att = m.attachments.getJSONObject(i)
+                val av = attachmentView(att, isUser)
+                row.attViews += av to att
+                row.addView(av)
+            }
             return row
         }
 
@@ -201,10 +212,10 @@ class ChatPanel(
                 adjustViewBounds = true
                 val max = (activity.resources.displayMetrics.widthPixels * 0.72f).toInt()
                 layoutParams = LinearLayout.LayoutParams(max, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    .apply { gravity = if (isUser) Gravity.END else Gravity.START }
+                    .apply { gravity = Gravity.CENTER_HORIZONTAL }   // lee: center media
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
-            val cache = cacheFile(name)
+            val cache = cacheFile(att)
             if (cache.exists() && cache.length() > 0) {
                 iv.setImageBitmap(BitmapFactory.decodeFile(cache.absolutePath))
             } else {
@@ -223,41 +234,72 @@ class ChatPanel(
             return iv
         }
 
-        /** Embedded video preview (lee 2026-10-14: "videos need to be an
-         *  embedded player like the image"). Shows the first frame paused,
-         *  scaled to the same 72%-width slot images use; tap the row for
-         *  the fullscreen player with controls. VideoView is deliberately
-         *  left non-clickable so the tap reaches the ListView item. */
-        private fun inlineVideo(att: JSONObject, name: String, isUser: Boolean): VideoView {
+        /** Embedded video preview = thumbnail bitmap + ▶ overlay
+         *  (lee 2026-10-14: inline VideoViews showed black boxes —
+         *  seekTo(1) lands on the fade-from-black frame; a thumbnail
+         *  grabbed 1s in always has content, and a BitmapView recycles
+         *  cleanly in the ListView where a SurfaceView doesn't). Tap the
+         *  row for the fullscreen player. */
+        private fun inlineVideo(att: JSONObject, name: String, isUser: Boolean): View {
+            val max = (activity.resources.displayMetrics.widthPixels * 0.72f).toInt()
+            val h = (max * 9f / 16f).toInt()
             val density = activity.resources.displayMetrics.density
-            val vv = VideoView(activity).apply {
-                val max = (activity.resources.displayMetrics.widthPixels * 0.72f).toInt()
-                layoutParams = LinearLayout.LayoutParams(max, (max * 9f / 16f).toInt())
-                    .apply { gravity = if (isUser) Gravity.END else Gravity.START }
+            val frame = android.widget.FrameLayout(activity).apply {
+                layoutParams = LinearLayout.LayoutParams(max, h)
+                    .apply { gravity = Gravity.CENTER_HORIZONTAL }   // lee: center media
                 setBackgroundColor(Color.parseColor("#0A0E14"))
             }
-            fun bind(file: File) {
-                vv.setVideoPath(file.absolutePath)
-                // Fixed 16:9 slot: resizing on onVideoSizeChanged made rows
-                // jump for seconds after every refresh (portrait videos
-                // letterbox inside the slot — VideoView centers content).
-                vv.setOnPreparedListener { vv.seekTo(1) }  // first frame, paused
+            val iv = ImageView(activity).apply {
+                layoutParams = android.widget.FrameLayout.LayoutParams(max, h)
+                scaleType = ImageView.ScaleType.CENTER_CROP
             }
-            val cache = cacheFile(name)
-            if (cache.exists() && cache.length() > 0) {
-                bind(cache)
+            val play = TextView(activity).apply {
+                text = "▶"
+                textSize = 28f
+                setTextColor(Color.WHITE)
+                val r = (26 * density).toInt()
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#80000000"))
+                }
+                gravity = Gravity.CENTER
+                layoutParams = android.widget.FrameLayout.LayoutParams(r * 2, r * 2)
+                    .apply { gravity = Gravity.CENTER }
+            }
+            frame.addView(iv)
+            frame.addView(play)
+
+            val thumb = File(cacheFile(att).absolutePath + ".thumb.png")
+            if (thumb.exists() && thumb.length() > 0) {
+                iv.setImageBitmap(BitmapFactory.decodeFile(thumb.absolutePath))
             } else {
                 Thread {
                     try {
-                        cache.parentFile?.mkdirs()
-                        cache.writeBytes(api.downloadFile(att))
-                        ui.post { bind(cache) }
+                        val cache = cacheFile(att)
+                        if (!cache.exists() || cache.length() == 0L) {
+                            cache.parentFile?.mkdirs()
+                            cache.writeBytes(api.downloadFile(att))
+                        }
+                        val mmr = android.media.MediaMetadataRetriever()
+                        try {
+                            mmr.setDataSource(cache.absolutePath)
+                            val bmp = mmr.getFrameAtTime(1_000_000)   // 1s in — past fades
+                                ?: mmr.getFrameAtTime(0)
+                            if (bmp != null) {
+                                java.io.FileOutputStream(thumb).use { out ->
+                                    bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
+                                }
+                                ui.post { iv.setImageBitmap(bmp) }
+                            }
+                        } finally {
+                            mmr.release()
+                        }
                     } catch (e: Exception) {
-                        Log.w(TAG, "video download failed: ${e.message}")
+                        Log.w(TAG, "video thumb failed: ${e.message}")
                     }
                 }.start()
             }
-            return vv
+            return frame
         }
 
         private fun fileChip(att: JSONObject, name: String, isUser: Boolean): View =
@@ -294,9 +336,73 @@ class ChatPanel(
         }
     }
 
-    private fun cacheFile(name: String): File {
+    /** Fullscreen media lives in the activity's mediaOverlay FrameLayout
+     *  (2026-10-14: dialogs stayed floating top-third windows on this
+     *  device despite setLayout — an in-activity view has no window
+     *  manager between us and the screen). Returns false when nothing
+     *  was open so BACK can fall through. */
+    fun closeMedia(): Boolean {
+        if (overlay.childCount == 0) return false
+        activeController?.hide()      // a shown controller eats BACK presses
+        activeController = null
+        (overlay.getChildAt(0) as? TexturePlayer)?.release()
+        overlay.removeAllViews()
+        overlay.visibility = View.GONE
+        return true
+    }
+
+    private var activeController: MediaController? = null
+
+    private val overlay: android.widget.FrameLayout
+        get() = activity.findViewById(R.id.mediaOverlay)
+
+    private fun showMedia(v: View) {
+        overlay.removeAllViews()
+        overlay.addView(v, android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT))
+        overlay.visibility = View.VISIBLE
+    }
+
+    /** Fullscreen image viewer: pinch-zoom / pan / double-tap via
+     *  ZoomImageView; long-press dismisses (a plain tap is zoom input). */
+    private fun showImage(file: File) {
+        val iv = ZoomImageView(activity)
+        iv.setOnLongClickListener { closeMedia(); true }
+        iv.setImageBitmap(BitmapFactory.decodeFile(file.absolutePath))
+        showMedia(iv)
+    }
+
+    private fun playVideo(file: File) {
+        val tp = TexturePlayer(activity)   // TextureView — no SurfaceView ghosts
+        tp.onDone = { closeMedia() }
+        val mc = MediaController(activity)
+        mc.setAnchorView(tp)
+        mc.setMediaPlayer(tp)
+        activeController = mc
+        // Controller on a TAP only (lee 2026-10-14: showing it on any touch
+        // meant every back-swipe's edge-down summoned the controller, which
+        // then ate the BACK itself — video never closed until it ended).
+        val taps = android.view.GestureDetector(activity,
+            object : android.view.GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapUp(e: MotionEvent): Boolean {
+                    mc.show(); return true
+                }
+            })
+        tp.setOnTouchListener { _, ev -> taps.onTouchEvent(ev) }
+        showMedia(tp)
+        tp.play(file.absolutePath)
+    }
+
+    /** Cache file for an attachment. Keyed by name + a short hash of the
+     *  hub path: two different attachments can share a display name
+     *  (lee 2026-10-14: second video "played the first" — name-keyed
+     *  cache resolved both to the first download). */
+    private fun cacheFile(att: JSONObject): File {
+        val name = att.optString("name", "file")
         val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        return File(activity.cacheDir, "attachments/$threadId/$safe")
+        val key = att.optString("path", "").hashCode().toString(16)
+        return File(activity.cacheDir, "attachments/$threadId/$key-$safe")
     }
 
     private operator fun LinearLayout.plusAssign(v: View) { addView(v) }

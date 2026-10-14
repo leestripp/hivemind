@@ -247,6 +247,7 @@ class VoiceActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        if (chatPanel?.closeMedia() == true) return
         if (chatMode) showVoiceMode() else super.onBackPressed()
     }
 

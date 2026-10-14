@@ -75,6 +75,17 @@
 
     <!-- Voice / chat mode switch. Visible in both modes; z-ordered last
          so it floats above the chat panel. -->
+    <!-- Fullscreen media overlay (image zoom / video player). Dialogs
+         proved unreliable for fullscreen on this device (floating window
+         ignored setLayout — status bar stayed visible, content top-third);
+         an in-activity overlay has no window manager in the way. -->
+    <FrameLayout
+        android:id="@+id/mediaOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/modeBar"
         android:orientation="horizontal"
