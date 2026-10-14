@@ -79,16 +79,15 @@ class ChatPanel(
         }.start()
     }
 
-    /** Fullscreen image viewer (tap anywhere to dismiss). */
+    /** Fullscreen image viewer: pinch-zoom / pan / double-tap via
+     *  ZoomImageView; long-press dismisses (a plain tap is zoom input). */
     private fun showImage(file: File) {
-        val iv = ImageView(activity).apply {
+        val iv = ZoomImageView(activity).apply {
             setImageBitmap(BitmapFactory.decodeFile(file.absolutePath))
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER
         }
         val dlg = AlertDialog.Builder(activity,
             android.R.style.Theme_Black_NoTitleBar_Fullscreen).setView(iv).create()
-        iv.setOnClickListener { dlg.dismiss() }
+        iv.setOnLongClickListener { dlg.dismiss(); true }
         dlg.show()
     }
 
@@ -192,7 +191,7 @@ class ChatPanel(
             val ext = name.substringAfterLast('.', "").lowercase()
             return when (ext) {
                 "jpg", "jpeg", "png", "webp", "gif", "bmp" -> imageView(att, name, isUser)
-                "mp4", "webm", "mov", "mkv", "3gp" -> videoChip(att, name, isUser)
+                "mp4", "webm", "mov", "mkv", "3gp" -> inlineVideo(att, name, isUser)
                 else -> fileChip(att, name, isUser)
             }
         }
@@ -224,8 +223,42 @@ class ChatPanel(
             return iv
         }
 
-        private fun videoChip(att: JSONObject, name: String, isUser: Boolean): View =
-            chip("▶ $name", isUser)
+        /** Embedded video preview (lee 2026-10-14: "videos need to be an
+         *  embedded player like the image"). Shows the first frame paused,
+         *  scaled to the same 72%-width slot images use; tap the row for
+         *  the fullscreen player with controls. VideoView is deliberately
+         *  left non-clickable so the tap reaches the ListView item. */
+        private fun inlineVideo(att: JSONObject, name: String, isUser: Boolean): VideoView {
+            val density = activity.resources.displayMetrics.density
+            val vv = VideoView(activity).apply {
+                val max = (activity.resources.displayMetrics.widthPixels * 0.72f).toInt()
+                layoutParams = LinearLayout.LayoutParams(max, (max * 9f / 16f).toInt())
+                    .apply { gravity = if (isUser) Gravity.END else Gravity.START }
+                setBackgroundColor(Color.parseColor("#0A0E14"))
+            }
+            fun bind(file: File) {
+                vv.setVideoPath(file.absolutePath)
+                // Fixed 16:9 slot: resizing on onVideoSizeChanged made rows
+                // jump for seconds after every refresh (portrait videos
+                // letterbox inside the slot — VideoView centers content).
+                vv.setOnPreparedListener { vv.seekTo(1) }  // first frame, paused
+            }
+            val cache = cacheFile(name)
+            if (cache.exists() && cache.length() > 0) {
+                bind(cache)
+            } else {
+                Thread {
+                    try {
+                        cache.parentFile?.mkdirs()
+                        cache.writeBytes(api.downloadFile(att))
+                        ui.post { bind(cache) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "video download failed: ${e.message}")
+                    }
+                }.start()
+            }
+            return vv
+        }
 
         private fun fileChip(att: JSONObject, name: String, isUser: Boolean): View =
             chip("📎 $name", isUser)
