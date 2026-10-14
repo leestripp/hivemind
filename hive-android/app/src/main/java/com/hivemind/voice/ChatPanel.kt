@@ -100,6 +100,7 @@ class ChatPanel(
                 ui.post {
                     when (ext) {
                         "mp4", "webm", "mov", "mkv", "3gp" -> playVideo(cache)
+                        "flac", "mp3", "wav", "ogg", "m4a", "aac", "opus" -> toggleAudio(cache, name)
                         else -> showImage(cache)
                     }
                 }
@@ -203,6 +204,7 @@ class ChatPanel(
             return when (ext) {
                 "jpg", "jpeg", "png", "webp", "gif", "bmp" -> imageView(att, name, isUser)
                 "mp4", "webm", "mov", "mkv", "3gp" -> inlineVideo(att, name, isUser)
+                "flac", "mp3", "wav", "ogg", "m4a", "aac", "opus" -> chip("🎵 $name", isUser)
                 else -> fileChip(att, name, isUser)
             }
         }
@@ -341,14 +343,59 @@ class ChatPanel(
      *  device despite setLayout — an in-activity view has no window
      *  manager between us and the screen). Returns false when nothing
      *  was open so BACK can fall through. */
+    /** BACK / close: stops any audio, then any fullscreen overlay. Audio
+     *  has no overlay view, so the early-out must come AFTER stopping it. */
     fun closeMedia(): Boolean {
-        if (overlay.childCount == 0) return false
+        val hadAudio = audioPlayer != null
+        stopAudio()
+        if (overlay.childCount == 0) return hadAudio
         activeController?.hide()      // a shown controller eats BACK presses
         activeController = null
         (overlay.getChildAt(0) as? TexturePlayer)?.release()
         overlay.removeAllViews()
         overlay.visibility = View.GONE
         return true
+    }
+
+    // ---- audio attachments (lee 2026-10-14: test Bob's songs) ----
+    // One shared MediaPlayer; tapping a chip toggles it, tapping a
+    // different song switches. Standard SDK MediaPlayer, no dependencies.
+    private var audioPlayer: android.media.MediaPlayer? = null
+    private var audioPath: String? = null
+
+    private fun stopAudio() {
+        audioPlayer?.let {
+            try { it.stop(); it.release() } catch (_: Exception) {}
+        }
+        audioPlayer = null
+        audioPath = null
+    }
+
+    private fun toggleAudio(cache: java.io.File, name: String) {
+        if (audioPath == cache.absolutePath) {           // same song: stop
+            stopAudio()
+            android.widget.Toast.makeText(activity, "Stopped $name",
+                android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        stopAudio()
+        val mp = android.media.MediaPlayer()
+        try {
+            mp.setDataSource(cache.absolutePath)
+            mp.setOnCompletionListener { p ->
+                p.release()
+                if (audioPlayer === p) { audioPlayer = null; audioPath = null }
+            }
+            mp.prepare()
+            mp.start()
+            audioPlayer = mp
+            audioPath = cache.absolutePath
+            android.widget.Toast.makeText(activity, "▶ $name",
+                android.widget.Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            mp.release()
+            Log.w(TAG, "audio playback failed: ${e.message}")
+        }
     }
 
     private var activeController: MediaController? = null
