@@ -216,7 +216,7 @@ class ChatPanel(
             return when (ext) {
                 "jpg", "jpeg", "png", "webp", "gif", "bmp" -> imageView(att, name, isUser)
                 "mp4", "webm", "mov", "mkv", "3gp" -> inlineVideo(att, name, isUser)
-                "flac", "mp3", "wav", "ogg", "m4a", "aac", "opus" -> chip("🎵 $name", isUser)
+                "flac", "mp3", "wav", "ogg", "m4a", "aac", "opus" -> audioCard(att, name, isUser)
                 else -> fileChip(att, name, isUser)
             }
         }
@@ -318,6 +318,59 @@ class ChatPanel(
 
         private fun fileChip(att: JSONObject, name: String, isUser: Boolean): View =
             chip("📎 $name", isUser)
+
+        /** Audio attachment card (lee 2026-10-14: "nice cards with filenames
+         *  and the LARGE play button" — fat-finger target). The ▶ is an
+         *  affordance; the row tap (AttRow.attAt) opens the fullscreen
+         *  player, so the button itself needs no listener. */
+        private fun audioCard(att: JSONObject, name: String, isUser: Boolean): View {
+            val dp = activity.resources.displayMetrics.density
+            val max = (activity.resources.displayMetrics.widthPixels * 0.72f).toInt()
+            val card = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply {
+                    cornerRadius = 16 * dp
+                    setColor(Color.parseColor(if (isUser) "#12303A" else "#101820"))
+                    setStroke((1.5f * dp).toInt(), Color.parseColor("#1E4A56"))
+                }
+                val p = (14 * dp).toInt()
+                setPadding(p, p, p, p)
+                layoutParams = LinearLayout.LayoutParams(
+                    max, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { gravity = Gravity.CENTER_HORIZONTAL }   // lee: center media
+            }
+            // large round play affordance
+            card.addView(TextView(activity).apply {
+                text = "▶"
+                textSize = 28f
+                gravity = Gravity.CENTER
+                setTextColor(Color.parseColor("#33D6E8"))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#0A0E14"))
+                    setStroke((2 * dp).toInt(), Color.parseColor("#33D6E8"))
+                }
+                val sz = (64 * dp).toInt()
+                layoutParams = LinearLayout.LayoutParams(sz, sz)
+            })
+            // filename + size
+            val sizeMb = att.optLong("size", 0) / 1024.0 / 1024.0
+            card.addView(TextView(activity).apply {
+                text = if (sizeMb > 0)
+                    "🎵 $name\n%.1f MB".format(sizeMb)
+                else
+                    "🎵 $name"
+                setTextColor(Color.parseColor("#DCE8F0"))
+                textSize = 15f
+                maxLines = 3
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                ).apply { marginStart = (14 * dp).toInt() }
+            })
+            return card
+        }
 
         private fun chip(text: String, isUser: Boolean): TextView {
             val bg = GradientDrawable().apply {
