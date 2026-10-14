@@ -1064,8 +1064,11 @@ class VoiceActivity : Activity() {
     override fun onDestroy() {
         stopSpeakAnimator()
         ui.removeCallbacksAndMessages(null)
-        stt.destroy()
-        tts.destroy()
+        // runCatching: a destroy-time engine bug must NEVER crash the app
+        // (2026-10-14: PcmPlayer.destroy NPE → "app keeps stopping" dialog
+        // + whole task wiped on a simple BACK from the voice screen).
+        runCatching { stt.destroy() }
+        runCatching { tts.destroy() }
         io.shutdownNow()
         super.onDestroy()
     }

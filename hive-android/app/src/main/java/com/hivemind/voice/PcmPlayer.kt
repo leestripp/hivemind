@@ -23,7 +23,10 @@ class PcmPlayer(
     private val onLevel: (Float) -> Unit,
 ) {
     private data class Item(val pcm: FloatArray?, val counted: Boolean)
-    private val queue = ArrayBlockingQueue<Item?>(64)  // null = poison
+    /** ArrayBlockingQueue rejects NULL elements (offer → NPE — the
+     *  2026-10-14 destroy crash): poison is an explicit sentinel Item. */
+    private val poison = Item(null, counted = false)
+    private val queue = ArrayBlockingQueue<Item>(64)
     /** Bumped by [stop]: the chunk mid-write when a stop lands must
      *  abort (else audio continues past the interrupt and its
      *  onChunkPlayed decrements an already-zeroed count). */
@@ -39,6 +42,7 @@ class PcmPlayer(
     private val writer = Thread {
         while (running) {
             val item = try { queue.take() } catch (_: InterruptedException) { null } ?: break
+            if (item === poison) break
             val g = writeGen.get()
             item.pcm?.let { writeChunk(it, g) }
             if (g == writeGen.get()) onChunkPlayed(item.counted)
@@ -89,7 +93,7 @@ class PcmPlayer(
     fun destroy() {
         running = false
         queue.clear()
-        queue.offer(null)          // poison the writer
+        queue.offer(poison)        // unblock the writer; it breaks on it
         runCatching { writer.join(2_000) }
         runCatching { track.stop(); track.release() }
     }
