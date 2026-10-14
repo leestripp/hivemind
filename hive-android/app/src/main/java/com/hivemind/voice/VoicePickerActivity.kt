@@ -57,11 +57,23 @@ class VoicePickerActivity : Activity() {
         }, onInitFailed = {
             status.text = "No text-to-speech engine on this device"
         })
+        // Load the pocket-tts model too: when ready, the picker lists
+        // the desktop voices instead of the OS engine's.
+        Thread {
+            tts.initLocal(applicationContext)
+            ui.post { populate() }
+        }.start()
         status.text = "Loading voices…"
     }
 
     private fun populate() {
-        options = tts.englishVoiceOptions()
+        options = if (PocketTts.ready)
+            PocketTts.VOICES.map { v ->
+                TtsEngine.VoiceOption(v, v.replace('_', ' ')
+                    .split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) })
+            }
+        else
+            tts.englishVoiceOptions()
         list.adapter = VoiceAdapter()
         list.setOnItemClickListener { _, _, pos, _ ->
             if (pos in options.indices) sample(options[pos])
@@ -86,6 +98,13 @@ class VoicePickerActivity : Activity() {
 
 
     private fun sample(opt: TtsEngine.VoiceOption) {
+        if (PocketTts.ready) {
+            tts.applyVoice(opt.name)
+            status.text = "Sampling ${opt.label}…"
+            ui.postDelayed(
+                { tts.preview("Hi, I'm $agentName — this is my voice.") }, 250)
+            return
+        }
         tts.setVoiceByName(opt.name)
         status.text = "Sampling ${opt.label}…"
         // setVoice() races an immediately-queued speak(): the engine

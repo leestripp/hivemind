@@ -4,6 +4,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import java.util.concurrent.Executors
 
 /**
  * Queued-utterance TextToSpeech wrapper for streamed replies.
@@ -50,6 +51,21 @@ class TtsEngine(
     @Volatile private var epochBase = 0
     private val pending = mutableListOf<String>()
 
+    /** On-device pocket-tts backend (audio.cpp — the SAME engine and
+     *  voices as desktop hive-client-voice, so agents sound identical
+     *  on both). When [pocketOk], speakQueued synthesizes chunks on
+     *  [synthExec] and plays PCM through PcmPlayer, which gives TRUE
+     *  mid-word hold (AudioTrack.pause keeps position) — the system-TTS
+     *  path below stays as the fallback when the model can't load. */
+    private val synthExec = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "hive-tts-synth")
+    }
+    private var player: PcmPlayer? = null
+    @Volatile private var pocketOk = false
+    @Volatile private var pocketVoice: String? = null
+    @Volatile private var rms = 0f
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+
     init {
         TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -76,8 +92,24 @@ class TtsEngine(
         }.also { tts = it }
     }
 
+    /** Load the pocket-tts model. BLOCKING (~1-4s) — bg thread only.
+     *  Safe to call once at startup; failure leaves the system-TTS
+     *  fallback active. */
+    fun initLocal(context: Context) {
+        if (!PocketTts.init(context)) return
+        pocketOk = true
+        (preferredVoiceName ?: pocketVoice)?.let {
+            if (it in PocketTts.VOICES) pocketVoice = it
+        }
+        player = PcmPlayer(PocketTts.sampleRate,
+            onChunkPlayed = { counted -> if (counted) chunkDone() },
+            onLevel = { rms = it })
+        Log.i(TAG, "pocket-tts active (voice=${pocketVoice ?: "alba"})")
+    }
+
     /** Queue a chunk for speech. Call on the main thread. */
     fun speakQueued(text: String) {
+        if (pocketOk) { pocketSpeak(text); return }
         val engine = tts
         if (!ready || engine == null) {
             if (pending.size < 20) pending += text  // never-ready cap
@@ -101,8 +133,60 @@ class TtsEngine(
         engine.speak(text, TextToSpeech.QUEUE_ADD, null, id)
     }
 
+    /** Pocket path: synthesize on the synth thread, hand PCM to the
+     *  player. Chunks synthesized DURING a hold still queue (player is
+     *  paused) — no rebuild dance needed. Synth failure falls back to
+     *  the system engine for that chunk rather than dropping speech. */
+    private fun pocketSpeak(text: String) {
+        outstanding++
+        val epoch = epochBase
+        speaking = true
+        Log.d(TAG, "synth +${text.length} chars (out=$outstanding)")
+        synthExec.execute {
+            if (epoch != epochBase) return@execute   // stop() already zeroed
+            val pcm = PocketTts.synthesize(text, pocketVoice ?: "alba")
+            if (pcm != null && epoch == epochBase) {
+                player?.enqueue(pcm, counted = true)
+            } else if (pcm != null) {
+                // stop() raced the synth — drop the PCM, count stays zeroed
+            } else {
+                Log.w(TAG, "pocket synth failed — system TTS speaks this chunk")
+                ui.post {
+                    if (epoch != epochBase) return@post
+                    outstanding--                 // undo pocket count…
+                    val engine = tts
+                    if (ready && engine != null) {
+                        outstanding++             // …system count instead
+                        speakNow(engine, text)    // its callbacks decrement
+                    } else {
+                        outstanding = 0
+                        speaking = false
+                        onQueueEmpty()
+                    }
+                }
+            }
+        }
+    }
+
+    /** A pocket chunk finished PLAYING (PcmPlayer writer thread). */
+    private fun chunkDone() {
+        if (outstanding > 0) outstanding--
+        Log.d(TAG, "chunk played (out=$outstanding)")
+        if (outstanding == 0) {
+            speaking = false
+            onQueueEmpty()
+        }
+    }
+
     /** Hold/resume playback for push-to-talk. Call on the main thread. */
     fun setHeld(h: Boolean) {
+        if (pocketOk) {
+            if (held == h) return
+            held = h
+            if (h) player?.pause() else player?.resume()
+            Log.i(TAG, "pocket setHeld($h) — playback ${if (h) "paused mid-word" else "resumed"}")
+            return
+        }
         Log.i(TAG, "setHeld($h) — held=$held live=${texts.size}")
         if (held == h) return
         held = h
@@ -160,6 +244,10 @@ class TtsEngine(
      * utterances QUEUED AFTER this call — the one playing is untouched.
      */
     fun applyVoice(name: String?) {
+        if (name != null && name in PocketTts.VOICES) {
+            pocketVoice = name
+            if (pocketOk) { Log.i(TAG, "pocket voice set to $name"); return }
+        }
         if (!ready) { preferredVoiceName = name; return }
         if (name.isNullOrEmpty()) {
             tts?.let { it.voice = it.defaultVoice }
@@ -179,6 +267,16 @@ class TtsEngine(
 
     /** One-off sample playback (voice picker); interrupts any prior sample. */
     fun preview(text: String) {
+        if (pocketOk) {
+            val v = pocketVoice ?: "alba"
+            synthExec.execute {
+                val pcm = PocketTts.synthesize(text, v) ?: return@execute
+                val p = player ?: return@execute
+                p.stop()                       // cut the prior sample
+                p.enqueue(pcm, counted = false)
+            }
+            return
+        }
         val engine = tts
         if (!ready || engine == null) return
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "${UTTER_PREFIX}preview")
@@ -193,10 +291,14 @@ class TtsEngine(
         outstanding = 0
         speaking = false
         epochBase = seq
+        player?.stop()
         tts?.stop()
     }
 
     fun destroy() {
+        player?.destroy()
+        player = null
+        synthExec.shutdown()
         tts?.stop()
         tts?.shutdown()
         tts = null
@@ -204,6 +306,7 @@ class TtsEngine(
 
     /** Animated 0..1 envelope for the sphere while the agent talks. */
     fun level(nowSec: Float): Float {
+        if (pocketOk) return (rms * 2.2f).coerceIn(0f, 0.9f)
         if (!speaking) return 0f
         val base = 0.38f + 0.22f * kotlin.math.sin(nowSec * 7.3f) *
                 kotlin.math.sin(nowSec * 2.1f + 1.3f)

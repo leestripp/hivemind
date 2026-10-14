@@ -178,6 +178,10 @@ class VoiceActivity : Activity() {
             status.text = "No text-to-speech engine on this device — " +
                           "replies will be silent"
         })
+        // On-device pocket-tts (audio.cpp — same voices as desktop).
+        // Blocking model load (~1-4s) on a bg thread; on failure the
+        // system-TTS path simply stays active.
+        Thread { tts.initLocal(applicationContext) }.start()
         // Per-agent voice (chosen in VoicePickerActivity); "" = default.
         Prefs.voiceFor(this, agentId).ifEmpty { null }?.let {
             tts.preferredVoiceName = it

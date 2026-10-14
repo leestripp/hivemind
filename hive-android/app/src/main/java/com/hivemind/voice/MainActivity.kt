@@ -68,6 +68,10 @@ class MainActivity : Activity() {
         status = findViewById(R.id.statusText)
         list = findViewById(R.id.agentList)
         tts = TtsEngine(this, onQueueEmpty = { /* nothing to resume */ })
+        // Warm the on-device pocket-tts engine at app start (process-wide
+        // singleton): VoiceActivity/picker then get instant local voices;
+        // state announcements on this screen use it too.
+        Thread { tts.initLocal(applicationContext) }.start()
         // Feature on but permission missing → the grant popup, once per
         // app start (the Settings toggle also triggers it).
         if (Prefs.notifyAnnounce(this))

@@ -9,3 +9,4 @@ local.properties
 app/src/main/jniLibs/
 app/src/main/assets/models/
 app/src/main/cpp/whisper-cpp/
+app/src/main/cpp/audio-cpp/

@@ -42,3 +42,25 @@ set_target_properties(whisper_jni PROPERTIES
     CXX_STANDARD_REQUIRED ON)
 target_compile_options(whisper_jni PRIVATE -O2)
 target_link_libraries(whisper_jni PRIVATE whisper ${lib_log})
+
+# ── audio.cpp pocket-TTS (vendored by fetch-deps.sh → audio-cpp/) ────
+# Same engine + voices as desktop hive-client-voice (ChimpFlow). Pinned
+# to the ChimpFlow commit; CPU-only, pocket_tts family only (custom model
+# set skips the other 110+ families' objects). Measured on the edge 30:
+# RTF 0.78 (~1.3x faster than real-time), 490MB peak RSS.
+# audio.cpp builds OUTSIDE this project (fetch-deps.sh → jniLibs/
+# libaudiocpp.so): both whisper.cpp and audio.cpp vendor ggml, and
+# add_subdirectory'ing both collides on the ggml target names
+# (CMP0002). The prebuilt also pins its own configure flags (C++20,
+# pocket_tts-only model set, -llog) independent of AGP's -std=c++17.
+add_library(audiocpp SHARED IMPORTED)
+set_target_properties(audiocpp PROPERTIES
+    IMPORTED_LOCATION
+        ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libaudiocpp.so
+    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/audio-cpp/include)
+
+add_library(pocket_tts_jni SHARED pocket_tts_jni.cpp)
+set_target_properties(pocket_tts_jni PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON)
+target_link_libraries(pocket_tts_jni PRIVATE audiocpp ${lib_log})
