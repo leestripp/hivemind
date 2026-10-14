@@ -32,6 +32,17 @@ class TtsEngine(
     @Volatile var outstanding = 0
         private set
     private var seq = 0
+
+    /** Push-to-talk hold (2026-10-14): while held, chunks queue in
+     *  [heldChunks], NOT the OS engine — agents never talk over the
+     *  user's recording. Engaging mid-utterance re-queues the playing
+     *  sentence at the front (Android TTS has no pause/resume, and its
+     *  stop() discards the WHOLE engine queue, so every live
+     *  utterance's text is kept in [texts] for the rebuild). */
+    @Volatile private var held = false
+    private val heldChunks = ArrayDeque<String>()
+    private var currentId: String? = null
+    private val texts = mutableMapOf<String, String>()
     /** Utterances with seq below this were killed by [stop] — their late
      *  callbacks must not touch speaking/outstanding (already accounted),
      *  or they flicker the sphere mid-next-reply and double-fire
@@ -73,8 +84,54 @@ class TtsEngine(
             return
         }
         outstanding++
+        if (held) {
+            heldChunks += text
+            Log.d(TAG, "queue +${text.length} chars HELD (out=$outstanding)")
+            return
+        }
+        speakNow(engine, text)
+    }
+
+    /** Hand one chunk to the OS engine (no accounting — callers own
+     *  outstanding; the flush path re-speaks already-counted chunks). */
+    private fun speakNow(engine: TextToSpeech, text: String) {
+        val id = "$UTTER_PREFIX${seq++}"
+        texts[id] = text
         Log.d(TAG, "queue +${text.length} chars (out=$outstanding)")
-        engine.speak(text, TextToSpeech.QUEUE_ADD, null, "$UTTER_PREFIX${seq++}")
+        engine.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+    }
+
+    /** Hold/resume playback for push-to-talk. Call on the main thread. */
+    fun setHeld(h: Boolean) {
+        Log.i(TAG, "setHeld($h) — held=$held live=${texts.size}")
+        if (held == h) return
+        held = h
+        if (h) {
+            // Rebuild everything the OS engine is holding (playing +
+            // queued) into heldChunks, in seq order, playing first —
+            // engine.stop() below discards it all.
+            val live = texts.entries
+                .sortedBy { it.key.removePrefix(UTTER_PREFIX).toIntOrNull() ?: 0 }
+            val playing = currentId
+            for (e in live) {
+                if (e.key == playing) heldChunks.addFirst(e.value)
+                else heldChunks.addLast(e.value)
+            }
+            texts.clear()
+            currentId = null
+            speaking = false
+            epochBase = seq  // late callbacks for the discarded utterances are stale
+            tts?.stop()
+            if (live.isNotEmpty())
+                Log.i(TAG, "held: ${live.size} utterance(s) parked for recording")
+        } else if (heldChunks.isNotEmpty()) {
+            val engine = tts
+            val chunks = heldChunks.toList()
+            heldChunks.clear()
+            Log.i(TAG, "released: ${chunks.size} held chunk(s)")
+            if (engine != null && ready) chunks.forEach { speakNow(engine, it) }
+            else pending.addAll(chunks)  // engine died mid-hold: pre-ready list
+        }
     }
 
     data class VoiceOption(val name: String, val label: String)
@@ -130,6 +187,9 @@ class TtsEngine(
     /** Interrupt: drop everything queued + playing. */
     fun stop() {
         pending.clear()
+        heldChunks.clear()
+        texts.clear()
+        currentId = null
         outstanding = 0
         speaking = false
         epochBase = seq
@@ -150,10 +210,15 @@ class TtsEngine(
         return base.coerceIn(0.08f, 0.75f)
     }
 
-    override fun onStart(utteranceId: String?) { speaking = true }
+    override fun onStart(utteranceId: String?) {
+        speaking = true
+        currentId = utteranceId
+    }
 
     override fun onDone(utteranceId: String?) {
         if (isPreStop(utteranceId)) return
+        utteranceId?.let { texts.remove(it) }
+        if (utteranceId == currentId) currentId = null
         if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
             outstanding--
             Log.d(TAG, "done (out=$outstanding)")
@@ -167,6 +232,8 @@ class TtsEngine(
     @Deprecated("deprecated in TTS API")
     override fun onError(utteranceId: String?) {
         if (isPreStop(utteranceId)) return
+        utteranceId?.let { texts.remove(it) }
+        if (utteranceId == currentId) currentId = null
         if (utteranceId?.startsWith(UTTER_PREFIX) == true && outstanding > 0) {
             outstanding--
         }

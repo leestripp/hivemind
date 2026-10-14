@@ -38,6 +38,13 @@ class SttEngine(
     @Volatile var listening: Boolean = false
         private set
 
+    /** Push-to-talk playback hold (2026-10-14): fires on every capture
+     *  transition (true = recording, false = stopped) so the owner can
+     *  hold TTS — agents must not talk over the user's recording.
+     *  Fires on the bg thread; the owner must post to the main thread
+     *  before touching UI/TTS. */
+    var onRecordingChanged: ((Boolean) -> Unit)? = null
+
     private val ui = Handler(Looper.getMainLooper())
     private val worker = HandlerThread("hive-stt").apply { start() }
     private val bg = Handler(worker.looper)
@@ -170,6 +177,7 @@ class SttEngine(
     /** Kill the capture thread + mic. Idempotent. */
     private fun teardownCapture() {
         listening = false
+        onRecordingChanged?.invoke(false)
         try {
             captureThread?.join(2_000)
         } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
@@ -265,6 +273,7 @@ class SttEngine(
         }
         record = ar
         listening = true
+        onRecordingChanged?.invoke(true)
         Log.i(TAG, "capture start")
         ar.startRecording()
         bg.postDelayed(partialTick, PARTIAL_MS)

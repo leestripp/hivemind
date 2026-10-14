@@ -182,6 +182,14 @@ class VoiceActivity : Activity() {
         Prefs.voiceFor(this, agentId).ifEmpty { null }?.let {
             tts.preferredVoiceName = it
         }
+        // Push-to-talk hold (2026-10-14): agents never talk over the
+        // user's recording — capture transitions hold/resume playback;
+        // the interrupted sentence restarts on release (Android TTS
+        // has no mid-word pause).
+        stt.onRecordingChanged = { rec ->
+            android.util.Log.i("HiveVoice", "hold wiring: rec=$rec")
+            ui.post { tts.setHeld(rec) }
+        }
 
         talk.isEnabled = false
         status.text = "Connecting…"
