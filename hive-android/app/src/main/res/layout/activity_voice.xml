@@ -56,8 +56,36 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/bg"
-        android:paddingTop="96dp"
+        android:paddingTop="24dp"
         android:visibility="gone">
+
+        <!-- Standard app bar: back arrow top-left (lee 2026-10-14:
+             "back button with arrow at the top left like other Android
+             apps" — replaces the bottom mode bar in chat). -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp">
+
+            <ImageButton
+                android:id="@+id/chatBackButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back to voice"
+                android:src="@drawable/ic_arrow_back" />
+
+            <TextView
+                android:id="@+id/chatTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:textColor="@color/text"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <ListView
             android:id="@+id/chatList"
@@ -73,45 +101,15 @@
             android:transcriptMode="normal" />
     </LinearLayout>
 
-    <!-- Voice / chat mode switch. Visible in both modes; z-ordered last
-         so it floats above the chat panel. -->
-    <!-- Fullscreen media overlay (image zoom / video player). Dialogs
-         proved unreliable for fullscreen on this device (floating window
-         ignored setLayout — status bar stayed visible, content top-third);
-         an in-activity overlay has no window manager in the way. -->
+    <!-- Fullscreen media overlay (image zoom / video player). Sits above
+         the chat panel; an in-activity view has no window manager in the
+         way (dialogs stayed floating top-third windows on this device). -->
     <FrameLayout
         android:id="@+id/mediaOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="#000000"
         android:visibility="gone" />
-
-    <LinearLayout
-        android:id="@+id/modeBar"
-        android:orientation="horizontal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="10dp"
-        android:gravity="center_vertical">
-
-        <ImageButton
-            android:id="@+id/modeVoiceButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginEnd="28dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Voice chat"
-            android:src="@drawable/ic_mic" />
-
-        <ImageButton
-            android:id="@+id/modeChatButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Full chat"
-            android:src="@drawable/ic_chat" />
-    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/buttonRow"
@@ -142,5 +140,17 @@
             android:textColor="@color/cyan"
             android:textSize="16sp"
             android:textStyle="bold" />
+
+        <!-- Chat opens to the RIGHT of TALK (lee 2026-10-14: fixed
+             STOP–TALK–CHAT row so buttons never move around; cancelButton
+             is INVISIBLE when idle so TALK stays dead-centre). -->
+        <ImageButton
+            android:id="@+id/chatButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="28dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Text chat"
+            android:src="@drawable/ic_chat" />
     </LinearLayout>
 </FrameLayout>

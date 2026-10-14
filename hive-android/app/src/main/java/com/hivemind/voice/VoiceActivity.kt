@@ -150,10 +150,12 @@ class VoiceActivity : Activity() {
         sphere = findViewById(R.id.sphereView)
         status = findViewById(R.id.statusText)
         talk = findViewById(R.id.talkButton)
-        findViewById<android.widget.ImageButton>(R.id.modeVoiceButton)
-            .setOnClickListener { showVoiceMode() }
-        findViewById<android.widget.ImageButton>(R.id.modeChatButton)
+        // Fixed bottom row: STOP — TALK — CHAT (lee 2026-10-14: chat
+        // lives right of TALK; the chat screen has a top-left back arrow).
+        findViewById<android.widget.ImageButton>(R.id.chatButton)
             .setOnClickListener { showChatMode() }
+        findViewById<android.widget.ImageButton>(R.id.chatBackButton)
+            .setOnClickListener { showVoiceMode() }
         cancel = findViewById(R.id.cancelButton)
 
         api = ApiClient(Prefs.hubUrl(this), Prefs.apiKey(this))
@@ -232,6 +234,7 @@ class VoiceActivity : Activity() {
         sphere.visibility = android.view.View.GONE
         findViewById<android.view.View>(R.id.buttonRow).visibility = android.view.View.GONE
         findViewById<android.view.View>(R.id.chatPanel).visibility = android.view.View.VISIBLE
+        findViewById<android.widget.TextView>(R.id.chatTitle).text = agentName
         if (chatPanel == null)
             chatPanel = ChatPanel(this, api, threadId, agentName,
                 findViewById(R.id.chatList))
