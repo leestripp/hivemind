@@ -86,8 +86,18 @@ class ChatPanel(
         }
     }
 
+    /** Attachment opens in flight — a double-tap during a long download
+     *  must not spawn two players (the second would orphan the first). */
+    private val opening =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private fun openAttachment(att: JSONObject) {
         val name = att.optString("name", "file")
+        val key = att.optString("path", name)
+        if (!opening.add(key)) {
+            Log.i(TAG, "open already in flight, ignored: $name")
+            return
+        }
         Log.i(TAG, "open attachment: $name")
         Thread {
             try {
@@ -98,6 +108,7 @@ class ChatPanel(
                 }
                 val ext = name.substringAfterLast('.', "").lowercase()
                 ui.post {
+                    opening.remove(key)
                     when (ext) {
                         "mp4", "webm", "mov", "mkv", "3gp" -> playVideo(cache)
                         "flac", "mp3", "wav", "ogg", "m4a", "aac", "opus" -> playAudio(cache, name)
@@ -106,6 +117,7 @@ class ChatPanel(
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "attachment download failed: ${e.message}")
+                ui.post { opening.remove(key) }
             }
         }.start()
     }
@@ -347,13 +359,23 @@ class ChatPanel(
         if (overlay.childCount == 0) return false
         activeController?.hide()      // a shown controller eats BACK presses
         activeController = null
+        releaseOverlayChild()
+        overlay.removeAllViews()
+        overlay.visibility = View.GONE
+        return true
+    }
+
+    /** Release whatever media view the overlay currently holds (if any).
+     *  MUST run before any removeAllViews that swaps media views — a
+     *  detached-but-unreleased AudioPlayerView/TexturePlayer keeps its
+     *  MediaPlayer alive with no way to reach it (lee 2026-10-14: "audio
+     *  playing with no way to stop it"). */
+    private fun releaseOverlayChild() {
+        if (overlay.childCount == 0) return
         when (val v = overlay.getChildAt(0)) {
             is TexturePlayer -> v.release()
             is AudioPlayerView -> v.release()
         }
-        overlay.removeAllViews()
-        overlay.visibility = View.GONE
-        return true
     }
 
     /** Audio attachments open the fullscreen GL player (lee 2026-10-14:
@@ -371,6 +393,7 @@ class ChatPanel(
         get() = activity.findViewById(R.id.mediaOverlay)
 
     private fun showMedia(v: View) {
+        releaseOverlayChild()         // never orphan a playing media view
         overlay.removeAllViews()
         overlay.addView(v, android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
