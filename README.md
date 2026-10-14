@@ -62,12 +62,15 @@ and only come back when they need your approval.
   live chat, approvals inbox, scheduled-task dialog, right-click agent
   management. Plus the **web dashboard**: Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
-- **Voice-only Android app** (`hive-android`) — pick an agent from the
-  info-card roster and just talk: Jarvis-style voice-reactive sphere,
-  hands-free-length takes (on-device streaming STT, no silence cutoffs),
-  replies spoken sentence-by-sentence as the agent streams (queued TTS,
-  per-agent selectable voices), and anything landing in your inbox read
-  out at idle. See docs/android.md.
+- **Android app** (`hive-android`) — pick an agent from the info-card
+  roster and just talk: Jarvis-style voice-reactive sphere, hands-free
+  takes (on-device streaming STT, no silence cutoffs), replies spoken
+  sentence-by-sentence as the agent streams (queued TTS, per-agent
+  voices), inbox items read out at idle. Plus a full **text chat** with
+  the thread's history and rich media: pinch-zoom image viewer,
+  fullscreen video player, and audio attachments as tap-to-play cards
+  that open a fullscreen player with an OpenGL ES waveform visualizer
+  driven by the actual audio. See docs/android.md.
 - **Any model** — providers/models live in HiveMind's own store
   (`llm.db`, managed on the web Models page) and are injected into agents
   at spawn; pick per agent. No vendor lock-in.
@@ -110,8 +113,9 @@ hive-server/   C++23 + OmniNet server: roster, threads, approvals,
                routines, containers, worker channel, web UI (web/dist)
 hive-agent/    the agent runtime itself (runs in worker containers)
 hive-client/   GTK4/gtkmm4 native client
-hive-android/  voice-only Android client — NDK GL sphere, on-device
-               STT, streaming TTS, inbox watch (docs/android.md)
+hive-android/  Android client — NDK GL sphere, on-device STT, streaming
+               TTS, inbox watch, text chat with media viewers + GL audio
+               player (docs/android.md)
 hive-worker/   Remote executor daemon — runs agent containers on other
                machines, driven over a WebSocket channel (Phase 30)
 */tests/       per-app ctest suites
@@ -158,7 +162,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Global skill library design — symlinks, local/global split |
 | `docs/client.md` | GTK4 native client — dialogs, menus, theming |
-| `docs/android.md` | Voice-only Android app — sphere, on-device STT, streaming TTS, inbox watch |
+| `docs/android.md` | Android app — sphere, on-device STT, streaming TTS, inbox watch, chat + media |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
 | `docs/containers.md` | Podman sandboxing |
 | `docs/hive-worker.md` | Distributed workers — enroll, channel protocol, exec/screen ops |

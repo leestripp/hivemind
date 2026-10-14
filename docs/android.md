@@ -57,6 +57,20 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   recording, a synthetic envelope while the agent talks. The voice
   screen holds `FLAG_KEEP_SCREEN_ON` for the whole session.
 
+- **Text chat** — chat icon right of TALK opens the full thread over the
+  sphere (voice session keeps running underneath). Bubbles with headers,
+  history scrollback, BACK or the top-left arrow returns to voice. Agent
+  attachments render inline: images center-cropped thumbnails, videos as
+  thumbnail + ▶, audio as cards (large ▶ + filename + size). Tap for the
+  fullscreen viewers.
+- **Fullscreen media** — one in-activity overlay hosts the viewers:
+  pinch-zoom/pan image viewer (fit-centre on open), a TextureView video
+  player (letterboxed fit, tap for controls, BACK stops instantly), and
+  an audio player with a 112dp play/pause, seek bar, and an OpenGL ES
+  waveform visualizer fed real samples from android.media.audiofx
+  Visualizer (pseudo-wave fallback). Audio autoplays; BACK closes any
+  viewer and releases its player.
+
 ## Build & install
 
 - Toolchain: JDK 21 (AGP requirement), Android SDK platform 35 + NDK
@@ -71,6 +85,15 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   requested on the first TALK.
 
 ## Internals worth knowing
+
+- **Media overlay discipline** — the overlay (mediaOverlay in
+  activity_voice.xml) holds at most ONE viewer and always release()s the
+  outgoing view BEFORE detach (an orphaned player keeps playing with no
+  controls). Attachment opens are guarded against double-tap during the
+  download (one in-flight open per attachment). MediaController shows on
+  single-tap only — shown controllers eat BACK.
+- **Attachment cache** — cacheDir/attachments/<thread>/<pathhash>-<name>;
+  downloads buffer fully in memory before write (no partial files).
 
 - **Kotlin shell only** — framework Views, org.json, kotlin-stdlib, no
   AndroidX. Native code does the interesting work: `libsphere.so` (GL
