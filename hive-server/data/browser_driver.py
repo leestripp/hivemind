@@ -34,7 +34,12 @@ def _default_slot():
     """
     import getpass
     u = getpass.getuser()
-    if u == "hivex-queenbee":
+    # Slot 0 for single-tenant stacks: hivex-queenbee (legacy, predates
+    # the knob) and the in-container user "hive" — every agent container
+    # has its own netns, so 9222 cannot collide there (2026-10-15: the
+    # slot hash sent container drivers to a dead port while the screen
+    # stack served CDP on 9222 — browser dead fleet-wide on rebuild).
+    if u in ("hivex-queenbee", "hive"):
         return 0
     return sum(u.encode("utf-8", "ignore")) % 50 + 1
 
