@@ -149,7 +149,19 @@ static json promote_outgoing(const std::string& agent_id,
     ec.clear();
     for (const auto& e : fs::directory_iterator(outdir, ec)) {
         if (!e.is_regular_file(ec)) continue;
-        const std::string fname = e.path().filename().string();
+        std::string fname = e.path().filename().string();
+        // 2026-10-15 (Lee's re-attach test): canon may already hold a
+        // same-named file — an agent re-attaching a deliverable in the
+        // same thread. On one filesystem rename(2) would replace it
+        // silently, but the EXDEV copy_file fallback below fails
+        // "File exists" and the attachment was dropped (Bob re-attaching
+        // yesterday's ads from a HOST workspace). Unique-ify instead —
+        // the same -N suffix rule attach_file uses within outgoing/.
+        const std::string stem = e.path().stem().string();
+        const std::string ext  = e.path().extension().string();
+        for (int i = 2; fs::exists(canon / fname, ec); ++i)
+            fname = stem + "-" + std::to_string(i) + ext;
+        ec.clear();
         fs::rename(e.path(), canon / fname, ec);
         if (ec == std::errc::cross_device_link) {
             // /workspace and the staging dir may be different
