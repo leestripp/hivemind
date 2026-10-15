@@ -467,6 +467,30 @@ void HubRouter::on_worker_frame(const std::string& worker,
         }
         return;
     }
+    if (op == "task_attachment") {
+        // 2026-10-15 (Plan.md): attach_file shipped a file MID-TURN.
+        // Post it immediately so it survives a turn interrupt; same
+        // worker-injection + type-guard discipline as task_result below
+        // (worker sends a JSON ARRAY; legacy peers may send a string).
+        std::string atts = "[]";
+        if (frame.contains("attachments")) {
+            const auto& a = frame["attachments"];
+            atts = a.is_string() ? a.get<std::string>() : a.dump();
+        }
+        {
+            auto arr = json::parse(atts, nullptr, false);
+            if (!arr.is_discarded() && arr.is_array() && !arr.empty()) {
+                for (auto& a : arr) a["worker"] = worker;
+                atts = arr.dump();
+            } else {
+                return;   // nothing usable — drop
+            }
+        }
+        if (chat_) chat_->post_turn_attachment(
+            frame.value("task", ""), frame.value("thread_id", ""),
+            agent_id, atts);
+        return;
+    }
     if (op == "task_result") {
         const std::string task = frame.value("task", "");
         {

@@ -617,6 +617,38 @@ void ChatService::append_delta(const std::string& task_id,
     if (it != by_task_.end()) it->second->partial += text;
 }
 
+void ChatService::post_turn_attachment(
+        const std::string& task_id, const std::string& thread_id,
+        const std::string& agent_id, const std::string& attachments_json) {
+    if (attachments_json.empty() || attachments_json == "[]") return;
+    if (thread_id.empty() || agent_id.empty()) return;
+    try {
+        if (!threads_.get_thread(thread_id)) return;   // deleted mid-turn
+        const std::string msg_id = threads_.add_message(
+            thread_id, "agent", agent_id, "*(attached a file)*",
+            attachments_json);
+        // Same correlation trail as complete_turn's reply journal; the
+        // stored body stays raw and no user-facing surface renders it.
+        std::fprintf(stderr, "[header] %sthread %.8s task %.12s "
+            "(mid-turn attachment)\n",
+            hivemind::render_message_header(
+                std::string(hivemind::msg_source::kAgentPrefix) +
+                    agent_id,
+                hivemind::db::iso_now()).c_str(),
+            thread_id.c_str(), task_id.c_str());
+        // Posting implies read-to-own-message (same as complete_turn) —
+        // the attachment message must never count as unread for its
+        // sender.
+        if (auto m = threads_.get_message(msg_id))
+            deliveries_.mark_read(thread_id, agent_id, msg_id,
+                                  m->created_at);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr,
+            "[chat] ERROR posting mid-turn attachment to thread %.8s: %s\n",
+            thread_id.c_str(), e.what());
+    }
+}
+
 void ChatService::complete_turn(const std::string& task_id,
                                 const std::string& body,
                                 const std::string& error,

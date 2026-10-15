@@ -435,6 +435,11 @@ private:
 // Phase 35: current turn's thread id — set by the turn thread before
 // each turn, read by AttachFileTool. Single turn thread → no locking.
 static std::string g_thread_id;
+// 2026-10-15 (Plan.md): current turn's task id — AttachFileTool emits
+// an immediate attachment event keyed to the running task so the hub
+// can post the file mid-turn (long renders hit the watchdog; attachments
+// that only ride task_result die with the interrupt).
+static std::string g_task_id;
 // Runtime descriptor (2026-10-12): the SAME binary serves containers and
 // bare-metal host agents; the worker's env says which. g_workspace_root
 // is the absolute project root (argv[1]) — tools must build paths from
@@ -606,10 +611,10 @@ int main(int argc, char** argv) {
         "\n\n## Sharing files in chat\n"
         "To show the user a file (a rendered video, image, archive - any "
         "deliverable), call attach_file with its path under your workspace "
-        "root (" + g_workspace_root.string() + "). It "
-        "attaches the file to your reply: images and video render inline "
-        "in the chat, other files appear as a download. Prefer this over "
-        "only mentioning the file path.";
+        "root (" + g_workspace_root.string() + "). The file posts to the chat "
+        "immediately as its own message: images and video render inline, "
+        "other files appear as a download. Prefer this over only mentioning "
+        "the file path.";
 
     // 2026-10-12: host agents mis-modelled themselves as containers and
     // prescribed container remedies ("recreate my container") for
@@ -1053,11 +1058,13 @@ int main(int argc, char** argv) {
         std::string get_name() const override { return "attach_file"; }
         std::string get_description() const override {
             return "Attach a file from your workspace (" +
-                   g_workspace_root.string() + ") to your reply so the user "
-                   "sees it in the chat (images and video render inline; "
+                   g_workspace_root.string() + ") to the chat so the user "
+                   "sees it immediately (images and video render inline; "
                    "other files appear as a download). Use it for "
                    "deliverables (rendered videos, images, archives) "
-                   "instead of only mentioning the file path.";
+                   "instead of only mentioning the file path. The file "
+                   "posts as its own message the moment you attach it — "
+                   "you do not need to wait for your turn to end.";
         }
         json get_definition() const override {
             json path = {{"type","string"},
@@ -1109,9 +1116,20 @@ int main(int argc, char** argv) {
                 fname = stem + "-" + std::to_string(i) + ext;
             fs::copy_file(src, outdir / fname, ec);
             if (ec) return {{"status","error"},{"error",ec.message()}};
+            // 2026-10-15 (Plan.md): ship the file to the chat NOW, as
+            // its own message. Attachments that wait for task_result
+            // are lost when a long turn is interrupted (watchdog /
+            // cancel) — the outgoing/ copy stays put so an old worker
+            // still promotes it at turn end (mixed-version fallback).
+            emit({{"ev", "attachment"},
+                  {"task", g_task_id},
+                  {"thread_id", g_thread_id},
+                  {"name", fname}});
             return {{"status","success"},
                     {"attached", fname},
-                    {"note","attached to your reply when this turn ends"}};
+                    {"note","sent to the chat immediately as its own "
+                     "message; your final reply posts separately when "
+                     "this turn ends"}};
         }
     };
     agent.register_tool(std::make_unique<AttachFileTool>());
@@ -1384,6 +1402,7 @@ int main(int argc, char** argv) {
                 queue.pop_front();
             }
             g_thread_id = t.thread_id;
+            g_task_id = t.id;
             sink->begin_task(t.id);
             std::string err;
             try {

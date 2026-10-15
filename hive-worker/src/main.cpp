@@ -119,6 +119,64 @@ static fs::path agent_workspace(const std::string& agent_id) {
     return worker_workspace();
 }
 
+/// 2026-10-15 (Plan.md): promote an agent's attachments/<tid>/outgoing/
+/// to the canonical attachments/<tid>/ and return the attachment records
+/// (hub adds "worker"). Called at ATTACH time (fleet "attachment" event)
+/// AND at turn end ("message" event) — files moved by the first call are
+/// gone by the second, so each attachment ships exactly once. Immediate
+/// promotion is the fix for attachments dying with interrupted long
+/// turns (watchdog/cancel): the file reaches the hub the moment the
+/// agent attaches it, not at task_result.
+static json promote_outgoing(const std::string& agent_id,
+                             const std::string& tid) {
+    json atts = json::array();
+    if (tid.empty() || !std::getenv("HOME")) return atts;
+    // attach_file writes into the AGENT's workspace (host agents:
+    // outside staging); the canonical copy the hub fetches stays in the
+    // shared staging workspace.
+    const fs::path ws = worker_workspace();
+    const fs::path outdir = agent_workspace(agent_id) /
+        "attachments" / tid / "outgoing";
+    const fs::path canon  = ws / "attachments" / tid;
+    std::error_code ec;
+    // Host agents stage into the REAL workspace, so the staging-side
+    // <tid> dir may not exist yet — without this every rename below
+    // failed ENOENT and the attachment was silently dropped (2026-10-13
+    // Bob/Forge "attachments:[]" incident).
+    fs::create_directories(canon, ec);
+    ec.clear();
+    if (!fs::is_directory(outdir, ec)) return atts;
+    ec.clear();
+    for (const auto& e : fs::directory_iterator(outdir, ec)) {
+        if (!e.is_regular_file(ec)) continue;
+        const std::string fname = e.path().filename().string();
+        fs::rename(e.path(), canon / fname, ec);
+        if (ec == std::errc::cross_device_link) {
+            // /workspace and the staging dir may be different
+            // filesystems — copy+remove.
+            ec.clear();
+            fs::copy_file(e.path(), canon / fname, ec);
+            if (!ec) fs::remove(e.path(), ec);
+        }
+        if (ec) {
+            std::cerr << "attachments: promote failed for "
+                      << fname << ": " << ec.message() << "\n";
+            ec.clear();
+            continue;
+        }
+        const auto sz = fs::file_size(canon / fname, ec);
+        atts.push_back({
+            {"name", fname},
+            {"rel_path", "attachments/" + tid + "/" + fname},
+            {"path", "/workspace/attachments/" + tid + "/" + fname},
+            {"size", ec ? 0 : (long long)sz},
+        });
+        ec.clear();
+    }
+    fs::remove(outdir, ec);   // emptied by the moves
+    return atts;
+}
+
 int main(int argc, char* argv[]) {
     // Phase 72: once-per-rig host-agent support install — root-only,
     // LOCAL. Installs the hivex-* helpers + sudoers grant so per-agent
@@ -247,63 +305,28 @@ int main(int argc, char* argv[]) {
                 f = {{"op","task_delta"},{"agent",agent_id},
                      {"task",ev.value("task","")},
                      {"text",ev.value("text","")}};
+            // 2026-10-15 (Plan.md): attach_file shipped a file MID-TURN.
+            // Promote it to the canonical dir and forward it to the hub
+            // immediately — attachments that wait for task_result are
+            // lost when a long turn is interrupted (watchdog/cancel).
+            else if (kind == "attachment") {
+                const std::string tid = ev.value("thread_id", "");
+                json atts = promote_outgoing(agent_id, tid);
+                if (atts.empty()) return;   // nothing on disk — drop
+                f = {{"op","task_attachment"},{"agent",agent_id},
+                     {"task",ev.value("task","")},
+                     {"thread_id",tid},
+                     {"attachments", std::move(atts)}};
+            }
             else if (kind == "message") {
                 // Phase 35: agent → chat attachments. attach_file dropped
                 // files into attachments/<tid>/outgoing/ in the workspace;
-                // promote them to the canonical attachments/<tid>/ and
-                // include records in task_result (hub adds "worker").
-                json atts = json::array();
+                // promote whatever is LEFT to the canonical
+                // attachments/<tid>/ and include records in task_result
+                // (hub adds "worker"). Files attached via the immediate
+                // path above were already moved — no duplicates.
                 const std::string tid = ev.value("thread_id", "");
-                if (!tid.empty() && std::getenv("HOME")) {
-                    // attach_file writes into the AGENT's workspace (host
-                    // agents: outside staging); the canonical copy the hub
-                    // fetches stays in the shared staging workspace.
-                    const fs::path ws = fs::path{std::getenv("HOME")} /
-                        ".local/share/hive-worker/workspace";
-                    const fs::path outdir = agent_workspace(agent_id) /
-                        "attachments" / tid / "outgoing";
-                    const fs::path canon  = ws / "attachments" / tid;
-                    std::error_code ec;
-                    // Host agents stage into the REAL workspace, so the
-                    // staging-side <tid> dir may not exist yet — without
-                    // this every rename below failed ENOENT and the
-                    // attachment was silently dropped (2026-10-13
-                    // Bob/Forge "attachments:[]" incident).
-                    fs::create_directories(canon, ec);
-                    ec.clear();
-                    if (fs::is_directory(outdir, ec)) {
-                        for (const auto& e : fs::directory_iterator(outdir, ec)) {
-                            if (!e.is_regular_file(ec)) continue;
-                            const std::string fname =
-                                e.path().filename().string();
-                            fs::rename(e.path(), canon / fname, ec);
-                            if (ec == std::errc::cross_device_link) {
-                                // /workspace and the staging dir may be
-                                // different filesystems — copy+remove.
-                                ec.clear();
-                                fs::copy_file(e.path(), canon / fname, ec);
-                                if (!ec) fs::remove(e.path(), ec);
-                            }
-                            if (ec) {
-                                std::cerr << "attachments: promote failed for "
-                                          << fname << ": " << ec.message()
-                                          << "\n";
-                                ec.clear();
-                                continue;
-                            }
-                            const auto sz = fs::file_size(canon / fname, ec);
-                            atts.push_back({
-                                {"name", fname},
-                                {"rel_path", "attachments/" + tid + "/" + fname},
-                                {"path", "/workspace/attachments/" + tid +
-                                             "/" + fname},
-                                {"size", ec ? 0 : (long long)sz},
-                            });
-                            ec.clear();
-                        }
-                        fs::remove(outdir, ec);   // emptied by the moves
-                    }
-                }
+                json atts = promote_outgoing(agent_id, tid);
                 f = {{"op","task_result"},{"agent",agent_id},
                      {"task",ev.value("task","")},
                      {"thread_id",tid},

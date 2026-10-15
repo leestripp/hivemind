@@ -130,6 +130,16 @@ public:
 
     // -- HubRouter callbacks (worker channel events) --------------------
     void append_delta(const std::string& task_id, const std::string& text);
+    /// 2026-10-15 (Plan.md): an attach_file attachment shipped MID-TURN.
+    /// Posts the file(s) as their own complete message immediately so
+    /// they survive turn interrupts (watchdog/cancel) — attachments that
+    /// only ride task_result die with the turn. NOT a turn boundary: no
+    /// fan-in, no relay, no delivery/mute/breaker bookkeeping. The task
+    /// may be unknown (hub restart) — the frame carries thread/agent.
+    void post_turn_attachment(const std::string& task_id,
+                              const std::string& thread_id,
+                              const std::string& agent_id,
+                              const std::string& attachments_json);
     /// Agent reported "ready" (spawn/reconnect): release one held wake.
     /// Recovery hook for wakes held across a worker restart.
     void on_agent_ready(const std::string& agent_id);
