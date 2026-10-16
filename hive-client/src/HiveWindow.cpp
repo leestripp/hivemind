@@ -54,6 +54,7 @@ const char* kCss = R"(
   background: alpha(@window_fg_color, 0.06);
   border-bottom: 1px solid alpha(@window_fg_color, 0.08); }
 .hv-time   { color: alpha(@window_fg_color, 0.45); font-size: 0.75em; }
+.hv-dl     { padding: 2px 8px; min-height: 0; }
 .hv-audio-card { background: alpha(@window_fg_color, 0.06);
   border: 1px solid alpha(@accent_color, 0.45); border-radius: 14px;
   padding: 10px 14px 10px 10px; margin: 4px 0; }
@@ -2013,6 +2014,7 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                     Gtk::Orientation::VERTICAL, 4);
                 box->append(*holder);
                 load_image_attachment(holder, a);
+                add_download_button(box, a, current_thread_, false);
                 continue;
             }
             if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" ||
@@ -2021,6 +2023,7 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                     Gtk::Orientation::VERTICAL, 4);
                 box->append(*holder);
                 load_video_attachment(holder, a);
+                add_download_button(box, a, current_thread_, false);
                 continue;
             }
             if (ext == ".mp3" || ext == ".flac" || ext == ".wav" ||
@@ -2030,6 +2033,7 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                     Gtk::Orientation::VERTICAL, 4);
                 box->append(*holder);
                 load_audio_attachment(holder, a);
+                add_download_button(box, a, current_thread_, false);
                 continue;
             }
             // 2026-09-17: the old chip opened file://host_path — the
@@ -2044,6 +2048,7 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
                 open_file_attachment(chip, a, tid);
             });
             chips->append(*chip);
+            add_download_button(chips, a, tid, true);
             any_chip = true;
         }
         if (any_chip) box->append(*chips);
@@ -2360,6 +2365,73 @@ void HiveWindow::open_file_attachment(Gtk::Button* chip,
             } else {
                 set_status("Download failed: " + err);
             }
+        });
+        dispatcher_.emit();
+    });
+}
+
+void HiveWindow::add_download_button(Gtk::Box* parent,
+                                     const nlohmann::json& att,
+                                     const std::string& tid,
+                                     bool icon_only) {
+    const std::string name = att.value("name", "file");
+    // ⬇ — icon-only on chip rows (the chip already shows the name),
+    // labelled under media cards.
+    auto* btn = Gtk::make_managed<Gtk::Button>(
+        icon_only ? "\u2B07" : "\u2B07 Download");
+    btn->add_css_class("flat");
+    btn->add_css_class("hv-dl");
+    btn->set_halign(Gtk::Align::START);
+    btn->set_tooltip_text("Save " + name + " to Downloads");
+    btn->signal_clicked().connect([this, att, tid, btn] {
+        download_attachment(btn, att, tid);
+    });
+    parent->append(*btn);
+}
+
+void HiveWindow::download_attachment(Gtk::Button* btn,
+                                     const nlohmann::json& att,
+                                     const std::string& tid) {
+    namespace fs = std::filesystem;
+    std::string rel, worker;
+    fs::path cache;
+    resolve_attachment(att, tid, rel, worker, cache);
+    const std::string name = att.value("name", "file");
+
+    // Destination: the user's real Downloads folder, unique-ified so a
+    // re-download never clobbers an earlier one (same -N rule as the
+    // worker's attachment staging).
+    std::string dls = Glib::get_user_special_dir(Glib::UserDirectory::DOWNLOAD);
+    if (dls.empty()) dls = Glib::get_home_dir() + "/Downloads";
+    fs::path dest = fs::path(dls) / name;
+    std::error_code ec;
+    const std::string stem = dest.stem().string();
+    const std::string ext  = dest.extension().string();
+    for (int i = 2; fs::exists(dest, ec); ++i)
+        dest = dest.parent_path() / (stem + "-" + std::to_string(i) + ext);
+    ec.clear();
+
+    btn->set_sensitive(false);
+    set_status("Saving " + name + " to Downloads\u2026");
+    auto weak = std::make_shared<Gtk::Button*>(btn);
+    btn->signal_destroy().connect([weak] { *weak = nullptr; });
+    const std::string dest_s = dest.string();
+    run_async([this, rel, worker, cache, dest, dest_s, name, weak] {
+        std::string err;
+        std::error_code ec;
+        if (!(fs::is_regular_file(cache, ec) &&
+              fs::file_size(cache, ec) > 0))
+            err = download_to_cache(api_, rel, worker, cache);
+        if (err.empty()) {
+            fs::copy_file(cache, dest, ec);
+            if (ec) err = ec.message();
+        }
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, dest_s, name, weak, err] {
+            if (!alive_) return;
+            if (*weak) (*weak)->set_sensitive(true);
+            set_status(err.empty() ? "Saved " + dest_s
+                                   : "Download failed: " + err);
         });
         dispatcher_.emit();
     });

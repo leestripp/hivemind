@@ -170,6 +170,15 @@ private:
     /// API into the client cache, then open locally.
     void open_file_attachment(Gtk::Button* chip, const nlohmann::json& att,
                           const std::string& tid);
+    /// 2026-10-16 (lee): per-attachment "Save to Downloads" button.
+    /// add_download_button appends it to parent (icon-only for chip rows,
+    /// labelled under media cards); download_attachment saves the file —
+    /// cached copy when present, hub download otherwise — into the
+    /// user's Downloads folder under a unique-ified name.
+    void add_download_button(Gtk::Box* parent, const nlohmann::json& att,
+                             const std::string& tid, bool icon_only);
+    void download_attachment(Gtk::Button* btn, const nlohmann::json& att,
+                             const std::string& tid);
     void show_video_widget(Gtk::Box* holder, const std::string& file,
                            const std::string& name);
     // Audio attachments: card with a big round play/pause button plus
