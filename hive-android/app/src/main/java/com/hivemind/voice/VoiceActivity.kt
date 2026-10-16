@@ -107,6 +107,10 @@ class VoiceActivity : Activity() {
     /** Chars of [streamText] already queued to TTS. */
     private var spokenLen = 0
     private var turnDone = false
+    /** App is backgrounded: the speech drain freezes (no pocket audio)
+     *  but the agent's turn is NEVER cancelled — work continues
+     *  server-side and the unheard remainder speaks on resume. */
+    private var backgrounded = false
     /** Last time the reply visibly grew (partial or stored messages) —
      *  a turn only times out when it STALLS, never for being long. */
     private var lastProgressMs = 0L
@@ -639,6 +643,7 @@ class VoiceActivity : Activity() {
     /** Speak the next pending note — IDLE only. */
     private fun speakPending() {
         if (phase != Phase.IDLE || pendingSpeech.isEmpty()) return
+        if (backgrounded) return  // notes speak on resume via inboxWatch
         val note = pendingSpeech.removeFirst()
         tts.applyVoice(voiceNameFor(note.senderId))
         turnDone = true            // standalone note: nothing more coming
@@ -794,6 +799,16 @@ class VoiceActivity : Activity() {
             ui.postDelayed(pollTick, POLL_MS)
         } else {
             turnDone = true
+            // Turn finished while backgrounded: the drain was frozen, so
+            // everything past the spoken cursor was never heard — and
+            // toIdle() below wipes that cursor. Hand the unheard tail to
+            // the pending-note queue instead; it speaks on resume via the
+            // re-armed inboxWatch / onResume drain.
+            if (backgrounded && spokenLen < streamText.length) {
+                val tail = streamText.substring(spokenLen).trim()
+                if (tail.isNotEmpty())
+                    pendingSpeech.add(PendingNote(agentId, tail))
+            }
             if (tts.outstanding == 0) toIdle("")
         }
     }
@@ -805,6 +820,10 @@ class VoiceActivity : Activity() {
      * speaks the remainder once the turn is done.
      */
     private fun drainSpeech(flush: Boolean) {
+        // Frozen while backgrounded: nothing reaches TTS (no pocket
+        // audio) and the spoken cursor holds, so onResume can speak the
+        // unheard remainder instead of losing the reply.
+        if (backgrounded) return
         if (flush) {
             val tail = streamText.substring(spokenLen).trim()
             if (tail.isNotEmpty()) queueSpeech(tail)
@@ -1046,6 +1065,11 @@ class VoiceActivity : Activity() {
         // fires at creation, before openThread's own first post).
         ui.removeCallbacks(inboxWatch)
         ui.postDelayed(inboxWatch, IDLE_POLL_MS)
+        backgrounded = false
+        // Speak anything captured while away: unheard turn tails (noted
+        // at turn end — toIdle wipes the speech cursor) and queued inbox
+        // notes. A turn still live resumes via its next poll tick.
+        speakPending()
     }
 
     override fun onPause() {
@@ -1053,11 +1077,21 @@ class VoiceActivity : Activity() {
         // Stop the idle watch entirely: no pocket audio from queued
         // announcements or inbox narration while backgrounded.
         ui.removeCallbacks(inboxWatch)
-        // Backgrounding cancels ANY active turn: LISTENING/STREAMING were
-        // always cancelled, but a THINKING turn's reply would arrive and
-        // start SPEAKING while the app is in the background (pocket audio).
-        if (phase == Phase.LISTENING || phase == Phase.STREAMING ||
-            phase == Phase.THINKING) cancelCurrent()
+        backgrounded = true
+        // 2026-10-16 (lee): backgrounding must NEVER cancel the agent's
+        // turn — work continues server-side and the reply (with any
+        // attachments) arrives whether the app is open or not. The old
+        // pocket-audio guard called cancelCurrent() on LISTENING /
+        // STREAMING / THINKING, which POSTed /cancel to the hub and
+        // KILLED long jobs (renders, builds) the moment the screen went
+        // off. Now: mute locally only. An open mic is discarded (never
+        // record from a pocket) — that path is local, no hub call — and
+        // the speech drain freezes until onResume.
+        if (phase == Phase.LISTENING) {
+            stt.discard()
+            toIdle("")
+        }
+        tts.stop()
         super.onPause()
     }
 
