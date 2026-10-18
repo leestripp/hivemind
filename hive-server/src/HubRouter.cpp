@@ -109,9 +109,7 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
     // discover each other (list_agents tool). Without it an agent told
     // to "message Forge" had no way to learn who exists and looped
     // trying to call a nonexistent directory tool (2026-09-07 incident).
-    json roster = json::array();
-    for (const auto& a : agents_.list_agents())
-        roster.push_back({{"id", a.id}, {"name", a.name}});
+    json roster = agent_directory_json(agents_.list_agents());
     json op = {{"op", "task"},
                {"agent_id", agent.id},
                {"id", task_id},

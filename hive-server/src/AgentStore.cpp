@@ -363,3 +363,12 @@ bool AgentStore::delete_agent(const std::string& id) {
     sqlite3_close(db);
     return ok;
 }
+
+nlohmann::json agent_directory_json(const std::vector<RosterAgent>& agents) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& a : agents)
+        arr.push_back({{"id", a.id},
+                       {"name", a.name},
+                       {"worker", a.worker}});
+    return arr;
+}

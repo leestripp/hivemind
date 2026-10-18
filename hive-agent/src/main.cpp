@@ -1003,8 +1003,11 @@ int main(int argc, char** argv) {
     public:
         std::string get_name() const override { return "list_agents"; }
         std::string get_description() const override {
-            return "List the agents in the company (name + id). Use this "
-                   "to discover who exists before calling message_agent.";
+            return "List the agents in the company: name, id, and the "
+                   "machine each runs on (worker field, e.g. droplet, "
+                   "ubuntu-pc). Use this to discover who exists before "
+                   "calling message_agent, and to tell which rig an "
+                   "agent lives on when coordinating cross-machine work.";
         }
         json get_definition() const override {
             return {{"type","function"},

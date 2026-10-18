@@ -5,6 +5,7 @@
 #include <vector>
 #include <filesystem>
 #include <sqlite3.h>
+#include <nlohmann/json.hpp>
 
 /**
  * AgentStore — SQLite persistence for the agent roster (HiveMind 2.0).
@@ -41,6 +42,15 @@ struct RosterAgent {
     std::string created_at;
     std::string updated_at;
 };
+
+/// Phase 40 task-frame roster (the company directory the agent's
+/// list_agents tool answers from). Factored out of HubRouter::dispatch
+/// 2026-10-18 so the shape is unit-testable without a WorkerChannel
+/// (secret_create_apply precedent). Per agent: id, name, and worker —
+/// the machine the agent runs on ("droplet", "ubuntu-pc", "local"),
+/// added 2026-10-18 at the agents' request (Plan.md: they coordinate
+/// across rigs and had no way to tell who lives where).
+nlohmann::json agent_directory_json(const std::vector<RosterAgent>& agents);
 
 class AgentStore {
 public:
