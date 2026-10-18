@@ -1186,8 +1186,10 @@ int main(int argc, char** argv) {
         std::string get_name() const override { return "list_schedules"; }
         std::string get_description() const {
             return "List your scheduled tasks (routines): id, name, "
-                   "schedule, next fire time, enabled. Use this before "
-                   "update_schedule/delete_schedule to get routine ids.";
+                   "schedule, next fire time, enabled, prompt size. "
+                   "Compact by design — use get_schedule for a routine's "
+                   "full prompt body. update_schedule/delete_schedule "
+                   "accept the id OR the exact name as their target.";
         }
         json get_definition() const override {
             json params = {{"type","object"},
@@ -1207,6 +1209,38 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<ListSchedulesTool>());
 
+    // 2026-10-18 (Plan.md): full-prompt read. list_schedules is compact
+    // (no prompt body) so it can never truncate past the tool-result
+    // cap; editing a prompt iteratively starts here.
+    class GetScheduleTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "get_schedule"; }
+        std::string get_description() const {
+            return "Get one scheduled task (routine) in full, including "
+                   "its complete prompt body. Target by id OR exact name.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"id",{{"type","string"},
+                      {"description","Routine id or exact name"}}}}},
+                {"required",{"id"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json resp = g_routines.call("get",
+                                        {{"routine_id", args.value("id","")}});
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<GetScheduleTool>());
+
     class UpdateScheduleTool final : public hive::BaseTool {
     public:
         std::string get_name() const override { return "update_schedule"; }
@@ -1219,7 +1253,8 @@ int main(int argc, char** argv) {
             json params = {{"type","object"},
                 {"properties",{
                     {"id",{{"type","string"},
-                      {"description","Routine id from list_schedules"}}},
+                      {"description","Routine id OR exact name (from "
+                       "list_schedules, or the routine's fire header)"}}},
                     {"name",{{"type","string"},{"description","New name (optional)"}}},
                     {"prompt",{{"type","string"},{"description","New prompt (optional)"}}},
                     {"schedule",{{"type","object"},{"description","New schedule JSON (optional)"}}},
@@ -1248,13 +1283,13 @@ int main(int argc, char** argv) {
         std::string get_name() const override { return "delete_schedule"; }
         std::string get_description() const {
             return "Delete a scheduled task (routine) you own. Its thread "
-                   "is removed too. Use list_schedules to get the id.";
+                   "is removed too. Target by id OR exact name.";
         }
         json get_definition() const override {
             json params = {{"type","object"},
                 {"properties",{
                     {"id",{{"type","string"},
-                      {"description","Routine id from list_schedules"}}}}},
+                      {"description","Routine id or exact name"}}}}},
                 {"required",{"id"}}};
             return {{"type","function"},
                     {"function",{{"name",get_name()},

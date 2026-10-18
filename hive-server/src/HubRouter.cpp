@@ -31,21 +31,6 @@ HubRouter::HubRouter(AgentStore& agents, ThreadStore& threads,
 
 namespace {
 
-/// Phase 53: same shape as RoutineRoutes' routine_json (that one is
-/// file-local; duplicated here to keep the routes untouched).
-json routine_to_json(const Routine& r) {
-    json sched;
-    try { sched = json::parse(r.schedule_json); }
-    catch (...) { sched = json::object(); }
-    return {
-        {"id", r.id}, {"agent_id", r.agent_id}, {"thread_id", r.thread_id},
-        {"name", r.name}, {"prompt", r.prompt},
-        {"schedule", sched},
-        {"schedule_text", hm::describe_schedule(sched)},
-        {"next_fire_at", r.next_fire_at}, {"enabled", r.enabled},
-        {"created_at", r.created_at}, {"last_fired_at", r.last_fired_at},
-    };
-}
 /// Phase 50: the agent's disabled-skill set — hub-known skills
 /// (dirs under the server skills root) minus its enabled global-skills.
 /// Rides the task frame so enable/disable goes live without a restart.
@@ -190,12 +175,23 @@ void HubRouter::handle_routine_req(const std::string& worker,
     };
     try {
         if (action == "list") {
+            // 2026-10-18 (Plan.md): COMPACT shape — full prompts blew
+            // past the agent's 10KB tool-result cap and the middle-cut
+            // swallowed routine ids (Buzz could never see his daily
+            // routine's id, so he could never edit it). Use "get" for
+            // the full prompt body.
             json arr = json::array();
             for (auto& r : routines_.list())
                 if (r.agent_id == agent_id)
-                    arr.push_back(routine_to_json(r));
+                    arr.push_back(routine_compact_json(r));
             resp["ok"] = true;
             resp["result"] = {{"routines", arr}};
+        } else if (action == "get") {
+            auto lk = resolve_routine_ref(routines_, agent_id,
+                                          frame.value("routine_id", ""));
+            if (!lk.routine) return fail(lk.error);
+            resp["ok"] = true;
+            resp["result"] = routine_full_json(*lk.routine);
         } else if (action == "add") {
             const std::string name   = frame.value("name", "");
             const std::string prompt = frame.value("prompt", "");
@@ -213,13 +209,15 @@ void HubRouter::handle_routine_req(const std::string& worker,
             auto r = routines_.create(agent_id, t.id, name, prompt,
                                       schedule.dump(), next.value_or(""));
             resp["ok"] = true;
-            resp["result"] = routine_to_json(r);
+            resp["result"] = routine_full_json(r);
         } else if (action == "update") {
-            const std::string rid = frame.value("routine_id", "");
-            auto r = routines_.get(rid);
-            if (!r) return fail("routine not found");
-            if (r->agent_id != agent_id)
-                return fail("routine belongs to another agent");
+            // id OR exact name (2026-10-18): names keep working even
+            // when the agent can't see the id.
+            auto lk = resolve_routine_ref(routines_, agent_id,
+                                          frame.value("routine_id", ""));
+            if (!lk.routine) return fail(lk.error);
+            const std::string rid = lk.routine->id;
+            const auto& r = lk.routine;  // optional<Routine>& — r-> works
             if (frame.contains("enabled"))
                 routines_.set_enabled(rid, frame.value("enabled", true));
             if (frame.contains("name") || frame.contains("prompt") ||
@@ -241,15 +239,14 @@ void HubRouter::handle_routine_req(const std::string& worker,
             }
             auto updated = routines_.get(rid);
             resp["ok"] = true;
-            resp["result"] = updated ? routine_to_json(*updated)
+            resp["result"] = updated ? routine_full_json(*updated)
                                      : json::object();
         } else if (action == "delete") {
-            const std::string rid = frame.value("routine_id", "");
-            auto r = routines_.get(rid);
-            if (!r) return fail("routine not found");
-            if (r->agent_id != agent_id)
-                return fail("routine belongs to another agent");
-            const std::string tid = r->thread_id;
+            auto lk = resolve_routine_ref(routines_, agent_id,
+                                          frame.value("routine_id", ""));
+            if (!lk.routine) return fail(lk.error);
+            const std::string rid = lk.routine->id;
+            const std::string tid = lk.routine->thread_id;
             routines_.remove(rid);
             if (!tid.empty()) {
                 try { threads_.delete_thread(tid); } catch (...) {}

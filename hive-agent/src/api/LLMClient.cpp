@@ -3284,7 +3284,13 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
     iteration_count_ = 0;
     loop_guard_window_.clear();   // §LoopGuard: fresh turn, fresh window
     loop_guard_trips_ = 0;
-    last_total_tokens_ = 0;
+    // Phase 65d follow-up (2026-10-18, Plan.md): do NOT zero the meter
+    // at turn start either — the first status block of every turn read
+    // "0/x (0.0%)" with a full chain behind it ("0 tokens, 221 messages"
+    // — impossible), and the 90% auto-compress check was blind until the
+    // first response landed. The chain persists across turns, so seed
+    // from a live-chain estimate, same as the post-compression path.
+    last_total_tokens_ = messages_ ? messages_->estimate_tokens() : 0;
     last_cached_tokens_ = 0;
     consecutive_compress_count_ = 0;  // §BUG-COMPRESS-LOOP
 

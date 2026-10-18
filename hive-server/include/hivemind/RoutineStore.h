@@ -5,6 +5,7 @@
 #include <vector>
 #include <filesystem>
 #include <sqlite3.h>
+#include <nlohmann/json.hpp>
 
 /**
  * RoutineStore — named, schedulable prompts attached to roster agents
@@ -32,6 +33,47 @@ struct Routine {
     std::string created_at;
     std::string last_fired_at; // "" if never
 };
+
+/**
+ * Agent routine-bridge helpers (2026-10-18, Plan.md — Buzz routine-edit
+ * incident). Factored out of HubRouter::handle_routine_req so unit tests
+ * can exercise them without a WorkerChannel (same pattern as
+ * secret_create_apply in SecretStore.h).
+ *
+ * Background: the agent's tool results are middle-truncated at 10KB
+ * (LLMClient max_tool_result_size_). The bridge LIST used to embed every
+ * routine's FULL prompt, so one long-prompt routine pushed the list past
+ * the cap and the middle entries' ids became unreachable — the agent
+ * could never edit what it could not see. The bridge list is therefore
+ * COMPACT (no prompt body); the "get" action returns the full row.
+ */
+
+/// Full JSON shape (includes the prompt body) — for "get" and the
+/// add/update responses.
+nlohmann::json routine_full_json(const Routine& r);
+
+/// Compact list shape: everything EXCEPT the prompt body (a
+/// prompt_chars count stands in). Cannot blow the tool-result cap at
+/// any realistic routine count.
+nlohmann::json routine_compact_json(const Routine& r);
+
+/// Result of resolve_routine_ref(): routine set on success, error set
+/// (user-speakable) on failure.
+struct RoutineLookup {
+    std::optional<Routine> routine;
+    std::string          error;
+};
+
+class RoutineStore;  // defined below — the resolver predates it in this header
+
+/// Resolve an agent-supplied routine reference: exact id first, then
+/// EXACT name among the caller's own routines. A name matching more
+/// than one owned routine fails with the candidate ids listed (never
+/// guess). Ownership is enforced here — an id belonging to another
+/// agent is "routine belongs to another agent", same as before.
+RoutineLookup resolve_routine_ref(RoutineStore& store,
+                                  const std::string& agent_id,
+                                  const std::string& ref);
 
 class RoutineStore {
 public:

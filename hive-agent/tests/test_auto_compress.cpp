@@ -1132,3 +1132,198 @@ TEST_SUITE("handle_compress_context_result (§COMPRESS-TOOL)") {
         CHECK(client.handle_compress_context_result(json::array()) == false);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 65d follow-up (2026-10-18, Plan.md — Bob's "context reads 0 at the
+// start of every new loop" report): the per-turn reset in
+// LLMClient::run_one_turn used to zero last_total_tokens_, so the FIRST
+// context-status block of every turn stamped "Token Usage 0/max" with a
+// full message chain behind it — impossible state, and it blinded the 90%
+// auto-compress check until the first response landed. The reset now seeds
+// from a live-chain estimate instead. This test drives two full turns
+// against a capturing fake server and inspects the outgoing request of
+// turn 2 cycle 1: the banner must be present and must NOT read 0.
+// ---------------------------------------------------------------------------
+namespace {
+
+class BannerCaptureServer {
+public:
+    explicit BannerCaptureServer(int total_tokens = 4200)
+        : total_tokens_(total_tokens) {
+        listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (listen_fd_ < 0) throw std::runtime_error("socket() failed");
+        int yes = 1;
+        ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;
+        if (::bind(listen_fd_, (sockaddr*)&addr, sizeof(addr)) < 0)
+            throw std::runtime_error("bind failed");
+        if (::listen(listen_fd_, 4) < 0)
+            throw std::runtime_error("listen failed");
+
+        socklen_t len = sizeof(addr);
+        ::getsockname(listen_fd_, (sockaddr*)&addr, &len);
+        port_ = ntohs(addr.sin_port);
+
+        running_.store(true);
+        thread_ = std::thread([this] { loop(); });
+    }
+
+    ~BannerCaptureServer() {
+        running_.store(false);
+        ::shutdown(listen_fd_, SHUT_RDWR);
+        ::close(listen_fd_);
+        if (thread_.joinable()) thread_.join();
+    }
+
+    std::string base_url() const {
+        return "http://127.0.0.1:" + std::to_string(port_);
+    }
+    std::vector<std::string> request_bodies() const {
+        std::lock_guard<std::mutex> lk(mu_);
+        return bodies_;
+    }
+
+private:
+    static void send_json(int cfd, const std::string& body) {
+        const std::string resp =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "Connection: close\r\n\r\n" + body;
+        ::send(cfd, resp.data(), resp.size(), 0);
+    }
+
+    void loop() {
+        while (running_.load()) {
+            sockaddr_in caddr{};
+            socklen_t clen = sizeof(caddr);
+            int cfd = ::accept(listen_fd_, (sockaddr*)&caddr, &clen);
+            if (cfd < 0) break;
+            handle_one(cfd);
+            ::close(cfd);
+        }
+    }
+
+    void handle_one(int cfd) {
+        std::string in;
+        char buf[8192];
+        size_t content_length = 0;
+        size_t body_start = std::string::npos;
+        while (true) {
+            ssize_t n = ::recv(cfd, buf, sizeof(buf), 0);
+            if (n <= 0) return;
+            in.append(buf, static_cast<size_t>(n));
+            body_start = in.find("\r\n\r\n");
+            if (body_start != std::string::npos) {
+                auto cl = in.find("Content-Length:");
+                if (cl != std::string::npos) {
+                    content_length = static_cast<size_t>(
+                        std::strtoul(in.c_str() + cl + 15, nullptr, 10));
+                }
+                break;
+            }
+            if (in.size() > 1024 * 1024) return;
+        }
+        while (in.size() - (body_start + 4) < content_length) {
+            ssize_t n = ::recv(cfd, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            in.append(buf, static_cast<size_t>(n));
+        }
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            bodies_.push_back(in.substr(body_start + 4));
+        }
+        const json j = {
+            {"id", "cmpl-fake"},
+            {"object", "chat.completion"},
+            {"choices", json::array({{
+                {"index", 0},
+                {"message", {{"role", "assistant"}, {"content", "Done."}}},
+                {"finish_reason", "stop"},
+            }})},
+            {"usage", {{"prompt_tokens", total_tokens_ - 10},
+                       {"completion_tokens", 10},
+                       {"total_tokens", total_tokens_}}},
+        };
+        send_json(cfd, j.dump());
+    }
+
+    int listen_fd_ = -1;
+    int port_ = 0;
+    int total_tokens_;
+    std::atomic<bool> running_{false};
+    mutable std::mutex mu_;
+    std::vector<std::string> bodies_;
+    std::thread thread_;
+};
+
+} // namespace
+
+TEST_CASE("turn-opening context banner shows real tokens, never a zero placeholder") {
+    BannerCaptureServer server{4200};   // 42% of 10000 — no compression
+    fs::path home = make_temp_home("banner");
+
+    {
+        auto store = hive::SettingsStore::for_home(home);
+        hive::ProviderConfig p;
+        p.name          = "fake";
+        p.host          = server.base_url();
+        p.api_key       = "test-key";
+        p.chat_endpoint = "/v1/chat/completions";
+        p.plugin        = "openai-compatible";
+        store.upsert_provider(p);
+
+        hive::ModelConfig m;
+        m.name             = "tiny";
+        m.provider         = "fake";
+        m.model_id         = "fake-model";
+        m.max_context_size = 10000;
+        m.temperature      = 0.0;
+        store.upsert_model(m);
+        store.set_default_model_name("tiny");
+    }
+
+    fs::path project = home / "project";
+    fs::create_directories(project);
+
+    hive::AgentConfig cfg;
+    cfg.project_root   = project;
+    cfg.agent_home     = home;
+    cfg.session_id     = "banner-seed-e2e";
+    cfg.stream         = false;
+    cfg.memory_enabled = true;
+    cfg.mcp_enabled    = false;
+
+    auto sink = std::make_shared<CompactionSink>();
+    hive::Agent agent(std::move(cfg), sink);
+    agent.initialize();
+
+    // Turn 1: one cycle, DONE. Chain now holds system+user+assistant and
+    // the provider has reported real usage.
+    agent.submit_user_message("hello");
+    agent.run_one_turn();
+
+    // Turn 2: the FIRST cycle's outgoing request carries the turn-opening
+    // status block. Pre-fix it read "Token Usage 0/10000" — the per-turn
+    // reset zeroed the meter before the banner was stamped.
+    agent.submit_user_message("again");
+    agent.run_one_turn();
+    agent.shutdown();
+
+    const auto bodies = server.request_bodies();
+    REQUIRE(bodies.size() == 2);
+
+    // Sanity: the banner is injected at all.
+    CHECK(bodies[0].find("Token Usage") != std::string::npos);
+    CHECK(bodies[1].find("Token Usage") != std::string::npos);
+
+    // The regression: turn 2's opening banner must not be the zero
+    // placeholder — the chain behind it is non-empty by definition.
+    CHECK(bodies[1].find("| Token Usage | 0/") == std::string::npos);
+
+    fs::remove_all(home);
+}

@@ -3,6 +3,7 @@
 // =============================================================================
 #include "hivemind/DbUtil.h"
 #include "hivemind/RoutineStore.h"
+#include "hivemind/Schedule.h"
 
 #include <array>
 #include <chrono>
@@ -321,4 +322,68 @@ bool RoutineStore::remove(const std::string& id) {
     }
     sqlite3_close(db);
     return ok;
+}
+
+// ============================================================================
+// Agent routine-bridge helpers (2026-10-18, Plan.md — see RoutineStore.h)
+// ============================================================================
+
+nlohmann::json routine_full_json(const Routine& r) {
+    nlohmann::json sched;
+    try { sched = nlohmann::json::parse(r.schedule_json); }
+    catch (...) { sched = nlohmann::json::object(); }
+    return {
+        {"id", r.id}, {"agent_id", r.agent_id}, {"thread_id", r.thread_id},
+        {"name", r.name}, {"prompt", r.prompt},
+        {"schedule", sched},
+        {"schedule_text", hm::describe_schedule(sched)},
+        {"next_fire_at", r.next_fire_at}, {"enabled", r.enabled},
+        {"created_at", r.created_at}, {"last_fired_at", r.last_fired_at},
+    };
+}
+
+nlohmann::json routine_compact_json(const Routine& r) {
+    nlohmann::json sched;
+    try { sched = nlohmann::json::parse(r.schedule_json); }
+    catch (...) { sched = nlohmann::json::object(); }
+    return {
+        {"id", r.id},
+        {"name", r.name},
+        {"schedule", sched},
+        {"schedule_text", hm::describe_schedule(sched)},
+        {"next_fire_at", r.next_fire_at}, {"enabled", r.enabled},
+        {"created_at", r.created_at}, {"last_fired_at", r.last_fired_at},
+        {"prompt_chars", r.prompt.size()},
+    };
+}
+
+RoutineLookup resolve_routine_ref(RoutineStore& store,
+                                  const std::string& agent_id,
+                                  const std::string& ref) {
+    if (ref.empty())
+        return {std::nullopt, "routine id or exact name required"};
+    if (auto by_id = store.get(ref)) {
+        if (by_id->agent_id != agent_id)
+            return {std::nullopt, "routine belongs to another agent"};
+        return {by_id, ""};
+    }
+    // Exact-name fallback among the caller's own routines.
+    std::vector<Routine> matches;
+    for (auto& r : store.list())
+        if (r.agent_id == agent_id && r.name == ref)
+            matches.push_back(r);
+    if (matches.empty())
+        return {std::nullopt,
+                "routine not found: '" + ref +
+                "' (tried as id, then as exact name among your routines)"};
+    if (matches.size() > 1) {
+        std::string ids;
+        for (const auto& m : matches)
+            ids += (ids.empty() ? "" : ", ") + m.id;
+        return {std::nullopt,
+                "name '" + ref + "' matches " +
+                std::to_string(matches.size()) +
+                " of your routines — target by id instead: " + ids};
+    }
+    return {matches.front(), ""};
 }
