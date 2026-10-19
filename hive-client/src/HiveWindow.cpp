@@ -2261,10 +2261,22 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
                                "&worker=" + ApiClient::url_encode(worker)));
             std::error_code ecw;
             fs::create_directories(fs::path(key).parent_path(), ecw);
-            std::ofstream out(key, std::ios::binary | std::ios::trunc);
-            out.write(bytes.data(), (std::streamsize)bytes.size());
-            out.close();
-            if (!out || bytes.empty()) err = "write failed";
+            // .part + rename: never leave a truncated file at the final
+            // cache path (see download_to_cache).
+            const std::string part = key + ".part";
+            {
+                std::ofstream out(part, std::ios::binary | std::ios::trunc);
+                out.write(bytes.data(), (std::streamsize)bytes.size());
+                out.close();
+                if (!out || bytes.empty()) err = "write failed";
+            }
+            if (err.empty()) {
+                fs::rename(part, key, ecw);
+                if (ecw) { fs::remove(part, ecw); err = "cache rename failed"; }
+            } else {
+                std::error_code ecrm;
+                fs::remove(part, ecrm);
+            }
         } catch (const std::exception& e) {
             err = e.what();
         }
@@ -2318,10 +2330,26 @@ std::string download_to_cache(ApiClient& api, const std::string& rel,
              "&worker=" + ApiClient::url_encode(worker)));
         std::error_code ec;
         fs::create_directories(cache.parent_path(), ec);
-        std::ofstream out(cache, std::ios::binary | std::ios::trunc);
-        out.write(bytes.data(), (std::streamsize)bytes.size());
-        out.close();
-        if (!out || bytes.empty()) return "write failed";
+        // 2026-10-19: write to a .part file and rename on success — a
+        // crash/interrupt mid-download used to leave a truncated file at
+        // the final path, and the size>0 cache check then served the
+        // corrupt copy forever. (Bob's FLAC thread crash did exactly
+        // this to three files.)
+        const fs::path part = cache.string() + ".part";
+        {
+            std::ofstream out(part, std::ios::binary | std::ios::trunc);
+            out.write(bytes.data(), (std::streamsize)bytes.size());
+            if (!out || bytes.empty()) {
+                out.close();
+                fs::remove(part, ec);
+                return "write failed";
+            }
+        }
+        fs::rename(part, cache, ec);
+        if (ec) {
+            fs::remove(part, ec);
+            return "cache rename failed";
+        }
         return "";
     } catch (const std::exception& e) {
         return e.what();
@@ -2563,8 +2591,22 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
                                "&worker=" + ApiClient::url_encode(worker)));
             std::error_code ecw;
             fs::create_directories(fs::path(key).parent_path(), ecw);
-            std::ofstream out(key, std::ios::binary | std::ios::trunc);
-            out.write(bytes.data(), (std::streamsize)bytes.size());
+            // .part + rename: never leave a truncated file at the final
+            // cache path (see download_to_cache).
+            const std::string part = key + ".part";
+            {
+                std::ofstream out(part, std::ios::binary | std::ios::trunc);
+                out.write(bytes.data(), (std::streamsize)bytes.size());
+                out.close();
+                if (!out || bytes.empty()) err = "write failed";
+            }
+            if (err.empty()) {
+                fs::rename(part, key, ecw);
+                if (ecw) { fs::remove(part, ecw); err = "cache rename failed"; }
+            } else {
+                std::error_code ecrm;
+                fs::remove(part, ecrm);
+            }
         } catch (const std::exception& e) {
             err = e.what();
         }
@@ -2599,7 +2641,14 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
 void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
     namespace fs = std::filesystem;
-    auto media = Gtk::MediaFile::create_for_filename(file);
+    // 2026-10-19: NO Gtk::MediaFile is created here. Each MediaFile
+    // immediately spins up a GStreamer decodebin3 pipeline, and several
+    // large audio attachments rendering together (e.g. an album's worth
+    // of FLACs in one thread) abort the whole process inside decodebin3
+    // ("assertion failed: (collection)" — a g_error, uncatchable). The
+    // pipeline is created LAZILY on the first Play click and registered
+    // as active_audio_; starting a new one pauses the previous, so at
+    // most one pipeline ever exists.
 
     auto* card = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
     card->add_css_class("hv-audio-card");
@@ -2633,17 +2682,9 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
     card->append(*text);
     holder->append(*card);
 
-    // Play/pause toggle; the glyph follows the stream state so a natural
-    // end-of-stream flips it back to the play triangle.
-    play->signal_clicked().connect([media] {
-        if (media->get_playing()) media->pause(); else media->play();
-    });
-    media->property_playing().signal_changed().connect([play, media] {
-        play->set_label(media->get_playing() ? "\u23f8" : "\u25b6");
-    });
-
-    // Media error (no gstreamer backend etc.) -> swap the card for a
-    // plain chip that opens the cached copy in the system player.
+    // Media error fallback (no gstreamer backend etc.): swap the card
+    // for a plain chip that opens the cached copy in the system player.
+    // Created up-front but only revealed by the lazily-built pipeline.
     auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
     chip->add_css_class("flat");
     chip->set_halign(Gtk::Align::START);
@@ -2652,10 +2693,55 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
         Gio::AppInfo::launch_default_for_uri("file://" + file);
     });
     holder->append(*chip);
-    media->property_error().signal_changed().connect([card, chip] {
-        if (card->get_parent()) card->unparent();
-        chip->set_visible(true);
+
+    // This card's own pipeline, empty until the first Play click. Shared
+    // so the signal lambdas can reach it after creation.
+    auto media_slot = std::make_shared<Glib::RefPtr<Gtk::MediaFile>>();
+
+    // Card destroyed (thread switch, history re-render): if this card
+    // owns the live pipeline, stop it — never leak playback past the
+    // widget that started it.
+    card->signal_destroy().connect([this, media_slot] {
+        if (active_audio_ && *media_slot && active_audio_ == *media_slot) {
+            active_audio_->pause();
+            active_audio_.reset();
+        }
     });
+
+    play->signal_clicked().connect(
+        [this, file, play, card, chip, media_slot] {
+            auto& media = *media_slot;
+            if (!media) {
+                // First play: stop whatever else is playing, then build
+                // this card's pipeline (the ONLY one now alive).
+                if (active_audio_) active_audio_->pause();
+                media = Gtk::MediaFile::create_for_filename(file);
+                active_audio_ = media;
+                // Glyph follows the stream state so a natural
+                // end-of-stream flips back to the play triangle.
+                media->property_playing().signal_changed().connect(
+                    [play, media_slot] {
+                        const auto& m = *media_slot;
+                        play->set_label(m && m->get_playing()
+                                            ? "\u23f8" : "\u25b6");
+                    });
+                media->property_error().signal_changed().connect(
+                    [card, chip] {
+                        if (card->get_parent()) card->unparent();
+                        chip->set_visible(true);
+                    });
+                media->play();
+                return;
+            }
+            if (media->get_playing()) {
+                media->pause();
+            } else {
+                if (active_audio_ && active_audio_ != media)
+                    active_audio_->pause();
+                active_audio_ = media;
+                media->play();
+            }
+        });
 
     auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
     open_btn->add_css_class("flat");

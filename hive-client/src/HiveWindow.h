@@ -189,6 +189,14 @@ private:
     void set_status(const std::string& text);
 
     ApiClient api_;
+
+    /// The single live audio pipeline (2026-10-19). Gtk::MediaFile spins
+    /// up a GStreamer decodebin3 per instance; several preparing at once
+    /// abort the process (decodebin3 "assertion failed: (collection)"
+    /// g_error, uncatchable). Audio cards therefore create their
+    /// MediaFile LAZILY on first Play and register it here — starting a
+    /// new one pauses the previous, so at most one pipeline ever exists.
+    Glib::RefPtr<Gtk::MediaFile> active_audio_;
     std::string server_url_ = "http://127.0.0.1:8421";
 
     // state (GUI thread only)
