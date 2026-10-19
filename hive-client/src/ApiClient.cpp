@@ -428,7 +428,14 @@ std::string ApiClient::download(const std::string& path) {
     using namespace OmniNet::HTTP;
     ClientConfig cfg;
     cfg.connect_timeout = std::chrono::seconds(5);
-    cfg.request_timeout = std::chrono::seconds(60);   // images can be big
+    // Cross-rig fetches are relayed worker→hub→client and the hub
+    // buffers the whole worker leg before byte 1: a cold 20MB attachment
+    // can sit silent for 100s+ before a single header arrives (measured
+    // 2026-10-19 with 9 concurrent FLACs). 60s truncated those downloads
+    // at the transport level; 300s covers the observed worst case with
+    // headroom, and the Content-Length check in OmniNet fails loud if a
+    // body still arrives short.
+    cfg.request_timeout = std::chrono::seconds(300);
 
     ClientRequest req;
     req.method("GET").url(base_ + path);
