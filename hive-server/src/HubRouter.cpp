@@ -264,6 +264,37 @@ void HubRouter::handle_routine_req(const std::string& worker,
 // broker. The VALUE only ever lives inside `frame` here — it is never
 // logged, never echoed in the response, and lands encrypted at rest
 // (SecretStore, AES-256-GCM). Auto-granted to the creator only.
+nlohmann::json secret_delete_apply(hivemind::SecretStore& secrets,
+                                   const std::string& name,
+                                   const std::string& agent_id) {
+    // 2026-10-20 (lee-approved; Bob report: the agent surface was
+    // list/get/create only — stale entries needed lee's manual webUI
+    // cleanup). "Remove MY access"; only the LAST holder destroys.
+    // Blind: other holders never appear in the result.
+    const hivemind::SecretEntry* entry = nullptr;
+    bool granted = false;
+    std::size_t holders = 0;
+    for (const auto& e : secrets.list()) {
+        if (e.name != name) continue;
+        entry = &e;
+        holders = e.agent_ids.size();
+        for (const auto& id : e.agent_ids)
+            if (id == agent_id) granted = true;
+        break;
+    }
+    if (!entry || !granted)
+        return {{"ok", false},
+                {"error", "no secret named '" + name + "' granted to you"}};
+    if (holders <= 1) {
+        if (!secrets.remove(name))
+            return {{"ok", false}, {"error", "delete failed"}};
+        return {{"ok", true}, {"result", {{"deleted", name}}}};
+    }
+    if (!secrets.revoke(name, agent_id))
+        return {{"ok", false}, {"error", "revoke failed"}};
+    return {{"ok", true}, {"result", {{"revoked", name}}}};
+}
+
 void HubRouter::handle_secret_req(const std::string& worker,
                                   const std::string& agent_id,
                                   const json& frame) {
@@ -271,7 +302,15 @@ void HubRouter::handle_secret_req(const std::string& worker,
     json resp = {{"op", "secret_resp"}, {"agent_id", agent_id}, {"id", id}};
     try {
         const std::string action = frame.value("action", "");
-        if (action != "create") {
+        if (action == "delete") {
+            json r = secret_delete_apply(secrets_, frame.value("name", ""),
+                                         agent_id);
+            resp["ok"] = r.value("ok", false);
+            if (resp["ok"].get<bool>())
+                resp["result"] = r.value("result", json::object());
+            else
+                resp["error"] = r.value("error", "delete failed");
+        } else if (action != "create") {
             resp["ok"] = false;
             resp["error"] = "unknown action: " + action;
         } else {

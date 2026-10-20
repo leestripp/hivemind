@@ -53,6 +53,18 @@ nlohmann::json secret_create_apply(hivemind::SecretStore& secrets,
                                    const nlohmann::json& payload,
                                    const std::string& agent_id);
 
+/// secrets_delete op core (unit-testable), 2026-10-20 lee-approved
+/// semantics: a secret may be granted to MANY agents, so an agent's
+/// delete removes THEIR grant only — the entry is destroyed solely when
+/// the LAST holder calls it. Returns:
+///   {"ok":true,"result":{"deleted":name}}   last holder — destroyed
+///   {"ok":true,"result":{"revoked":name}}   shared — caller's grant gone
+///   {"ok":false,"error":...}                not found / not granted
+/// BLIND by design: the result never names other holders.
+nlohmann::json secret_delete_apply(hivemind::SecretStore& secrets,
+                                   const std::string& name,
+                                   const std::string& agent_id);
+
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,

@@ -1400,6 +1400,61 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<SecretsCreateTool>());
 
+    // secrets_delete (2026-10-20, lee-approved; Bob report: the agent
+    // surface was list/get/create only — stale entries needed lee's
+    // manual webUI cleanup). A secret can be granted to MANY agents, so
+    // delete is "remove my access"; only the LAST holder's call destroys
+    // the entry. The result is blind — it never reveals other holders.
+    class SecretsDeleteTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "secrets_delete"; }
+        std::string get_description() const override {
+            return "Remove a broker secret you hold. If other agents "
+                   "also hold it this removes only YOUR access (they "
+                   "keep it); if you are the last holder the entry is "
+                   "destroyed and cannot be recovered. Use for stale or "
+                   "broken credentials you no longer need. Names as "
+                   "shown by secrets_list (case-insensitive). The change "
+                   "reaches your tools after your next restart (env "
+                   "secrets load at spawn).";
+        }
+        json get_definition() const override {
+            json name = {{"type","string"},
+                         {"description","Secret name as shown by "
+                                        "secrets_list (case-insensitive, "
+                                        "e.g. GITHUB_TOKEN)"}};
+            json params = {{"type","object"},
+                           {"properties",{{"name",name}}},
+                           {"required",{"name"}}};
+            return {{"type","function"},
+                    {"function",{{"name","secrets_delete"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string raw = args.value("name","");
+            if (raw.empty())
+                return {{"status","error"},{"error","name required"}};
+            const std::string name = hive::secret_env_normalize(raw);
+            if (!hive::secret_env_name_valid(name))
+                return {{"status","error"},{"error","invalid secret name"}};
+            json r = g_secrets.call("delete", {{"name",name}});
+            if (!r.value("ok", false))
+                return {{"status","error"},
+                        {"error", r.value("error","delete failed")}};
+            const json res = r.value("result", json::object());
+            if (res.contains("deleted"))
+                return {{"status","success"},
+                        {"note","secret '" + name + "' destroyed — you "
+                                "were the last holder."}};
+            return {{"status","success"},
+                    {"note","your access to '" + name + "' was removed; "
+                            "the entry stays in the broker because other "
+                            "agents still hold it."}};
+        }
+    };
+    agent.register_tool(std::make_unique<SecretsDeleteTool>());
+
     // container environment at spawn (Phase 60); these tools let the
     // agent discover (secrets_list) and read (secrets_get) them.
     agent.register_tool(std::make_unique<hive::SecretsListTool>());
