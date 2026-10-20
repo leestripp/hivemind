@@ -67,6 +67,21 @@ inline bool normalize_thinking_level(std::string& v) {
 /// "req-…" and support can grep the exact failure.
 inline thread_local std::string request_id;
 
+/// 2026-10-20: baseline hardening headers on every response (HoneyBee's
+/// external scan flagged their absence + the public nginx version string).
+/// HSTS is safe to emit from the hub — it only takes effect over HTTPS,
+/// which nginx terminates in front of us. X-Frame-Options SAMEORIGIN:
+/// the cast page is always loaded top-level (HiveWindow) or same-origin.
+/// The nginx `Server: nginx/x.y` banner itself can only be suppressed
+/// with `server_tokens off` in the nginx config (root-owned) — separate
+/// step, handed to lee.
+inline void apply_security_headers(OmniNet::HTTP::Response& resp) {
+    resp.setHeader("X-Content-Type-Options", "nosniff");
+    resp.setHeader("X-Frame-Options", "SAMEORIGIN");
+    resp.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    resp.setHeader("Strict-Transport-Security", "max-age=31536000");
+}
+
 inline void apply_cors(OmniNet::HTTP::Response& resp) {
     if (request_origin.empty()) return;
     if (!ServerConfig::instance().cors_allowed(request_origin)) return;
@@ -81,6 +96,7 @@ inline void send_json(OmniNet::HTTP::Response& resp, const nlohmann::json& j,
     resp.setContentType("application/json");
     if (!request_id.empty()) resp.setHeader("X-Request-Id", request_id);
     resp.setBody(j.dump());
+    apply_security_headers(resp);
     apply_cors(resp);
 }
 

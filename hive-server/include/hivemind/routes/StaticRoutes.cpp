@@ -19,6 +19,8 @@
 
 #include "hivemind/routes/StaticRoutes.h"
 
+#include "hivemind/routes/RouteUtil.h"
+
 #include <OmniNet.h>
 
 #include <cerrno>
@@ -110,6 +112,7 @@ void serve_fallback(const fs::path& web_dir, const OmniNet::HTTP::Request& req,
     resp = OmniNet::HTTP::Response::ok();
     resp.setContentType("text/html; charset=utf-8");
     resp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    hivemind::routes::apply_security_headers(resp);
     resp.setBody(fallback);
 }
 
@@ -156,6 +159,7 @@ void register_static_routes(OmniNet::HTTP::Server& server) {
             // stale index.html/app.js from cache (this has bitten us twice:
             // old JS + new HTML = broken page wiring).
             resp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            hivemind::routes::apply_security_headers(resp);
             resp.setBody(*content_opt);
         } catch (const std::exception& e) {
             std::cerr << "[StaticRoutes] error serving '" << req.path()

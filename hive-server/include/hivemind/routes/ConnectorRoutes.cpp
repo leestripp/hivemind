@@ -63,6 +63,7 @@ void send_html(OmniNet::HTTP::Response& resp, const std::string& title,
                  "<body style=\"font-family:system-ui;background:#0e1116;color:#d8dee9;"
                  "display:grid;place-items:center;height:100vh;margin:0\">"
                  "<div style=\"text-align:center\">" + body + "</div></body>");
+    hivemind::routes::apply_security_headers(resp);
 }
 
 } // namespace

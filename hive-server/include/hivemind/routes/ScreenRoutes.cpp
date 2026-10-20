@@ -444,6 +444,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 resp.setHeader("Cache-Control",
                                "no-cache, no-store, must-revalidate");
                 resp.setHeader("Refresh", "8");
+                routes::apply_security_headers(resp);
                 resp.setBody(
                     "<!doctype html><meta charset=utf-8>"
                     "<title>Starting screen\u2026</title>"
@@ -468,6 +469,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 resp.setHeader("Cache-Control",
                                "no-cache, no-store, must-revalidate");
                 resp.setBody(kCastPage);
+                routes::apply_security_headers(resp);
                 return;
             }
 
