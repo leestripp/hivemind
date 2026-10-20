@@ -63,7 +63,8 @@ void register_file_routes(OmniNet::HTTP::Server& server,
                    OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());   // api threads :id attachments
             if (seg.size() < 4) { send_error(resp, 400, "missing id"); return; }
-            if (!threads.get_thread(seg[2])) {
+            const auto thread = threads.get_thread(seg[2]);
+            if (!thread) {
                 send_error(resp, 404, "thread not found"); return;
             }
             const std::string name =
@@ -79,16 +80,49 @@ void register_file_routes(OmniNet::HTTP::Server& server,
             // over the channel into attachments/<thread_id>/<name> on
             // the worker's workspace dir (agents see it at
             // /workspace/attachments/<thread_id>/<name>).
-            const auto worker = pick_worker(wchannel, agents,
-                req.queryParameter("worker", ""));
-            if (!worker) {
+            //
+            // 2026-10-20 (user attachments land on the wrong rig): with
+            // the fleet split across workers, pick_worker() sends the
+            // payload to the MAJORITY worker — not the worker hosting
+            // the thread's agent. Bob (ubuntu-pc) got zero bytes of
+            // every file lee attached (they sat on the droplet). Target
+            // the worker(s) hosting the THREAD's agents instead; an
+            // explicit ?worker= still wins. A thread spanning workers
+            // gets the file pushed to EACH so every participant sees it
+            // at the same /workspace path.
+            std::vector<std::string> targets;
+            if (const auto want = req.queryParameter("worker", "");
+                !want.empty()) {
+                if (wchannel->is_online(want)) targets.push_back(want);
+            } else {
+                std::unordered_set<std::string> seen;
+                for (const auto& aid : thread->agent_ids) {
+                    auto a = agents.get_agent(aid);
+                    if (!a) continue;
+                    if (wchannel->is_online(a->worker) &&
+                        seen.insert(a->worker).second)
+                        targets.push_back(a->worker);
+                }
+                if (targets.empty()) {
+                    // No thread agent's worker is online — fall back to
+                    // the old majority pick so an upload to a thread
+                    // with no bound agents (or all offline) still
+                    // lands somewhere fetchable.
+                    if (auto w = pick_worker(wchannel, agents))
+                        targets.push_back(*w);
+                }
+            }
+            if (targets.empty()) {
                 send_error(resp, 503, "worker not connected"); return;
             }
-            // Uniquify against the worker's current listing so repeated
-            // same-name uploads do not clobber each other.
+            // Uniquify against the first target's listing so repeated
+            // same-name uploads do not clobber each other; the SAME
+            // fname is used on every target so the /workspace path in
+            // the message metadata resolves identically for all
+            // participants.
             const std::string dir_rel = "attachments/" + seg[2];
             std::string fname = name;
-            if (auto l = wchannel->list_files(*worker, dir_rel, 15);
+            if (auto l = wchannel->list_files(targets.front(), dir_rel, 15);
                 l && l->ok) {
                 std::unordered_set<std::string> taken;
                 for (auto& e : l->entries)
@@ -102,16 +136,21 @@ void register_file_routes(OmniNet::HTTP::Server& server,
                 }
             }
             const std::string rel = dir_rel + "/" + fname;
-            auto r = wchannel->push_file(*worker, rel,
-                std::string(reinterpret_cast<const char*>(body.data()),
-                            body.size()));
-            if (!r) { send_error(resp, 503, "worker went offline"); return; }
-            if (!r->ok) { send_error(resp, 502, r->error); return; }
+            const std::string data(reinterpret_cast<const char*>(body.data()),
+                                   body.size());
+            for (const auto& w : targets) {
+                auto r = wchannel->push_file(w, rel, data);
+                if (!r) { send_error(resp, 503, "worker went offline"); return; }
+                if (!r->ok) { send_error(resp, 502, r->error); return; }
+            }
+            json workers_json = json::array();
+            for (const auto& w : targets) workers_json.push_back(w);
             send_json(resp, json{
                 {"name", fname},
                 {"rel_path", rel},
                 {"path", "/workspace/" + rel},
-                {"worker", *worker},
+                {"worker", targets.front()},
+                {"workers", workers_json},
                 {"size", body.size()},
             }, 201);
         });
