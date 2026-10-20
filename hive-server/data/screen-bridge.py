@@ -112,6 +112,14 @@ class Bridge:
             return                       # already up (agent's or ours)
         except Exception:
             pass
+        # Stale Singleton locks (e.g. a profile copied from another host)
+        # make Chrome refuse to start — hive-chrome.sh clears these too.
+        import glob as _g, os as _o
+        for f in _g.glob(_o.path.join(self.profile, "Singleton*")):
+            try:
+                _o.remove(f)
+            except OSError:
+                pass
         subprocess.Popen(
             [self.chrome_bin,
              f"--remote-debugging-port={self.cdp_port}",
