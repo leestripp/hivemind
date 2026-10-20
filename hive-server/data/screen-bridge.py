@@ -101,6 +101,7 @@ class Bridge:
         self.last_frame_at = time.monotonic()
         self._retarget_lock = asyncio.Lock()
         self.pending_chooser = None   # {"backendNodeId": int, "mode": str}
+        self.current_target = ""      # targetId of the attached page
 
     # ── Chrome lifecycle ────────────────────────────────────────────────
     def _http_json(self, path):
@@ -153,6 +154,7 @@ class Bridge:
             return t.get("targetId") or t.get("id", "")
         page = next((t for t in targets if _tid(t) == target_id),
                     targets[-1])
+        self.current_target = _tid(page)
         print(f"screen-bridge: attaching '{page.get('title','')[:40]}' "
               f"{_tid(page)[:8]}", flush=True)
         if self.cdp:
@@ -399,6 +401,25 @@ class Bridge:
                 r = await self.browser.call("Target.createTarget",
                                             url=msg.get("url", "about:blank"))
                 await self.attach_newest_page(r.get("targetId", ""))
+                if self.clients:
+                    await self.start_cast()
+        elif t == "tab":
+            # Cycle to the prev/next open page target (lee: "can't get to
+            # any other browser tabs"). Wraps around.
+            dir_ = 1 if msg.get("dir", 1) >= 0 else -1
+            targets = [x for x in self._http_json("/json")
+                       if x.get("type") == "page"]
+            if len(targets) < 2:
+                return
+            ids = [x.get("targetId") or x.get("id", "") for x in targets]
+            try:
+                idx = ids.index(self.current_target)
+            except ValueError:
+                idx = 0
+            nxt = ids[(idx + dir_) % len(ids)]
+            async with self._retarget_lock:
+                await self.stop_cast()
+                await self.attach_newest_page(nxt)
                 if self.clients:
                     await self.start_cast()
         elif t == "retarget":

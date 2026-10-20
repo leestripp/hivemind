@@ -205,6 +205,8 @@ canvas{background:#000;max-width:100%;cursor:crosshair}
 <input id=url placeholder="address — type a URL and press Go">
 <button onclick="go()">Go</button>
 <button onclick="send({type:'newtab',url:document.getElementById('url').value||'about:blank'})">New&nbsp;Tab</button>
+<button title="previous tab" onclick="send({type:'tab',dir:-1})">&#9664;&nbsp;Tab</button>
+<button title="next tab" onclick="send({type:'tab',dir:1})">Tab&nbsp;&#9654;</button>
 <span id=stat>connecting…</span>
 </div>
 <div id=wrap><canvas id=cv width=1280 height=800></canvas></div>
