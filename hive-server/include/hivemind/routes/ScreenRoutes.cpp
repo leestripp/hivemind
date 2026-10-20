@@ -78,20 +78,24 @@ void pump(OmniNet::Socket& from, OmniNet::Socket& to) {
 // local containers, a ChannelSocket over the worker channel for remote.
 void splice_to_container(std::unique_ptr<OmniNet::Socket> client,
                          std::unique_ptr<OmniNet::Socket> up,
-                         uint16_t port) {
+                         uint16_t port, bool cast = false) {
 
-    // Fresh upstream handshake to websockify.
+    // Fresh upstream handshake: websockify (RFB, binary subprotocol) or
+    // the cast bridge (JSON text frames, no subprotocol). Both legs speak
+    // WS over the raw pipe, so the byte-transparent pump stays correct.
     const auto nonce = OmniNet::Crypto::randomBytes(16);
     const std::string key = OmniNet::Crypto::base64Encode(
         std::span<const uint8_t>(nonce.data(), nonce.size()));
-    const std::string handshake =
-        "GET /websockify HTTP/1.1\r\n"
+    std::string handshake =
+        std::string("GET ") + (cast ? "/cast" : "/websockify") +
+        " HTTP/1.1\r\n"
         "Host: 127.0.0.1:" + std::to_string(port) + "\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: " + key + "\r\n"
-        "Sec-WebSocket-Version: 13\r\n"
-        "Sec-WebSocket-Protocol: binary\r\n\r\n";
+        "Sec-WebSocket-Version: 13\r\n";
+    if (!cast) handshake += "Sec-WebSocket-Protocol: binary\r\n";
+    handshake += "\r\n";
     try {
         up->sendAll(std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(handshake.data()), handshake.size()));
@@ -177,6 +181,65 @@ bool http_fetch(OmniNet::Socket& sock, uint16_t port,
 
 } // namespace
 
+/// HiveScreen P0: self-contained cast viewer. Speaks the bridge's JSON
+/// protocol over the same /screen/ws splice (kind=cast picks /cast
+/// upstream). Auth rides the ?key= query the share link already carries.
+static const char kCastPage[] = R"CAST(<!doctype html>
+<html><head><meta charset=utf-8><title>HiveScreen</title>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;background:#14161a;color:#e8e8ea;font-family:system-ui,sans-serif}
+#bar{display:flex;gap:6px;padding:6px;background:#1d2026;align-items:center}
+#bar input{flex:1;background:#0f1114;border:1px solid #333;color:#eee;padding:6px;border-radius:4px}
+#bar button{background:#2b6cb0;border:0;color:#fff;padding:6px 12px;border-radius:4px;cursor:pointer}
+#bar button:hover{background:#3182ce}
+#wrap{display:flex;justify-content:center;padding:8px}
+canvas{background:#000;max-width:100%;cursor:crosshair}
+#stat{font-size:12px;color:#9aa;padding:0 8px}
+</style></head><body>
+<div id=bar>
+<input id=url placeholder="address — type a URL and press Go">
+<button onclick="go()">Go</button>
+<button onclick="send({type:'newtab',url:document.getElementById('url').value||'about:blank'})">New&nbsp;Tab</button>
+<span id=stat>connecting…</span>
+</div>
+<div id=wrap><canvas id=cv width=1280 height=800></canvas></div>
+<script>
+const q=new URLSearchParams(location.search);
+const agent=q.get('agent')||location.pathname.split('/')[2];
+const key=q.get('key')||'';
+const proto=location.protocol==='https:'?'wss':'ws';
+const ws=new WebSocket(`${proto}://${location.host}/screen/ws?agent=${agent}&key=${encodeURIComponent(key)}`);
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),stat=document.getElementById('stat');
+const img=new Image();let frames=0;
+img.onload=()=>{ctx.drawImage(img,0,0);};
+ws.onopen=()=>stat.textContent='live';
+ws.onclose=()=>stat.textContent='disconnected — reload to retry';
+ws.onerror=()=>stat.textContent='error';
+ws.onmessage=e=>{try{const m=JSON.parse(e.data);
+ if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
+ else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
+function send(o){if(ws.readyState===1)ws.send(JSON.stringify(o));}
+function go(){const u=document.getElementById('url').value.trim();if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
+document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')go();e.stopPropagation();});
+// coords: canvas CSS size -> 1280x800 frame space
+function pos(ev){const r=cv.getBoundingClientRect();
+ return {x:Math.round((ev.clientX-r.left)*1280/r.width),y:Math.round((ev.clientY-r.top)*800/r.height)};}
+cv.addEventListener('click',e=>send({type:'click',...pos(e)}));
+cv.addEventListener('dblclick',e=>send({type:'click',dbl:true,...pos(e)}));
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+let lastMove=0;
+cv.addEventListener('mousemove',e=>{const n=Date.now();if(n-lastMove>80){lastMove=n;send({type:'move',...pos(e)});}});
+cv.addEventListener('wheel',e=>{e.preventDefault();send({type:'wheel',...pos(e),dx:e.deltaX,dy:e.deltaY});},{passive:false});
+const SPECIAL={Enter:1,Backspace:1,Tab:1,Escape:1,Delete:1,Home:1,End:1,PageUp:1,PageDown:1,
+ ArrowLeft:1,ArrowRight:1,ArrowUp:1,ArrowDown:1};
+document.addEventListener('keydown',e=>{
+ if(e.target.id==='url')return;
+ if(SPECIAL[e.key]){e.preventDefault();send({type:'key',key:e.key});}
+ else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();send({type:'text',text:e.key});}});
+</script></body></html>
+)CAST";
+
 void register_screen_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
                             AuthStore& auth,
@@ -202,6 +265,14 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
         } catch (...) {}
         return {};   // v2: no worker -> no password
     };
+    // HiveScreen P0: "cast" (CDP bridge, JSON text WS) vs "rfb" (noVNC).
+    auto kind_of = [](const std::string& id) -> std::string {
+        try {
+            if (auto r = WorkerRouter::screen_ctl(id, "status"))
+                return r->kind.empty() ? "rfb" : r->kind;
+        } catch (...) {}
+        return "rfb";
+    };
     // ── GET /api/agents/:id/screen — status ─────────────────────────────
     server.get("/api/agents/:id/screen",
         [&agents, resolve](const Request& req, Response& resp) {
@@ -224,6 +295,8 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 {"browser_image", remote.has_value() && remote->error.empty()},
                 {"running", port != 0},
                 {"port", port},
+                {"kind", remote && !remote->kind.empty() ? remote->kind
+                                                         : "rfb"},
                 {"url", port ? "/screen/" + id + "/" : ""},
             });
         });
@@ -281,7 +354,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
 
     // ── GET /screen/* — noVNC asset proxy (own auth) ────────────────────
     server.get("/screen/*",
-        [&agents, &auth, resolve, password_of](const Request& req, Response& resp) {
+        [&agents, &auth, resolve, password_of, kind_of](const Request& req, Response& resp) {
             if (!screen_authorized(req, auth)) {
                 routes::send_error(resp, 401, "missing or invalid key"); return;
             }
@@ -335,6 +408,19 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                     "<p>The desktop stack was parked. It is being woken "
                     "now \u2014 this page refreshes automatically "
                     "(usually 10\u201340 seconds).</p></div>");
+                return;
+            }
+
+            // HiveScreen P0: cast agents skip noVNC entirely — one
+            // self-contained page, no asset proxying, no cookie (the
+            // page passes ?key= straight into its WS URL). The page's
+            // WS rides the same /screen/ws splice with kind=cast.
+            if (kind_of(seg[1]) == "cast") {
+                resp = OmniNet::HTTP::Response::ok();
+                resp.setContentType("text/html; charset=utf-8");
+                resp.setHeader("Cache-Control",
+                               "no-cache, no-store, must-revalidate");
+                resp.setBody(kCastPage);
                 return;
             }
 
@@ -445,17 +531,19 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
                 resp.setHeader("Sec-WebSocket-Protocol", "binary");
         resp.markProtocolSwitch();
     };
-    h.on_post_upgrade = [resolve](std::unique_ptr<OmniNet::Socket> socket,
+    h.on_post_upgrade = [resolve, kind_of](
+                           std::unique_ptr<OmniNet::Socket> socket,
                            const Request& req) {
         const std::string id = req.queryParameter("agent", "");
         const uint16_t port = resolve(id);
         if (port == 0) return;
-        std::thread([client = std::move(socket), id, port]() mutable {
+        const bool cast = kind_of(id) == "cast";
+        std::thread([client = std::move(socket), id, port, cast]() mutable {
             std::unique_ptr<OmniNet::Socket> up;
             try { up = connect_upstream(id, port); }
             catch (...) { return; }   // client socket closes with `client`
             if (!up) return;
-            splice_to_container(std::move(client), std::move(up), port);
+            splice_to_container(std::move(client), std::move(up), port, cast);
         }).detach();
     };
     server.registerProtocolSwitch("/screen/ws", std::move(h));

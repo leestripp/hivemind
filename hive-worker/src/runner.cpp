@@ -1129,6 +1129,66 @@ static int host_screen_slot(const std::string& user) {
     return int(sum % 50) + 1;
 }
 
+ScreenResult cast_ctl(const std::string& /*agent_id*/,
+                      const std::string& user,
+                      const std::string& action) {
+    ScreenResult r;
+    r.kind = "cast";
+    const int slot = host_screen_slot(user);
+    const uint16_t port = static_cast<uint16_t>(16080 + slot);
+    const int cdp = 9263 + slot;
+    const std::string tag = "/tmp/hive-cast-" + user;
+
+    if (action == "status") {
+        if (port_accepts(port)) {
+            r.port = port;
+            r.running = true;
+        }
+        return r;
+    }
+
+    if (action == "stop") {
+        std::string out;
+        run_as_user(user, {"sh", "-c",
+                           "kill $(cat " + tag + ".pid) 2>/dev/null; "
+                           "rm -f " + tag + ".pid"},
+                    "", &out);
+        r.running = false;
+        return r;
+    }
+
+    if (action != "start") { r.error = "unknown action"; return r; }
+
+    if (port_accepts(port)) {          // already up — idempotent
+        r.port = port;
+        r.running = true;
+        return r;
+    }
+    std::string out;
+    const std::string cmd =
+        "nohup python3 /usr/local/bin/screen-bridge.py"
+        " --serve-port " + std::to_string(port) +
+        " --cdp-port " + std::to_string(cdp) +
+        " >" + tag + ".log 2>&1 & echo $! >" + tag + ".pid";
+    if (run_as_user(user, {"sh", "-c", cmd}, "", &out) != 0) {
+        r.error = "cast bridge failed to launch: " + out;
+        return r;
+    }
+    for (int i = 0; i < 50; ++i) {     // grace-probe up to ~10s
+        if (port_accepts(port)) {
+            r.port = port;
+            r.running = true;
+            return r;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    std::string log;
+    run_as_user(user, {"sh", "-c", "tail -5 " + tag + ".log"}, "", &log);
+    r.error = "cast bridge did not come up on " + std::to_string(port) +
+              ": " + log;
+    return r;
+}
+
 ScreenResult screen_ctl_host(const std::string& agent_id,
                              const std::string& user,
                              const std::string& action,

@@ -418,7 +418,8 @@ int install_support(const std::string& worker_user) {
     // browser). Installed from the repo data dir when run from the
     // repository root; best-effort — a missing tree just skips them.
     for (const char* s :
-         {"hive-screen.sh", "hive-chrome.sh", "browser_driver.py"}) {
+         {"hive-screen.sh", "hive-chrome.sh", "browser_driver.py",
+          "screen-bridge.py"}) {
         const std::string src = std::string("hive-server/data/") + s;
         if (std::filesystem::exists(src))
             run({"/usr/bin/install", "-m", "0755", "-o", "root", "-g",

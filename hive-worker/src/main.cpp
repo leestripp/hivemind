@@ -1425,17 +1425,19 @@ int main(int argc, char* argv[]) {
                     // screen stack runs on the host as the hivex user.
                     const std::string huser =
                         g_fleet ? g_fleet->host_user_of(aid) : "";
+                    // HiveScreen P0: host agents get the CDP cast
+                    // bridge (replaces the never-reachable RFB stack).
                     auto r = huser.empty()
                         ? hwrunner::screen_ctl(
                               aid, frame.value("action", ""),
                               frame.value("type", ""),
                               frame.value("resolution", "1280x800"))
-                        : hwrunner::screen_ctl_host(
-                              aid, huser, frame.value("action", ""),
-                              frame.value("resolution", "1280x800"));
+                        : hwrunner::cast_ctl(
+                              aid, huser, frame.value("action", ""));
                     json resp{{"op","screen_result"},{"id",id},
                               {"running",r.running},{"port",r.port},
-                              {"password",r.password}};
+                              {"password",r.password},
+                              {"kind", r.kind.empty() ? "rfb" : r.kind}};
                     if (!r.error.empty()) resp["error"] = r.error;
                     try { send_frame(resp); } catch (...) {}
                 } else if (op == "stream_open") {

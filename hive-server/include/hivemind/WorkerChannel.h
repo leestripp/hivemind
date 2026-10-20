@@ -105,6 +105,7 @@ public:
     /// resolution are passed through from server config.
     /// nullopt when the worker is offline; error field set on failure.
     struct ScreenResult { bool running = false; uint16_t port = 0;
+        std::string kind;   // "rfb" | "cast" (worker reports; default rfb)
                           std::string password; std::string error; };
     std::optional<ScreenResult> screen_ctl(const std::string& worker,
                                            const std::string& agent,

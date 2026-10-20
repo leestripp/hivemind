@@ -138,6 +138,7 @@ struct ScreenResult {
     bool running = false;
     uint16_t port = 0;
     std::string password;
+    std::string kind;       // "rfb" (container noVNC) | "cast" (CDP bridge)
     std::string error;      // "" on success
 };
 
@@ -166,5 +167,14 @@ ScreenResult screen_ctl_host(const std::string& agent_id,
                              const std::string& user,
                              const std::string& action,
                              const std::string& resolution);
+
+/// HiveScreen P0: CDP screencast bridge for a HOST agent. Runs
+/// screen-bridge.py as the hivex-<name> user (detached, pidfile'd);
+/// serve port = 16080 + slot (127.0.0.1-only), CDP = 9263 + slot.
+/// kind is always "cast"; no RFB password (hub auth gates the UI).
+/// action: "status" | "start" | "stop".
+ScreenResult cast_ctl(const std::string& agent_id,
+                      const std::string& user,
+                      const std::string& action);
 
 } // namespace hwrunner

@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""screen-bridge.py — HiveScreen P0: CDP screencast -> WebSocket bridge.
+
+Runs next to an agent's Chrome (bare-metal hivex user, later in-container).
+Launches Chrome headless if the CDP port is dark, attaches to the newest
+page target, and serves:
+
+  GET  /status   -> JSON health (worker screen_ctl probes this)
+  WS   /cast     -> screencast frames out {"type":"frame","data":<b64>,"w","h"}
+                    input in {"type":"click"|"move"|"wheel"|"text"|"key"|
+                              "newtab"|"retarget", ...}
+
+First client starts the screencast; last disconnect stops it (idle-pause).
+Chrome stays 127.0.0.1-only; this bridge binds 127.0.0.1 too — the worker
+channel proxies UI traffic in, nothing new is exposed on the network.
+"""
+import argparse
+import asyncio
+import base64
+import json
+import subprocess
+import sys
+import time
+import urllib.request
+
+import websockets
+
+VIEW_W, VIEW_H = 1280, 800          # deterministic viewport (1:1 frame px)
+MIN_FRAME_INTERVAL = 0.15           # ~6.6fps cap via ack throttling
+CHROME_ARGS = [
+    "--headless=new", "--no-first-run", "--no-default-browser-check",
+    "--disable-session-crashed-bubble", "--disable-dev-shm-usage",
+    "--no-sandbox", "--disable-gpu", "--noerrdialogs",
+    "--hide-crash-restore-bubble", "--disable-features=TranslateUI",
+    f"--window-size={VIEW_W},{VIEW_H}",
+]
+
+KEY_MAP = {  # key name -> (windowsVirtualKeyCode, key, code)
+    "Enter": (13, "Enter", "Enter"), "Backspace": (8, "Backspace", "Backspace"),
+    "Tab": (9, "Tab", "Tab"), "Escape": (27, "Escape", "Escape"),
+    "Delete": (46, "Delete", "Delete"), "Home": (36, "Home", "Home"),
+    "End": (35, "End", "End"), "PageUp": (33, "PageUp", "PageUp"),
+    "PageDown": (34, "PageDown", "PageDown"),
+    "ArrowLeft": (37, "ArrowLeft", "ArrowLeft"),
+    "ArrowRight": (39, "ArrowRight", "ArrowRight"),
+    "ArrowUp": (38, "ArrowUp", "ArrowUp"),
+    "ArrowDown": (40, "ArrowDown", "ArrowDown"),
+}
+
+
+class CDP:
+    """Minimal async CDP client over one websocket."""
+    def __init__(self, ws):
+        self.ws = ws
+        self.next_id = 0
+        self.pending = {}
+        self.on_event = None          # async fn(method, params)
+        self._reader = asyncio.create_task(self._read_loop())
+
+    async def _read_loop(self):
+        try:
+            async for raw in self.ws:
+                msg = json.loads(raw)
+                if "id" in msg:
+                    fut = self.pending.pop(msg["id"], None)
+                    if fut and not fut.done():
+                        fut.set_result(msg)
+                elif self.on_event:
+                    # Never await here: the handler itself calls back into CDP
+                    # (screencastFrameAck) and needs THIS loop to read the
+                    # response. Awaiting deadlocks after the first frame.
+                    asyncio.create_task(self.on_event(
+                        msg.get("method", ""), msg.get("params", {})))
+        except websockets.ConnectionClosed:
+            for fut in self.pending.values():
+                if not fut.done():
+                    fut.set_exception(RuntimeError("cdp ws closed"))
+
+    async def call(self, method, **params):
+        self.next_id += 1
+        mid = self.next_id
+        fut = asyncio.get_running_loop().create_future()
+        self.pending[mid] = fut
+        await self.ws.send(json.dumps({"id": mid, "method": method, "params": params}))
+        msg = await fut
+        if "error" in msg:
+            raise RuntimeError(f"{method}: {msg['error']}")
+        return msg.get("result", {})
+
+
+class Bridge:
+    def __init__(self, cdp_port, chrome_bin, profile):
+        self.cdp_port = cdp_port
+        self.chrome_bin = chrome_bin
+        self.profile = profile
+        self.clients = set()
+        self.cdp = None               # CDP to the attached page target
+        self.browser = None           # CDP to the browser endpoint (Target.*)
+        self.cast_running = False
+        self.last_frame_sent = 0.0
+        self._retarget_lock = asyncio.Lock()
+
+    # ── Chrome lifecycle ────────────────────────────────────────────────
+    def _http_json(self, path):
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.cdp_port}{path}", timeout=3) as r:
+            return json.load(r)
+
+    def ensure_chrome(self):
+        try:
+            self._http_json("/json/version")
+            return                       # already up (agent's or ours)
+        except Exception:
+            pass
+        subprocess.Popen(
+            [self.chrome_bin,
+             f"--remote-debugging-port={self.cdp_port}",
+             f"--user-data-dir={self.profile}"] + CHROME_ARGS,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        for _ in range(50):              # up to 10s
+            time.sleep(0.2)
+            try:
+                self._http_json("/json/version")
+                return
+            except Exception:
+                continue
+        raise RuntimeError("chrome did not come up on CDP")
+
+    # ── Target attach ───────────────────────────────────────────────────
+    async def attach_newest_page(self, target_id=""):
+        ver = self._http_json("/json/version")
+        if not self.browser:
+            self.browser = CDP(await websockets.connect(
+                ver["webSocketDebuggerUrl"], max_size=64 * 1024 * 1024))
+        targets = [t for t in self._http_json("/json") if t.get("type") == "page"]
+        if not targets:
+            r = await self.browser.call("Target.createTarget", url="about:blank")
+            target_id = r["targetId"]
+            targets = [t for t in self._http_json("/json") if t.get("targetId") == target_id]
+        # /json entries carry the id as "id" (createTarget returns "targetId").
+        def _tid(t):
+            return t.get("targetId") or t.get("id", "")
+        page = next((t for t in targets if _tid(t) == target_id),
+                    targets[-1])
+        print(f"screen-bridge: attaching '{page.get('title','')[:40]}' "
+              f"{_tid(page)[:8]}", flush=True)
+        if self.cdp:
+            try:
+                await self.cdp.ws.close()
+            except Exception:
+                pass
+        self.cdp = CDP(await websockets.connect(
+            page["webSocketDebuggerUrl"], max_size=64 * 1024 * 1024))
+        self.cdp.on_event = self._on_cdp_event
+        try:
+            await self.browser.call("Target.activateTarget",
+                                    targetId=_tid(page))
+        except Exception as e:
+            print(f"screen-bridge: activateTarget: {e}", flush=True)
+        await self.cdp.call("Page.enable")
+        try:
+            await self.cdp.call("Page.bringToFront")
+        except Exception:
+            pass
+        await self.cdp.call("Emulation.setDeviceMetricsOverride",
+                            width=VIEW_W, height=VIEW_H,
+                            deviceScaleFactor=1, mobile=False)
+        self.cast_running = False
+
+    # ── Screencast ──────────────────────────────────────────────────────
+    async def _on_cdp_event(self, method, params):
+        try:
+            await self._dispatch_event(method, params)
+        except Exception as e:
+            print(f"screen-bridge: event error: {e}", flush=True)
+
+    async def _dispatch_event(self, method, params):
+        if method != "Page.screencastFrame":
+            return
+        data = params.get("data", "")
+        meta = params.get("metadata", {})
+        frame = json.dumps({
+            "type": "frame", "data": data,
+            "w": VIEW_W, "h": VIEW_H,
+            "scrollY": meta.get("scrollOffsetY", 0),
+        })
+        dead = []
+        for ws in list(self.clients):
+            try:
+                await ws.send(frame)
+            except websockets.ConnectionClosed:
+                dead.append(ws)
+        for ws in dead:
+            self.clients.discard(ws)
+        # Ack gating = flow control. Throttle to MIN_FRAME_INTERVAL.
+        now = time.monotonic()
+        wait = MIN_FRAME_INTERVAL - (now - self.last_frame_sent)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        self.last_frame_sent = time.monotonic()
+        try:
+            await self.cdp.call("Page.screencastFrameAck",
+                                sessionId=params["sessionId"])
+            self._frames_acked = getattr(self, "_frames_acked", 0) + 1
+            if self._frames_acked <= 3:
+                print(f"screen-bridge: ack {self._frames_acked} ok", flush=True)
+        except Exception as e:
+            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
+
+    async def start_cast(self):
+        if self.cast_running or not self.cdp:
+            return
+        await self.cdp.call("Page.startScreencast", format="jpeg",
+                            quality=60, maxWidth=VIEW_W, maxHeight=VIEW_H,
+                            everyNthFrame=1)
+        self.cast_running = True
+        print("screen-bridge: screencast started", flush=True)
+
+    async def stop_cast(self):
+        if not self.cast_running or not self.cdp:
+            return
+        try:
+            await self.cdp.call("Page.stopScreencast")
+        except Exception:
+            pass
+        self.cast_running = False
+
+    # ── Input ───────────────────────────────────────────────────────────
+    async def handle_input(self, msg):
+        t = msg.get("type")
+        c = self.cdp
+        if not c:
+            return
+        if t == "click":
+            x, y = msg["x"], msg["y"]
+            count = 2 if msg.get("dbl") else 1
+            await c.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            for _ in range(count):
+                await c.call("Input.dispatchMouseEvent", type="mousePressed",
+                             x=x, y=y, button="left", clickCount=count)
+                await c.call("Input.dispatchMouseEvent", type="mouseReleased",
+                             x=x, y=y, button="left", clickCount=count)
+        elif t == "move":
+            await c.call("Input.dispatchMouseEvent", type="mouseMoved",
+                         x=msg["x"], y=msg["y"])
+        elif t == "wheel":
+            await c.call("Input.dispatchMouseEvent", type="mouseWheel",
+                         x=msg.get("x", VIEW_W // 2), y=msg.get("y", VIEW_H // 2),
+                         deltaX=msg.get("dx", 0), deltaY=msg.get("dy", 0))
+        elif t == "text":
+            await c.call("Input.insertText", text=msg["text"])
+        elif t == "key":
+            name = msg["key"]
+            if name in KEY_MAP:
+                code, key, kcode = KEY_MAP[name]
+                for kt in ("keyDown", "keyUp"):
+                    await c.call("Input.dispatchKeyEvent", type=kt,
+                                 windowsVirtualKeyCode=code, key=key, code=kcode)
+            elif len(name) == 1:
+                await c.call("Input.insertText", text=name)
+        elif t == "navigate":
+            await c.call("Page.navigate", url=msg.get("url", "about:blank"))
+        elif t == "newtab":
+            async with self._retarget_lock:
+                await self.stop_cast()
+                r = await self.browser.call("Target.createTarget",
+                                            url=msg.get("url", "about:blank"))
+                await self.attach_newest_page(r.get("targetId", ""))
+                if self.clients:
+                    await self.start_cast()
+        elif t == "retarget":
+            async with self._retarget_lock:
+                await self.stop_cast()
+                await self.attach_newest_page()
+                if self.clients:
+                    await self.start_cast()
+
+    # ── WS client handling ──────────────────────────────────────────────
+    async def client_loop(self, ws):
+        self.clients.add(ws)
+        try:
+            if not self.cdp:
+                await self.attach_newest_page()
+            await self.start_cast()
+            async for raw in ws:
+                try:
+                    await self.handle_input(json.loads(raw))
+                except Exception as e:
+                    print(f"screen-bridge: input error: {e}", flush=True)
+                    await ws.send(json.dumps({"type": "error", "error": str(e)}))
+        finally:
+            self.clients.discard(ws)
+            if not self.clients:
+                await self.stop_cast()
+
+
+def find_chrome():
+    import glob
+    import shutil
+    for c in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        p = shutil.which(c)
+        if p:
+            return p
+    # Same fallback as hive-chrome.sh: playwright-bundled chromium.
+    cands = sorted(glob.glob("/opt/ms-playwright/chromium-*/chrome-linux*/chrome"))
+    if cands:
+        return cands[-1]
+    sys.exit("screen-bridge: no chrome found")
+
+
+async def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cdp-port", type=int, default=9263)
+    ap.add_argument("--serve-port", type=int, required=True)
+    ap.add_argument("--profile", default="")
+    args = ap.parse_args()
+    profile = args.profile or __import__("os").path.expanduser("~/.browser-profile")
+
+    bridge = Bridge(args.cdp_port, find_chrome(), profile)
+    bridge.ensure_chrome()
+
+    def process_request(connection, request):
+        if request.path == "/status":
+            return connection.respond(200, json.dumps({
+                "ok": True, "clients": len(bridge.clients),
+                "casting": bridge.cast_running, "cdp": args.cdp_port,
+            }))
+        return None
+
+    async with websockets.serve(bridge.client_loop, "127.0.0.1",
+                                args.serve_port, max_size=64 * 1024 * 1024,
+                                process_request=process_request):
+        print(f"screen-bridge: CDP :{args.cdp_port} -> ws://127.0.0.1:"
+              f"{args.serve_port}/cast", flush=True)
+        await asyncio.Future()           # run forever
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

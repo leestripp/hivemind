@@ -421,6 +421,7 @@ void WorkerChannel::handle(Connection& ws) {
                 sj->result.running = frame.value("running", false);
                 sj->result.port = frame.value("port", 0);
                 sj->result.password = frame.value("password", "");
+                sj->result.kind = frame.value("kind", "rfb");
                 sj->result.error = frame.value("error", "");
                 sj->done = true;
                 sj->cv.notify_all();
