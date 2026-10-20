@@ -196,6 +196,10 @@ body{margin:0;background:#14161a;color:#e8e8ea;font-family:system-ui,sans-serif}
 #wrap{display:flex;justify-content:center;padding:8px}
 canvas{background:#000;max-width:100%;cursor:crosshair}
 #stat{font-size:12px;color:#9aa;padding:0 8px}
+#fcover{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9}
+#fcbox{max-width:420px;margin:15vh auto;background:#1d2026;border:1px solid #333;border-radius:8px;padding:18px;font-size:15px}
+#fcbox button{background:#2b6cb0;border:0;color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;margin-top:10px}
+#fcbox input{color:#eee;margin-top:10px}
 </style></head><body>
 <div id=bar>
 <input id=url placeholder="address — type a URL and press Go">
@@ -204,6 +208,13 @@ canvas{background:#000;max-width:100%;cursor:crosshair}
 <span id=stat>connecting…</span>
 </div>
 <div id=wrap><canvas id=cv width=1280 height=800></canvas></div>
+<div id=fcover>
+ <div id=fcbox>
+  <p id=fctext>The page is asking for a file.<br>Pick it here and it lands straight in that browser.</p>
+  <input type=file id=fcfile><br>
+  <button id=fcgo>Upload</button> <button id=fccancel>Cancel</button>
+ </div>
+</div>
 <script>
 const q=new URLSearchParams(location.search);
 const agent=q.get('agent')||location.pathname.split('/')[2];
@@ -223,6 +234,8 @@ function connect(){
  ws.onerror=()=>{try{ws.close();}catch(_){}};
  ws.onmessage=e=>{lastRx=Date.now();try{const m=JSON.parse(e.data);
   if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
+  else if(m.type==='filechooser'){fcShow(m.multiple);}
+  else if(m.type==='upload_done'){fcHide();}
   else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
 }
 connect();
@@ -234,6 +247,24 @@ let lastRx=Date.now();
 setInterval(()=>{send({type:'ping'});
  if(Date.now()-lastRx>15000){try{ws.close();}catch(_){}}},5000);
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+// File-chooser relay: headless Chrome can't show a native picker, so the
+// bridge intercepts it and asks us. We read the file here and ship it
+// back as base64; the bridge drops it in /tmp and calls setFileInputFiles.
+const fcover=document.getElementById('fcover'),fcfile=document.getElementById('fcfile');
+function fcShow(mult){fcfile.multiple=!!mult;fcfile.value='';fcover.style.display='block';}
+function fcHide(){fcover.style.display='none';}
+document.getElementById('fccancel').onclick=()=>{send({type:'upload_cancel'});fcHide();};
+document.getElementById('fcgo').onclick=async()=>{
+ if(!fcfile.files.length){fcfile.click();return;}
+ stat.textContent='uploading…';
+ const files=[];
+ for(const f of fcfile.files){
+  const b64=await new Promise(res=>{const r=new FileReader();
+   r.onload=()=>res(r.result.split(',')[1]);r.readAsDataURL(f);});
+  files.push({name:f.name,data:b64});
+ }
+ send({type:'upload',files});
+};
 function go(){const u=document.getElementById('url').value.trim();if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
 document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')go();e.stopPropagation();});
 // coords: canvas CSS size -> 1280x800 frame space

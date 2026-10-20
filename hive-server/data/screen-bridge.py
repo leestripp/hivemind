@@ -100,6 +100,7 @@ class Bridge:
         self.last_frame_sent = 0.0
         self.last_frame_at = time.monotonic()
         self._retarget_lock = asyncio.Lock()
+        self.pending_chooser = None   # {"backendNodeId": int, "mode": str}
 
     # ── Chrome lifecycle ────────────────────────────────────────────────
     def _http_json(self, path):
@@ -168,6 +169,17 @@ class Bridge:
         except Exception as e:
             print(f"screen-bridge: activateTarget: {e}", flush=True)
         await self.cdp.call("Page.enable")
+        await self.cdp.call("DOM.enable")
+        try:
+            # Headless Chrome cannot render the native GTK file picker;
+            # a page that opens one blocks forever. Intercept it and
+            # satisfy it via DOM.setFileInputFiles instead (the cast page
+            # relays the user's chosen file as {type:"upload"}).
+            await self.cdp.call("Page.setInterceptFileChooserDialog",
+                                enabled=True)
+        except Exception as e:
+            print(f"screen-bridge: intercept file chooser: {e}", flush=True)
+        self.pending_chooser = None
         try:
             await self.cdp.call("Page.bringToFront")
         except Exception:
@@ -185,6 +197,23 @@ class Bridge:
             print(f"screen-bridge: event error: {e}", flush=True)
 
     async def _dispatch_event(self, method, params):
+        if method == "Page.fileChooserOpened":
+            self.pending_chooser = {
+                "backendNodeId": params.get("backendNodeId"),
+                "mode": params.get("mode", "selectSingle"),
+            }
+            print(f"screen-bridge: file chooser opened "
+                  f"({self.pending_chooser['mode']})", flush=True)
+            note = json.dumps({
+                "type": "filechooser",
+                "multiple": self.pending_chooser["mode"] != "selectSingle",
+            })
+            for ws in list(self.clients):
+                try:
+                    await ws.send(note)
+                except Exception:
+                    pass
+            return
         if method != "Page.screencastFrame":
             return
         self.last_frame_at = time.monotonic()
@@ -321,6 +350,47 @@ class Bridge:
                                  windowsVirtualKeyCode=code, key=key, code=kcode)
             elif len(name) == 1:
                 await c.call("Input.insertText", text=name)
+        elif t == "upload":
+            ch = self.pending_chooser
+            if not ch or ch.get("backendNodeId") is None:
+                return
+            paths = []
+            for i, f in enumerate(msg.get("files", [])):
+                name = "".join(chr_ if chr_.isalnum() or chr_ in "._-"
+                               else "_" for chr_ in f.get("name", f"file{i}"))[:80]
+                path = f"/tmp/hive-upload-{i}-{name}"
+                with open(path, "wb") as fh:
+                    fh.write(base64.b64decode(f.get("data", "")))
+                paths.append(path)
+            if ch["mode"] == "selectSingle":
+                paths = paths[:1]
+            await c.call("DOM.setFileInputFiles", files=paths,
+                         backendNodeId=ch["backendNodeId"])
+            print(f"screen-bridge: upload -> {paths}", flush=True)
+            self.pending_chooser = None
+            done = json.dumps({"type": "upload_done"})
+            for ws in list(self.clients):
+                try:
+                    await ws.send(done)
+                except Exception:
+                    pass
+        elif t == "upload_cancel":
+            ch = self.pending_chooser
+            if ch and ch.get("backendNodeId") is not None:
+                # Completing with an empty selection unblocks the page
+                # (the input just stays empty, like pressing Cancel).
+                try:
+                    await c.call("DOM.setFileInputFiles", files=[],
+                                 backendNodeId=ch["backendNodeId"])
+                except Exception as e:
+                    print(f"screen-bridge: upload cancel: {e}", flush=True)
+            self.pending_chooser = None
+            done = json.dumps({"type": "upload_done"})
+            for ws in list(self.clients):
+                try:
+                    await ws.send(done)
+                except Exception:
+                    pass
         elif t == "navigate":
             await c.call("Page.navigate", url=msg.get("url", "about:blank"))
         elif t == "newtab":
