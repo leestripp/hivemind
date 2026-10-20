@@ -221,14 +221,18 @@ function connect(){
  ws.onclose=()=>{retry=Math.min(retry+1,5);stat.textContent=`reconnecting (${retry})…`;
   setTimeout(connect,1000*retry);};
  ws.onerror=()=>{try{ws.close();}catch(_){}};
- ws.onmessage=e=>{try{const m=JSON.parse(e.data);
+ ws.onmessage=e=>{lastRx=Date.now();try{const m=JSON.parse(e.data);
   if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
   else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
 }
 connect();
-// Client keepalive: keeps the browser->hub direction warm even when the
-// mouse is idle (the bridge no-ops unknown message types).
-setInterval(()=>send({type:'ping'}),20000);
+// Client keepalive: an idle client->bridge leg dies silently after ~10s
+// on this path (protocol pings don't save it; app messages do) — ping
+// every 5s, and if NOTHING (frame or pong) has arrived for 15s, force a
+// reconnect. Invisible self-heal instead of a frozen canvas.
+let lastRx=Date.now();
+setInterval(()=>{send({type:'ping'});
+ if(Date.now()-lastRx>15000){try{ws.close();}catch(_){}}},5000);
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function go(){const u=document.getElementById('url').value.trim();if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
 document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')go();e.stopPropagation();});

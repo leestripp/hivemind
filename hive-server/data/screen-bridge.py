@@ -188,6 +188,24 @@ class Bridge:
         if method != "Page.screencastFrame":
             return
         self.last_frame_at = time.monotonic()
+        # Ack IMMEDIATELY: Chrome does not hard-gate on acks (it just
+        # stops if they NEVER come), so prompt acks keep the session
+        # healthy — the rate cap below is what throttles.
+        try:
+            await self.cdp.call("Page.screencastFrameAck",
+                                sessionId=params["sessionId"])
+        except Exception as e:
+            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
+            self.cast_running = False   # watchdog restarts the session
+            return
+        # True rate cap: broadcast at most one frame per
+        # MIN_FRAME_INTERVAL, drop the rest. Frame-on-change runs at
+        # ~14fps on a busy page = ~1MB/s, which outruns the WAN splice
+        # (~800KB/s) and wedges every unwindowed queue in the path —
+        # proven with ss(8). 6.6fps * ~66KB = 440KB/s leaves headroom.
+        now = time.monotonic()
+        if now - self.last_frame_sent < MIN_FRAME_INTERVAL:
+            return                      # dropped frame (acked, not sent)
         data = params.get("data", "")
         meta = params.get("metadata", {})
         frame = json.dumps({
@@ -196,7 +214,6 @@ class Bridge:
             "scrollY": meta.get("scrollOffsetY", 0),
         })
         dead = []
-        t_send = time.monotonic()
         for ws in list(self.clients):
             try:
                 await asyncio.wait_for(ws.send(frame), 2.0)
@@ -205,25 +222,7 @@ class Bridge:
                 dead.append(ws)
         for ws in dead:
             self.clients.discard(ws)
-        slow = time.monotonic() - t_send
-        if slow > 0.5:
-            print(f"screen-bridge: SLOW SEND {slow:.2f}s", flush=True)
-        # The ack is Chrome's ONLY flow-control signal: hold it until the
-        # frame is broadcast AND the throttle interval has elapsed. That
-        # pins the producer rate to the consumer rate (~6.6fps = 440KB/s)
-        # so no queue in the splice path can build up. A send slower than
-        # the 2s timeout drops the client instead of wedging the ack.
-        now = time.monotonic()
-        wait = MIN_FRAME_INTERVAL - (now - self.last_frame_sent)
-        if wait > 0:
-            await asyncio.sleep(wait)
         self.last_frame_sent = time.monotonic()
-        try:
-            await self.cdp.call("Page.screencastFrameAck",
-                                sessionId=params["sessionId"])
-        except Exception as e:
-            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
-            self.cast_running = False   # watchdog restarts the session
 
     async def start_cast(self):
         if self.cast_running or not self.cdp:
@@ -282,6 +281,17 @@ class Bridge:
     async def handle_input(self, msg):
         t = msg.get("type")
         c = self.cdp
+        if t == "ping":
+            # App-level keepalive: intermediaries can silently kill an idle
+            # client->bridge leg (proven: protocol pings die after ~10s
+            # idle while data flows; app pings every 5s keep it up). The
+            # pong lets the page detect a half-dead path and reconnect.
+            for ws in list(self.clients):
+                try:
+                    await ws.send(json.dumps({"type": "pong"}))
+                except Exception:
+                    pass
+            return
         if not c:
             return
         if t == "click":
@@ -337,7 +347,9 @@ class Bridge:
             await self.start_cast()
             async for raw in ws:
                 try:
-                    await self.handle_input(json.loads(raw))
+                    _m = json.loads(raw)
+                    print(f"screen-bridge: RX {_m.get('type')}", flush=True)
+                    await self.handle_input(_m)
                 except Exception as e:
                     print(f"screen-bridge: input error: {e}", flush=True)
                     await ws.send(json.dumps({"type": "error", "error": str(e)}))
