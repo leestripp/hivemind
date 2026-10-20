@@ -24,6 +24,14 @@ class TexturePlayer(ctx: Context) : FrameLayout(ctx),
     private val tv = TextureView(ctx)
     private var mp: MediaPlayer? = null
     private var path: String? = null
+    /** Video's own dimensions, captured onPrepared. fit() needs them to
+     *  re-letterbox after rotation: activities declare configChanges, so
+     *  a rotate resizes this view in place and the transform matrix
+     *  computed for the OLD width/height is stale (lee 2026-10-20:
+     *  landscape squashed the video to a thin line pinned at the bottom —
+     *  the matrix kept the portrait scale AND the portrait center pivot). */
+    private var videoW = 0
+    private var videoH = 0
     var onDone: (() -> Unit)? = null
     // NOTE: no BACK handling here — VoiceActivity.onBackPressed owns it
     // (closeMedia). A view-level dispatchKeyEvent override double-fired
@@ -49,7 +57,9 @@ class TexturePlayer(ctx: Context) : FrameLayout(ctx),
             setDataSource(p)
             setSurface(Surface(tv.surfaceTexture))
             setOnPreparedListener { m ->
-                fit(m.videoWidth, m.videoHeight)
+                videoW = m.videoWidth
+                videoH = m.videoHeight
+                fit(videoW, videoH)
                 m.start()
             }
             setOnCompletionListener { onDone?.invoke() }
@@ -76,7 +86,14 @@ class TexturePlayer(ctx: Context) : FrameLayout(ctx),
     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
         if (path != null && mp == null) startPlayer()
     }
-    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+        fit(videoW, videoH)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        fit(videoW, videoH)
+    }
     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
         release()
         return true
