@@ -1202,9 +1202,24 @@ int main(int argc, char* argv[]) {
                             data = std::move(it->second);
                             pushes.erase(it);
                         }
-                        const fs::path fpath =
+                        fs::path fpath =
                             fs::path{std::getenv("HOME")} /
                             ".local/share/hive-worker/workspace" / rel;
+                        // 2026-10-20 (user attachments invisible to host
+                        // agents): containers bind-mount the staging
+                        // workspace as /workspace, so staging IS the
+                        // agent's view there. Host agents run in the
+                        // REAL shared workspace root and read
+                        // attachments at <root>/attachments/<tid>/ —
+                        // the same canon dir promote_outgoing writes —
+                        // while the provision's intended staging
+                        // symlink never existed (real dir pre-existed).
+                        // On a host-workspace rig, land attachment
+                        // pushes in the real root alongside canon.
+                        if (!hwrunner::g_host_workspace_root.empty() &&
+                            rel.rfind("attachments/", 0) == 0)
+                            fpath = fs::path{
+                                hwrunner::g_host_workspace_root} / rel;
                         std::error_code ec;
                         fs::create_directories(fpath.parent_path(), ec);
                         // World-writable: agent containers (rootless
