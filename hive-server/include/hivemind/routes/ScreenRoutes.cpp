@@ -209,17 +209,27 @@ const q=new URLSearchParams(location.search);
 const agent=q.get('agent')||location.pathname.split('/')[2];
 const key=q.get('key')||'';
 const proto=location.protocol==='https:'?'wss':'ws';
-const ws=new WebSocket(`${proto}://${location.host}/screen/ws?agent=${agent}&key=${encodeURIComponent(key)}`);
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),stat=document.getElementById('stat');
 const img=new Image();let frames=0;
 img.onload=()=>{ctx.drawImage(img,0,0);};
-ws.onopen=()=>stat.textContent='live';
-ws.onclose=()=>stat.textContent='disconnected — reload to retry';
-ws.onerror=()=>stat.textContent='error';
-ws.onmessage=e=>{try{const m=JSON.parse(e.data);
- if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
- else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
-function send(o){if(ws.readyState===1)ws.send(JSON.stringify(o));}
+// Auto-reconnect: any hop (nginx, hub splice, worker channel) can drop a
+// long-lived socket — reconnect with backoff instead of dying on-screen.
+let ws=null,retry=0;
+function connect(){
+ ws=new WebSocket(`${proto}://${location.host}/screen/ws?agent=${agent}&key=${encodeURIComponent(key)}`);
+ ws.onopen=()=>{retry=0;stat.textContent='live';};
+ ws.onclose=()=>{retry=Math.min(retry+1,5);stat.textContent=`reconnecting (${retry})…`;
+  setTimeout(connect,1000*retry);};
+ ws.onerror=()=>{try{ws.close();}catch(_){}};
+ ws.onmessage=e=>{try{const m=JSON.parse(e.data);
+  if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
+  else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
+}
+connect();
+// Client keepalive: keeps the browser->hub direction warm even when the
+// mouse is idle (the bridge no-ops unknown message types).
+setInterval(()=>send({type:'ping'}),20000);
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function go(){const u=document.getElementById('url').value.trim();if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
 document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')go();e.stopPropagation();});
 // coords: canvas CSS size -> 1280x800 frame space

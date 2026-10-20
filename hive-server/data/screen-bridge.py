@@ -98,6 +98,7 @@ class Bridge:
         self.browser = None           # CDP to the browser endpoint (Target.*)
         self.cast_running = False
         self.last_frame_sent = 0.0
+        self.last_frame_at = time.monotonic()
         self._retarget_lock = asyncio.Lock()
 
     # ── Chrome lifecycle ────────────────────────────────────────────────
@@ -186,6 +187,16 @@ class Bridge:
     async def _dispatch_event(self, method, params):
         if method != "Page.screencastFrame":
             return
+        self.last_frame_at = time.monotonic()
+        # Ack FIRST: Chrome holds the next frame until this arrives, so a
+        # slow/dead UI client must never sit between the frame and the ack.
+        try:
+            await self.cdp.call("Page.screencastFrameAck",
+                                sessionId=params["sessionId"])
+        except Exception as e:
+            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
+            self.cast_running = False   # watchdog restarts the session
+            return
         data = params.get("data", "")
         meta = params.get("metadata", {})
         frame = json.dumps({
@@ -196,25 +207,19 @@ class Bridge:
         dead = []
         for ws in list(self.clients):
             try:
-                await ws.send(frame)
-            except websockets.ConnectionClosed:
+                await asyncio.wait_for(ws.send(frame), 2.0)
+            except Exception:
                 dead.append(ws)
         for ws in dead:
             self.clients.discard(ws)
-        # Ack gating = flow control. Throttle to MIN_FRAME_INTERVAL.
+        # Throttle AFTER the ack: Chrome's one-unacked-frame gate keeps
+        # this serial, so sleeping here still caps the rate at
+        # MIN_FRAME_INTERVAL without ever delaying the producer.
         now = time.monotonic()
         wait = MIN_FRAME_INTERVAL - (now - self.last_frame_sent)
         if wait > 0:
             await asyncio.sleep(wait)
         self.last_frame_sent = time.monotonic()
-        try:
-            await self.cdp.call("Page.screencastFrameAck",
-                                sessionId=params["sessionId"])
-            self._frames_acked = getattr(self, "_frames_acked", 0) + 1
-            if self._frames_acked <= 3:
-                print(f"screen-bridge: ack {self._frames_acked} ok", flush=True)
-        except Exception as e:
-            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
 
     async def start_cast(self):
         if self.cast_running or not self.cdp:
@@ -233,6 +238,41 @@ class Bridge:
         except Exception:
             pass
         self.cast_running = False
+
+    async def _watchdog(self):
+        # Chrome's screencast can silently stop emitting (renderer swap on
+        # navigation, target crash, a lost ack) while the WS stays open —
+        # the classic "connected but frozen". With clients watching and no
+        # frame for 15s, bounce the session. Also self-heals cast_running
+        # lying about a dead session.
+        while True:
+            await asyncio.sleep(5)
+            if not self.clients or not self.cdp:
+                continue
+            if time.monotonic() - self.last_frame_at <= 15:
+                continue
+            print("screen-bridge: watchdog kick (no frames 15s)", flush=True)
+            self.last_frame_at = time.monotonic()  # one kick per interval
+            try:
+                await self.cdp.call("Page.stopScreencast")
+            except Exception:
+                pass
+            self.cast_running = False
+            try:
+                await self.start_cast()
+            except Exception as e:
+                print(f"screen-bridge: watchdog restart failed: {e}", flush=True)
+
+    async def _keepalive(self):
+        # Protocol-level ping: the browser auto-pongs, so both directions
+        # stay warm and no hop (nginx, hub splice) can idle-reap the WS.
+        while True:
+            await asyncio.sleep(15)
+            for ws in list(self.clients):
+                try:
+                    await ws.ping()
+                except Exception:
+                    pass
 
     # ── Input ───────────────────────────────────────────────────────────
     async def handle_input(self, msg):
@@ -341,6 +381,8 @@ async def main():
                                 process_request=process_request):
         print(f"screen-bridge: CDP :{args.cdp_port} -> ws://127.0.0.1:"
               f"{args.serve_port}/cast", flush=True)
+        asyncio.create_task(bridge._watchdog())
+        asyncio.create_task(bridge._keepalive())
         await asyncio.Future()           # run forever
 
 
