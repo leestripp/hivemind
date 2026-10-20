@@ -756,7 +756,17 @@ ChannelSocket::ChannelSocket(WorkerChannel& ch, const std::string& worker,
         [st](std::string_view bytes) {
             {
                 std::lock_guard lk(st->m);
-                st->buf.append(bytes);
+                // Flow-control safety net: the stream protocol has no
+                // windowing, so if the downstream consumer (screen splice
+                // to a slow client) falls ~4MB behind, this buffer would
+                // grow without bound and eventually wedge the whole path.
+                // Fail the stream instead — cast clients auto-reconnect.
+                if (st->buf.size() + bytes.size() > 4u * 1024 * 1024) {
+                    st->eof = true;
+                    st->overflow = true;
+                } else {
+                    st->buf.append(bytes);
+                }
             }
             st->cv.notify_all();
         },

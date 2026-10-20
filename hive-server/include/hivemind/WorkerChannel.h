@@ -358,6 +358,7 @@ private:
         mutable std::condition_variable cv;
         std::string buf;        // pending inbound bytes
         bool eof = false;
+        bool overflow = false;  // dropped: consumer fell >4MB behind
     };
 
     WorkerChannel& ch_;

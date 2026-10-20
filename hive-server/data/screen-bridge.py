@@ -188,15 +188,6 @@ class Bridge:
         if method != "Page.screencastFrame":
             return
         self.last_frame_at = time.monotonic()
-        # Ack FIRST: Chrome holds the next frame until this arrives, so a
-        # slow/dead UI client must never sit between the frame and the ack.
-        try:
-            await self.cdp.call("Page.screencastFrameAck",
-                                sessionId=params["sessionId"])
-        except Exception as e:
-            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
-            self.cast_running = False   # watchdog restarts the session
-            return
         data = params.get("data", "")
         meta = params.get("metadata", {})
         frame = json.dumps({
@@ -205,21 +196,34 @@ class Bridge:
             "scrollY": meta.get("scrollOffsetY", 0),
         })
         dead = []
+        t_send = time.monotonic()
         for ws in list(self.clients):
             try:
                 await asyncio.wait_for(ws.send(frame), 2.0)
-            except Exception:
+            except Exception as e:
+                print(f"screen-bridge: DROP client ({type(e).__name__})", flush=True)
                 dead.append(ws)
         for ws in dead:
             self.clients.discard(ws)
-        # Throttle AFTER the ack: Chrome's one-unacked-frame gate keeps
-        # this serial, so sleeping here still caps the rate at
-        # MIN_FRAME_INTERVAL without ever delaying the producer.
+        slow = time.monotonic() - t_send
+        if slow > 0.5:
+            print(f"screen-bridge: SLOW SEND {slow:.2f}s", flush=True)
+        # The ack is Chrome's ONLY flow-control signal: hold it until the
+        # frame is broadcast AND the throttle interval has elapsed. That
+        # pins the producer rate to the consumer rate (~6.6fps = 440KB/s)
+        # so no queue in the splice path can build up. A send slower than
+        # the 2s timeout drops the client instead of wedging the ack.
         now = time.monotonic()
         wait = MIN_FRAME_INTERVAL - (now - self.last_frame_sent)
         if wait > 0:
             await asyncio.sleep(wait)
         self.last_frame_sent = time.monotonic()
+        try:
+            await self.cdp.call("Page.screencastFrameAck",
+                                sessionId=params["sessionId"])
+        except Exception as e:
+            print(f"screen-bridge: ACK FAILED: {e}", flush=True)
+            self.cast_running = False   # watchdog restarts the session
 
     async def start_cast(self):
         if self.cast_running or not self.cdp:
