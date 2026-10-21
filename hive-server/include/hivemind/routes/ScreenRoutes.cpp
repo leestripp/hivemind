@@ -188,31 +188,54 @@ static const char kCastPage[] = R"CAST(<!doctype html>
 <html><head><meta charset=utf-8><title>HiveScreen</title>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <style>
-body{margin:0;background:#14161a;color:#e8e8ea;font-family:system-ui,sans-serif}
-#bar{display:flex;gap:6px;padding:6px;background:#1d2026;align-items:center}
-#bar input{flex:1;background:#0f1114;border:1px solid #333;color:#eee;padding:6px;border-radius:4px}
-#bar button{background:#2b6cb0;border:0;color:#fff;padding:6px 12px;border-radius:4px;cursor:pointer}
-#bar button:hover{background:#3182ce}
-#wrap{display:flex;justify-content:center;padding:8px}
-canvas{background:#000;max-width:100%;cursor:crosshair}
-#stat{font-size:12px;color:#9aa;padding:0 8px}
+:root{--bg:#14161a;--panel:#1d2026;--border:#333;--fg:#e8e8ea;--accent:#2b6cb0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;
+     height:100vh;display:grid;grid-template-rows:auto auto 1fr}
+#bar{display:flex;gap:8px;padding:8px;background:var(--panel);align-items:center}
+#url{flex:1;min-width:100px;background:#0f1114;border:1px solid var(--border);
+     color:#eee;padding:9px 10px;border-radius:6px;font-size:16px}
+button{background:var(--accent);border:0;color:#fff;padding:9px 14px;border-radius:6px;
+       cursor:pointer;font-size:16px;white-space:nowrap}
+button:hover{background:#3182ce}
+#zoom{background:#3a3f47}
+/* Fixed-width status: text changes never reflow the bar (v1's "moving
+   buttons" bug). */
+#stat{margin-left:auto;min-width:230px;text-align:right;
+      font:14px/1.3 ui-monospace,monospace;color:#9aa}
+#dot{display:inline-block;width:10px;height:10px;border-radius:50%;
+     background:#666;margin-right:6px;vertical-align:middle}
+#tabs{display:flex;gap:6px;padding:6px 8px;background:#191c21;overflow-x:auto;
+      min-height:48px;align-items:center;border-bottom:1px solid var(--border)}
+.tab{display:flex;align-items:center;gap:6px;background:#23262d;
+     border:1px solid var(--border);color:#ccc;padding:8px 12px;border-radius:6px;
+     max-width:270px;cursor:pointer;flex:0 0 auto;font-size:15px}
+.tab.active{background:var(--accent);color:#fff;border-color:#3182ce}
+.tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.tab .x{background:transparent;border:0;padding:0 4px;color:inherit;font-size:16px;
+        border-radius:4px;cursor:pointer}
+.tab .x:hover{background:rgba(255,255,255,.25)}
+#newtab{flex:0 0 auto;background:#3a3f47;font-size:18px;padding:6px 14px}
+#view{overflow:auto;display:flex;justify-content:center;padding:10px}
+canvas{background:#000;cursor:crosshair}
+#view.fit canvas{max-width:calc(100vw - 20px);height:auto}
 #fcover{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9}
-#fcbox{max-width:420px;margin:15vh auto;background:#1d2026;border:1px solid #333;border-radius:8px;padding:18px;font-size:15px}
-#fcbox button{background:#2b6cb0;border:0;color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;margin-top:10px}
-#fcbox input{color:#eee;margin-top:10px}
+#fcbox{max-width:420px;margin:15vh auto;background:var(--panel);
+       border:1px solid var(--border);border-radius:8px;padding:18px;font-size:16px}
+#fcbox input{color:#eee;margin-top:10px;font-size:15px}
+#fcbox button{margin-top:12px}
 </style></head><body>
 <div id=bar>
-<input id=url placeholder="address — type a URL and press Go">
+<input id=url placeholder="address — type a URL, press Enter">
 <button onclick="go()">Go</button>
-<button onclick="send({type:'newtab',url:document.getElementById('url').value||'about:blank'})">New&nbsp;Tab</button>
-<button title="previous tab" onclick="send({type:'tab',dir:-1})">&#9664;&nbsp;Tab</button>
-<button title="next tab" onclick="send({type:'tab',dir:1})">Tab&nbsp;&#9654;</button>
-<span id=stat>connecting…</span>
+<button id=zoom title="toggle zoom">Zoom: Fit</button>
+<span id=stat><span id=dot></span><span id=stxt>connecting…</span></span>
 </div>
-<div id=wrap><canvas id=cv width=1280 height=800></canvas></div>
+<div id=tabs></div>
+<div id=view class=fit><canvas id=cv width=1280 height=800></canvas></div>
 <div id=fcover>
  <div id=fcbox>
-  <p id=fctext>The page is asking for a file.<br>Pick it here and it lands straight in that browser.</p>
+  <p>The page is asking for a file.<br>Pick it here and it lands straight in that browser.</p>
   <input type=file id=fcfile><br>
   <button id=fcgo>Upload</button> <button id=fccancel>Cancel</button>
  </div>
@@ -222,43 +245,90 @@ const q=new URLSearchParams(location.search);
 const agent=q.get('agent')||location.pathname.split('/')[2];
 const key=q.get('key')||'';
 const proto=location.protocol==='https:'?'wss':'ws';
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),stat=document.getElementById('stat');
-const img=new Image();let frames=0;
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const dot=document.getElementById('dot'),stxt=document.getElementById('stxt');
+const tabsEl=document.getElementById('tabs'),view=document.getElementById('view');
+const img=new Image();
 img.onload=()=>{ctx.drawImage(img,0,0);};
-// Auto-reconnect: any hop (nginx, hub splice, worker channel) can drop a
-// long-lived socket — reconnect with backoff instead of dying on-screen.
-let ws=null,retry=0;
+let frames=0,lastFrame=0,lastRx=Date.now(),ws=null,retry=0;
+let fpsWin=[];   // frame arrival timestamps (rolling 2s)
+
+// Zoom: Fit scales the 1280x800 frame to the window; 100% is native
+// pixels with scrollbars. Persisted — lee is visually impaired.
+let zoom=localStorage.getItem('hs-zoom')||'fit';
+function applyZoom(){view.className=zoom;
+ document.getElementById('zoom').textContent='Zoom: '+(zoom==='fit'?'Fit':'100%');}
+document.getElementById('zoom').onclick=()=>{zoom=zoom==='fit'?'full':'fit';
+ localStorage.setItem('hs-zoom',zoom);applyZoom();};
+applyZoom();
+
+function renderTabs(tabs){
+ tabsEl.innerHTML='';
+ for(const t of tabs){
+  const b=document.createElement('button');
+  b.className='tab'+(t.active?' active':'');
+  b.title=t.title+'\n'+t.url;
+  const span=document.createElement('span');span.className='t';span.textContent=t.title;
+  b.appendChild(span);
+  const x=document.createElement('button');x.className='x';x.textContent='\u00d7';
+  x.title='close tab';
+  x.onclick=e=>{e.stopPropagation();send({type:'closetab',id:t.id});};
+  b.appendChild(x);
+  b.onclick=()=>send({type:'switchtab',id:t.id});
+  tabsEl.appendChild(b);
+ }
+ const plus=document.createElement('button');
+ plus.id='newtab';plus.textContent='+';plus.title='new tab';
+ plus.onclick=()=>send({type:'newtab',url:'about:blank'});
+ tabsEl.appendChild(plus);
+}
+
 function connect(){
  ws=new WebSocket(`${proto}://${location.host}/screen/ws?agent=${agent}&key=${encodeURIComponent(key)}`);
- ws.onopen=()=>{retry=0;stat.textContent='live';};
- ws.onclose=()=>{retry=Math.min(retry+1,5);stat.textContent=`reconnecting (${retry})…`;
-  setTimeout(connect,1000*retry);};
+ ws.onopen=()=>{retry=0;};
+ ws.onclose=()=>{retry=Math.min(retry+1,5);stxt.textContent=`reconnecting (${retry})…`;
+  dot.style.background='#c53030';setTimeout(connect,1000*retry);};
  ws.onerror=()=>{try{ws.close();}catch(_){}};
  ws.onmessage=e=>{lastRx=Date.now();try{const m=JSON.parse(e.data);
-  if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;frames++;stat.textContent=`live — ${frames} frames`;}
+  if(m.type==='frame'){img.src='data:image/jpeg;base64,'+m.data;
+   frames++;lastFrame=Date.now();fpsWin.push(lastFrame);}
+  else if(m.type==='tabs'){renderTabs(m.tabs);}
   else if(m.type==='filechooser'){fcShow(m.multiple);}
   else if(m.type==='upload_done'){fcHide();}
-  else if(m.type==='error'){stat.textContent='bridge: '+m.error;}}catch(_){}};
+  else if(m.type==='pong'){}
+  else if(m.type==='error'){stxt.textContent='bridge: '+m.error;}}catch(_){}};
 }
 connect();
+
+// Liveness: honest indicator driven by actual frame arrivals.
+// LIVE <2s, STALE 2-10s, FROZEN >10s (force reconnect).
+setInterval(()=>{
+ const now=Date.now(),age=lastFrame?(now-lastFrame)/1000:Infinity;
+ fpsWin=fpsWin.filter(t=>now-t<2000);
+ const fps=(fpsWin.length/2).toFixed(1);
+ if(!ws||ws.readyState!==1){return;}
+ if(age<2){dot.style.background='#38a169';stxt.textContent=`LIVE — ${fps} fps — ${frames} frames`;}
+ else if(age<10){dot.style.background='#d69e2e';stxt.textContent=`STALE — ${age.toFixed(0)}s — ${frames} frames`;}
+ else{dot.style.background='#c53030';stxt.textContent=`FROZEN — ${frames} frames`;}
+},1000);
+
 // Client keepalive: an idle client->bridge leg dies silently after ~10s
 // on this path (protocol pings don't save it; app messages do) — ping
-// every 5s, and if NOTHING (frame or pong) has arrived for 15s, force a
-// reconnect. Invisible self-heal instead of a frozen canvas.
-let lastRx=Date.now();
+// every 5s; if NOTHING arrived for 15s, force a reconnect.
 setInterval(()=>{send({type:'ping'});
  if(Date.now()-lastRx>15000){try{ws.close();}catch(_){}}},5000);
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+
 // File-chooser relay: headless Chrome can't show a native picker, so the
-// bridge intercepts it and asks us. We read the file here and ship it
-// back as base64; the bridge drops it in /tmp and calls setFileInputFiles.
+// bridge intercepts it and asks us; we ship the file back as base64 and
+// the bridge calls DOM.setFileInputFiles.
 const fcover=document.getElementById('fcover'),fcfile=document.getElementById('fcfile');
 function fcShow(mult){fcfile.multiple=!!mult;fcfile.value='';fcover.style.display='block';}
 function fcHide(){fcover.style.display='none';}
 document.getElementById('fccancel').onclick=()=>{send({type:'upload_cancel'});fcHide();};
 document.getElementById('fcgo').onclick=async()=>{
  if(!fcfile.files.length){fcfile.click();return;}
- stat.textContent='uploading…';
+ stxt.textContent='uploading…';
  const files=[];
  for(const f of fcfile.files){
   const b64=await new Promise(res=>{const r=new FileReader();
@@ -267,8 +337,10 @@ document.getElementById('fcgo').onclick=async()=>{
  }
  send({type:'upload',files});
 };
-function go(){const u=document.getElementById('url').value.trim();if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
+function go(){const u=document.getElementById('url').value.trim();
+ if(u)send({type:'navigate',url:u.includes('://')?u:'https://'+u});}
 document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')go();e.stopPropagation();});
+
 // coords: canvas CSS size -> 1280x800 frame space
 function pos(ev){const r=cv.getBoundingClientRect();
  return {x:Math.round((ev.clientX-r.left)*1280/r.width),y:Math.round((ev.clientY-r.top)*800/r.height)};}
