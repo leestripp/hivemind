@@ -1,4 +1,5 @@
 #include "HiveWindow.h"
+#include "MediaPlayer.h"
 #include "text_utils.h"
 
 #include <thread>
@@ -2489,54 +2490,102 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
                           {"size", std::filesystem::file_size(cache)}};
 }
 
-// -- Phase E: inline video attachments -----------------------------------
-// Same download/cache pattern as images. The paused Gtk::Video doubles as
-// the thumbnail (first frame); click toggles play/pause; a small button
-// opens the cached copy in the system player. On media error (no gstreamer
-// backend etc.) the card falls back to a plain attachment chip.
+// -- Phase E: video attachments ------------------------------------------
+// Same download/cache pattern as images. 2026-10-21: no Gtk::Video /
+// Gtk::MediaFile anywhere — in-process decodebin3 can g_error-abort the
+// app (uncatchable). The poster (first frame) is extracted by an ffmpeg
+// CHILD at first render and cached as <file>.poster.png; playback is a
+// gst-play-1.0 child opening its own window. A decoder crash now kills a
+// child, never the client.
 
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
-    auto media = Gtk::MediaFile::create_for_filename(file);
-    auto* video = Gtk::make_managed<Gtk::Video>();
-    video->set_media_stream(media);
-    video->set_autoplay(false);
-    // lee 2026-10-14: 320x180 with no alignment let the widget stretch to
-    // the chat width while keeping the short height ("very wide, not tall
-    // enough"). Pin it left at a real 16:9 size.
-    video->set_size_request(640, 360);
-    video->set_hexpand(false);
-    video->set_vexpand(false);
-    video->set_halign(Gtk::Align::START);
-    video->set_tooltip_text(name + "  -  click to play/pause");
+    namespace fs = std::filesystem;
+    const std::string poster = file + ".poster.png";
 
-    // Click toggles play/pause.
-    auto click = Gtk::GestureClick::create();
-    click->signal_pressed().connect([media](int, double, double) {
-        if (media->get_playing()) media->pause(); else media->play();
-    });
-    video->add_controller(click);
-
-    // Media error -> swap the video for a plain chip (widget may be gone
-    // by then; removing a destroyed child is avoided by the box still
-    // owning the widget tree - GTK no-ops a remove of an already-removed
-    // child only if parented, so guard via get_parent()).
-    auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
-    chip->add_css_class("flat");
-    chip->set_halign(Gtk::Align::START);
-    chip->set_visible(false);
-    chip->signal_clicked().connect([file] {
-        Gio::AppInfo::launch_default_for_uri("file://" + file);
-    });
-    media->property_error().signal_changed().connect([video, chip] {
-        if (video->get_parent()) {
-            video->unparent();   // make_managed + unparent drops it safely
+    // Start playback in a child process (one player at a time, as audio).
+    // The video opens in gst-play's own window; closing it ends the child.
+    auto start_playback = [this, file] {
+        if (active_player_pid_ != 0) {
+            media_player::stop(active_player_pid_);
+            active_player_pid_ = 0;
         }
-        chip->set_visible(true);
-    });
+        try {
+            active_player_pid_ = media_player::play(
+                file, [this](GPid pid, bool /*ok*/) {
+                    if (!alive_) return;
+                    if (active_player_pid_ == pid) active_player_pid_ = 0;
+                });
+        } catch (const std::exception&) {
+            // gst-play missing/unspawnable — the open-in-player button
+            // below is the escape hatch; nothing else to do here.
+        }
+    };
 
-    holder->append(*video);
-    holder->append(*chip);
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
+    box->set_halign(Gtk::Align::START);
+    holder->append(*box);
+
+    // Poster area: 16:9 box pinned left (lee 2026-10-14). Clicking the
+    // poster plays the video.
+    auto append_poster = [this, box, start_playback](
+                             const std::string& png,
+                             const std::string& label_text) {
+        std::error_code pec;
+        if (!png.empty() && fs::is_regular_file(png, pec) &&
+            fs::file_size(png, pec) > 0) {
+            auto* pic = Gtk::make_managed<Gtk::Picture>(
+                Gdk::Texture::create_from_filename(png));
+            pic->set_content_fit(Gtk::ContentFit::CONTAIN);
+            pic->set_size_request(640, 360);
+            pic->set_halign(Gtk::Align::START);
+            pic->set_tooltip_text(label_text + "  -  click to play");
+            auto click = Gtk::GestureClick::create();
+            click->signal_pressed().connect(
+                [this, start_playback](int, double, double) {
+                    start_playback();
+                });
+            pic->add_controller(click);
+            box->append(*pic);
+        } else {
+            auto* ph = Gtk::make_managed<Gtk::Label>("video: " + label_text);
+            ph->add_css_class("hv-time");
+            ph->set_halign(Gtk::Align::START);
+            box->append(*ph);
+        }
+    };
+
+    std::error_code ec;
+    const bool have_poster = fs::is_regular_file(poster, ec) &&
+                             fs::file_size(poster, ec) > 0;
+    append_poster(have_poster ? poster : "", name);
+
+    if (!have_poster) {
+        // Extract the first frame in a worker thread (ffmpeg child), then
+        // swap the placeholder for the poster on the GTK thread.
+        auto weak = std::make_shared<Gtk::Box*>(box);
+        box->signal_destroy().connect([weak] { *weak = nullptr; });
+        const std::string tid = current_thread_;
+        run_async([this, file, poster, name, weak, tid,
+                   append_poster] {
+            const bool ok = media_player::make_poster(file, poster);
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, poster, name, weak, tid, ok,
+                                   append_poster] {
+                if (!alive_ || !*weak || tid != current_thread_) return;
+                while (auto* child = (*weak)->get_first_child())
+                    (*weak)->remove(*child);
+                append_poster(ok ? poster : "", name);
+            });
+            dispatcher_.emit();
+        });
+    }
+
+    auto* play_btn = Gtk::make_managed<Gtk::Button>("\u25b6 play: " + name);
+    play_btn->add_css_class("flat");
+    play_btn->set_halign(Gtk::Align::START);
+    play_btn->signal_clicked().connect([start_playback] { start_playback(); });
+    holder->append(*play_btn);
 
     auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
     open_btn->add_css_class("flat");
@@ -2641,14 +2690,13 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
 void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
     namespace fs = std::filesystem;
-    // 2026-10-19: NO Gtk::MediaFile is created here. Each MediaFile
-    // immediately spins up a GStreamer decodebin3 pipeline, and several
-    // large audio attachments rendering together (e.g. an album's worth
-    // of FLACs in one thread) abort the whole process inside decodebin3
-    // ("assertion failed: (collection)" — a g_error, uncatchable). The
-    // pipeline is created LAZILY on the first Play click and registered
-    // as active_audio_; starting a new one pauses the previous, so at
-    // most one pipeline ever exists.
+    // 2026-10-21: playback is a gst-play-1.0 CHILD PROCESS, never an
+    // in-process Gtk::MediaFile. GStreamer's decodebin3 can g_error-abort
+    // ("assertion failed: (collection)" — uncatchable); the lazy-pipeline
+    // band-aid only reduced the odds and the client died again. In a
+    // child, a decoder crash kills the child and the card falls back to
+    // the open-in-player chip — the client survives. One player child at
+    // a time via active_player_pid_.
 
     auto* card = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
     card->add_css_class("hv-audio-card");
@@ -2694,52 +2742,56 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
     });
     holder->append(*chip);
 
-    // This card's own pipeline, empty until the first Play click. Shared
-    // so the signal lambdas can reach it after creation.
-    auto media_slot = std::make_shared<Glib::RefPtr<Gtk::MediaFile>>();
+    // This card's own player child pid (0 = not playing). Shared cell so
+    // the signal lambdas can reach it after creation.
+    auto card_pid = std::make_shared<GPid>(0);
 
     // Card destroyed (thread switch, history re-render): if this card
-    // owns the live pipeline, stop it — never leak playback past the
+    // owns the live player child, stop it — never leak playback past the
     // widget that started it.
-    card->signal_destroy().connect([this, media_slot] {
-        if (active_audio_ && *media_slot && active_audio_ == *media_slot) {
-            active_audio_->pause();
-            active_audio_.reset();
+    card->signal_destroy().connect([this, card_pid] {
+        if (*card_pid != 0 && *card_pid == active_player_pid_) {
+            media_player::stop(*card_pid);
+            active_player_pid_ = 0;
         }
     });
 
     play->signal_clicked().connect(
-        [this, file, play, card, chip, media_slot] {
-            auto& media = *media_slot;
-            if (!media) {
-                // First play: stop whatever else is playing, then build
-                // this card's pipeline (the ONLY one now alive).
-                if (active_audio_) active_audio_->pause();
-                media = Gtk::MediaFile::create_for_filename(file);
-                active_audio_ = media;
-                // Glyph follows the stream state so a natural
-                // end-of-stream flips back to the play triangle.
-                media->property_playing().signal_changed().connect(
-                    [play, media_slot] {
-                        const auto& m = *media_slot;
-                        play->set_label(m && m->get_playing()
-                                            ? "\u23f8" : "\u25b6");
-                    });
-                media->property_error().signal_changed().connect(
-                    [card, chip] {
-                        if (card->get_parent()) card->unparent();
-                        chip->set_visible(true);
-                    });
-                media->play();
+        [this, file, play, card, chip, card_pid] {
+            if (*card_pid != 0) {
+                // This card is playing: stop it. The exit watch below
+                // resets the glyph and clears the cell/active pid.
+                media_player::stop(*card_pid);
                 return;
             }
-            if (media->get_playing()) {
-                media->pause();
-            } else {
-                if (active_audio_ && active_audio_ != media)
-                    active_audio_->pause();
-                active_audio_ = media;
-                media->play();
+            // Stop whatever else is playing, then start this card's
+            // child (the ONLY one now alive).
+            if (active_player_pid_ != 0)
+                media_player::stop(active_player_pid_);
+            try {
+                const GPid pid = media_player::play(
+                    file, [this, card_pid, play, card, chip](GPid done,
+                                                             bool ok) {
+                        if (!alive_) return;
+                        if (active_player_pid_ == done)
+                            active_player_pid_ = 0;
+                        if (*card_pid != done) return;
+                        *card_pid = 0;
+                        play->set_label("\u25b6");
+                        if (!ok) {
+                            // Decoder died in the child — swap to the
+                            // open-in-player chip.
+                            if (card->get_parent()) card->unparent();
+                            chip->set_visible(true);
+                        }
+                    });
+                *card_pid = pid;
+                active_player_pid_ = pid;
+                play->set_label("\u23f8");
+            } catch (const std::exception&) {
+                // gst-play missing/unspawnable: straight to the chip.
+                if (card->get_parent()) card->unparent();
+                chip->set_visible(true);
             }
         });
 

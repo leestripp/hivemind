@@ -46,6 +46,7 @@ add_executable(hive-client
     src/main.cpp
     src/HiveApplication.cpp
     src/HiveWindow.cpp
+    src/MediaPlayer.cpp
     src/ApiClient.cpp
     src/UiApi.cpp
     ${GRESOURCE_C}
