@@ -1164,9 +1164,25 @@ ScreenResult cast_ctl(const std::string& /*agent_id*/,
         r.running = true;
         return r;
     }
+    // Bridge script resolution (2026-10-21 reboot incident): the
+    // canonical /usr/local/bin install needs root and was never done on
+    // ubuntu-pc — every reboot stranded the screen until someone
+    // relaunched by hand. Fall back to the worker user's repo checkout
+    // (both rigs keep one at ~/hivemind) so the share link self-heals
+    // with zero root steps. An outdated repo copy still beats no copy;
+    // the next deploy refreshes it.
+    const char* home = std::getenv("HOME");
+    const std::string repo_script =
+        (home ? std::string(home) : std::string()) +
+        "/hivemind/hive-server/data/screen-bridge.py";
+    const std::string script =
+        fs::exists("/usr/local/bin/screen-bridge.py")
+            ? "/usr/local/bin/screen-bridge.py"
+            : (home && fs::exists(repo_script)) ? repo_script
+            : "/usr/local/bin/screen-bridge.py";  // launch error surfaces
     std::string out;
     const std::string cmd =
-        "nohup python3 /usr/local/bin/screen-bridge.py"
+        "nohup python3 " + script +
         " --serve-port " + std::to_string(port) +
         " --cdp-port " + std::to_string(cdp) +
         " >" + tag + ".log 2>&1 & echo $! >" + tag + ".pid";
