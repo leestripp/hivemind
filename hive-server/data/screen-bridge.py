@@ -54,7 +54,10 @@ HEARTBEAT_AFTER = 0.8               # capture if no frame for this long
 HEARTBEAT_TICK = 0.5                # heartbeat loop cadence
 INPUT_BOOST_DELAY = 0.15            # capture this long after input
 WATCHDOG_STALL = 5.0                # no frames this long -> restart cast
-JPEG_QUALITY = 60
+JPEG_QUALITY = 45               # was 60: halve wire bytes for slow viewers
+CAPTURE_MIN_INTERVAL = 0.4      # heartbeat/boost frames can't burst past this
+FORCE_FRAME_EVERY = 4.0         # send even an identical frame this often
+CDP_CALL_TIMEOUT = 8.0          # a stalled page must never wedge input
 
 CHROME_ARGS = [
     "--headless=new", "--no-first-run", "--no-default-browser-check",
@@ -116,7 +119,14 @@ class CDP:
         self.pending[mid] = fut
         await self.ws.send(json.dumps({"id": mid, "method": method,
                                        "params": params}))
-        msg = await fut
+        try:
+            msg = await asyncio.wait_for(fut, CDP_CALL_TIMEOUT)
+        except asyncio.TimeoutError:
+            self.pending.pop(mid, None)
+            raise RuntimeError(f"{method}: CDP call timed out") from None
+        except BaseException:
+            self.pending.pop(mid, None)   # cancelled: don't leak
+            raise
         if "error" in msg:
             raise RuntimeError(f"{method}: {msg['error']}")
         return msg.get("result", {})
@@ -202,6 +212,10 @@ class Bridge:
         self._retarget_lock = asyncio.Lock()
         self._capture_lock = asyncio.Lock()
         self._boost_handle = None
+        self.last_capture_sent = 0.0
+        self.last_frame_wire = 0.0
+        self._move_pending = None   # latest (x,y) awaiting coalesced dispatch
+        self._move_task = None
 
     # ── Chrome lifecycle ────────────────────────────────────────────────
     def _http_json(self, path):
@@ -326,11 +340,17 @@ class Bridge:
 
     async def _broadcast_frame(self, data_b64, scroll_y=0.0):
         """Dedup + send. Returns True if a frame actually went out."""
+        now = time.monotonic()
+        self.last_frame_at = now   # pipeline alive even when deduped
         h = hashlib.md5(data_b64.encode()).hexdigest()
-        if h == self.last_frame_hash:
+        if h == self.last_frame_hash and \
+                now - self.last_frame_wire < FORCE_FRAME_EVERY:
             return False                # identical to previous — skip
+        # Identical frames still go out every FORCE_FRAME_EVERY so a
+        # healthy static page reads LIVE (not STALE/FROZEN) and the
+        # watchdog stays quiet.
         self.last_frame_hash = h
-        self.last_frame_at = time.monotonic()
+        self.last_frame_wire = now
         await self._broadcast(json.dumps({
             "type": "frame", "data": data_b64,
             "w": VIEW_W, "h": VIEW_H, "scrollY": scroll_y}))
@@ -339,6 +359,13 @@ class Bridge:
     async def _capture_once(self, reason):
         """One Page.captureScreenshot of the active target."""
         if not self.cdp or not self.clients:
+            return
+        # Rate-cap capture-sourced frames: the screencast is capped at
+        # MIN_FRAME_INTERVAL but heartbeat/boost used to bypass it, so
+        # heavy interaction on an image-heavy page burst past the WAN
+        # splice's drain rate (lee's mouse-death, 2026-10-21).
+        if reason != "watchdog" and \
+                time.monotonic() - self.last_capture_sent < CAPTURE_MIN_INTERVAL:
             return
         async with self._capture_lock:
             try:
@@ -349,7 +376,8 @@ class Bridge:
                 log(f"capture ({reason}) failed: {e}")
                 self.last_frame_at = 0.0   # let the watchdog react
                 return
-        await self._broadcast_frame(r.get("data", ""))
+        if await self._broadcast_frame(r.get("data", "")):
+            self.last_capture_sent = time.monotonic()
 
     async def _heartbeat(self):
         # Static pages emit no screencast damage (v1: frame counter
@@ -371,6 +399,26 @@ class Bridge:
             await asyncio.sleep(INPUT_BOOST_DELAY)
             await self._capture_once("input-boost")
         self._boost_handle = asyncio.ensure_future(_later())
+
+    def _queue_move(self, x, y):
+        """Coalesce mousemoves: only the latest position matters, and a
+        heavy page (100ms+ per dispatch) must never let queued moves
+        delay a click sitting behind them."""
+        self._move_pending = (x, y)
+        if self._move_task is None or self._move_task.done():
+            self._move_task = asyncio.ensure_future(self._move_worker())
+
+    async def _move_worker(self):
+        while self._move_pending is not None:
+            x, y = self._move_pending
+            self._move_pending = None
+            if not self.cdp:
+                return
+            try:
+                await self.cdp.call("Input.dispatchMouseEvent",
+                                    type="mouseMoved", x=x, y=y)
+            except Exception:
+                return
 
     async def _on_browser_event(self, method, params):
         try:
@@ -419,7 +467,7 @@ class Bridge:
             return
         # Rate cap screencast frames (WAN wedge lesson, ee723a7): busy
         # pages emit ~14fps/~1MB/s, outrunning the splice. Heartbeat and
-        # boost frames are exempt — they are what keep static pages live.
+        # boost frames are capped separately in _capture_once.
         now = time.monotonic()
         if now - self.last_frame_sent < MIN_FRAME_INTERVAL:
             return                      # dropped (acked, not sent)
@@ -518,6 +566,7 @@ class Bridge:
             return
         if t == "click":
             x, y = msg["x"], msg["y"]
+            self._move_pending = None   # don't interleave a stale move
             count = 2 if msg.get("dbl") else 1
             await c.call("Input.dispatchMouseEvent", type="mouseMoved",
                          x=x, y=y)
@@ -530,8 +579,7 @@ class Bridge:
                              button="left", clickCount=count)
             self._boost()
         elif t == "move":
-            await c.call("Input.dispatchMouseEvent", type="mouseMoved",
-                         x=msg["x"], y=msg["y"])
+            self._queue_move(msg["x"], msg["y"])
         elif t == "wheel":
             await c.call("Input.dispatchMouseEvent", type="mouseWheel",
                          x=msg.get("x", VIEW_W // 2),
