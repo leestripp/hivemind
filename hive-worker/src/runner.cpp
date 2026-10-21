@@ -1129,6 +1129,15 @@ static int host_screen_slot(const std::string& user) {
     return int(sum % 50) + 1;
 }
 
+// cast_ctl's sh -c must go through hivex-exec: the provisioned sudoers
+// (/etc/sudoers.d/hivex-helpers) lets the worker user run ONLY whitelisted
+// commands as hivex-<name> (tee/chmod/hive-agent/hive-screen.sh and
+// hivex-exec) — a bare "sh" gets "sudo: interactive authentication is
+// required" and the self-healing share link dies (2026-10-21 reboot).
+// hivex-exec itself exec's its argv as the target user, so the timeout
+// only bounds the (instant, nohup-detached) shell.
+static const char* const kHivexExec = "/usr/local/sbin/hivex-exec";
+
 ScreenResult cast_ctl(const std::string& /*agent_id*/,
                       const std::string& user,
                       const std::string& action) {
@@ -1149,7 +1158,7 @@ ScreenResult cast_ctl(const std::string& /*agent_id*/,
 
     if (action == "stop") {
         std::string out;
-        run_as_user(user, {"sh", "-c",
+        run_as_user(user, {kHivexExec, "10", "sh", "-c",
                            "kill $(cat " + tag + ".pid) 2>/dev/null; "
                            "rm -f " + tag + ".pid"},
                     "", &out);
@@ -1186,7 +1195,8 @@ ScreenResult cast_ctl(const std::string& /*agent_id*/,
         " --serve-port " + std::to_string(port) +
         " --cdp-port " + std::to_string(cdp) +
         " >" + tag + ".log 2>&1 & echo $! >" + tag + ".pid";
-    if (run_as_user(user, {"sh", "-c", cmd}, "", &out) != 0) {
+    if (run_as_user(user, {kHivexExec, "15", "sh", "-c", cmd},
+                    "", &out) != 0) {
         r.error = "cast bridge failed to launch: " + out;
         return r;
     }
@@ -1199,7 +1209,9 @@ ScreenResult cast_ctl(const std::string& /*agent_id*/,
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     std::string log;
-    run_as_user(user, {"sh", "-c", "tail -5 " + tag + ".log"}, "", &log);
+    run_as_user(user, {kHivexExec, "10", "sh", "-c",
+                       "tail -5 " + tag + ".log"},
+                "", &log);
     r.error = "cast bridge did not come up on " + std::to_string(port) +
               ": " + log;
     return r;
