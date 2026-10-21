@@ -2512,7 +2512,7 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
         }
         try {
             active_player_pid_ = media_player::play(
-                file, [this](GPid pid, bool /*ok*/) {
+                file, [this](GPid pid, bool /*ok*/, double /*elapsed*/) {
                     if (!alive_) return;
                     if (active_player_pid_ == pid) active_player_pid_ = 0;
                 });
@@ -2759,9 +2759,13 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
     play->signal_clicked().connect(
         [this, file, play, card, chip, card_pid] {
             if (*card_pid != 0) {
-                // This card is playing: stop it. The exit watch below
-                // resets the glyph and clears the cell/active pid.
+                // This card is playing: stop it. Zero the cell FIRST so
+                // the exit watch sees a user-stop (not an early death)
+                // and skips the fallback chip; it still clears the
+                // active pid. Glyph resets here.
                 media_player::stop(*card_pid);
+                *card_pid = 0;
+                play->set_label("\u25b6");
                 return;
             }
             // Stop whatever else is playing, then start this card's
@@ -2770,17 +2774,19 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
                 media_player::stop(active_player_pid_);
             try {
                 const GPid pid = media_player::play(
-                    file, [this, card_pid, play, card, chip](GPid done,
-                                                             bool ok) {
+                    file, [this, card_pid, play, card, chip](
+                              GPid done, bool ok, double elapsed) {
                         if (!alive_) return;
                         if (active_player_pid_ == done)
                             active_player_pid_ = 0;
                         if (*card_pid != done) return;
                         *card_pid = 0;
                         play->set_label("\u25b6");
-                        if (!ok) {
-                            // Decoder died in the child — swap to the
-                            // open-in-player chip.
+                        // Only a child that died EARLY failed to play;
+                        // a nonzero exit after real playback time is a
+                        // natural end (gst-play's EOS exit code is not
+                        // trustworthy in every environment).
+                        if (!ok && elapsed < 2.5) {
                             if (card->get_parent()) card->unparent();
                             chip->set_visible(true);
                         }

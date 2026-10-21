@@ -2,6 +2,7 @@
 
 #include <sys/wait.h>
 
+#include <chrono>
 #include <cstdio>
 #include <csignal>
 #include <stdexcept>
@@ -24,11 +25,22 @@ GPid play(const std::string& file, ExitCallback on_exit) {
         throw std::runtime_error("media_player: spawn returned pid 0");
 
     // Fires on the main context when the child exits. We own the reaping.
+    const auto started = std::chrono::steady_clock::now();
     Glib::signal_child_watch().connect(
-        [on_exit = std::move(on_exit)](GPid done_pid, int status) {
+        [on_exit = std::move(on_exit), started](GPid done_pid, int status) {
+            const double elapsed =
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - started)
+                    .count();
             const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+            std::fprintf(stderr,
+                         "[media_player] exit pid=%d ok=%d after=%.1fs "
+                         "(exit=%d sig=%d)\n",
+                         (int)done_pid, (int)ok, elapsed,
+                         WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+                         WIFSIGNALED(status) ? WTERMSIG(status) : 0);
             Glib::spawn_close_pid(done_pid);
-            on_exit(done_pid, ok);
+            on_exit(done_pid, ok, elapsed);
         },
         pid);
     return pid;

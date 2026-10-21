@@ -20,9 +20,13 @@
 namespace media_player {
 
 // Called on the GTK main thread when a child started by play() exits.
-// ok == false means the player failed (decoder error, abort, missing
-// plugin) — the card should swap to its fallback.
-using ExitCallback = std::function<void(GPid pid, bool ok)>;
+// ok == false means a nonzero/signalled exit; elapsed is how long the
+// child lived. gst-play's EOS exit code is unreliable in some
+// environments, so the caller should treat  !ok && elapsed is short  as
+// "never played" (decoder failure → fallback) and anything after a
+// couple of seconds as a natural end.
+using ExitCallback =
+    std::function<void(GPid pid, bool ok, double elapsed_seconds)>;
 
 // Spawn gst-play-1.0 on `file`. Audio plays on the default sink; video
 // opens its own window. Returns the child pid (never 0 on success) and
