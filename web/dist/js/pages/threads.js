@@ -86,11 +86,12 @@ function senderLabel(m) {
 
 function statusPill(m) {
   const st = m.status;
-  if (!st || !st.status) return '';
-  const cls = { claimed: 'st-claimed', done: 'st-done', verified: 'st-verified' }[st.status] || 'st-claimed';
+  const state = st && (st.state || st.status);   // API serializes "state"
+  if (!state) return '';
+  const cls = { claimed: 'st-claimed', done: 'st-done', verified: 'st-verified' }[state] || 'st-claimed';
   const by = st.by === 'user' ? 'You' : agentName(st.by);
-  const tip = `${st.status} by ${by} · ${fmtTimeTZ(st.at)}${st.note ? '\n' + st.note : ''}`;
-  return `<span class="st-pill ${cls}" title="${esc(tip)}">${esc(st.status)} · ${esc(by)} · ${esc(relAge(st.at))}</span>`;
+  const tip = `${state} by ${by} · ${fmtTimeTZ(st.at)}${st.note ? '\n' + st.note : ''}`;
+  return `<span class="st-pill ${cls}" title="${esc(tip)}">${esc(state)} · ${esc(by)} · ${esc(relAge(st.at))}</span>`;
 }
 
 function renderMessages(msgs, scroll) {
