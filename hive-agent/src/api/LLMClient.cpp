@@ -2664,6 +2664,29 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
                 return AgentState::DONE;
             }
 
+            // 2026-10-22: agents ritually call set_status({"state":"Done"})
+            // believing it ends the turn (Bob looped 43+ iterations, each
+            // appending another "closing" line to the reply). Honor the
+            // semantics instead of fighting the habit: Done IS the end of
+            // the turn — finalize exactly like stop.
+            if (function_name == "set_status") {
+                // Normalise exactly like SetStatusTool does (trim +
+                // case-insensitive) — models pad/case state names.
+                std::string done_state = args_for_display.value("state", "");
+                const auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+                done_state.erase(done_state.begin(),
+                    std::find_if(done_state.begin(), done_state.end(), not_space));
+                done_state.erase(std::find_if(done_state.rbegin(), done_state.rend(),
+                    not_space).base(), done_state.end());
+                std::string done_lower = done_state;
+                for (auto& ch : done_lower) ch = (char)std::tolower((unsigned char)ch);
+                if (done_lower == "done") {
+                    messages.insert(messages.end(), tool_results.begin(), tool_results.end());
+                    if (messages_) messages_->mark_dirty();  // PERSIST-DIRTY
+                    return AgentState::DONE;
+                }
+            }
+
         }
 
         // Add tool results to message history

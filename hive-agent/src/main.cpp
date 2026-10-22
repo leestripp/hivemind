@@ -377,8 +377,15 @@ public:
     // test is fully closed" doubling). "stop" is the exception: the
     // loop ends there, so prose immediately before stop IS the reply.
     void on_tool_call(std::string_view name,
-                      const nlohmann::json& /*args*/) noexcept override {
+                      const nlohmann::json& args) noexcept override {
         if (name == "stop") return;
+        // 2026-10-22: set_status({"state":"Done"}) is turn-terminal (see
+        // LLMClient) — prose immediately before it IS the reply, same as
+        // before stop; do not stash it as intermediate.
+        if (name == "set_status") {
+            const std::string st = args.value("state", "");
+            if (st == "Done" || st == "done") return;
+        }
         std::lock_guard<std::mutex> lk(m_);
         if (!pending_.empty()) {
             last_intermediate_ = pending_;
