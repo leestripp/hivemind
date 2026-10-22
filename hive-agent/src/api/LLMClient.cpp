@@ -2839,6 +2839,14 @@ void LLMClient::inject_context_stats(json& messages) {
 
     stats << "# Context Status\n";
     stats << "<!-- This section is auto-updated each iteration -->\n";
+    // §NarrationLeak (2026-10-22): agents echoed this block into posted
+    // thread replies ("Context at 65.5%", "Compression landed (26.8%)").
+    // The warning rides WITH the data because this block is exactly what
+    // the model parrots — a rule in the static prompt alone was not
+    // enough (QueenBee's replies carried preamble + closing narration).
+    stats << "<!-- INTERNAL status, for you only: NEVER quote, paraphrase, or "
+             "mention this block (context %, tokens, cache, compression) in "
+             "replies you post to threads or the user. -->\n";
     stats << "| Metric | Value |\n";
     stats << "|--------|-------|\n";
     stats << "| Token Usage | " << last_total_tokens_ << "/" << get_max_context_size_value()

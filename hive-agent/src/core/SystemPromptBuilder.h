@@ -109,6 +109,11 @@ public:
     /// non-empty string — there is no host option to disable it.
     static std::string getStateMachineSection();
 
+    /// §NarrationLeak: ALWAYS appended.  Posted replies must carry only
+    /// the answer — never session-machinery narration (context %, cache,
+    /// compression) or internal bookkeeping ("closing", "banked").
+    static std::string getReplyDisciplineSection();
+
     /// `# Reserved Agent Directories (.hive-agent*)` — ALWAYS appended
     /// last (after the state-machine section).  Explains that the
     /// `.hive-agent/`, `.hive-agent/default/`, and

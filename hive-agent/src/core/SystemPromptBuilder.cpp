@@ -163,6 +163,39 @@ std::string SystemPromptBuilder::getStateMachineSection() {
         "   without `stop` the turn never terminates.\n";
 }
 
+std::string SystemPromptBuilder::getReplyDisciplineSection() {
+    // §NarrationLeak (2026-10-22): agents (QueenBee documented) posted
+    // replies that opened with session narration ("Context at 65.5% —
+    // daedalus is investigating ...") and closed with bookkeeping
+    // ("Nothing pending — closing quietly.", "... are banked.",
+    // "Compression landed (26.8%) ... Closing.").  The reader of a
+    // thread needs only the answer; the status block and the agent's
+    // own ledger are internal.  lee reported this repeatedly before it
+    // was pinned down — the wording was "vague" because the narration
+    // is free-form; the rule has to name the PATTERNS, not the bytes.
+    return
+        "# Thread Reply Discipline\n"
+        "\n"
+        "Replies you post to threads (and to the user) must contain ONLY\n"
+        "the answer or result. NEVER narrate session machinery or internal\n"
+        "bookkeeping in them:\n"
+        "\n"
+        "1. **No status-block echo** — no context/token/cache/compression\n"
+        "   talk (\"Context at 65%\", \"Context Pressure\", \"prompt tokens\n"
+        "   cached\", \"Compression landed\"). That block is internal.\n"
+        "2. **No play-by-play** — do not open a reply by restating what you\n"
+        "   are about to do or who asked (\"X is investigating Y, answering\n"
+        "   numbered\", \"I have the evidence fresh\"). Just answer.\n"
+        "3. **No closing/housekeeping notes** — no \"Nothing pending —\n"
+        "   closing\", \"All threads are in their right places\", \"banked\",\n"
+        "   \"Closing.\" The `Done`/`stop` ritual is silent.\n"
+        "4. **No reasoning-in-public** — deliberation belongs in your own\n"
+        "   context, never in the posted text. The reply is the result,\n"
+        "   not the plan and not the summary of the plan.\n"
+        "\n"
+        "A reader of the thread should see only what THEY need.\n";
+}
+
 std::string SystemPromptBuilder::getReservedAgentDirsSection() {
     // §Reserved Agent Dirs: ALWAYS appended last.  Tells the agent
     // that .hive-agent* folders are reserved runtime state — same
@@ -259,7 +292,11 @@ std::string SystemPromptBuilder::compose(const SystemPromptOptions& options) {
     //    the agent is instructed to set it as it works.
     sections.push_back(getStateMachineSection());
 
-    // 8. Reserved agent directories — ALWAYS appended.  Tells the agent
+    // 8. Thread reply discipline — ALWAYS appended.  Static rule text;
+    //    no per-iteration data (§ContextCache byte-static requirement).
+    sections.push_back(getReplyDisciplineSection());
+
+    // 9. Reserved agent directories — ALWAYS appended.  Tells the agent
     //     that .hive-agent* folders are owned by the runtime and must
     //     never be deleted / renamed / edited.
     //
@@ -271,12 +308,12 @@ std::string SystemPromptBuilder::compose(const SystemPromptOptions& options) {
     // (see src/api/ContextStatus.h and LLMClient::inject_context_stats).
     sections.push_back(getReservedAgentDirsSection());
 
-    // 9. Session memory (opt-in) — ALWAYS last.
+    // 10. Session memory (opt-in) — ALWAYS last.
     //
     // §ContextCache follow-up (2026-08-02, icarus patch review): the
     // memory dump is the most volatile section — its stats header
     // changes on almost every run. Server-side prompt caches stop at
-    // the first differing byte, so emitting memory LAST keeps slots 7-8
+    // the first differing byte, so emitting memory LAST keeps slots 7-9
     // (~2.4k tokens of byte-static mandatory text) inside the cacheable
     // prefix regardless of memory churn; only this final section misses.
     if (options.include_session_memory && !options.session_memory.empty()) {
