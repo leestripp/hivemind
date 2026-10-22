@@ -135,6 +135,14 @@ int main(int argc, char* argv[]) {
     ThreadStore thread_store;
     thread_store.ensure_user_thread();   // Phase 44: User Inbox always exists
     ApprovalStore approval_store;
+    // 2026-10-22 (bug sweep 3): approvals still 'pending' at boot are
+    // orphans — the in-memory request-id relay (HubRouter pend_appr_)
+    // died with the previous process, so no client decision can ever
+    // reach them and the waiting turn is already gone (broker auto-deny
+    // / watchdog). Deny them so the client never sees unresolvable
+    // ghost approvals after a hub restart/deploy.
+    for (auto& a : approval_store.list("pending"))
+        approval_store.resolve(a.id, false);
     RoutineStore routine_store;
     // 2026-09-23 migration: routine threads were created as kind "dm",
     // which made find_dm() resolve an agent's user DM to the LAST-created

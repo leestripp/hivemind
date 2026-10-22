@@ -531,7 +531,6 @@ void HubRouter::on_worker_frame(const std::string& worker,
             std::lock_guard<std::mutex> lk(m_);
             tasks_.erase(task);
         }
-        flush_pending_spawns();   // a turn ended — deferred pushes go now
         // Phase 35: worker ships attachment records minus the worker
         // field (it doesn't know its hub-side name) — inject it here so
         // clients can fetch via /api/files/download?worker&path.
@@ -559,6 +558,11 @@ void HubRouter::on_worker_frame(const std::string& worker,
                                         frame.value("error", ""), atts,
                                         frame.value("thread_id", ""),
                                         agent_id, stats);
+        // 2026-10-22 (bug sweep 3): flush AFTER complete_turn — the
+        // LiveTurn is retired inside it, so agent_busy() finally reports
+        // idle. Flushing before meant the agent still looked mid-turn
+        // and the deferred spawn waited for the next 15s heartbeat.
+        flush_pending_spawns();
         return;
     }
     if (op == "approval_req") {
