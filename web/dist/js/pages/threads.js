@@ -141,7 +141,10 @@ async function mark(mid, act) {
 export function enterThreads() {
   loadAgents().then(loadThreads).catch(() => {});
   pollTimer = setInterval(() => {
-    loadThreads().catch(() => {});
+    // Agents map failed or lagged on first paint? Retry — thread titles
+    // and sender names fall back to raw id prefixes without it.
+    const names = agentsById.size ? Promise.resolve() : loadAgents().catch(() => {});
+    names.then(() => loadThreads().catch(() => {}));
     if (selectedId) loadMessages(false).catch(() => {});
   }, 10000);
 }
