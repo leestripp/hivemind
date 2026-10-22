@@ -342,6 +342,13 @@ int main() {
     assert(r.statusCode() == 200);
     assert(jget(port, "/api/agents/" + a2)["require_approval"] == false);
 
+    // 2026-10-22 (Bob incident): a routine PATCH that never mentions
+    // require_approval must NOT silently re-gate an existing host agent —
+    // only freshly ENABLING host mode forces the gate ON.
+    r = request("PATCH", port, "/api/agents/" + a2, {{"role", "builder"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a2)["require_approval"] == false);
+
     // Moving a host agent to a non-opted-in worker -> 409.
     r = request("PATCH", port, "/api/agents/" + a2, {{"worker", "plainrig"}});
     assert(r.statusCode() == 409);

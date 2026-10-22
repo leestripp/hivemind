@@ -497,9 +497,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     }
                     std::cerr << "HOST AGENT approvals disabled: '"
                               << existing->name << "' — ack received\n";
-                } else {
-                    // Enabling host (or updating one) with no explicit
-                    // approvals choice: the gate is forced ON.
+                } else if (phost == 1 && !existing->host_agent) {
+                    // Freshly ENABLING host mode with no explicit approvals
+                    // choice: the gate is forced ON. A routine update of an
+                    // existing host agent (role/memory/mcp/...) keeps the
+                    // operator's current choice — forcing it ON here silently
+                    // re-gated Bob on an unrelated PATCH (2026-10-22).
                     preq_appr = true;
                 }
             }
