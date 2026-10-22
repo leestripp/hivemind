@@ -33,11 +33,28 @@ public:
     using HubRouter::HubRouter;
     std::vector<Dispatch> dispatches;
     int next = 0;
+    // 2026-10-22 (bug sweep) test hooks:
+    std::string throw_on;         // B1: dispatch throws when the prompt
+                                  // contains this (simulated poison dump)
+    ChatService* chat = nullptr;  // B2: reentrancy hook
+    std::string reenter_agent;    // B2: reenter try_dispatch mid-dispatch
+    bool reentering = false;
     std::string dispatch(const RosterAgent& agent,
                          const std::string& thread_id,
                          const std::string& text) override {
+        if (!throw_on.empty() && text.find(throw_on) != std::string::npos)
+            throw std::runtime_error("simulated poison dispatch");
         std::string tid = "mock-task-" + std::to_string(++next);
         dispatches.push_back({agent.id, thread_id, tid, text});
+        // B2: simulate the concurrent caller that passed the idle check
+        // before the winner claimed the turn — old code double-dispatched
+        // the same queued row from here.
+        if (chat && !reenter_agent.empty() && agent.id == reenter_agent &&
+            !reentering) {
+            reentering = true;
+            chat->on_agent_ready(agent.id);   // public try_dispatch entry
+            reentering = false;
+        }
         return tid;
     }
     const Dispatch* find(const std::string& agent_id,
@@ -578,6 +595,67 @@ int main() {
         assert(done == 3 && "all three joined fan-in rows land done");
     }
     settle(chat);
+
+    // ── 2026-10-22 bug sweep: B1 — poison dispatch containment ──────
+    // A dispatch failure (WorkerChannel dump throwing on poison UTF-8 is
+    // the production case) must mark the wake row error and MUST NOT
+    // wedge the agent's queue: the next clean wake dispatches normally.
+    {
+        hub.throw_on = "THROW_ME";
+        const size_t before_err =
+            deliveries.list(chief.id, "error", 50).size();
+        chat.post_user_message(dm.id, "THROW_ME poison marker");
+        const auto errs = deliveries.list(chief.id, "error", 50);
+        assert(errs.size() == before_err + 1 &&
+               "poison wake must be marked error, not left queued");
+        assert(errs.front().error.rfind("dispatch: ", 0) == 0 &&
+               "error row must carry the dispatch failure reason");
+        // Head-of-line check: a clean wake must dispatch immediately.
+        chat.post_user_message(dm.id, "clean follow-up");
+        const auto* clean = hub.find_last(chief.id, dm.id);
+        assert(clean && clean->prompt.find("clean follow-up") !=
+                            std::string::npos &&
+               "clean wake after a poison wake must dispatch (no HOL block)");
+        hub.throw_on.clear();
+        settle(chat);
+    }
+
+    // ── 2026-10-22 bug sweep: B2 — no double-dispatch under race ─────
+    // The mock re-enters try_dispatch from INSIDE dispatch — exactly the
+    // interleaving of two real callers racing the idle check. Old code
+    // dispatched the same queued row twice; the claim fix lets the
+    // reentrant call see the agent busy and back off.
+    {
+        const size_t before = hub.dispatches.size();
+        hub.chat = &chat;
+        hub.reenter_agent = chief.id;
+        chat.post_user_message(dm.id, "race probe");
+        hub.reenter_agent.clear();
+        hub.chat = nullptr;
+        size_t n = 0;
+        for (size_t i = before; i < hub.dispatches.size(); ++i)
+            if (hub.dispatches[i].agent_id == chief.id &&
+                hub.dispatches[i].thread_id == dm.id)
+                ++n;
+        assert(n == 1 && "racing try_dispatch must not double-dispatch");
+        settle(chat);
+    }
+
+    // ── 2026-10-22 bug sweep: B5 — dedup returns the original handle ──
+    {
+        std::string did1, did2;
+        chat.post_agent_message(chief.id, honey.id, "dedup-probe ping",
+                                &did1);
+        const std::string tid2 =
+            chat.post_agent_message(chief.id, honey.id, "dedup-probe ping",
+                                    &did2);
+        assert(!did1.empty() && "first send gets a delivery id");
+        assert(did2 == did1 &&
+               "deduped retry must return the ORIGINAL delivery id");
+        assert(!tid2.empty() &&
+               "deduped retry must return the original pair thread");
+        settle(chat);
+    }
 
     std::cout << "agent relay: all assertions passed\n";
     return 0;

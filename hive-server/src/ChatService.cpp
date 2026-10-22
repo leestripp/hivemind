@@ -57,7 +57,11 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     // Dedup (2026-09-25, Chief's double-delivery report): an identical
     // (sender, target, body) inside the window is the sender retrying a
     // slow tool call, not a new message — drop the repeat so retries
-    // can't double-post. Returns "" (caller ignores the thread id).
+    // can't double-post. 2026-10-22 (bug sweep B5): the drop now returns
+    // the ORIGINAL thread + delivery id — a retrying sender gets a
+    // working message_status handle to the message it already sent
+    // (the hub used to report an empty id, and msg_send then claimed
+    // state "queued" for a message that no longer existed).
     {
         std::lock_guard<std::mutex> lk(m_);
         const auto now = std::chrono::steady_clock::now();
@@ -73,10 +77,10 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
                     "within %ds — repeat dropped\n",
                     sender_id.c_str(), target_id.c_str(),
                     dedup_window_s());
-                return "";
+                if (delivery_id_out) *delivery_id_out = r.delivery_id;
+                return r.thread_id;
             }
         }
-        recent_agent_msgs_.push_back({sender_id, target_id, body, now});
     }
 
     // Find-or-create the pair thread (kind "group", exactly these two).
@@ -109,6 +113,12 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
                std::string(hivemind::msg_source::kAgentPrefix) +
                    sender->name,
                body, /*generation=*/1, sender_id, msg_id, "wake");
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        recent_agent_msgs_.push_back(
+            {sender_id, target_id, body, tid, did,
+             std::chrono::steady_clock::now()});
+    }
     if (delivery_id_out) *delivery_id_out = did;
     return tid;
 }
@@ -482,8 +492,59 @@ void ChatService::try_dispatch(const std::string& agent_id) {
         live->worker     = agent->worker;
         live->generation = d->generation;
 
-        const std::string task_id =
-            hub_.dispatch(*agent, d->thread_id, prompt);
+        // 2026-10-22 (bug sweep B2): claim the idle transition BEFORE
+        // dispatching. The old code checked agent_busy_locked, released
+        // m_, and inserted the LiveTurn only after hub_.dispatch
+        // returned — two concurrent try_dispatch callers (a burst of
+        // POSTs on different HTTP threads; complete_turn on the WS
+        // thread racing a POST) both saw the agent idle, both read the
+        // same still-'queued' head row, and BOTH dispatched it: two
+        // live turns for one wake, two replies in the thread. Inserting
+        // the turn under m_ first makes the loser see busy and back
+        // off; the winner's completion drains the queue.
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            if (agent_busy_locked(agent_id))
+                return;   // lost the race — the winner drains the queue
+            auto& vec = live_[d->thread_id];
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                                     [](const auto& t) { return t->done; }),
+                      vec.end());
+            if (vec.size() >= kMaxLivePerThread)
+                vec.erase(vec.begin());
+            vec.push_back(live);
+        }
+
+        std::string task_id;
+        try {
+            task_id = hub_.dispatch(*agent, d->thread_id, prompt);
+        } catch (const std::exception& e) {
+            // 2026-10-22 (bug sweep B1): dispatch must never take the
+            // queue down with it. WorkerChannel::send frame.dump()
+            // throws type_error.316 on invalid UTF-8 anywhere in the
+            // frame; without containment the throw escaped try_dispatch
+            // (the POST 500'd AFTER storing the message) and the poison
+            // row stayed queued — head-of-line blocking the agent's
+            // whole queue, the identical error re-thrown on every later
+            // dispatch, until the wake TTL (2026-10-02 incident). The
+            // ingress sanitizer (Utf8.h) makes this rare; this catch is
+            // the belt to its suspenders: fail the joined rows visibly,
+            // drop the claim, and move on to the next queued wake.
+            std::fprintf(stderr,
+                "[delivery] dispatch ERROR %.8s (-> %.8s): %s\n",
+                d->id.c_str(), agent_id.c_str(), e.what());
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                auto& vec = live_[d->thread_id];
+                vec.erase(std::remove_if(vec.begin(), vec.end(),
+                        [&](const auto& t) { return t.get() == live.get(); }),
+                    vec.end());
+            }
+            for (const auto& jid : joined_ids)
+                deliveries_.mark_error(jid,
+                    std::string{"dispatch: "} + e.what());
+            continue;
+        }
         if (task_id.empty()) {
             // Worker offline: leave the row QUEUED (durable — it drains
             // when the worker reconnects and the agent reports ready).
@@ -493,31 +554,16 @@ void ChatService::try_dispatch(const std::string& agent_id) {
                 "(-> %.8s)\n", d->id.c_str(), agent_id.c_str());
             {
                 std::lock_guard<std::mutex> lk(m_);
-                auto& vec = live_[d->thread_id];
                 live->error = "worker offline";
-                live->done = true;
-                vec.push_back(live);
+                live->done = true;   // stays visible in activity()
             }
-            try {
-                threads_.add_message(d->thread_id, "system", "hivemind",
-                    "*(dispatch to agent " + agent->name +
-                    " deferred — worker offline or no LLM config; the "
-                    "message is queued and will be delivered when the "
-                    "worker is back)*");
-            } catch (...) {}
+            post_dispatch_deferred_notice(d->thread_id, agent->name);
             return;   // everything for this agent will fail the same way
         }
 
         {
             std::lock_guard<std::mutex> lk(m_);
-            auto& vec = live_[d->thread_id];
-            vec.erase(std::remove_if(vec.begin(), vec.end(),
-                                     [](const auto& t) { return t->done; }),
-                      vec.end());
-            if (vec.size() >= kMaxLivePerThread)
-                vec.erase(vec.begin());
             live->task_id = task_id;
-            vec.push_back(live);
             by_task_[task_id] = live;
         }
         // Queue-join (Plan.md, 2026-10-04): every joined row carries the
@@ -887,7 +933,13 @@ void ChatService::complete_turn(const std::string& task_id,
             }
         }
     }
-    live->done = true;
+    {
+        // 2026-10-22 (bug sweep B3): done was written OUTSIDE m_ here —
+        // a data race with every other LiveTurn state reader/writer
+        // (watchdog, busy(), flush_partial all take m_).
+        std::lock_guard<std::mutex> lk(m_);
+        live->done = true;
+    }
     // Phase 66b: close out the delivery row that drove this turn (if
     // any) and advance the agent's read mark to the wake's source
     // message — the agent demonstrably consumed it (it WAS the prompt).
@@ -1016,6 +1068,16 @@ void ChatService::watchdog_loop() {
             }
         }
         for (const auto& v : victims) {
+            {
+                // 2026-10-22 (bug sweep B3): complete_turn may have
+                // finished this turn between our collection sweep and
+                // now (its result frame was already on the wire).
+                // Acting anyway posted a bogus "timed out" system
+                // message and marked a SUCCESSFUL turn's delivery rows
+                // error. Recheck under m_ before touching anything.
+                std::lock_guard<std::mutex> lk(m_);
+                if (v.turn->done) continue;
+            }
             std::fprintf(stderr,
                 "[chat] WATCHDOG: turn %.16s on agent %.8s %s — retiring\n",
                 v.task_id.c_str(), v.agent_id.c_str(),
@@ -1066,6 +1128,28 @@ void ChatService::watchdog_loop() {
                 expired, wake_ttl_s());
         deliveries_.expire_relays(static_cast<int>(relay_ttl().count()));
     }
+}
+
+void ChatService::post_dispatch_deferred_notice(
+        const std::string& thread_id, const std::string& agent_name) {
+    // 2026-10-22 (bug sweep B4): while a worker is offline, EVERY
+    // queued wake used to append another copy of this notice — a long
+    // outage buried the thread in duplicates. Post only when the
+    // thread's last message is not already the same notice.
+    try {
+        bool has_more = false;
+        auto recent =
+            threads_.list_messages_window(thread_id, "", 1, has_more);
+        const std::string prefix =
+            "*(dispatch to agent " + agent_name + " deferred";
+        if (!recent.empty() && recent.back().body.rfind(prefix, 0) == 0)
+            return;
+        threads_.add_message(thread_id, "system", "hivemind",
+            "*(dispatch to agent " + agent_name +
+            " deferred — worker offline or no LLM config; the "
+            "message is queued and will be delivered when the "
+            "worker is back)*");
+    } catch (...) {}
 }
 
 void ChatService::flush_partial(LiveTurn& t) {

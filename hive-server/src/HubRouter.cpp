@@ -884,6 +884,15 @@ void HubRouter::handle_msg_send_req(const std::string& worker,
             resp["thread_id"] = tid;
             resp["delivery_id"] = delivery_id;
             resp["state"] = "queued";
+            // 2026-10-22 (bug sweep B5): report the row's REAL state.
+            // A dedup hit returns the original delivery (possibly long
+            // since dispatched/done) — "queued" was a guess that lied to
+            // senders polling message_status.
+            if (!delivery_id.empty()) {
+                const auto ds =
+                    chat_->delivery_status(agent_id, delivery_id);
+                if (!ds.empty()) resp["state"] = ds.front().state;
+            }
         }
     } catch (const std::exception& e) {
         resp["ok"] = false;

@@ -4,6 +4,7 @@
 // =============================================================================
 
 #include "hivemind/DeliveryStore.h"
+#include "hivemind/Utf8.h"
 #include "hivemind/DbUtil.h"
 
 #include <sqlite3.h>
@@ -176,6 +177,11 @@ void DeliveryStore::init_schema() {
 // ── deliveries ───────────────────────────────────────────────────────────
 
 std::string DeliveryStore::enqueue(Delivery d) {
+    // 2026-10-22 (bug sweep B6): the delivery body rides worker frames
+    // as JSON — repair it here (the single enqueue choke point for every
+    // wake) so a poison body can never reach WorkerChannel::send's dump.
+    d.body = hivemind::sanitize_utf8(d.body);
+    d.sender_label = hivemind::sanitize_utf8(d.sender_label);
     if (d.id.empty()) d.id = uuid_v4();
     if (d.state.empty()) d.state = "queued";
     if (d.kind.empty()) d.kind = "wake";

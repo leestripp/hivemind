@@ -79,8 +79,10 @@ public:
     /// Agent->agent async message: find-or-create the pair thread, post
     /// as sender_kind="agent", fan in to the target at generation 1.
     /// Phase 66d: when delivery_id_out is given it receives the durable
-    /// delivery id (the message_status handle); "" when the content
-    /// dedup dropped a repeat or no wake was needed.
+    /// delivery id (the message_status handle); "" when no wake was
+    /// needed (fan-in suppression). A content-dedup hit returns the
+    /// ORIGINAL message's thread + delivery id (2026-10-22, B5) so a
+    /// retrying sender gets a working status handle.
     std::string post_agent_message(const std::string& sender_id,
                                    const std::string& target_id,
                                    const std::string& body,
@@ -147,6 +149,11 @@ public:
     /// user-facing text survives cancel/timeout. No-op when empty or
     /// already flushed. Sets partial_flushed.
     void flush_partial(LiveTurn& t);
+    /// 2026-10-22 (bug sweep B4): the "dispatch deferred (worker
+    /// offline)" visibility notice — deduped against the thread's last
+    /// message so an offline stretch posts it once, not once per wake.
+    void post_dispatch_deferred_notice(const std::string& thread_id,
+                                       const std::string& agent_name);
     void complete_turn(const std::string& task_id, const std::string& body,
                        const std::string& error,
                        const std::string& attachments_json = "[]",
@@ -245,6 +252,8 @@ private:
     // is a retry — drop the repeat.
     struct RecentMsg {
         std::string sender, target, body;
+        std::string thread_id;      // B5: pair thread (dedup returns it)
+        std::string delivery_id;    // B5: original wake (dedup returns it)
         std::chrono::steady_clock::time_point at;
     };
     std::deque<RecentMsg> recent_agent_msgs_;   // guarded by m_, FIFO

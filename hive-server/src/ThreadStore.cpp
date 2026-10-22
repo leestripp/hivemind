@@ -3,6 +3,7 @@
 // =============================================================================
 #include "hivemind/DbUtil.h"
 #include "hivemind/ThreadStore.h"
+#include "hivemind/Utf8.h"
 
 #include <array>
 #include <chrono>
@@ -587,7 +588,10 @@ std::string ThreadStore::add_message(const std::string& thread_id,
     bind_text(st, 2, thread_id);
     bind_text(st, 3, sender_kind);
     bind_text(st, 4, sender_id);
-    bind_text(st, 5, body);
+    // 2026-10-22 (bug sweep B6): repair untrusted text at the store
+    // ingress — one invalid UTF-8 byte here poisons every later
+    // nlohmann dump of the thread (2026-10-02 incident).
+    bind_text(st, 5, hivemind::sanitize_utf8(body));
     bind_text(st, 6, attachments_json.empty() ? "[]" : attachments_json);
     bind_text(st, 7, now);
     bind_text(st, 8, stats_json);
