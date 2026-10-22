@@ -122,20 +122,14 @@ function renderMessages(msgs, scroll) {
 }
 
 async function mark(mid, act) {
-  // The WebUI's bearer key IS the user principal — assert it explicitly
-  // (the route 400s on empty "by"; agents go through the bridge, which
-  // derives "by" from the worker-stamped agent id, never this route).
   const url = `/api/threads/${selectedId}/messages/${mid}/status`;
-  try {
-    if (act === 'clear') {
-      await API.del(url);
-    } else {
-      const note = window.prompt(`Note for "${act}" (optional, Cancel = no note):`, '');
-      await API.post(url, note === null ? { status: act, by: 'user' }
-                                      : { status: act, by: 'user', note });
-    }
-    await Promise.all([loadMessages(false), loadThreads()]);
-  } catch { /* API.req already raised the error toast */ }
+  if (act === 'clear') {
+    await API.del(url);
+  } else {
+    const note = window.prompt(`Note for "${act}" (optional, Cancel = no note):`, '');
+    await API.post(url, note === null ? { status: act } : { status: act, note });
+  }
+  await Promise.all([loadMessages(false), loadThreads()]);
 }
 
 export function enterThreads() {
