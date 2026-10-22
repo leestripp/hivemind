@@ -5,6 +5,7 @@ import { enterSettings, initSettings } from './pages/settings.js';
 import { enterKeys, initKeys } from './pages/keys.js';
 import { enterModels, initModels } from './pages/models.js';
 import { enterTasks, initTasks } from './pages/tasks.js';
+import { enterThreads, leaveThreads, initThreads } from './pages/threads.js';
 import { enterSkills, initSkills } from './pages/skills.js';
 import { enterSecrets, initSecrets } from './pages/secrets.js';
 import { enterFiles, initFiles } from './pages/files.js';
@@ -14,7 +15,7 @@ import { getTheme } from './util.js';
 
 document.documentElement.dataset.theme = getTheme();   // Phase 19
 
-const PAGES = ['agents', 'tasks', 'files', 'skills', 'secrets', 'models', 'workers', 'system', 'keys', 'settings'];   // sidebar order
+const PAGES = ['agents', 'tasks', 'threads', 'files', 'skills', 'secrets', 'models', 'workers', 'system', 'keys', 'settings'];   // sidebar order
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'agents';
@@ -26,6 +27,7 @@ function showPage(name) {
   if (name === 'agents')   enterAgents(); else leaveAgents();
   if (name === 'models')   enterModels();
   if (name === 'tasks')    enterTasks();
+  if (name === 'threads')  enterThreads(); else leaveThreads();
   if (name === 'skills')   enterSkills();
   if (name === 'files')    enterFiles();
   if (name === 'secrets')  enterSecrets();
@@ -44,6 +46,7 @@ initWorkers();
 initSystem();
 initModels();
 initTasks();
+initThreads();
 initSkills();
 initFiles();
 initSecrets();
