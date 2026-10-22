@@ -7,6 +7,7 @@
 
 #include <array>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <stdexcept>
 #include <string_view>
@@ -20,6 +21,13 @@ using hivemind::db::bind_text;
 using hivemind::db::col_text;
 inline void exec_sql(sqlite3* db, const char* sql) {
     hivemind::db::exec_sql(db, sql, "ThreadStore");
+}
+
+inline void step_done(sqlite3* db, sqlite3_stmt* st, const char* what) {
+    if (sqlite3_step(st) != SQLITE_DONE)
+        throw std::runtime_error(std::string(what) + ": " +
+                                 sqlite3_errmsg(db));
+    sqlite3_finalize(st);
 }
 
 
@@ -92,6 +100,39 @@ void ThreadStore::ensure_schema() {
         "  kind TEXT NOT NULL DEFAULT 'dm',"
         "  created_at TEXT NOT NULL"
         ")");
+    // 2026-10-22 (bug sweep 2): pair_key backs the atomic
+    // find_or_create_pair_thread. Guarded UNIQUE index: if a legacy
+    // database already holds duplicate pair threads, index creation
+    // fails on the constraint — log and continue (those deployments
+    // keep scan-based canonical behavior; no new duplicates can be
+    // prevented there without orphaning messages).
+    bool has_pair_key = false;
+    {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, "PRAGMA table_info(threads)",
+                               -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char* n = col_text(st, 1);
+                if (n && std::string_view{n} == "pair_key") {
+                    has_pair_key = true;
+                    break;
+                }
+            }
+            sqlite3_finalize(st);
+        }
+    }
+    if (!has_pair_key)
+        exec_sql(db, "ALTER TABLE threads ADD COLUMN pair_key TEXT");
+    try {
+        exec_sql(db,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_pair_key"
+            " ON threads(pair_key) WHERE pair_key IS NOT NULL");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr,
+            "[threads] WARNING: pair_key unique index unavailable (%s)"
+            " — legacy duplicate pair threads present; scan-based"
+            " canonical resolution in effect\n", e.what());
+    }
     exec_sql(db,
         "CREATE TABLE IF NOT EXISTS thread_participants ("
         "  thread_id TEXT NOT NULL,"
@@ -213,6 +254,170 @@ void ThreadStore::set_kind(const std::string& id, const std::string& kind) {
     }
     sqlite3_finalize(st);
     sqlite3_close(db);
+}
+
+Thread ThreadStore::find_or_create_pair_thread(
+        const std::string& a, const std::string& b,
+        const std::string& title) {
+    // Sorted pair + unit separator: ids can never collide across the
+    // concatenation boundary, and key order is order-independent.
+    const std::string lo = a < b ? a : b;
+    const std::string hi = a < b ? b : a;
+    const std::string key = lo + "\x1f" + hi;
+
+    auto load_by_key = [&](sqlite3* db) -> std::optional<Thread> {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT id FROM threads WHERE pair_key = ?",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, key);
+        std::optional<Thread> out;
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char* id = col_text(st, 0);
+            if (id) out = get_thread(id);   // fills participants
+        }
+        sqlite3_finalize(st);
+        return out;
+    };
+    // Adoption (2026-10-22, bug sweep 2): a pair thread created before
+    // the pair_key migration has no key. Stamp the oldest exact-match
+    // so the canonical identity (relays already point at it) survives.
+    // Runs at most once per pair — after the first touch the key hits.
+    auto adopt_legacy = [&](sqlite3* db) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT id FROM threads"
+                " WHERE pair_key IS NULL AND kind = 'group'"
+                " AND id IN (SELECT p1.thread_id"
+                "   FROM thread_participants p1"
+                "   JOIN thread_participants p2"
+                "     ON p1.thread_id = p2.thread_id"
+                "    AND p1.agent_id = ? AND p2.agent_id = ?)"
+                " ORDER BY created_at LIMIT 1",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, lo);
+        bind_text(st, 2, hi);
+        std::string legacy_id;
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char* id = col_text(st, 0);
+            if (id) legacy_id = id;
+        }
+        sqlite3_finalize(st);
+        if (legacy_id.empty()) return;   // nothing to adopt — no write
+        st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "UPDATE threads SET pair_key = ? WHERE id = ?",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, key);
+        bind_text(st, 2, legacy_id);
+        step_done(db, st, "pair thread adoption");
+    };
+
+    sqlite3* db = open_conn();
+    try {
+        for (int round = 0; round < 50; ++round) {
+            if (auto existing = load_by_key(db)) {
+                sqlite3_close(db);
+                return *existing;
+            }
+            // First touch only: adopt a pre-migration thread if present.
+            if (round == 0) {
+                try {
+                    adopt_legacy(db);
+                } catch (const std::exception&) {
+                    // BUSY contention — harmless, retry the round.
+                }
+                if (auto existing = load_by_key(db)) {
+                    sqlite3_close(db);
+                    return *existing;
+                }
+            }
+
+            Thread t;
+            t.id = uuid_v4();
+            t.title = title;
+            t.kind = "group";
+            t.created_at = iso_now();
+            t.agent_ids = {lo, hi};
+
+            // Write attempt. Three outcomes: success, lost the unique-
+            // index race (a concurrent creator won — re-read), or
+            // SQLITE_BUSY (a peer's transaction holds the lock — the
+            // busy handler already waited out its window; back off and
+            // retry the whole round rather than failing the caller).
+            exec_sql(db, "BEGIN");
+            sqlite3_stmt* st = nullptr;
+            if (sqlite3_prepare_v2(db,
+                    "INSERT INTO threads (id, title, kind, created_at,"
+                    " pair_key) VALUES (?,?,?,?,?)",
+                    -1, &st, nullptr) != SQLITE_OK) {
+                exec_sql(db, "ROLLBACK");
+                throw std::runtime_error(sqlite3_errmsg(db));
+            }
+            bind_text(st, 1, t.id);
+            bind_text(st, 2, t.title);
+            bind_text(st, 3, t.kind);
+            bind_text(st, 4, t.created_at);
+            bind_text(st, 5, key);
+            if (sqlite3_step(st) == SQLITE_DONE) {
+                sqlite3_finalize(st);
+                try {
+                    for (const auto& aid : t.agent_ids) {
+                        sqlite3_stmt* ps = nullptr;
+                        if (sqlite3_prepare_v2(db,
+                                "INSERT OR IGNORE INTO thread_participants"
+                                " (thread_id, agent_id) VALUES (?,?)",
+                                -1, &ps, nullptr) != SQLITE_OK)
+                            throw std::runtime_error(sqlite3_errmsg(db));
+                        bind_text(ps, 1, t.id);
+                        bind_text(ps, 2, aid);
+                        if (sqlite3_step(ps) != SQLITE_DONE)
+                            throw std::runtime_error(
+                                "participant insert failed");
+                        sqlite3_finalize(ps);
+                    }
+                    exec_sql(db, "COMMIT");
+                } catch (...) {
+                    exec_sql(db, "ROLLBACK");
+                    sqlite3_close(db);
+                    throw;
+                }
+                sqlite3_close(db);
+                return t;
+            }
+            const int err = sqlite3_extended_errcode(db);
+            sqlite3_finalize(st);
+            exec_sql(db, "ROLLBACK");
+            if (err == SQLITE_CONSTRAINT_UNIQUE) {
+                if (auto existing = load_by_key(db)) {
+                    sqlite3_close(db);
+                    return *existing;
+                }
+                continue;   // winner's row not visible yet — retry
+            }
+            if (err == SQLITE_BUSY) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
+            sqlite3_close(db);
+            throw std::runtime_error("pair thread insert failed");
+        }
+        // 50 rounds of contention without a resolution — give the
+        // caller a clean error rather than an infinite loop.
+        if (auto existing = load_by_key(db)) {
+            sqlite3_close(db);
+            return *existing;
+        }
+        sqlite3_close(db);
+        throw std::runtime_error(
+            "pair thread creation: contended database");
+    } catch (...) {
+        sqlite3_close(db);
+        throw;
+    }
 }
 
 std::optional<Thread> ThreadStore::find_dm(const std::string& agent_id) {

@@ -94,6 +94,20 @@ public:
                          const std::string& kind,
                          const std::vector<std::string>& agent_ids);
 
+    /// Atomic find-or-create for the canonical 2-agent pair thread.
+    /// 2026-10-22 (bug sweep 2): the old list_threads-scan +
+    /// create_thread in post_agent_message was a check-then-act race —
+    /// concurrent A→B and B→A messages created TWO pair threads, and
+    /// since relay arming is keyed by pair thread id, replies split
+    /// across the duplicates and broke message_agent delivery. A
+    /// sorted-participant pair_key (partial UNIQUE index, schema
+    /// migration below) makes creation race-free; a pre-existing
+    /// unkeyed pair thread is adopted and stamped so canonical identity
+    /// survives the upgrade.
+    Thread find_or_create_pair_thread(const std::string& a,
+                                      const std::string& b,
+                                      const std::string& title);
+
     std::optional<Thread> get_thread(const std::string& id);
     std::vector<Thread> list_threads();
     /// Cascades messages + participants. The User Inbox (kUserThreadId)

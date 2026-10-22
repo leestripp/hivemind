@@ -486,10 +486,17 @@ DeliveryStore::consume_relay(const std::string& pair_thread_id,
     if (!found || row.requester_id == replier_id) return std::nullopt;
     StmtGuard st;
     prepare(db.db, st,
-        "UPDATE relay_links SET consumed = 1 WHERE pair_thread_id = ?",
+        "UPDATE relay_links SET consumed = 1"
+        " WHERE pair_thread_id = ? AND consumed = 0",
         "consume_relay update");
     bind_text(st, 1, pair_thread_id);
     step_done(db.db, st, "consume_relay update");
+    // 2026-10-22 (bug sweep 2): the consume must be a CLAIM, not a
+    // blind write. Two replier agents finishing turns in the same pair
+    // thread concurrently could both read consumed=0 and both fire the
+    // relay. Only the UPDATE that actually flipped the flag wins; the
+    // loser's earlier SELECT is stale.
+    if (sqlite3_changes(db.db) != 1) return std::nullopt;
     return row;
 }
 

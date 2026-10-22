@@ -83,24 +83,14 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
         }
     }
 
-    // Find-or-create the pair thread (kind "group", exactly these two).
-    std::string tid;
-    for (const auto& t : threads_.list_threads()) {
-        if (t.kind == "group" && t.agent_ids.size() == 2 &&
-            std::find(t.agent_ids.begin(), t.agent_ids.end(), sender_id) !=
-                t.agent_ids.end() &&
-            std::find(t.agent_ids.begin(), t.agent_ids.end(), target_id) !=
-                t.agent_ids.end()) {
-            tid = t.id;
-            break;
-        }
-    }
-    if (tid.empty()) {
-        auto t = threads_.create_thread(
-            sender->name + " <-> " + target->name, "group",
-            {sender_id, target_id});
-        tid = t.id;
-    }
+    // 2026-10-22 (bug sweep 2): atomic find-or-create via the pair_key
+    // UNIQUE index. The old list_threads scan + create_thread was a
+    // check-then-act race — concurrent A→B and B→A messages created TWO
+    // pair threads, and relay arming is keyed by pair thread id, so
+    // replies split across the duplicates and broke delivery.
+    const std::string tid = threads_.find_or_create_pair_thread(
+        sender_id, target_id,
+        sender->name + " <-> " + target->name).id;
 
     const std::string msg_id =
         threads_.add_message(tid, "agent", sender_id, body);
@@ -758,6 +748,13 @@ void ChatService::complete_turn(const std::string& task_id,
         }
     }
     if (suppress) {
+        // 2026-10-22 (bug sweep 2): a cancel landing while the turn sat
+        // in the claim window (task_id not yet set when cancel ran)
+        // could not drop these rows — they stayed 'dispatched' forever.
+        // Close them here; re-dropping rows the cancel path already
+        // dropped is harmless (stateless UPDATE).
+        for (auto& d : deliveries_.find_all_by_task(task_id))
+            deliveries_.mark_dropped(d.id, "cancelled");
         // Phase 67.2 still holds: Stop releases the durable queue even
         // when the cancelled turn's own result is what freed the agent.
         try_dispatch(live->agent_id);
@@ -1039,7 +1036,10 @@ void ChatService::watchdog_loop() {
             const auto now = std::chrono::steady_clock::now();
             for (auto& [tid, vec] : live_) {
                 for (auto& t : vec) {
-                    if (t->done || t->task_id.empty())
+                    // reply_posted turns are mid-completion; their
+                    // result is on the wire (bug sweep 2, see
+                    // cancel_agent_turns).
+                    if (t->done || t->task_id.empty() || t->reply_posted)
                         continue;
                     const auto now_s = now;
                     const bool already_cancelling = t->cancelling;
@@ -1183,7 +1183,13 @@ int ChatService::cancel_agent_turns(const std::string& agent_id) {
         std::lock_guard<std::mutex> lk(m_);
         for (auto& [thread_id, turns] : live_) {
             for (auto& t : turns) {
-                if (t->agent_id != agent_id || t->done || t->cancelling)
+                // 2026-10-22 (bug sweep 2): reply_posted means
+                // complete_turn already claimed the single reply slot —
+                // the full reply WILL land in the thread. Cancelling
+                // anyway dropped its rows "cancelled" and sent a
+                // spurious cancel for a turn that already answered.
+                if (t->agent_id != agent_id || t->done || t->cancelling ||
+                    t->reply_posted)
                     continue;
                 t->cancelling = true;
                 t->cancel_started = std::chrono::steady_clock::now();
@@ -1225,7 +1231,10 @@ void ChatService::cancel_thread(const std::string& thread_id) {
         auto it = live_.find(thread_id);
         if (it == live_.end()) return;
         for (auto& t : it->second) {
-            if (t->done || t->cancelling) continue;
+            // 2026-10-22 (bug sweep 2): reply_posted turns are
+            // completing — the reply lands regardless; cancelling only
+            // corrupts the rows' state (see cancel_agent_turns).
+            if (t->done || t->cancelling || t->reply_posted) continue;
             t->cancelling = true;
             t->cancel_started = std::chrono::steady_clock::now();
             if (!t->task_id.empty()) {

@@ -1,9 +1,14 @@
 // tests/test_thread_store.cpp — ThreadStore threads/messages, no LLM required.
 #include "hivemind/ThreadStore.h"
 
+#include <atomic>
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
+#include <set>
+#include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -161,6 +166,57 @@ int main() {
             store.add_message(tid.id, "agent", "a", "unrelated");
         store.set_message_status(tid.id, mid2, "done", "a", "");
         assert(store.get_message(mid)->status.empty());
+    }
+
+    // ── 2026-10-22 (bug sweep 2): atomic pair-thread find-or-create ─────
+    // Concurrent A→B / B→A used to create TWO pair threads (check-then-act
+    // race), splitting relay delivery across the duplicates.
+    {
+        auto first  = store.find_or_create_pair_thread("pa", "pb", "P <-> Q");
+        auto second = store.find_or_create_pair_thread("pb", "pa", "Q <-> P");
+        assert(first.id == second.id);            // order-independent
+        auto third  = store.find_or_create_pair_thread("pa", "pb", "again");
+        assert(third.id == first.id);
+        // distinct pairs never collide
+        auto other = store.find_or_create_pair_thread("pa", "pc", "P <-> C");
+        assert(other.id != first.id);
+        // adoption: a pair thread created the OLD way (no pair_key) is
+        // found and stamped, not duplicated
+        auto legacy = store.create_thread("legacy", "group", {"px", "py"});
+        auto adopted = store.find_or_create_pair_thread("py", "px", "adopt");
+        assert(adopted.id == legacy.id);
+        // and a second lookup hits the stamped key
+        auto again = store.find_or_create_pair_thread("px", "py", "adopt2");
+        assert(again.id == legacy.id);
+    }
+
+    // Race: 8 threads hammering the same pair must all land on ONE thread.
+    {
+        constexpr int kThreads = 8, kIters = 40;
+        std::atomic<int> created{0};
+        std::vector<std::thread> pool;
+        std::mutex ids_m;
+        std::set<std::string> ids;
+        for (int i = 0; i < kThreads; ++i) {
+            pool.emplace_back([&] {
+                for (int j = 0; j < kIters; ++j) {
+                    auto t = store.find_or_create_pair_thread(
+                        "race-a", "race-b", "race");
+                    std::lock_guard<std::mutex> lk(ids_m);
+                    ids.insert(t.id);
+                }
+            });
+        }
+        for (auto& th : pool) th.join();
+        assert(ids.size() == 1);
+        // exactly one canonical thread carries the pair
+        int matches = 0;
+        for (auto& t : store.list_threads())
+            if (t.kind == "group" && t.agent_ids.size() == 2 &&
+                ((t.agent_ids[0] == "race-a" && t.agent_ids[1] == "race-b") ||
+                 (t.agent_ids[0] == "race-b" && t.agent_ids[1] == "race-a")))
+                ++matches;
+        assert(matches == 1);
     }
 
     fs::remove_all(tmp);

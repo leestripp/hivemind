@@ -3,7 +3,10 @@
 
 #include "hivemind/DeliveryStore.h"
 
+#include <atomic>
 #include <cassert>
+#include <thread>
+#include <vector>
 #include <cstdio>
 #include <filesystem>
 #include <thread>
@@ -169,6 +172,22 @@ int main() {
     // ── prune ────────────────────────────────────────────────────────
     // Nothing is old enough yet.
     assert(store.prune_terminal_older_than(7) == 0);
+
+    // ── 2026-10-22 (bug sweep 2): consume_relay must be a CLAIM ─────────
+    // Two concurrent consumers must not BOTH fire the one-shot relay.
+    {
+        constexpr int kThreads = 8;
+        store.arm_relay("pair-race", "requester-r", "home-race");
+        std::atomic<int> wins{0};
+        std::vector<std::thread> pool;
+        for (int i = 0; i < kThreads; ++i) {
+            pool.emplace_back([&] {
+                if (store.consume_relay("pair-race", "peer-p")) ++wins;
+            });
+        }
+        for (auto& th : pool) th.join();
+        assert(wins == 1);
+    }
 
     fs::remove_all(dir);
     std::puts("test_delivery_store: OK");
