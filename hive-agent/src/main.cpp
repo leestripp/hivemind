@@ -1697,7 +1697,8 @@ int main(int argc, char** argv) {
             g_routines.resolve(op.value("id", ""), op);
         } else if (kind == "secret_resp") {
             g_secrets.resolve(op.value("id", ""), op);
-        } else if (kind == "msg_send_resp" || kind == "msg_status_resp") {
+        } else if (kind == "msg_send_resp" || kind == "msg_status_resp" ||
+                   kind == "msg_mark_resp") {
             g_msgbridge.resolve(op.value("id", ""), op);
         } else if (kind == "share_create_resp" || kind == "share_list_resp" ||
                    kind == "share_fetch_resp" || kind == "share_revoke_resp") {

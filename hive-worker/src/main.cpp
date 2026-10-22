@@ -834,6 +834,7 @@ int main(int argc, char* argv[]) {
                 if (op == "task" || op == "approval_resp" || op == "cancel" ||
                     op == "routine_resp" || op == "secret_resp" ||
                     op == "msg_send_resp" || op == "msg_status_resp" ||
+                    op == "msg_mark_resp" ||
                     op == "share_create_resp" || op == "share_list_resp" ||
                     op == "share_fetch_resp" || op == "share_revoke_resp") {
                     const std::string aid = frame.value("agent_id","");
