@@ -324,6 +324,30 @@ std::string ChatService::fan_in(const std::string& thread_id,
     return id;
 }
 
+namespace {
+/// §MsgStatus (2026-10-22): agent-facing id+marker line appended to
+/// every wake segment. The ids make the segment addressable for the
+/// message_mark tool (agents see wakes, not raw thread JSON, so this
+/// is the ONLY place they learn message ids); the MARKED clause is
+/// rendered from the LIVE message row at dispatch time — a claim/done
+/// set after enqueue still shows, which is the whole point (stops
+/// redelivery and parallel-session re-runs; QueenBee bug classes 1+4).
+std::string wake_status_line(ThreadStore& threads,
+                             const std::string& thread_id,
+                             const std::string& source_message_id) {
+    if (source_message_id.empty()) return {};
+    const auto m = threads.get_message(source_message_id);
+    if (!m) return {};
+    std::string out = "(thread " + thread_id + ", msg " + m->id;
+    if (m->status.empty())
+        return out + ") ";
+    out += ") MARKED " + m->status + " by " + m->status_by + " @ " +
+           m->status_at;
+    if (!m->status_note.empty()) out += " — \"" + m->status_note + "\"";
+    return out + " — do NOT redo this work. ";
+}
+}  // namespace
+
 void ChatService::try_dispatch(const std::string& agent_id) {
     if (stopping_) return;
     for (;;) {
@@ -426,6 +450,7 @@ void ChatService::try_dispatch(const std::string& agent_id) {
         std::vector<std::string> joined_ids{d->id};
         std::string prompt =
             hivemind::render_message_header(d->source, d->created_at) +
+            wake_status_line(threads_, d->thread_id, d->source_message_id) +
             d->body;
         bool any_voice = (d->source == hivemind::msg_source::kVoiceApp);
         {
@@ -435,7 +460,10 @@ void ChatService::try_dispatch(const std::string& agent_id) {
                 prompt.clear();
                 for (const auto& j : join_set) {
                     prompt += hivemind::render_message_header(
-                                  j.source, j.created_at) + j.body + "\n\n";
+                                  j.source, j.created_at) +
+                              wake_status_line(threads_, j.thread_id,
+                                               j.source_message_id) +
+                              j.body + "\n\n";
                     if (j.id != d->id) joined_ids.push_back(j.id);
                     any_voice = any_voice ||
                                 (j.source == hivemind::msg_source::kVoiceApp);

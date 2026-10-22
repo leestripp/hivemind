@@ -104,6 +104,65 @@ int main() {
     assert(store.list_threads().size() == 2);
 
 
+
+    // ── §MsgStatus: lifecycle markers ────────────────────────────────────
+    {
+        auto tid = store.create_thread("status suite", "group", {"a", "b"});
+        const std::string mid =
+            store.add_message(tid.id, "user", "", "task: rotate the keys");
+
+        // Fresh messages carry no status on any read path.
+        auto fresh = store.get_message(mid);
+        assert(fresh && fresh->status.empty() && fresh->status_by.empty());
+        assert(store.list_messages(tid.id).back().status.empty());
+        bool has_more = true;
+        auto win = store.list_messages_window(tid.id, "", 10, has_more);
+        assert(!has_more && win.back().status.empty());
+
+        // Set -> visible on every read path, at stamped, note kept.
+        store.set_message_status(tid.id, mid, "claimed", "QueenBee",
+                                 "taking this");
+        auto cur = store.get_message(mid);
+        assert(cur->status == "claimed" && cur->status_by == "QueenBee");
+        assert(!cur->status_at.empty() && cur->status_note == "taking this");
+        assert(store.list_messages(tid.id).back().status == "claimed");
+        win = store.list_messages_window(tid.id, "", 10, has_more);
+        assert(win.back().status == "claimed" &&
+               win.back().status_by == "QueenBee");
+
+        // Forward transition re-stamps by/note.
+        store.set_message_status(tid.id, mid, "done", "QueenBee", "");
+        cur = store.get_message(mid);
+        assert(cur->status == "done" && cur->status_note.empty());
+
+        store.set_message_status(tid.id, mid, "verified", "Forge",
+                                 "port answers 200");
+        cur = store.get_message(mid);
+        assert(cur->status == "verified" && cur->status_by == "Forge");
+
+        // Clear empties all four fields.
+        store.set_message_status(tid.id, mid, "", "", "");
+        cur = store.get_message(mid);
+        assert(cur->status.empty() && cur->status_by.empty() &&
+               cur->status_at.empty() && cur->status_note.empty());
+
+        // Unknown message -> invalid_argument; wrong thread -> same.
+        bool threw = false;
+        try { store.set_message_status(tid.id, "no-such", "done", "x", ""); }
+        catch (const std::invalid_argument&) { threw = true; }
+        assert(threw);
+        threw = false;
+        try { store.set_message_status("no-thread", mid, "done", "x", ""); }
+        catch (const std::invalid_argument&) { threw = true; }
+        assert(threw);
+
+        // Status on one message never leaks into another.
+        const std::string mid2 =
+            store.add_message(tid.id, "agent", "a", "unrelated");
+        store.set_message_status(tid.id, mid2, "done", "a", "");
+        assert(store.get_message(mid)->status.empty());
+    }
+
     fs::remove_all(tmp);
     std::cout << "test_thread_store: OK\n";
     return 0;

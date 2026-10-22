@@ -48,6 +48,15 @@ struct ThreadMessage {
     // iterations, context size) as a JSON object; "" when absent.
     std::string stats_json;
     std::string created_at;
+    // §MsgStatus (2026-10-22): task-lifecycle marker, broker-side so
+    // every session of every agent sees the same state (QueenBee
+    // parallel-session lesson). status: "" | "claimed" | "done" |
+    // "verified"; _by is the agent NAME or "user"; _at is ISO-8601;
+    // _note is a short free-text ("verified: port 8090 answers").
+    std::string status;
+    std::string status_by;
+    std::string status_at;
+    std::string status_note;
 };
 
 /// Phase 67: user-organisable thread groups — FOLDERS, not labels: a
@@ -108,6 +117,17 @@ public:
 
     /// Fetch one message by id (read-receipt HWM bookkeeping, Phase 66).
     std::optional<ThreadMessage> get_message(const std::string& id);
+
+    /// §MsgStatus: set/clear the lifecycle marker on ONE message.
+    /// `status` must be "", "claimed", "done" or "verified" (the route
+    /// layer owns the transition rules; the store just records).
+    /// Empty status clears all four fields. Throws invalid_argument
+    /// when no message (thread_id, message_id) exists.
+    void set_message_status(const std::string& thread_id,
+                            const std::string& message_id,
+                            const std::string& status,
+                            const std::string& by,
+                            const std::string& note);
 
     /// Append a message; returns its id.
     std::string add_message(const std::string& thread_id,

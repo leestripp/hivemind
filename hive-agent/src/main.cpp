@@ -777,6 +777,75 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<MessageStatusTool>());
 
+    // message_mark (§MsgStatus 2026-10-22): the task-lifecycle marker —
+    // claimed / done / verified on a THREAD message, broker-side so
+    // every session of every agent sees the same state (QueenBee
+    // parallel-session lesson). Stops two classes of repeated work:
+    // redelivered/late task messages arrive already marked, and a
+    // second agent sees the claim BEFORE starting. Emits
+    // {"ev":"msg_mark_req",...} over the MsgBridge; hub applies the
+    // transition rules (first-claim-wins; verify needs done + an
+    // INDEPENDENT verifier — never your own done).
+    class MessageMarkTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "message_mark"; }
+        std::string get_description() const override {
+            return "Mark the lifecycle state of a task message in a "
+                   "thread so other agents can see it. state: 'claimed' "
+                   "(you are taking this — check first, first-claim-wins, "
+                   "a 409 tells you who holds it), 'done' (you finished "
+                   "it), 'verified' (you INDEPENDENTLY confirmed someone "
+                   "else's done — never verify your own), or 'clear'. "
+                   "Pass thread_id + message_id (from the [msg <id>] tag "
+                   "on wakes and thread reads) and an optional short "
+                   "note ('verified: port 8090 answers 200').";
+        }
+        json get_definition() const override {
+            json state = {{"type","string"},
+                          {"enum",{"claimed","done","verified","clear"}},
+                          {"description","Lifecycle state to set"}};
+            json tid = {{"type","string"},
+                        {"description","Thread id"}};
+            json mid = {{"type","string"},
+                        {"description","Message id to mark"}};
+            json note = {{"type","string"},
+                         {"description","Optional short note (<=500 bytes)"}};
+            json params = {{"type","object"},
+                           {"properties",{{"state",state},
+                                          {"thread_id",tid},
+                                          {"message_id",mid},
+                                          {"note",note}}},
+                           {"required",{"state","thread_id","message_id"}}};
+            return {{"type","function"},
+                    {"function",{{"name","message_mark"},
+                                 {"description", get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            const std::string state = args.value("state","");
+            const std::string tid   = args.value("thread_id","");
+            const std::string mid   = args.value("message_id","");
+            const std::string note  = args.value("note","");
+            if (state.empty() || tid.empty() || mid.empty())
+                return {{"status","error"},
+                        {"error","state, thread_id and message_id required"}};
+            const json resp = g_msgbridge.call("msg_mark_req",
+                {{"state", state}, {"thread_id", tid},
+                 {"message_id", mid}, {"note", note}});
+            if (!resp.value("ok", false)) {
+                json out = {{"status","error"},
+                            {"error", resp.value("error", "mark failed")}};
+                // 409 conflicts carry the CURRENT holder — surface it so
+                // the agent can act on "already claimed by X" directly.
+                if (resp.contains("status")) out["current"] = resp["status"];
+                return out;
+            }
+            return {{"status","success"},
+                    {"marked", resp.value("status", json(nullptr))}};
+        }
+    };
+    agent.register_tool(std::make_unique<MessageMarkTool>());
+
     // ── Agent file sharing (2026-10-11, Plan.md) ─────────────────────
     // Four tools over the ShareBridge: share_file stages + registers +
     // notifies; list_shared_files is the discovery surface;

@@ -623,6 +623,10 @@ void HubRouter::on_worker_frame(const std::string& worker,
         handle_msg_status_req(worker, agent_id, frame);
         return;
     }
+    if (op == "msg_mark_req") {   // §MsgStatus: message_mark tool
+        handle_msg_mark_req(worker, agent_id, frame);
+        return;
+    }
     if (op == "share_create_req") {   // share_file tool (2026-10-11)
         handle_share_create_req(worker, agent_id, frame);
         return;
@@ -754,6 +758,96 @@ json delivery_to_json(const hivemind::Delivery& d, bool read) {
             {"completed_at", d.completed_at}};
 }
 }  // namespace
+
+void HubRouter::handle_msg_mark_req(const std::string& worker,
+                                    const std::string& agent_id,
+                                    const json& frame) {
+    const std::string id = frame.value("id", "");
+    json resp = {{"op", "msg_mark_resp"}, {"agent_id", agent_id},
+                 {"id", id}};
+    auto send_fail = [&](const std::string& err) {
+        resp["ok"] = false;
+        resp["error"] = err;
+        channel_.send(worker, resp);
+    };
+    auto status_of = [](const ThreadMessage& m) -> json {
+        if (m.status.empty()) return json(nullptr);
+        return json{{"state", m.status}, {"by", m.status_by},
+                    {"at", m.status_at}, {"note", m.status_note}};
+    };
+
+    // `by` is the agent's roster NAME derived from the worker-stamped
+    // agent_id — agents can never speak as someone else (same trust
+    // rule as msg_send_req's agent stamp). The REST route's
+    // caller-asserted `by` is the less-trusted sibling; keep the
+    // transition rules below in sync with RosterRoutes' §MsgStatus.
+    const std::string by = [&] {
+        if (auto a = agents_.get_agent(agent_id)) return a->name;
+        return agent_id;
+    }();
+    const std::string state = frame.value("state", "");
+    const std::string tid   = frame.value("thread_id", "");
+    const std::string mid   = frame.value("message_id", "");
+    const std::string note  = frame.value("note", "");
+
+    if (state == "clear") {
+        try {
+            threads_.set_message_status(tid, mid, "", "", "");
+            resp["ok"] = true;
+            resp["status"] = json(nullptr);
+        } catch (const std::invalid_argument& e) {
+            send_fail(e.what()); return;
+        }
+        channel_.send(worker, resp);
+        return;
+    }
+    if (state != "claimed" && state != "done" && state != "verified") {
+        send_fail("state must be claimed, done, verified or clear");
+        return;
+    }
+    if (tid.empty() || mid.empty()) {
+        send_fail("thread_id and message_id required"); return;
+    }
+    if (note.size() > 500) {
+        send_fail("note too long (500 bytes max)"); return;
+    }
+    auto cur = threads_.get_message(mid);
+    if (!cur || cur->thread_id != tid) {
+        send_fail("message not found"); return;
+    }
+    if (state == "claimed") {
+        // First-claim-wins; the 409 carries the current holder so the
+        // loser can message them instead of duplicating the work.
+        if (!cur->status.empty() && cur->status_by != by) {
+            resp["ok"] = false;
+            resp["error"] = "already claimed";
+            resp["status"] = status_of(*cur);
+            channel_.send(worker, resp);
+            return;
+        }
+    } else if (state == "verified") {
+        if (cur->status != "done") {
+            resp["ok"] = false;
+            resp["error"] = "verify requires a done message";
+            resp["status"] = status_of(*cur);
+            channel_.send(worker, resp);
+            return;
+        }
+        // QueenBee's anti-false-claim rule: never verify your own done.
+        if (cur->status_by == by) {
+            send_fail("verifier must be independent of the doer"); return;
+        }
+    }
+    try {
+        threads_.set_message_status(tid, mid, state, by, note);
+    } catch (const std::invalid_argument& e) {
+        send_fail(e.what()); return;
+    }
+    auto updated = threads_.get_message(mid);
+    resp["ok"] = true;
+    resp["status"] = status_of(*updated);
+    channel_.send(worker, resp);
+}
 
 void HubRouter::handle_msg_send_req(const std::string& worker,
                                     const std::string& agent_id,

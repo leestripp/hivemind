@@ -75,7 +75,25 @@ json message_json(const ThreadMessage& m) {
         {"attachments", atts},
     };
     if (stats.is_object() && !stats.empty()) out["stats"] = stats;
+    // §MsgStatus (2026-10-22): lifecycle marker, omitted when unset —
+    // same shape the POST .../status endpoint accepts/returns.
+    if (!m.status.empty()) {
+        out["status"] = json{{"state", m.status},
+                             {"by", m.status_by},
+                             {"at", m.status_at},
+                             {"note", m.status_note}};
+    }
     return out;
+}
+
+/// §MsgStatus: one shared serializer for route responses (current
+/// state after a set/clear, and embedded in 409 conflict bodies).
+json status_json_of(const ThreadMessage& m) {
+    if (m.status.empty()) return json(nullptr);
+    return json{{"state", m.status},
+                {"by", m.status_by},
+                {"at", m.status_at},
+                {"note", m.status_note}};
 }
 
 } // namespace
@@ -922,6 +940,107 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 404, e.what());
             }
+        });
+
+    // ── §MsgStatus: POST /api/threads/:id/messages/:mid/status ───────────
+    // Body: {"status":"claimed"|"done"|"verified", "by":"<agent name|user>",
+    //        "note":"..."}  (note optional, <= 500 BYTES, must be valid
+    // UTF-8 — we never truncate, we reject; code-craft §std::string IS
+    // BYTES). Transition rules (QueenBee 2026-10-22 semantics):
+    //   claimed  — first-claim-wins: 409 when someone ELSE holds any
+    //              status; "user" may override (re-stamps by/at).
+    //   done     — from empty or claimed (re-done re-stamps by/at/note).
+    //   verified — only from done, and the verifier must be INDEPENDENT:
+    //              by != the done-setter, unless by == "user" (403
+    //              otherwise). QueenBee's anti-false-claim rule: the
+    //              doer may never verify their own claim.
+    // Trust note: `by` is caller-asserted (fleet key holders don't
+    // forge); cryptographic caller identity is a later hardening.
+    auto handle_set_status =
+        [&threads](const OmniNet::HTTP::Request& req,
+                   OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            // api threads :id messages :mid status
+            if (seg.size() < 6) { send_error(resp, 400, "missing id"); return; }
+            json body = json::parse(req.body(), nullptr, /*exceptions=*/false);
+            if (body.is_discarded() || !body.is_object()) {
+                send_error(resp, 400, "invalid JSON"); return;
+            }
+            if (!body.contains("status") || !body["status"].is_string()) {
+                send_error(resp, 400, "status must be a string"); return;
+            }
+            const std::string want = body["status"].get<std::string>();
+            if (want != "claimed" && want != "done" && want != "verified") {
+                send_error(resp, 400,
+                    "status must be claimed, done or verified"); return;
+            }
+            std::string by;
+            if (body.contains("by")) {
+                if (!body["by"].is_string()) {
+                    send_error(resp, 400, "by must be a string"); return;
+                }
+                by = body["by"].get<std::string>();
+            }
+            if (by.empty()) { send_error(resp, 400, "by must not be empty"); return; }
+            std::string note;
+            if (body.contains("note")) {
+                if (!body["note"].is_string()) {
+                    send_error(resp, 400, "note must be a string"); return;
+                }
+                note = body["note"].get<std::string>();
+            }
+            if (note.size() > 500) {
+                send_error(resp, 400, "note too long (500 bytes max)"); return;
+            }
+
+            auto cur = threads.get_message(seg[4]);
+            if (!cur || cur->thread_id != seg[2]) {
+                send_error(resp, 404, "message not found"); return;
+            }
+            const bool is_user = by == "user";
+            if (want == "claimed") {
+                if (!cur->status.empty() && cur->status_by != by && !is_user) {
+                    send_json(resp,
+                        json{{"error", "already claimed"},
+                             {"status", status_json_of(*cur)}}, 409);
+                    return;
+                }
+            } else if (want == "verified") {
+                if (cur->status != "done") {
+                    send_json(resp,
+                        json{{"error", "verify requires a done message"},
+                             {"status", status_json_of(*cur)}}, 409);
+                    return;
+                }
+                if (cur->status_by == by && !is_user) {
+                    send_error(resp, 403,
+                        "verifier must be independent of the doer"); return;
+                }
+            }
+            try {
+                threads.set_message_status(seg[2], seg[4], want, by, note);
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 404, e.what()); return;
+            }
+            auto updated = threads.get_message(seg[4]);
+            send_json(resp, json{{"ok", true},
+                                 {"message_id", seg[4]},
+                                 {"status", status_json_of(*updated)}});
+        };
+    server.post("/api/threads/:id/messages/:mid/status", handle_set_status);
+
+    // ── §MsgStatus: DELETE .../status — clear the marker ─────────────────
+    server.delete_("/api/threads/:id/messages/:mid/status",
+        [&threads](const OmniNet::HTTP::Request& req,
+                   OmniNet::HTTP::Response& resp) {
+            auto seg = path_segments(req.path());
+            if (seg.size() < 6) { send_error(resp, 400, "missing id"); return; }
+            try {
+                threads.set_message_status(seg[2], seg[4], "", "", "");
+            } catch (const std::invalid_argument& e) {
+                send_error(resp, 404, e.what()); return;
+            }
+            send_json(resp, json{{"ok", true}, {"message_id", seg[4]}});
         });
 
     // ── GET /api/threads/:id/messages?after=<msg_id> ──────────────────────

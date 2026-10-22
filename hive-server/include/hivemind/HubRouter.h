@@ -109,6 +109,12 @@ public:
     void handle_msg_send_req(const std::string& worker,
                              const std::string& agent_id,
                              const nlohmann::json& frame);
+    // §MsgStatus (2026-10-22): message_mark tool — claim/done/verify/
+    // clear a thread message. `by` is derived from the authenticated
+    // agent_id (worker-stamped), never caller-asserted.
+    void handle_msg_mark_req(const std::string& worker,
+                             const std::string& agent_id,
+                             const nlohmann::json& frame);
     void handle_msg_status_req(const std::string& worker,
                                const std::string& agent_id,
                                const nlohmann::json& frame);

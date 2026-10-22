@@ -404,6 +404,14 @@ int main(int argc, char* argv[]) {
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
+            // §MsgStatus (2026-10-22): message_mark tool — same
+            // request/response bridge pattern (msg_mark_resp back).
+            else if (kind == "msg_mark_req") {
+                f = ev;
+                f["op"] = "msg_mark_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             // 2026-10-11 (Plan.md "Agent File Sharing"): share_file tool.
             // Path confinement + the 50 MB cap + staging happen HERE, on
             // the worker, before the hub sees anything; the op forwarded
