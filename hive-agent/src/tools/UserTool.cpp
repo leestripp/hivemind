@@ -150,16 +150,15 @@ json StopTool::get_definition() const {
         {"type", "function"},
         {"function", {
             {"name", get_name()},
-            {"description", "Signal that the task is complete. Call this when you have finished the user's request - all research, planning, edits, and verification are done. This will end the agent loop."},
+            {"description", "Signal that the task is complete. Call this when you have finished the user's request - all research, planning, edits, and verification are done. This will end the agent loop. Your final assistant message is what gets posted to the chat; do NOT put your reply or a closing summary here."},
             {"parameters", json::object({
                 {"type", "object"},
                 {"properties", json::object({
                     {"summary", json::object({
                         {"type", "string"},
-                        {"description", "Brief summary of what was accomplished"}
+                        {"description", "Optional internal turn note (not posted to the chat)"}
                     })}
-                })},
-                {"required", json::array({"summary"})}
+                })}
             })}
         }}
     });
@@ -182,10 +181,8 @@ json StopTool::execute(const json& args, FileIO&) {
             summary = args.value("summary", "");
         }
 
-        if (summary.empty()) {
-            return json::object({{"status", "error"}, {"message", "Missing 'summary' in arguments"}});
-        }
-
+        // summary is optional (2026-10-22 reply-pipeline fix): the stop
+        // signal is what matters; an absent summary is a clean end.
         return json::object({
             {"status", "stop"},
             {"summary", summary}

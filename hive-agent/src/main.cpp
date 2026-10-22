@@ -338,22 +338,52 @@ public:
     void begin_task(const std::string& id) {
         std::lock_guard<std::mutex> lk(m_);
         task_id_ = id;
-        user_output_.clear();
+        pending_.clear();
+        committed_.clear();
+        stop_summary_.clear();
+        last_intermediate_.clear();
         errored_ = false;
     }
 
+    // The posted reply: deliberate tell_user messages (in call order)
+    // plus the FINAL assistant message's prose. Fallbacks, in order:
+    // stop.summary (answer put there instead of in text), then the last
+    // intermediate prose — a turn must never post an empty body, but a
+    // closing summary is never APPENDED to an already-complete reply
+    // (2026-10-22 reply-pipeline fix: kills the "... Closing." tail).
     std::string user_output() const {
         std::lock_guard<std::mutex> lk(m_);
-        return user_output_;
+        std::string out = committed_;
+        append_paragraph(out, pending_);
+        if (out.empty()) out = stop_summary_;
+        if (out.empty()) out = last_intermediate_;
+        return out;
     }
     bool errored() const { return errored_.load(); }
 
     void on_assistant_delta(std::string_view text) noexcept override {
         {
             std::lock_guard<std::mutex> lk(m_);
-            user_output_ += text;
+            pending_ += text;   // current assistant message only
         }
         emit({{"ev", "delta"}, {"task", current_task()}, {"text", std::string(text)}});
+    }
+
+    // Iteration boundary (2026-10-22 reply-pipeline fix): a tool call
+    // means the assistant message that preceded it was INTERMEDIATE
+    // (working out loud), not the reply — stash it as a fallback and
+    // start a fresh pending buffer. Before this, every iteration's
+    // prose was concatenated into the posted reply ("works.The route
+    // test is fully closed" doubling). "stop" is the exception: the
+    // loop ends there, so prose immediately before stop IS the reply.
+    void on_tool_call(std::string_view name,
+                      const nlohmann::json& /*args*/) noexcept override {
+        if (name == "stop") return;
+        std::lock_guard<std::mutex> lk(m_);
+        if (!pending_.empty()) {
+            last_intermediate_ = pending_;
+            pending_.clear();
+        }
     }
 
     void on_tool_result(std::string_view name,
@@ -365,23 +395,17 @@ public:
             const std::string content = result.value("content", "");
             if (!content.empty()) {
                 std::lock_guard<std::mutex> lk(m_);
-                if (!user_output_.empty() && user_output_.back() != '\n')
-                    user_output_ += '\n';
-                user_output_ += '\n';
-                user_output_ += content;
+                append_paragraph(committed_, content);
             }
         }
-        // Phase 52: the stop tool ends the turn — its summary can carry
-        // the model's final user-facing answer (models sometimes put it
-        // there instead of in text). Capture it or it is lost.
+        // 2026-10-22: stop.summary is now a RESCUE path, never an
+        // append. Phase 52 concatenated it onto every reply, which
+        // forced a posted closing summary each turn ("... Closing.").
         if (name == "stop") {
             const std::string summary = result.value("summary", "");
             if (!summary.empty()) {
                 std::lock_guard<std::mutex> lk(m_);
-                if (!user_output_.empty() && user_output_.back() != '\n')
-                    user_output_ += '\n';
-                user_output_ += '\n';
-                user_output_ += summary;
+                stop_summary_ = summary;
             }
         }
     }
@@ -423,10 +447,23 @@ private:
         return task_id_;
     }
 
+    // Joins blocks with a blank line (no leading blank on the first).
+    static void append_paragraph(std::string& dst, const std::string& src) {
+        if (src.empty()) return;
+        if (!dst.empty()) {
+            if (dst.back() != '\n') dst += '\n';
+            dst += '\n';
+        }
+        dst += src;
+    }
+
     ApprovalBroker& approvals_;
     mutable std::mutex m_;
     std::string task_id_;
-    std::string user_output_;
+    std::string pending_;            // current assistant message's prose
+    std::string committed_;          // tell_user messages, call order
+    std::string stop_summary_;       // rescue only — see user_output()
+    std::string last_intermediate_;  // last stashed pre-tool prose
     std::atomic<bool> errored_{false};
 };
 
