@@ -2494,32 +2494,22 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
 // Same download/cache pattern as images. 2026-10-21: no Gtk::Video /
 // Gtk::MediaFile anywhere — in-process decodebin3 can g_error-abort the
 // app (uncatchable). The poster (first frame) is extracted by an ffmpeg
-// CHILD at first render and cached as <file>.poster.png; playback is a
-// gst-play-1.0 child opening its own window. A decoder crash now kills a
-// child, never the client.
+// CHILD at first render and cached as <file>.poster.png. 2026-10-23:
+// playback is the desktop's assigned app via launch_default_for_uri
+// (xdg-open equivalent) — no in-house player at all.
 
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
     namespace fs = std::filesystem;
     const std::string poster = file + ".poster.png";
 
-    // Start playback in a child process (one player at a time, as audio).
-    // The video opens in gst-play's own window; closing it ends the child.
-    auto start_playback = [this, file] {
-        if (active_player_pid_ != 0) {
-            media_player::stop(active_player_pid_);
-            active_player_pid_ = 0;
-        }
-        try {
-            active_player_pid_ = media_player::play(
-                file, [this](GPid pid, bool /*ok*/, double /*elapsed*/) {
-                    if (!alive_) return;
-                    if (active_player_pid_ == pid) active_player_pid_ = 0;
-                });
-        } catch (const std::exception&) {
-            // gst-play missing/unspawnable — the open-in-player button
-            // below is the escape hatch; nothing else to do here.
-        }
+    // 2026-10-23: playback is the DESKTOP'S assigned app (mpv etc.) via
+    // the default-uri launcher — the homemade gst-play player is gone
+    // (lee: "un-make it; don't reinvent the wheel"). The launcher spawns
+    // a detached child, so a decoder crash can never take the client
+    // down either.
+    auto start_playback = [file] {
+        Gio::AppInfo::launch_default_for_uri("file://" + file);
     };
 
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
@@ -2587,13 +2577,6 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
     play_btn->signal_clicked().connect([start_playback] { start_playback(); });
     holder->append(*play_btn);
 
-    auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
-    open_btn->add_css_class("flat");
-    open_btn->set_halign(Gtk::Align::START);
-    open_btn->signal_clicked().connect([file] {
-        Gio::AppInfo::launch_default_for_uri("file://" + file);
-    });
-    holder->append(*open_btn);
 }
 
 void HiveWindow::load_video_attachment(Gtk::Box* holder,
@@ -2690,13 +2673,10 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
 void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
     namespace fs = std::filesystem;
-    // 2026-10-21: playback is a gst-play-1.0 CHILD PROCESS, never an
-    // in-process Gtk::MediaFile. GStreamer's decodebin3 can g_error-abort
-    // ("assertion failed: (collection)" — uncatchable); the lazy-pipeline
-    // band-aid only reduced the odds and the client died again. In a
-    // child, a decoder crash kills the child and the card falls back to
-    // the open-in-player chip — the client survives. One player child at
-    // a time via active_player_pid_.
+    // 2026-10-23: the card has no player of its own anymore — \u25b6
+    // opens the desktop's assigned app (mpv etc.) in a detached child.
+    // No gstreamer in-process (decodebin3 g_error-aborts are uncatchable),
+    // no gst-play window, no pid bookkeeping.
 
     auto* card = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
     card->add_css_class("hv-audio-card");
@@ -2730,84 +2710,13 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
     card->append(*text);
     holder->append(*card);
 
-    // Media error fallback (no gstreamer backend etc.): swap the card
-    // for a plain chip that opens the cached copy in the system player.
-    // Created up-front but only revealed by the lazily-built pipeline.
-    auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
-    chip->add_css_class("flat");
-    chip->set_halign(Gtk::Align::START);
-    chip->set_visible(false);
-    chip->signal_clicked().connect([file] {
+    // 2026-10-23: the \u25b6 button opens the file in the desktop's
+    // assigned app via the default-uri launcher (xdg-open equivalent) —
+    // the homemade gst-play player and its pid/chip bookkeeping are
+    // gone (lee: "un-make it; don't reinvent the wheel").
+    play->signal_clicked().connect([file] {
         Gio::AppInfo::launch_default_for_uri("file://" + file);
     });
-    holder->append(*chip);
-
-    // This card's own player child pid (0 = not playing). Shared cell so
-    // the signal lambdas can reach it after creation.
-    auto card_pid = std::make_shared<GPid>(0);
-
-    // Card destroyed (thread switch, history re-render): if this card
-    // owns the live player child, stop it — never leak playback past the
-    // widget that started it.
-    card->signal_destroy().connect([this, card_pid] {
-        if (*card_pid != 0 && *card_pid == active_player_pid_) {
-            media_player::stop(*card_pid);
-            active_player_pid_ = 0;
-        }
-    });
-
-    play->signal_clicked().connect(
-        [this, file, play, card, chip, card_pid] {
-            if (*card_pid != 0) {
-                // This card is playing: stop it. Zero the cell FIRST so
-                // the exit watch sees a user-stop (not an early death)
-                // and skips the fallback chip; it still clears the
-                // active pid. Glyph resets here.
-                media_player::stop(*card_pid);
-                *card_pid = 0;
-                play->set_label("\u25b6");
-                return;
-            }
-            // Stop whatever else is playing, then start this card's
-            // child (the ONLY one now alive).
-            if (active_player_pid_ != 0)
-                media_player::stop(active_player_pid_);
-            try {
-                const GPid pid = media_player::play(
-                    file, [this, card_pid, play, card, chip](
-                              GPid done, bool ok, double elapsed) {
-                        if (!alive_) return;
-                        if (active_player_pid_ == done)
-                            active_player_pid_ = 0;
-                        if (*card_pid != done) return;
-                        *card_pid = 0;
-                        play->set_label("\u25b6");
-                        // Only a child that died EARLY failed to play;
-                        // a nonzero exit after real playback time is a
-                        // natural end (gst-play's EOS exit code is not
-                        // trustworthy in every environment).
-                        if (!ok && elapsed < 2.5) {
-                            if (card->get_parent()) card->unparent();
-                            chip->set_visible(true);
-                        }
-                    });
-                *card_pid = pid;
-                active_player_pid_ = pid;
-                play->set_label("\u23f8");
-            } catch (const std::exception&) {
-                // gst-play missing/unspawnable: straight to the chip.
-                if (card->get_parent()) card->unparent();
-                chip->set_visible(true);
-            }
-        });
-
-    auto* open_btn = Gtk::make_managed<Gtk::Button>("open in player: " + name);
-    open_btn->add_css_class("flat");
-    open_btn->set_halign(Gtk::Align::START);
-    open_btn->signal_clicked().connect([file] {
-        Gio::AppInfo::launch_default_for_uri("file://" + file);
-    });
-    holder->append(*open_btn);
 }
 
 void HiveWindow::load_audio_attachment(Gtk::Box* holder,

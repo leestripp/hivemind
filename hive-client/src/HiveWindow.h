@@ -197,7 +197,6 @@ private:
     /// Playback is a gst-play-1.0 child process (MediaPlayer.h); this is
     /// the single live one — starting playback stops the previous, so at
     /// most one player child ever exists.
-    GPid active_player_pid_ = 0;
     std::string server_url_ = "http://127.0.0.1:8421";
 
     // state (GUI thread only)
