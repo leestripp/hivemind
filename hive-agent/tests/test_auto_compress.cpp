@@ -1131,6 +1131,26 @@ TEST_SUITE("handle_compress_context_result (§COMPRESS-TOOL)") {
                   {{"status", "set_state"}, {"state", "Acting"}}) == false);
         CHECK(client.handle_compress_context_result(json::array()) == false);
     }
+
+    // 2026-10-23 (Bob stuck-loop): one voluntary compress per turn. The
+    // second call in the same turn is refused, and the refusal is written
+    // INTO the tool result (Messages::add_system silently no-ops on a
+    // non-empty history, so the result text is the only reliable channel).
+    TEST_CASE("Second voluntary compress in one turn is refused and visible") {
+        LLMClient client(make_compress_handler_config(
+            make_temp_home("handler_cap")));
+        json first = {{"status", "compress_context"}, {"reason", "r1"}};
+        CHECK(client.handle_compress_context_result(first) == true);
+        CHECK(first.value("status", "") == "compress_context");  // untouched
+        json second = {{"status", "compress_context"}, {"reason", "r2"}};
+        CHECK(client.handle_compress_context_result(second) == true);
+        CHECK(second.value("status", "") == "refused");
+        CHECK(second.value("message", "").find("DECLINED")
+              != std::string::npos);
+        CHECK(second.value("message", "").find("already compressed once")
+              != std::string::npos);
+        CHECK(second.count("reason") == 0);   // stripped on refusal
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ public:
 class CompressContextTool : public BaseTool {
 public:
     std::string get_name() const override { return "compress_context"; }
-    std::string get_description() const override { return "Request context compression when you no longer need older parts of the conversation"; }
+    std::string get_description() const override { return "Request context compression when a long-running task is nearing the memory limit and older details are no longer needed. This does NOT end your turn, post a reply, or save a record of finished work — those are what the stop tool is for. Never compress as a final/cleanup step: it erases working detail and the turn simply continues."; }
     json get_definition() const override;
     json execute(const json& args, FileIO& file_io) override;
 };

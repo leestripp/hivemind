@@ -136,7 +136,7 @@ json CompressContextTool::execute(const json& args, FileIO&) {
         return json::object({
             {"status", "compress_context"},
             {"reason", reason},
-            {"message", "Context compression scheduled. It runs at the end of the current cycle; continue your work normally."}
+            {"message", "Context compression scheduled (max one voluntary compress per turn). It runs at the end of the current cycle; continue your work normally. Compression is NOT a stop — when your task is complete, call the stop tool."}
         });
     } catch (const std::exception& e) {
         return json::object({{"status", "error"}, {"message", std::string(e.what())}});

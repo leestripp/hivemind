@@ -1097,12 +1097,41 @@ bool LLMClient::handle_set_state_result(const json& result) {
 // compress_context() and the cycle-boundary checkpoint (§AutoCompress)
 // does the work: same code path as the 90% threshold trigger, safe
 // mid-turn, result reported via on_compaction().
-bool LLMClient::handle_compress_context_result(const json& result) {
+bool LLMClient::handle_compress_context_result(json& result) {
     if (!result.is_object()
         || result.value("status", "") != "compress_context") {
         return false;
     }
     const std::string reason = result.value("reason", "");
+
+    // 2026-10-23 (Bob stuck-loop): refusals must be VISIBLE to the model.
+    // This handler used to report refusals via Messages::add_system, which
+    // silently no-ops on a non-empty history ("System message already
+    // exists") — the model saw the tool's unconditional "scheduled"
+    // message, believed compression was coming, and re-planned around it.
+    // The tool result itself is rewritten instead: the model reads the
+    // refusal in the result of its own call.
+    auto refuse = [&](const std::string& why) {
+        LOG_WARNING("[COMPRESS] Voluntary compress_context REFUSED: " + why);
+        result["status"] = "refused";
+        result.erase("reason");
+        result["message"] =
+            "compress_context DECLINED: " + why +
+            " Compression discards working memory of this conversation; "
+            "it is NOT a stop, a save, or a cleanup step. The system "
+            "auto-compresses at 90% pressure. Continue your work; when "
+            "your task is complete, call the stop tool.";
+        compress_note_ = "request declined (" + why + ")";
+        return true;
+    };
+
+    // Hard cap: one voluntary compress per turn. Inside a single long
+    // turn the 600 s wall-clock cooldown below can never fire, and each
+    // accepted compress erases the model's memory of having compressed
+    // (Bob's loop: compress -> amnesia -> "final close" -> compress).
+    if (voluntary_compresses_this_turn_ >= 1) {
+        return refuse("you already compressed once this turn.");
+    }
 
     // Phase 65e: gate voluntary self-compression. During the 2026-09-16
     // storm Honey compressed at 49% "to arrive fresh", wiping memory of
@@ -1115,38 +1144,26 @@ bool LLMClient::handle_compress_context_result(const json& result) {
         const float ratio =
             messages_->get_compression_ratio(last_total_tokens_);
         if (ratio < 0.70f) {
-            LOG_WARNING("[COMPRESS] Voluntary compress_context REFUSED: "
-                        "real pressure " +
-                        std::to_string(static_cast<int>(ratio * 100)) +
-                        "% is below 70%. Context is healthy — keep working.");
-            if (messages_) messages_->add_system(
-                "[SYSTEM] Your compress_context request was declined: "
-                "context pressure is below 70%. Self-compression is only "
-                "available under real pressure — it discards working "
-                "memory of this conversation. Continue your work; the "
-                "system auto-compresses at 90%.");
-            return true;
+            return refuse("real pressure " +
+                          std::to_string(static_cast<int>(ratio * 100)) +
+                          "% is below 70%; context is healthy.");
         }
     }
     const auto now = std::chrono::steady_clock::now();
     if (last_voluntary_compress_.time_since_epoch().count() != 0 &&
         now - last_voluntary_compress_ <
             std::chrono::seconds(kVoluntaryCompressCooldownS)) {
-        LOG_WARNING("[COMPRESS] Voluntary compress_context REFUSED: "
-                    "cooldown (one per " +
-                    std::to_string(kVoluntaryCompressCooldownS / 60) +
-                    " min).");
-        if (messages_) messages_->add_system(
-            "[SYSTEM] Your compress_context request was declined: "
-            "voluntary compression is rate-limited. Continue your work.");
-        return true;
+        return refuse("rate-limited (one voluntary compress per " +
+                      std::to_string(kVoluntaryCompressCooldownS / 60) +
+                      " min).");
     }
     last_voluntary_compress_ = now;
+    ++voluntary_compresses_this_turn_;
 
     compress_requested_.store(true, std::memory_order_relaxed);
     LOG_INFO("[COMPRESS] Agent requested context compression"
-             + (reason.empty() ? std::string(".")
-                               : ": " + reason));
+            + (reason.empty() ? std::string(".")
+                              : ": " + reason));
     return true;
 }
 
@@ -2902,6 +2919,14 @@ void LLMClient::inject_context_stats(json& messages) {
         stats << "| Context Pressure | " << std::fixed << std::setprecision(1) << (compress_ratio * 100) << "% |\n";
     }
 
+    // 2026-10-23 (Bob stuck-loop): last compress outcome — set at the
+    // cycle-boundary checkpoint (or on a refused voluntary request) so
+    // the model always sees whether compression ran. Transient row, same
+    // self-replacing block as the rest of the stats.
+    if (!compress_note_.empty()) {
+        stats << "| Compression | " << compress_note_ << " |\n";
+    }
+
     // Session memory stats
     if (session_memory_) {
         auto mem_stats = session_memory_->get_stats();
@@ -3109,6 +3134,12 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
     // §IdleExitBreaker: fresh turn — a status-only iteration at the end
     // of the PREVIOUS turn must not count against this one.
     consecutive_status_only_count_ = 0;
+
+    // 2026-10-23 (Bob stuck-loop): fresh turn — one voluntary compress
+    // per turn, and the compress-outcome note must not carry "call stop
+    // now" advice across turns.
+    voluntary_compresses_this_turn_ = 0;
+    compress_note_.clear();
 
     // §Phase 16: route skill tools to this Agent's owned SkillManager while
     // this turn is executing.
@@ -3439,10 +3470,11 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
                 const size_t before_tokens = last_total_tokens_;
                 messages_->set_messages(messages);
                 auto compress_result = messages_->compress();
+                size_t after_tokens = 0;
                 if (compress_result.outcome == CompressOutcome::Compressed) {
                     messages_->replace_messages(compress_result.compressed_json);
                     messages = messages_->get_messages();
-                    const size_t after_tokens = messages_->estimate_tokens();
+                    after_tokens = messages_->estimate_tokens();
                     if (sink_) sink_->on_compaction(before_tokens, after_tokens);
                     LOG_INFO("[CONTEXT] Compressed successfully. Continuing...");
                 } else if (compress_result.outcome == CompressOutcome::FallbackDeleted) {
@@ -3450,7 +3482,7 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
                     // still reduced the context — report it so host
                     // stats/UI stay in sync.
                     messages = messages_->get_messages();
-                    const size_t after_tokens = messages_->estimate_tokens();
+                    after_tokens = messages_->estimate_tokens();
                     if (sink_) sink_->on_compaction(before_tokens, after_tokens);
                     LOG_WARNING("[COMPRESS] Summary failed; oldest messages "
                                 "deleted as fallback. Continuing...");
@@ -3460,6 +3492,36 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
                     // context is unchanged.
                     LOG_ERROR("[COMPRESS] Failed - context unchanged");
                 }
+                // 2026-10-23 (Bob stuck-loop): the model was never told
+                // whether its compress actually ran. Compaction erases the
+                // "done -> stop" resolution, and with no confirmation the
+                // model re-derived cleanup work and compressed again
+                // forever. The note rides the transient Context Status
+                // block (same channel as the stats) so the next iteration
+                // states the outcome in the model's own view.
+                std::ostringstream note;
+                if (compress_result.outcome == CompressOutcome::Compressed ||
+                    compress_result.outcome == CompressOutcome::FallbackDeleted) {
+                    note << "EXECUTED " << before_tokens << " -> "
+                         << after_tokens << " tokens";
+                    if (compress_result.outcome ==
+                            CompressOutcome::FallbackDeleted)
+                        note << " (summary failed; oldest messages deleted)";
+                    note << ". Compression ERASED the detail of earlier "
+                            "work — do NOT re-summarize or re-verify "
+                            "completed work. Compression is not a stop: "
+                            "if your task is complete, call the stop tool "
+                            "now";
+                    if (host_requested && voluntary_compresses_this_turn_ > 0)
+                        note << ". Voluntary compress this turn: "
+                             << voluntary_compresses_this_turn_ << "/1";
+                    note << ".";
+                } else {
+                    note << "did NOT run (nothing to compress or summary "
+                            "failed) — context UNCHANGED. Do not retry "
+                            "now; continue your work.";
+                }
+                compress_note_ = note.str();
             }
             iteration_count_ = 0;
             // Phase 65d: do NOT zero the meter — the first turn after a

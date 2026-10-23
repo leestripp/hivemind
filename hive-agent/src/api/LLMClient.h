@@ -195,6 +195,23 @@ private:
     // one voluntary compress per kVoluntaryCompressCooldownS.
     std::chrono::steady_clock::time_point last_voluntary_compress_{};
     static constexpr int kVoluntaryCompressCooldownS = 600;
+    // 2026-10-23 (Bob stuck-loop): voluntary compresses THIS turn. Bob
+    // treated compress_context as a pre-stop "banking" ritual and, inside
+    // one long turn, compressed -> compaction amnesia wiped the "done ->
+    // stop" resolution -> re-derived cleanup -> compressed again, until
+    // max-iterations. The 600 s wall-clock cooldown never fired inside a
+    // single turn. Hard cap: one voluntary compress per turn; the >=90%
+    // auto path doesn't come through handle_compress_context_result, so
+    // real pressure is still relieved. Reset at turn start.
+    int voluntary_compresses_this_turn_ = 0;
+    // Model-visible outcome of the most recent compression (or a refused
+    // request), rendered as a row in the transient Context Status block.
+    // Empty = nothing to report. The refused-path messages used to go
+    // through Messages::add_system, which SILENTLY no-ops on a non-empty
+    // history ("System message already exists, not adding") — the model
+    // was never told. Reset at turn start so "call stop now" advice can't
+    // go stale across turns.
+    std::string compress_note_;
 
     // §BUG-COMPRESS-LOOP (2026-08-10): consecutive compression attempts
     // that did NOT get the context back below the auto-compress threshold.
@@ -430,7 +447,7 @@ public:
     ///        cycle-boundary checkpoint (§AutoCompress) — never inline,
     ///        never interrupting in-flight tool calls. Returns true when
     ///        the result was a valid compression request.
-    bool handle_compress_context_result(const json& result);
+    bool handle_compress_context_result(json& result);
 
     /// @brief Update the running AppConfig (e.g., after a model switch).
     ///        Also refreshes the Messages compression config so context-size
