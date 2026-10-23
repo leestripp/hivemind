@@ -459,8 +459,8 @@ int main(int argc, char* argv[]) {
                 const auto size = fs::file_size(src, ec);
                 if (ec) { if (fail("stat failed")) return; }
                 if (size == 0) { if (fail("empty file")) return; }
-                if (size > 50ll * 1024 * 1024) {
-                    if (fail("file too large (50 MB max)")) return;
+                if (size > 256ll * 1024 * 1024) {
+                    if (fail("file too large (256 MB max)")) return;
                 }
                 const std::string share_id = share_uuid();
                 const std::string fname =
@@ -1017,8 +1017,13 @@ int main(int argc, char* argv[]) {
                             return;
                         }
                         const auto size = fs::file_size(fpath, ec);
-                        if (ec || size > 50u * 1024 * 1024) {
-                            fail(ec ? "stat failed" : "file too large (50MB cap)");
+                        // 2026-10-23: 50MB cap blocked real agent output
+                        // (57.9MB video in Forge's DM refused → no
+                        // thumbnail/playback on every client). 256MB
+                        // matches what a 4GB hub can buffer transiently
+                        // for a single user-triggered download.
+                        if (ec || size > 256u * 1024 * 1024) {
+                            fail(ec ? "stat failed" : "file too large (256MB cap)");
                             return;
                         }
                         std::ifstream in(fpath, std::ios::binary);
