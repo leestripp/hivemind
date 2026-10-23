@@ -110,6 +110,11 @@ class ChatPanel(
                     api.downloadToFile(att, cache)
                 }
                 val ext = name.substringAfterLast('.', "").lowercase()
+                if (ext in setOf("mp4", "webm", "mov", "mkv", "3gp"))
+                    Thread {
+                        frameVideoThumb(cache,
+                            java.io.File(cache.absolutePath + ".thumb.png"))
+                    }.start()
                 ui.post {
                     opening.remove(key)
                     when (ext) {
@@ -128,6 +133,32 @@ class ChatPanel(
                 }
             }
         }.start()
+    }
+
+    /** Extract + save a video poster frame from a LOCAL file. Caller
+     *  runs this on a worker thread; [iv], when given, is updated on
+     *  the UI thread (list re-render shows the saved file anyway). */
+    private fun frameVideoThumb(cache: java.io.File, thumb: java.io.File,
+                                iv: ImageView? = null) {
+        try {
+            val mmr = android.media.MediaMetadataRetriever()
+            try {
+                mmr.setDataSource(cache.absolutePath)
+                val bmp = mmr.getFrameAtTime(1_000_000)   // 1s in — past fades
+                    ?: mmr.getFrameAtTime(0)
+                if (bmp != null) {
+                    java.io.FileOutputStream(thumb).use { out ->
+                        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
+                    }
+                    val show = iv ?: return
+                    ui.post { show.setImageBitmap(bmp) }
+                }
+            } finally {
+                mmr.release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "video thumb failed: ${e.message}")
+        }
     }
 
     private fun toast(msg: String) {
@@ -299,31 +330,17 @@ class ChatPanel(
             if (thumb.exists() && thumb.length() > 0) {
                 iv.setImageBitmap(BitmapFactory.decodeFile(thumb.absolutePath))
             } else {
-                Thread {
-                    try {
-                        val cache = cacheFile(att)
-                        if (!cache.exists() || cache.length() == 0L) {
-                            cache.parentFile?.mkdirs()
-                            cache.writeBytes(api.downloadFile(att))
-                        }
-                        val mmr = android.media.MediaMetadataRetriever()
-                        try {
-                            mmr.setDataSource(cache.absolutePath)
-                            val bmp = mmr.getFrameAtTime(1_000_000)   // 1s in — past fades
-                                ?: mmr.getFrameAtTime(0)
-                            if (bmp != null) {
-                                java.io.FileOutputStream(thumb).use { out ->
-                                    bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
-                                }
-                                ui.post { iv.setImageBitmap(bmp) }
-                            }
-                        } finally {
-                            mmr.release()
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "video thumb failed: ${e.message}")
-                    }
-                }.start()
+                // 2026-10-23: NEVER network-fetch just to build a poster.
+                // That pulled the ENTIRE video through the hub (whole-file
+                // base64 relay per worker, serialized) — two video rows
+                // auto-fetched 110MB and starved the user's real download
+                // ("worker file fetch timed out" on every tap). Uncached
+                // rows keep the plain ▶ on the dark frame; the poster is
+                // frame-grabbed locally by openAttachment after its
+                // download, so this branch only ever reads local bytes.
+                val cache = cacheFile(att)
+                if (cache.exists() && cache.length() > 0L)
+                    Thread { frameVideoThumb(cache, thumb, iv) }.start()
             }
             return frame
         }
