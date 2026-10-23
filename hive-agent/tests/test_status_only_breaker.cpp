@@ -13,6 +13,14 @@
  * and ends the turn (like stop) once the count reaches 2. These tests drive
  * LLMClient against an in-process HTTP server that answers chat completions
  * with a set_status tool call — mirroring test_fatal_breaker.cpp.
+ *
+ * 2026-10-23: the fake server replies with state "Working", NOT "Done".
+ * Commit dd053a3 (2026-10-22) made set_status({state:Done}) finalize the
+ * turn like stop (models ritually call it expecting the turn to end —
+ * Bob looped 43+ iterations appending "closing" lines). "Done" never
+ * reaches a second iteration, so the old "Done"-replying server made
+ * every case end after ONE request. The breaker under test here is the
+ * non-exit-status loop (model stuck in Working/Thinking limbo).
  */
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
@@ -38,7 +46,10 @@ namespace {
 // ---------------------------------------------------------------------------
 // In-process HTTP server that answers every POST /v1/chat/completions with a
 // valid chat completion. Two modes:
-//   ALL_STATUS       — every response is ONE set_status("Done") tool call
+//   ALL_STATUS       — every response is ONE set_status("Working") tool
+//                      call (a NON-exit status — exercises the breaker)
+//   ALL_DONE         — every response is set_status("Done"): dd053a3 made
+//                      Done finalize the turn like stop (1 request, DONE)
 //   STATUS_THEN_TEXT — ALTERNATES per request: even seq = set_status tool
 //                      call, odd seq = plain text (so each turn in the
 //                      reset test runs status-then-text)
@@ -46,7 +57,7 @@ namespace {
 // ---------------------------------------------------------------------------
 class StatusOnlyServer {
 public:
-    enum Mode { ALL_STATUS, STATUS_THEN_TEXT };
+    enum Mode { ALL_STATUS, STATUS_THEN_TEXT, ALL_DONE };
 
     explicit StatusOnlyServer(Mode mode) : mode_(mode) {
         listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -124,8 +135,11 @@ private:
 
         const int seq = request_count_.fetch_add(1);
         std::string body;
-        if (mode_ == ALL_STATUS || (mode_ == STATUS_THEN_TEXT && seq % 2 == 0)) {
-            body = status_tool_call_response(seq);
+        if (mode_ == ALL_DONE) {
+            body = status_done_response(seq);
+        } else if (mode_ == ALL_STATUS ||
+                   (mode_ == STATUS_THEN_TEXT && seq % 2 == 0)) {
+            body = status_working_response(seq);
         } else {
             body = text_response();
         }
@@ -138,13 +152,24 @@ private:
         ::send(cfd, resp.data(), resp.size(), 0);
     }
 
-    static std::string status_tool_call_response(int seq) {
+    static std::string status_done_response(int seq) {
         return std::string(
             R"({"id":"chatcmpl-test","object":"chat.completion","choices":[)"
             R"({"index":0,"message":{"role":"assistant","content":null,)"
             R"("tool_calls":[{"id":"call_)" + std::to_string(seq) +
             R"(","type":"function","function":{"name":"set_status",)"
             R"("arguments":"{\"state\": \"Done\"}"}}]},)"
+            R"("finish_reason":"tool_calls"}],)"
+            R"("usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}})");
+    }
+
+    static std::string status_working_response(int seq) {
+        return std::string(
+            R"({"id":"chatcmpl-test","object":"chat.completion","choices":[)"
+            R"({"index":0,"message":{"role":"assistant","content":null,)"
+            R"("tool_calls":[{"id":"call_)" + std::to_string(seq) +
+            R"(","type":"function","function":{"name":"set_status",)"
+            R"("arguments":"{\"state\": \"Working\"}"}}]},)"
             R"("finish_reason":"tool_calls"}],)"
             R"("usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}})");
     }
@@ -248,5 +273,22 @@ TEST_SUITE("set_status-only circuit breaker (§IdleExitBreaker)") {
         // so assert the count instead of just the state.
         CHECK(client.run_one_turn("second") == AgentState::DONE);
         CHECK(server.request_count() == 4);
+    }
+
+    TEST_CASE("set_status(Done) finalizes the turn like stop (dd053a3)") {
+        StatusOnlyServer server(StatusOnlyServer::ALL_DONE);
+        ScratchDir scratch("status-done-exit");
+
+        LLMClient client(make_config(server.base_url(), scratch.path));
+        client.initialize();
+
+        const AgentState final = client.run_one_turn("hello");
+
+        // Done is the models' normal exit idiom — honored
+        // exactly like stop: the turn finalizes after the FIRST
+        // request instead of looping until the status-only breaker
+        // fires.
+        CHECK(final == AgentState::DONE);
+        CHECK(server.request_count() == 1);
     }
 }
