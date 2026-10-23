@@ -46,12 +46,13 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
     )
 
     /** Byte-returning sibling of [request] for file downloads. */
-    private fun requestBytes(method: String, path: String): ByteArray {
+    private fun requestBytes(method: String, path: String,
+                             readTimeoutMs: Int = 60_000): ByteArray {
         val conn = java.net.URL(base + path).openConnection() as java.net.HttpURLConnection
         conn.requestMethod = method
         conn.setRequestProperty("Authorization", "Bearer $apiKey")
         conn.connectTimeout = 10_000
-        conn.readTimeout = 60_000          // images/videos can be big
+        conn.readTimeout = readTimeoutMs   // images/videos can be big
         val code = conn.responseCode
         if (code >= 400) {
             val err = conn.errorStream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
@@ -191,7 +192,48 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
         val path = "/api/files/download?path=" +
             URLEncoder.encode(rel, "UTF-8") +
             if (worker.isEmpty()) "" else "&worker=" + URLEncoder.encode(worker, "UTF-8")
-        return requestBytes("GET", path)
+        // 2026-10-23: 60s default read timeout truncated 50MB+ video
+        // downloads through the hub relay (measured 37s for 51.6MB — too
+        // close). Files get 10 minutes.
+        return requestBytes("GET", path, readTimeoutMs = 600_000)
+    }
+
+    /** Stream a file download straight to disk (no whole-file memory
+     *  buffer — agent videos run 50-60MB). Writes [out].part then
+     *  renames, so a truncated download never sits at the final path.
+     *  Throws ApiException on HTTP >= 400 (e.g. the worker size cap). */
+    fun downloadToFile(att: JSONObject, out: java.io.File) {
+        var rel = att.optString("path", "")
+        if (rel.startsWith("/workspace/")) rel = rel.removePrefix("/workspace/")
+        val name = att.optString("name", "file")
+        if (rel.isEmpty()) rel = "attachments/$name"
+        val worker = att.optString("worker", "")
+        val path = "/api/files/download?path=" +
+            URLEncoder.encode(rel, "UTF-8") +
+            if (worker.isEmpty()) "" else "&worker=" + URLEncoder.encode(worker, "UTF-8")
+        val conn = java.net.URL(base + path).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("Authorization", "Bearer $apiKey")
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 600_000
+        try {
+            val code = conn.responseCode
+            if (code >= 400) {
+                val err = conn.errorStream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
+                throw ApiException(code, err)
+            }
+            out.parentFile?.mkdirs()
+            val part = java.io.File(out.path + ".part")
+            conn.inputStream.use { input ->
+                part.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (!part.renameTo(out)) {
+                part.copyTo(out, overwrite = true)
+                part.delete()
+            }
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /** Latest message id in the thread ("" when empty) — poll baseline. */

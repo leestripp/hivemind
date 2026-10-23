@@ -99,12 +99,15 @@ class ChatPanel(
             return
         }
         Log.i(TAG, "open attachment: $name")
+        // 2026-10-23: surface download failures. Before this a failed
+        // download (worker size cap, timeout) was a lone logcat line —
+        // lee tapped and NOTHING happened, no toast, no error.
+        ui.post { toast("Downloading $name\u2026") }
         Thread {
             try {
                 val cache = cacheFile(att)
                 if (!cache.exists() || cache.length() == 0L) {
-                    cache.parentFile?.mkdirs()
-                    cache.writeBytes(api.downloadFile(att))
+                    api.downloadToFile(att, cache)
                 }
                 val ext = name.substringAfterLast('.', "").lowercase()
                 ui.post {
@@ -117,9 +120,18 @@ class ChatPanel(
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "attachment download failed: ${e.message}")
-                ui.post { opening.remove(key) }
+                ui.post {
+                    opening.remove(key)
+                    val why = if (e is ApiException && e.code == 400)
+                        "file too large" else (e.message ?: "download failed")
+                    toast("Couldn't download $name ($why)")
+                }
             }
         }.start()
+    }
+
+    private fun toast(msg: String) {
+        android.widget.Toast.makeText(activity, msg, android.widget.Toast.LENGTH_LONG).show()
     }
 
     /** Reload full history (bg). Safe to call from the poll loop on
