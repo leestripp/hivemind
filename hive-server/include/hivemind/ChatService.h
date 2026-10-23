@@ -265,6 +265,12 @@ private:
     hivemind::DeliveryStore& deliveries_;   // Phase 66b durable queue
 
     std::mutex m_;
+    // 2026-10-22 (improvements sweep): serializes the claim->dispatch
+    // transition so double-dispatch is structurally impossible, not
+    // dependent on LiveTurn insert ordering (bug sweep B2 made it
+    // correct; this makes the invariant explicit). Lock order is
+    // dispatch_m_ -> m_; every try_dispatch call site is m_-free.
+    std::mutex dispatch_m_;
     std::unordered_map<std::string, std::vector<std::shared_ptr<LiveTurn>>> live_;
     std::unordered_map<std::string, std::shared_ptr<LiveTurn>> by_task_;
     std::atomic<bool> stopping_{false};
@@ -326,5 +332,9 @@ private:
     static int cb_window_s();    // env HIVEMIND_CB_WINDOW_S, def 300
 
     static constexpr std::size_t kMaxLivePerThread = 32;
+    // Cap on a live turn's streamed partial buffer (improvements sweep):
+    // flush_partial appended every delta until turn end — a very long
+    // turn grew memory without bound.
+    static constexpr std::size_t kMaxPartial = 8192;
     static constexpr int kMaxFanInGenerations = 3;
 };

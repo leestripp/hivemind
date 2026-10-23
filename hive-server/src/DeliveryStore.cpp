@@ -320,8 +320,13 @@ void DeliveryStore::mark_done(const std::string& id) {
     DbGuard db{open_db(db_path_)};
     StmtGuard st;
     prepare(db.db, st,
+        // 2026-10-22 (improvements sweep): also accept 'expired' — the
+        // watchdog's expire_queued can flip a row between try_dispatch's
+        // read and mark_dispatched, after which the turn still ran to
+        // completion; it must close as done, not display 'expired'.
         "UPDATE deliveries SET state='done', completed_at=?"
-        " WHERE id=? AND state='dispatched'", "mark_done");
+        " WHERE id=? AND (state='dispatched' OR state='expired')",
+        "mark_done");
     bind_text(st, 1, iso_now());
     bind_text(st, 2, id);
     step_done(db.db, st, "mark_done");
@@ -456,6 +461,28 @@ void DeliveryStore::arm_relay(const std::string& pair_thread_id,
     bind_text(st, 3, home_thread_id);
     bind_text(st, 4, iso_now());
     step_done(db.db, st, "arm_relay");
+}
+
+std::optional<RelayLinkRow>
+DeliveryStore::peek_relay(const std::string& pair_thread_id,
+                          const std::string& replier_id) {
+    DbGuard db{open_db(db_path_)};
+    StmtGuard st;
+    prepare(db.db, st,
+        "SELECT requester_id, home_thread_id, created_at"
+        " FROM relay_links"
+        " WHERE pair_thread_id = ? AND consumed = 0",
+        "peek_relay");
+    bind_text(st, 1, pair_thread_id);
+    if (sqlite3_step(st) != SQLITE_ROW) return std::nullopt;
+    RelayLinkRow row;
+    row.pair_thread_id = pair_thread_id;
+    row.requester_id   = col_text(st, 0);
+    row.home_thread_id = col_text(st, 1);
+    row.created_at     = col_text(st, 2);
+    row.consumed       = false;
+    if (row.requester_id == replier_id) return std::nullopt;
+    return row;
 }
 
 std::optional<RelayLinkRow>

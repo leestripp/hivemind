@@ -84,6 +84,13 @@ public:
     void set_kind(const std::string& id, const std::string& kind);
 
     std::optional<Thread> find_dm(const std::string& agent_id);
+    /// Atomic find-or-create of an agent's canonical DM (2026-10-22,
+    /// improvements sweep). The notifications route used find_dm +
+    /// create_thread — two concurrent notifications could both miss
+    /// and insert a duplicate DM (find_dm still resolves to the oldest,
+    /// so it was an orphan row; this closes the race the same way as
+    /// find_or_create_pair_thread).
+    Thread find_or_create_dm(const std::string& agent_id);
 
     /// Idempotent: create the User Inbox thread if it does not exist
     /// (called on hub boot). Returns the thread.

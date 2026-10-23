@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 // HubRouter (HiveMind 2.0 Phase C): the server is a PURE HUB. It owns no
 // brains; it routes between roster/threads, workers, and the client.
 //
@@ -190,6 +192,12 @@ private:
     struct Task { std::string agent_id; std::string worker; };
     std::unordered_map<std::string, Task> tasks_;       // task_id -> owner
     std::unordered_map<std::string, std::string> states_;  // agent -> state
+    // 2026-10-22 (improvements sweep): worker -> last heartbeat. A
+    // crashed/partitioned rig sends nothing, so its agents would show
+    // last-known state (often "ready") forever; any live heartbeat
+    // sweeps stale entries to "offline".
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+        last_seen_;
     // approval id -> (worker, agent_id) for the response relay
     struct PendAppr { std::string worker; std::string agent_id;
                       std::string req_id; };  // req_id = worker-side id

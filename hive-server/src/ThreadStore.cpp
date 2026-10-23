@@ -256,6 +256,149 @@ void ThreadStore::set_kind(const std::string& id, const std::string& kind) {
     sqlite3_close(db);
 }
 
+Thread ThreadStore::find_or_create_dm(const std::string& agent_id) {
+    const std::string key = "dm\x1f" + agent_id;
+
+    auto load_by_key = [&](sqlite3* db) -> std::optional<Thread> {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT id FROM threads WHERE pair_key = ?",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, key);
+        std::optional<Thread> out;
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char* id = col_text(st, 0);
+            if (id) out = get_thread(id);   // fills participants
+        }
+        sqlite3_finalize(st);
+        return out;
+    };
+    // Adopt the oldest pre-migration single-agent dm thread, same
+    // pattern as find_or_create_pair_thread.
+    auto adopt_legacy = [&](sqlite3* db) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "SELECT id FROM threads"
+                " WHERE pair_key IS NULL AND kind = 'dm'"
+                " AND id IN (SELECT thread_id FROM thread_participants"
+                "             WHERE agent_id = ?)"
+                " AND (SELECT COUNT(*) FROM thread_participants p"
+                "       WHERE p.thread_id = threads.id) = 1"
+                " ORDER BY created_at LIMIT 1",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, agent_id);
+        std::string legacy_id;
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char* id = col_text(st, 0);
+            if (id) legacy_id = id;
+        }
+        sqlite3_finalize(st);
+        if (legacy_id.empty()) return;
+        st = nullptr;
+        if (sqlite3_prepare_v2(db,
+                "UPDATE threads SET pair_key = ? WHERE id = ?",
+                -1, &st, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        bind_text(st, 1, key);
+        bind_text(st, 2, legacy_id);
+        step_done(db, st, "dm thread adoption");
+    };
+
+    sqlite3* db = open_conn();
+    try {
+        for (int round = 0; round < 20; ++round) {
+            if (auto existing = load_by_key(db)) {
+                sqlite3_close(db);
+                return *existing;
+            }
+            if (round == 0) {
+                try {
+                    adopt_legacy(db);
+                } catch (const std::exception&) {
+                    // BUSY contention — harmless, retry the round.
+                }
+                if (auto existing = load_by_key(db)) {
+                    sqlite3_close(db);
+                    return *existing;
+                }
+            }
+
+            Thread t;
+            t.id = uuid_v4();
+            t.title = "";
+            t.kind = "dm";
+            t.created_at = iso_now();
+            t.agent_ids = {agent_id};
+
+            exec_sql(db, "BEGIN");
+            sqlite3_stmt* st = nullptr;
+            if (sqlite3_prepare_v2(db,
+                    "INSERT INTO threads (id, title, kind, created_at,"
+                    " pair_key) VALUES (?,?,?,?,?)",
+                    -1, &st, nullptr) != SQLITE_OK) {
+                exec_sql(db, "ROLLBACK");
+                throw std::runtime_error(sqlite3_errmsg(db));
+            }
+            bind_text(st, 1, t.id);
+            bind_text(st, 2, t.title);
+            bind_text(st, 3, t.kind);
+            bind_text(st, 4, t.created_at);
+            bind_text(st, 5, key);
+            if (sqlite3_step(st) == SQLITE_DONE) {
+                sqlite3_finalize(st);
+                try {
+                    sqlite3_stmt* ps = nullptr;
+                    if (sqlite3_prepare_v2(db,
+                            "INSERT OR IGNORE INTO thread_participants"
+                            " (thread_id, agent_id) VALUES (?,?)",
+                            -1, &ps, nullptr) != SQLITE_OK)
+                        throw std::runtime_error(sqlite3_errmsg(db));
+                    bind_text(ps, 1, t.id);
+                    bind_text(ps, 2, agent_id);
+                    if (sqlite3_step(ps) != SQLITE_DONE)
+                        throw std::runtime_error(
+                            "participant insert failed");
+                    sqlite3_finalize(ps);
+                    exec_sql(db, "COMMIT");
+                } catch (...) {
+                    exec_sql(db, "ROLLBACK");
+                    sqlite3_close(db);
+                    throw;
+                }
+                sqlite3_close(db);
+                return t;
+            }
+            const int err = sqlite3_extended_errcode(db);
+            sqlite3_finalize(st);
+            exec_sql(db, "ROLLBACK");
+            if (err == SQLITE_CONSTRAINT_UNIQUE) {
+                if (auto existing = load_by_key(db)) {
+                    sqlite3_close(db);
+                    return *existing;
+                }
+                continue;   // winner's row not visible yet — retry
+            }
+            if (err == SQLITE_BUSY) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
+            sqlite3_close(db);
+            throw std::runtime_error("dm thread insert failed");
+        }
+        if (auto existing = load_by_key(db)) {
+            sqlite3_close(db);
+            return *existing;
+        }
+        sqlite3_close(db);
+        throw std::runtime_error("dm thread creation: contended database");
+    } catch (...) {
+        sqlite3_close(db);
+        throw;
+    }
+}
+
 Thread ThreadStore::find_or_create_pair_thread(
         const std::string& a, const std::string& b,
         const std::string& title) {
@@ -476,41 +619,54 @@ Thread ThreadStore::create_thread(const std::string& title,
     t.agent_ids = agent_ids;
 
     sqlite3* db = open_conn();
-    exec_sql(db, "BEGIN");
-    try {
-        sqlite3_stmt* st = nullptr;
-        if (sqlite3_prepare_v2(db,
-                "INSERT INTO threads (id, title, kind, created_at) VALUES (?,?,?,?)",
-                -1, &st, nullptr) != SQLITE_OK)
-            throw std::runtime_error(sqlite3_errmsg(db));
-        bind_text(st, 1, t.id);
-        bind_text(st, 2, t.title);
-        bind_text(st, 3, t.kind);
-        bind_text(st, 4, t.created_at);
-        if (sqlite3_step(st) != SQLITE_DONE)
-            throw std::runtime_error("thread insert failed");
-        sqlite3_finalize(st);
-
-        for (const auto& aid : agent_ids) {
-            sqlite3_stmt* ps = nullptr;
+    // 2026-10-22 (improvements sweep): bounded retry on SQLITE_BUSY.
+    // The old body failed the whole POST on the first lock-contention
+    // error (a burst of writes from concurrent routes could 500 a
+    // client create). Back off and retry the whole transaction.
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        exec_sql(db, "BEGIN");
+        try {
+            sqlite3_stmt* st = nullptr;
             if (sqlite3_prepare_v2(db,
-                    "INSERT INTO thread_participants (thread_id, agent_id)"
-                    " VALUES (?,?)", -1, &ps, nullptr) != SQLITE_OK)
+                    "INSERT INTO threads (id, title, kind, created_at) VALUES (?,?,?,?)",
+                    -1, &st, nullptr) != SQLITE_OK)
                 throw std::runtime_error(sqlite3_errmsg(db));
-            bind_text(ps, 1, t.id);
-            bind_text(ps, 2, aid);
-            if (sqlite3_step(ps) != SQLITE_DONE)
-                throw std::runtime_error("participant insert failed");
-            sqlite3_finalize(ps);
+            bind_text(st, 1, t.id);
+            bind_text(st, 2, t.title);
+            bind_text(st, 3, t.kind);
+            bind_text(st, 4, t.created_at);
+            if (sqlite3_step(st) != SQLITE_DONE)
+                throw std::runtime_error("thread insert failed");
+            sqlite3_finalize(st);
+
+            for (const auto& aid : agent_ids) {
+                sqlite3_stmt* ps = nullptr;
+                if (sqlite3_prepare_v2(db,
+                        "INSERT INTO thread_participants (thread_id, agent_id)"
+                        " VALUES (?,?)", -1, &ps, nullptr) != SQLITE_OK)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+                bind_text(ps, 1, t.id);
+                bind_text(ps, 2, aid);
+                if (sqlite3_step(ps) != SQLITE_DONE)
+                    throw std::runtime_error("participant insert failed");
+                sqlite3_finalize(ps);
+            }
+            exec_sql(db, "COMMIT");
+            sqlite3_close(db);
+            return t;
+        } catch (const std::exception&) {
+            exec_sql(db, "ROLLBACK");
+            if (sqlite3_extended_errcode(db) == SQLITE_BUSY &&
+                attempt + 1 < 10) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
+            sqlite3_close(db);
+            throw;
         }
-        exec_sql(db, "COMMIT");
-    } catch (...) {
-        exec_sql(db, "ROLLBACK");
-        sqlite3_close(db);
-        throw;
     }
     sqlite3_close(db);
-    return t;
+    throw std::runtime_error("thread creation: contended database");
 }
 
 std::optional<Thread> ThreadStore::get_thread(const std::string& id) {

@@ -1174,8 +1174,11 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             if (agent_id.empty() || !agents.get_agent(agent_id)) {
                 send_error(resp, 400, "unknown agent id"); return;
             }
-            std::optional<Thread> dm = threads.find_dm(agent_id);
-            if (!dm) dm = threads.create_thread("", "dm", {agent_id});
+            // Atomic find-or-create (2026-10-22, improvements sweep):
+            // the old find_dm + create_thread pair raced — two
+            // concurrent notifications could both miss and insert a
+            // duplicate DM.
+            const Thread dm = threads.find_or_create_dm(agent_id);
             const std::string app = body.value("app", "phone");
             const std::string title = body.value("title", "");
             const std::string text = body.value("text", "");
@@ -1197,10 +1200,10 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 pretty.resize(cut);
             }
             const std::string msg_id = threads.add_message(
-                dm->id, "system", "hivemind",
+                dm.id, "system", "hivemind",
                 "[phone · " + app + "] " + pretty);
             send_json(resp, json{{"message_id", msg_id},
-                                 {"thread_id", dm->id}}, 201);
+                                 {"thread_id", dm.id}}, 201);
         });
 
     // ── GET /api/threads/:id/activity ─────────────────────────────────────

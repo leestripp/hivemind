@@ -53,6 +53,13 @@ std::string ChatService::post_agent_message(const std::string& sender_id,
     auto target = agents_.get_agent(target_id);
     if (!sender || !target)
         throw std::invalid_argument("unknown sender or target agent");
+    // 2026-10-22 (improvements sweep): self-messaging creates a
+    // degenerate pair thread {A,A} whose relay can never fire (the
+    // replier guard blocks requester == replier). Reject at the hub —
+    // the share path already blocks self-shares; message_agent now
+    // matches.
+    if (sender_id == target_id)
+        throw std::invalid_argument("agent cannot message itself");
 
     // Dedup (2026-09-25, Chief's double-delivery report): an identical
     // (sender, target, body) inside the window is the sender retrying a
@@ -219,14 +226,20 @@ std::string ChatService::maybe_fire_relay(const std::string& thread_id,
                                           const std::string& replier_name,
                                           const std::string& body,
                                           int generation) {
-    // Durable one-shot (Phase 66b): consume_relay returns the link only
-    // when one is armed AND the replier is not the requester.
-    const auto hit = deliveries_.consume_relay(thread_id, replier_id);
+    // Durable one-shot (Phase 66b). 2026-10-22 (improvements sweep):
+    // PEEK + validate BEFORE claiming. The old order consumed the link
+    // first, so a failed home-thread/requester check burned the relay
+    // and the mirror silently downgraded to pair-thread fan-in.
+    const auto hit = deliveries_.peek_relay(thread_id, replier_id);
     if (!hit) return "";
     try {
         if (!threads_.get_thread(hit->home_thread_id)) return "";
         auto requester = agents_.get_agent(hit->requester_id);
         if (!requester) return "";
+        // Claim after validation — consume_relay is atomic (bug sweep 2),
+        // so a concurrent replier that beats us here wins and we skip.
+        if (!deliveries_.consume_relay(thread_id, replier_id))
+            return "";
         // Mirror the peer's reply into the requester's home thread
         // (attributed to the peer), then wake the requester there to
         // frame it. A BUSY requester just keeps the relay wake 'queued'
@@ -492,6 +505,10 @@ void ChatService::try_dispatch(const std::string& agent_id) {
         // live turns for one wake, two replies in the thread. Inserting
         // the turn under m_ first makes the loser see busy and back
         // off; the winner's completion drains the queue.
+        // dispatch_m_ (2026-10-22, improvements sweep) makes the
+        // double-dispatch race structurally impossible: only one
+        // claim->dispatch transition per agent can be in flight.
+        std::lock_guard<std::mutex> dlk(dispatch_m_);
         {
             std::lock_guard<std::mutex> lk(m_);
             if (agent_busy_locked(agent_id))
@@ -604,6 +621,11 @@ std::string ChatService::post_user_message(const std::string& thread_id,
         std::vector<std::pair<std::string, std::string>> pending;
         for (auto it = recent.rbegin(); it != recent.rend(); ++it) {
             if (it->sender_kind == "user") break;
+            // 2026-10-22 (improvements sweep): an agent reply newer
+            // than the notifications means they were already handled —
+            // stop there instead of folding stale ones into the next
+            // wake (double context for the user).
+            if (it->sender_kind == "agent") break;
             if (it->sender_kind == "system" &&
                 it->body.rfind("[phone ", 0) == 0)
                 pending.emplace_back(it->created_at, it->body);
@@ -678,7 +700,11 @@ void ChatService::append_delta(const std::string& task_id,
                                const std::string& text) {
     std::lock_guard<std::mutex> lk(m_);
     auto it = by_task_.find(task_id);
-    if (it != by_task_.end()) it->second->partial += text;
+    if (it != by_task_.end()) {
+        auto& p = it->second->partial;
+        if (p.size() < kMaxPartial)
+            p += text.substr(0, kMaxPartial - p.size());
+    }
 }
 
 void ChatService::post_turn_attachment(
@@ -1035,6 +1061,14 @@ void ChatService::watchdog_loop() {
             std::lock_guard<std::mutex> lk(m_);
             const auto now = std::chrono::steady_clock::now();
             for (auto& [tid, vec] : live_) {
+                // 2026-10-22 (improvements sweep): reap terminal turns.
+                // The worker-offline deferred path leaves done=true
+                // dummies in live_ (kept for activity()); if the thread
+                // never dispatches again they would linger until hub
+                // restart. Terminal == safe to drop here.
+                vec.erase(std::remove_if(vec.begin(), vec.end(),
+                        [](const auto& t) { return t->done; }),
+                    vec.end());
                 for (auto& t : vec) {
                     // reply_posted turns are mid-completion; their
                     // result is on the wire (bug sweep 2, see

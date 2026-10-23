@@ -118,6 +118,11 @@ public:
     /// the replier IS the requester (requester's own msgs never relay).
     std::optional<RelayLinkRow> consume_relay(
         const std::string& pair_thread_id, const std::string& replier_id);
+    /// Read the armed link WITHOUT consuming (2026-10-22 improvements):
+    /// maybe_fire_relay validates the home thread / requester first, so
+    /// a failed validation no longer burns the one-shot relay.
+    std::optional<RelayLinkRow> peek_relay(
+        const std::string& pair_thread_id, const std::string& replier_id);
     /// Drop links older than ttl_s. Returns count.
     int expire_relays(int ttl_s);
 

@@ -465,9 +465,24 @@ void HubRouter::on_heartbeat(const std::string& worker,
     if (!agents.is_object()) return;
     flush_pending_spawns();
     std::lock_guard<std::mutex> lk(m_);
+    last_seen_[worker] = std::chrono::steady_clock::now();
     for (auto it = agents.begin(); it != agents.end(); ++it)
         if (it.value().is_string()) states_[it.key()] = it.value().get<std::string>();
-    (void)worker;
+    // Liveness sweep: 6 missed 15s heartbeats (90s) => the rig is gone.
+    // Only touch workers we have actually seen before — a worker that
+    // never heartbeated is unknown, not offline. "down" (administrative
+    // stop) is never overwritten; a reconnect's heartbeat repaints the
+    // real state from the payload.
+    const auto cutoff = std::chrono::steady_clock::now() -
+                        std::chrono::seconds(90);
+    for (auto& [aid, state] : states_) {
+        if (state == "down" || state == "offline") continue;
+        auto agent = agents_.get_agent(aid);
+        if (!agent) continue;
+        const auto ls = last_seen_.find(agent->worker);
+        if (ls != last_seen_.end() && ls->second < cutoff)
+            state = "offline";
+    }
 }
 
 void HubRouter::on_worker_frame(const std::string& worker,
