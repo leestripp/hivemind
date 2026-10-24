@@ -364,9 +364,22 @@ void MigrationService::drive(const Migration& job) {
                                  {"job_id", job.id},
                                  {"agent_id", job.agent_id},
                                  {"name", agent_name_of(agents_, job.agent_id)}});
+    } else if (s == "exporting") {
+        // Re-drive the export: the op is idempotent per job_id (the
+        // worker reuses the archive when it already exists and
+        // re-sends export_ready). The original build only sent from
+        // the "pending" branch — one lost frame (restart race, stale
+        // worker) parked the job here FOREVER, with the sweep
+        // "re-driving" a state that sent nothing (found live
+        // 2026-10-24: job 5525a65b stuck in exporting for 8 minutes).
+        send(job.source_worker, {{"op", "agent_export"},
+                                 {"job_id", job.id},
+                                 {"agent_id", job.agent_id},
+                                 {"name", agent_name_of(agents_, job.agent_id)},
+                                 {"force", job.force}});
     }
-    // exporting / verifying: awaiting a worker reply; the sweep handles
-    // verifying deadlines below.
+    // verifying: awaiting a worker reply; the sweep handles verifying
+    // deadlines below.
 }
 
 void MigrationService::sweep() {
