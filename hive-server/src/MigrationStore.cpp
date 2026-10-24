@@ -6,6 +6,7 @@
 
 #include <sqlite3.h>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 #include "hivemind/DbUtil.h"
@@ -74,6 +75,27 @@ MigrationStore::MigrationStore(fs::path db) : db_path_(std::move(db)) {
 
 MigrationStore::~MigrationStore() = default;
 
+namespace {
+bool column_exists(sqlite3* db, const char* table, const char* col) {
+    const std::string sql =
+        std::string("PRAGMA table_info(") + table + ")";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+        return false;
+    bool found = false;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const auto* name =
+            reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+        if (name && col == std::string_view(name)) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+}  // namespace
+
 void MigrationStore::init_schema() {
     sqlite3* db = open_db(db_path_);
     exec_sql(db,
@@ -95,12 +117,18 @@ void MigrationStore::init_schema() {
              "  created_at TEXT NOT NULL,"
              "  updated_at TEXT NOT NULL"
              ");"
-             // 2026-10-24 (Phase 73 mid-build): original runtime type, for
-             // rollback. Additive — ignore the error on existing DBs.
-             "ALTER TABLE migrations ADD COLUMN source_type TEXT NOT NULL DEFAULT '';"
              "CREATE INDEX IF NOT EXISTS idx_migrations_agent ON migrations(agent_id);"
              "CREATE INDEX IF NOT EXISTS idx_migrations_state ON migrations(state);",
              "MigrationStore schema");
+    // 2026-10-24 (Phase 73): original runtime type, for rollback. The
+    // first build ran this ALTER UNCONDITIONALLY in the batch above —
+    // first boot added the column, every later boot died on
+    // "duplicate column name" (droplet crash-loop, restart counter 10).
+    // Add only when actually missing.
+    if (!column_exists(db, "migrations", "source_type"))
+        exec_sql(db,
+                 "ALTER TABLE migrations ADD COLUMN source_type TEXT NOT NULL DEFAULT '';",
+                 "MigrationStore schema add source_type");
     sqlite3_close(db);
 }
 
