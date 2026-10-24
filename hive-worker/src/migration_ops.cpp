@@ -390,6 +390,8 @@ void do_teardown(const Ctx& ctx, const json& f) {
 
 void run_op(const json& frame, const Ctx& ctx) {
     const std::string op = frame.value("op", "");
+    std::cerr << "worker: [migration] <- op=" << op
+              << " job=" << frame.value("job_id", "") << "\n";
     try {
         if (op == "agent_export") return do_export(ctx, frame);
         if (op == "agent_data_begin") return do_data_begin(ctx, frame);

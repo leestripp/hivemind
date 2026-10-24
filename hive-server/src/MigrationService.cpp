@@ -46,7 +46,12 @@ MigrationService::~MigrationService() {
 }
 
 void MigrationService::send(const std::string& worker, const json& f) {
-    channel_.send(worker, f);
+    // M1 live-test observability: the protocol is otherwise silent and
+    // a dropped frame looks exactly like a slow worker.
+    const bool ok = channel_.send(worker, f);
+    std::cerr << "[migration] -> " << worker << " op=" << f.value("op", "")
+              << " job=" << f.value("job_id", "")
+              << (ok ? "" : " SEND-FAILED") << "\n";
 }
 
 // ─── begin: validate + create + kick ─────────────────────────────────────────
@@ -161,6 +166,8 @@ void MigrationService::on_worker_frame(const std::string& worker,
     if (std::find(kOps.begin(), kOps.end(), op) == kOps.end()) return;
 
     const std::string job_id = f.value("job_id", "");
+    std::cerr << "[migration] <- " << worker << " op=" << op
+              << " job=" << job_id << "\n";
     auto job = store_.get(job_id);
     if (!job || !MigrationStore::is_live(job->state)) return;
 
