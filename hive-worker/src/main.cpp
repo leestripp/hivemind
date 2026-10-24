@@ -14,6 +14,7 @@
 #include "runner.h"
 #include "hostagent.h"
 #include "fleet.h"
+#include "migration_ops.h"
 
 #include <nlohmann/json.hpp>
 
@@ -305,6 +306,10 @@ int main(int argc, char* argv[]) {
     // Phase B (v2): the fleet lives OUTSIDE the reconnect loop - agents
     // keep running across channel drops. Events route via g_send_frame,
     // which the connection below refreshes on every (re)connect.
+    // Phase 73: stale migration staging never survives a restart (the
+    // hub's sweep re-drives export/transfer for in-flight jobs).
+    std::error_code mig_ec;
+    fs::remove_all(worker_workspace() / "migrations", mig_ec);
     g_fleet = std::make_unique<hwfleet::Fleet>(
         [](const std::string& agent_id, const json& ev) {
             if (!g_send_frame) return;     // between connections: drop
@@ -849,6 +854,45 @@ int main(int argc, char* argv[]) {
                                           {"error","agent not running here"}});
                         } catch (...) {}
                     }
+                    return;
+                }
+
+                // -- Phase 73: agent migration ops (Plan.md) ----------
+                // Source role: agent_export / agent_data_begin /
+                // agent_cleanup. Target role: agent_data_chunk /
+                // agent_import. Either: agent_migrate_abort. All staging
+                // lives under the worker-owned shared workspace.
+                if (op == "agent_export" || op == "agent_data_begin" ||
+                    op == "agent_data_chunk" || op == "agent_import" ||
+                    op == "agent_cleanup" || op == "agent_migrate_abort") {
+                    const json mj = frame;   // copy: detached thread
+                    std::thread([mj] {
+                        hwmigration::Ctx ctx;
+                        ctx.ws = worker_workspace();
+                        ctx.staging_root = ctx.ws / "migrations";
+                        ctx.send = [](const json& f) {
+                            try { g_send_frame(f); } catch (...) {}
+                        };
+                        ctx.hooks.is_running = [](const std::string& id) {
+                            if (!g_fleet) return false;
+                            const auto st = g_fleet->statuses();
+                            const std::string s = st.value(id, "");
+                            return s == "up" || s == "starting";
+                        };
+                        ctx.hooks.stop_agent = [](const std::string& id) {
+                            if (g_fleet) g_fleet->stop(id);
+                        };
+                        ctx.hooks.spawn_agent = [](const hwfleet::AgentSpec& sp) {
+                            if (g_fleet) g_fleet->spawn(sp);
+                        };
+                        ctx.hooks.remove_agent = [](const std::string& id) {
+                            if (g_fleet) g_fleet->remove(id);
+                        };
+                        ctx.hooks.host_user_of = [](const std::string& id) {
+                            return g_fleet ? g_fleet->host_user_of(id) : "";
+                        };
+                        hwmigration::run_op(mj, ctx);
+                    }).detach();
                     return;
                 }
 

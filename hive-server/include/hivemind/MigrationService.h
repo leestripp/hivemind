@@ -11,7 +11,7 @@
 // as Phase 66 file sharing).
 //
 // Worker protocol (frames on the worker channel):
-//   hub → source   {"op":"agent_export","job_id","agent_id","force"}
+//   hub → source   {"op":"agent_export","job_id","agent_id","name","force"}
 //   source → hub   {"op":"agent_export_ready","job_id","path","size"}
 //                  {"op":"agent_export_error","job_id","error"}
 //   hub → source   {"op":"agent_data_begin","job_id","target_worker"}
@@ -23,7 +23,7 @@
 //                   "name",<spawn-spec fields>}
 //   target → hub   {"op":"agent_import_done","job_id"}
 //                  {"op":"agent_import_error","job_id","error"}
-//   hub → source   {"op":"agent_cleanup","job_id","agent_id"}
+//   hub → source   {"op":"agent_cleanup","job_id","agent_id","name"}
 //   source → hub   {"op":"agent_cleanup_done","job_id"}
 //   hub → either   {"op":"agent_migrate_abort","job_id"}  (cancel; staging only)
 //

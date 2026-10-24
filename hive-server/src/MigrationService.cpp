@@ -255,6 +255,15 @@ void MigrationService::fail(const Migration& job, const std::string& error) {
     store_.set_state(job.id, "failed", error, "");
 }
 
+namespace {
+// Worker state dirs are keyed by NAME (.hive-agent/<Name>) — the
+// export/cleanup frames must carry it.
+std::string agent_name_of(AgentStore& agents, const std::string& id) {
+    const auto a = agents.get_agent(id);
+    return a ? a->name : "";
+}
+}  // namespace
+
 void MigrationService::drive(const Migration& job) {
     // (Re-)send the frame belonging to the current state. Every op is
     // idempotent per job_id (worker staging keyed by job), so re-driving
@@ -265,6 +274,7 @@ void MigrationService::drive(const Migration& job) {
         send(job.source_worker, {{"op", "agent_export"},
                                  {"job_id", job.id},
                                  {"agent_id", job.agent_id},
+                                 {"name", agent_name_of(agents_, job.agent_id)},
                                  {"force", job.force}});
     } else if (s == "transferring") {
         send(job.source_worker, {{"op", "agent_data_begin"},
@@ -275,7 +285,8 @@ void MigrationService::drive(const Migration& job) {
     } else if (s == "cleanup") {
         send(job.source_worker, {{"op", "agent_cleanup"},
                                  {"job_id", job.id},
-                                 {"agent_id", job.agent_id}});
+                                 {"agent_id", job.agent_id},
+                                 {"name", agent_name_of(agents_, job.agent_id)}});
     }
     // exporting / verifying: awaiting a worker reply; the sweep handles
     // verifying deadlines below.

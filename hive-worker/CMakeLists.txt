@@ -3,7 +3,7 @@
 
 # Core lib (everything except main.cpp) so tests link the exact objects
 # the binary ships — same convention as hive-agent/hive_agent_core.
-add_library(hive_worker_core STATIC src/runner.cpp src/fleet.cpp src/hostagent.cpp)
+add_library(hive_worker_core STATIC src/runner.cpp src/fleet.cpp src/hostagent.cpp src/migration_ops.cpp)
 target_include_directories(hive_worker_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive_worker_core PUBLIC OmniNet nlohmann_json::nlohmann_json)
 
