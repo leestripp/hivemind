@@ -31,6 +31,7 @@ struct Migration {
     std::string agent_name;      // denormalized for history display
     std::string source_worker;
     std::string target_worker;
+    std::string source_type;     // "container" | "host" (pre-migration runtime)
     std::string target_type;     // "container" | "host"
     std::string state;           // see banner
     std::string error;           // last error ("" when none)

@@ -38,24 +38,25 @@ Migration row_to_migration(sqlite3_stmt* st) {
     m.source_worker = col_text(st, 3);
     m.target_worker = col_text(st, 4);
     m.target_type   = col_text(st, 5);
-    m.state         = col_text(st, 6);
-    m.error         = col_text(st, 7);
-    m.retryable     = sqlite3_column_int(st, 8) != 0;
-    m.force         = sqlite3_column_int(st, 9) != 0;
-    m.no_rollback   = sqlite3_column_int(st, 10) != 0;
-    m.export_path   = col_text(st, 11);
-    m.export_size   = sqlite3_column_int64(st, 12);
-    m.progress      = col_text(st, 13);
-    m.created_at    = col_text(st, 14);
-    m.updated_at    = col_text(st, 15);
+    m.source_type   = col_text(st, 6);
+    m.state         = col_text(st, 7);
+    m.error         = col_text(st, 8);
+    m.retryable     = sqlite3_column_int(st, 9) != 0;
+    m.force         = sqlite3_column_int(st, 10) != 0;
+    m.no_rollback   = sqlite3_column_int(st, 11) != 0;
+    m.export_path   = col_text(st, 12);
+    m.export_size   = sqlite3_column_int64(st, 13);
+    m.progress      = col_text(st, 14);
+    m.created_at    = col_text(st, 15);
+    m.updated_at    = col_text(st, 16);
     return m;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, agent_id, agent_name, source_worker, target_worker,"
-    "       target_type, state, error, retryable, force, no_rollback,"
-    "       export_path, export_size, progress, created_at, updated_at"
-    "  FROM migrations ";
+    "       target_type, source_type, state, error, retryable, force,"
+    "       no_rollback, export_path, export_size, progress, created_at,"
+    "       updated_at FROM migrations ";
 
 }  // namespace
 
@@ -94,6 +95,9 @@ void MigrationStore::init_schema() {
              "  created_at TEXT NOT NULL,"
              "  updated_at TEXT NOT NULL"
              ");"
+             // 2026-10-24 (Phase 73 mid-build): original runtime type, for
+             // rollback. Additive — ignore the error on existing DBs.
+             "ALTER TABLE migrations ADD COLUMN source_type TEXT NOT NULL DEFAULT '';"
              "CREATE INDEX IF NOT EXISTS idx_migrations_agent ON migrations(agent_id);"
              "CREATE INDEX IF NOT EXISTS idx_migrations_state ON migrations(state);",
              "MigrationStore schema");
@@ -112,8 +116,9 @@ std::string MigrationStore::create(Migration m) {
         throw std::invalid_argument("migration: source/target worker empty");
     if (m.target_type != "container" && m.target_type != "host")
         throw std::invalid_argument("migration: target_type must be container|host");
-    if (m.source_worker == m.target_worker && m.target_type.empty())
-        throw std::invalid_argument("migration: source == target");
+    if (m.source_type.empty()) m.source_type = "container";
+    if (m.source_worker == m.target_worker && m.source_type == m.target_type)
+        throw std::invalid_argument("migration: agent already runs that runtime there");
 
     sqlite3* db = open_db(db_path_);
     // One live job per agent (fresh connection per op — DbUtil pattern).
@@ -139,9 +144,9 @@ std::string MigrationStore::create(Migration m) {
 
     const char* sql =
         "INSERT INTO migrations (id, agent_id, agent_name, source_worker,"
-        "  target_worker, target_type, state, error, retryable, force,"
-        "  no_rollback, export_path, export_size, progress, created_at,"
-        "  updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        "  target_worker, target_type, source_type, state, error, retryable,"
+        "  force, no_rollback, export_path, export_size, progress, created_at,"
+        "  updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     sqlite3_stmt* st = nullptr;
     sqlite3_prepare_v2(db, sql, -1, &st, nullptr);
     bind_text(st, 1, m.id);
@@ -150,16 +155,17 @@ std::string MigrationStore::create(Migration m) {
     bind_text(st, 4, m.source_worker);
     bind_text(st, 5, m.target_worker);
     bind_text(st, 6, m.target_type);
-    bind_text(st, 7, m.state);
-    bind_text(st, 8, m.error);
-    sqlite3_bind_int(st, 9, m.retryable ? 1 : 0);
-    sqlite3_bind_int(st, 10, m.force ? 1 : 0);
-    sqlite3_bind_int(st, 11, m.no_rollback ? 1 : 0);
-    bind_text(st, 12, m.export_path);
-    sqlite3_bind_int64(st, 13, m.export_size);
-    bind_text(st, 14, m.progress);
-    bind_text(st, 15, m.created_at);
-    bind_text(st, 16, m.updated_at);
+    bind_text(st, 7, m.source_type);
+    bind_text(st, 8, m.state);
+    bind_text(st, 9, m.error);
+    sqlite3_bind_int(st, 10, m.retryable ? 1 : 0);
+    sqlite3_bind_int(st, 11, m.force ? 1 : 0);
+    sqlite3_bind_int(st, 12, m.no_rollback ? 1 : 0);
+    bind_text(st, 13, m.export_path);
+    sqlite3_bind_int64(st, 14, m.export_size);
+    bind_text(st, 15, m.progress);
+    bind_text(st, 16, m.created_at);
+    bind_text(st, 17, m.updated_at);
     if (sqlite3_step(st) != SQLITE_DONE) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_finalize(st);

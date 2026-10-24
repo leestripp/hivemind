@@ -19,6 +19,7 @@ set(CORE_SOURCES
     src/ThreadStore.cpp
     src/DeliveryStore.cpp
     src/MigrationStore.cpp
+    src/MigrationService.cpp
     src/ShareStore.cpp
     src/ContainerManager.cpp
     src/ExecAuditStore.cpp
@@ -40,6 +41,7 @@ set(ROUTE_SOURCES
     include/hivemind/routes/StaticRoutes.cpp
     include/hivemind/routes/SystemRoutes.cpp
     include/hivemind/routes/RosterRoutes.cpp
+    include/hivemind/routes/MigrationRoutes.cpp
     include/hivemind/routes/FileRoutes.cpp
     include/hivemind/routes/ConnectorRoutes.cpp
     include/hivemind/routes/WorkerRoutes.cpp

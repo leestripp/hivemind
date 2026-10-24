@@ -26,6 +26,8 @@
 #include "hivemind/routes/SystemRoutes.h"
 #include "hivemind/SystemMonitor.h"
 #include "hivemind/routes/RosterRoutes.h"
+#include "hivemind/MigrationService.h"
+#include "hivemind/routes/MigrationRoutes.h"
 #include "hivemind/routes/FileRoutes.h"
 #include "hivemind/routes/ConnectorRoutes.h"
 #include "hivemind/ConnectorStore.h"
@@ -185,9 +187,17 @@ int main(int argc, char* argv[]) {
     ChatService chat_service{agent_store, thread_store, hub,
                              delivery_store};
     hub.set_chat_service(&chat_service);
+    // Phase 73 (Plan.md "Agent Migration"): durable migration jobs + the
+    // orchestrator driving worker export/transfer/import/cleanup frames.
+    hivemind::MigrationStore migration_store;
+    hivemind::MigrationService migration_service{migration_store, agent_store,
+                                                 worker_channel, hub};
+    migration_service.set_chat_service(&chat_service);
     worker_channel.on_frame =
-        [&hub](const std::string& w, const nlohmann::json& f) {
+        [&hub, &migration_service](const std::string& w,
+                                   const nlohmann::json& f) {
             hub.on_worker_frame(w, f);
+            migration_service.on_worker_frame(w, f);
         };
     worker_channel.on_heartbeat =
         [&hub](const std::string& w, const nlohmann::json& agents) {
@@ -282,6 +292,10 @@ int main(int argc, char* argv[]) {
             (path.rfind("/api/workers/", 0) == 0 &&
              (path.find("/models") != std::string::npos ||
               path.find("/secrets") != std::string::npos)) ||
+            // Phase 73: migration moves live agents — admin only.
+            path.rfind("/api/migrations", 0) == 0 ||
+            (path.rfind("/api/agents/", 0) == 0 &&
+             path.find("/migrate") != std::string::npos) ||
             (path.rfind("/api/connectors", 0) == 0 &&
              req.method() != OmniNet::HTTP::Method::GET) ||
             path.find("/container/exec") != std::string::npos ||
@@ -319,6 +333,7 @@ int main(int argc, char* argv[]) {
     register_approval_routes(server, hub, approval_store, agent_store);
     register_key_routes(server, auth_store);
     register_worker_routes(server, worker_store, worker_channel);
+    register_migration_routes(server, migration_service);
     register_model_routes(server, llm_store);
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
