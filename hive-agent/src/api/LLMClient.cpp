@@ -2633,7 +2633,14 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
                 result_content = result_for_storage.dump(-1, ' ', false, json::error_handler_t::replace);
             }
             
-            if (result_content.size() > max_tool_result_size_) {
+            // 2026-10-24 (Buzz bug report): get_schedule exists precisely
+            // to return a routine's FULL prompt body — mid-truncating it
+            // silently (success status, "[...] bytes removed" marker)
+            // made every long routine uneditable. Exempt it; the tool
+            // doc promises "complete prompt body". list_schedules stays
+            // compact by design so the cap still protects context.
+            const bool no_truncate = (function_name == "get_schedule");
+            if (!no_truncate && result_content.size() > max_tool_result_size_) {
                 std::ostringstream trunc_msg;
                 trunc_msg << "Tool result truncated from " << result_content.size()
                           << " to " << max_tool_result_size_ << " bytes";

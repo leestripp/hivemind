@@ -1259,7 +1259,9 @@ int main(int argc, char** argv) {
         R"json({"type":"interval","every_minutes":N}, )json"
         R"json({"type":"daily","time":"HH:MM"}, )json"
         R"json({"type":"weekly","time":"HH:MM","days":[0-6]} )json"
-        "(0=Sunday). Times are hub-local.";
+        "(0=Sunday). Times are UTC (the hub scheduler fires on UTC clock; "
+        "e.g. daily 01:00 = 11:00 AEST summer / 10:00 AEST standard — "
+        "convert from the target local time yourself).";
 
     class ScheduleTaskTool final : public hive::BaseTool {
     public:
@@ -1363,7 +1365,11 @@ int main(int argc, char** argv) {
         std::string get_description() const {
             return std::string("Edit a scheduled task (routine) you own: "
                 "rename, change the prompt or schedule, or enable/disable "
-                "it. Only provided fields change. ") + kScheduleShapes;
+                "it. Only provided fields change. The prompt can be edited "
+                "as a full replace (prompt=) or surgically "
+                "(prompt_append= / prompt_prepend= add text to the existing "
+                "prompt without resubmitting it — use these for long "
+                "prompts; do not combine with prompt=). ") + kScheduleShapes;
         }
         json get_definition() const override {
             json params = {{"type","object"},
@@ -1372,7 +1378,9 @@ int main(int argc, char** argv) {
                       {"description","Routine id OR exact name (from "
                        "list_schedules, or the routine's fire header)"}}},
                     {"name",{{"type","string"},{"description","New name (optional)"}}},
-                    {"prompt",{{"type","string"},{"description","New prompt (optional)"}}},
+                    {"prompt",{{"type","string"},{"description","New prompt — FULL REPLACE (optional; do not combine with prompt_append/prepend)"}}},
+                    {"prompt_append",{{"type","string"},{"description","Text to append to the existing prompt (optional)"}}},
+                    {"prompt_prepend",{{"type","string"},{"description","Text to prepend to the existing prompt (optional)"}}},
                     {"schedule",{{"type","object"},{"description","New schedule JSON (optional)"}}},
                     {"enabled",{{"type","boolean"},{"description","Enable/disable (optional)"}}}}},
                 {"required",{"id"}}};
@@ -1383,6 +1391,29 @@ int main(int argc, char** argv) {
         }
         json execute(const json& args, hive::HostToolContext&) override {
             json payload = {{"routine_id", args.value("id", "")}};
+            const bool has_replace = args.contains("prompt");
+            const bool has_append = args.contains("prompt_append");
+            const bool has_prepend = args.contains("prompt_prepend");
+            if (has_replace && (has_append || has_prepend))
+                return {{"status","error"},
+                        {"error","prompt= is a full replace and cannot be "
+                                 "combined with prompt_append=/prompt_prepend="}};
+            if (has_append || has_prepend) {
+                // Surgical edit: read-modify-write so the agent never
+                // resubmits (or silently loses) a long prompt body.
+                json cur = g_routines.call("get",
+                                    {{"routine_id", args.value("id","")}});
+                if (!cur.value("ok", false))
+                    return {{"status","error"},
+                            {"error","could not read current routine: " +
+                                cur.value("error","hub error")}};
+                std::string body = cur["result"].value("prompt", "");
+                if (has_prepend)
+                    body = args.value("prompt_prepend", "") + body;
+                if (has_append)
+                    body += args.value("prompt_append", "");
+                payload["prompt"] = std::move(body);
+            }
             for (const char* k : {"name", "prompt", "schedule", "enabled"})
                 if (args.contains(k)) payload[k] = args[k];
             json resp = g_routines.call("update", payload);
