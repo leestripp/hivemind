@@ -26,6 +26,8 @@
 //   hub → source   {"op":"agent_cleanup","job_id","agent_id","name"}
 //   source → hub   {"op":"agent_cleanup_done","job_id"}
 //   hub → either   {"op":"agent_migrate_abort","job_id"}  (cancel; staging only)
+//   hub → target   {"op":"agent_migrate_teardown","job_id","agent_id","name"}
+//                  (rollback: remove any half-imported placement; no ack)
 //
 // Every op is idempotent per job_id (worker staging dir keyed by job), so
 // the sweep thread can safely re-drive a state after a hub restart.
@@ -33,6 +35,7 @@
 
 #include <atomic>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -102,6 +105,9 @@ private:
     // Verifying bookkeeping: job_id -> deadline (steady-clock epoch secs).
     std::mutex m_;
     std::map<std::string, std::int64_t> verifying_deadline_;
+    // One-shot data_begin per transfer (sweep must not re-drive
+    // mid-stream — see agent_export_ready in the .cpp).
+    std::set<std::string> begun_;
     static constexpr std::int64_t kVerifyTimeoutS = 180;
     static constexpr std::int64_t kSweepIntervalS = 2;
 };

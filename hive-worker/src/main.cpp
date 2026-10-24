@@ -864,7 +864,8 @@ int main(int argc, char* argv[]) {
                 // lives under the worker-owned shared workspace.
                 if (op == "agent_export" || op == "agent_data_begin" ||
                     op == "agent_data_chunk" || op == "agent_import" ||
-                    op == "agent_cleanup" || op == "agent_migrate_abort") {
+                    op == "agent_cleanup" || op == "agent_migrate_abort" ||
+                    op == "agent_migrate_teardown") {
                     const json mj = frame;   // copy: detached thread
                     std::thread([mj] {
                         hwmigration::Ctx ctx;
@@ -890,6 +891,9 @@ int main(int argc, char* argv[]) {
                         };
                         ctx.hooks.host_user_of = [](const std::string& id) {
                             return g_fleet ? g_fleet->host_user_of(id) : "";
+                        };
+                        ctx.hooks.workspace_root_of = [](const std::string& id) {
+                            return g_fleet ? g_fleet->workspace_root(id) : "";
                         };
                         hwmigration::run_op(mj, ctx);
                     }).detach();

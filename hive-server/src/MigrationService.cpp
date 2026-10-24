@@ -29,6 +29,9 @@ std::int64_t now_secs() {
         .count();
 }
 
+// Defined just before drive() below; cancel/rollback use it earlier.
+std::string agent_name_of(AgentStore& agents, const std::string& id);
+
 }  // namespace
 
 MigrationService::MigrationService(MigrationStore& store, AgentStore& agents,
@@ -129,6 +132,14 @@ void MigrationService::cancel(const std::string& job_id) {
         rollback(*job, "cancelled after placement");
         return;
     }
+    if (job->state == "importing") {
+        // The extract/spawn may have landed — remove the placement so
+        // no orphan copy survives a cancel.
+        send(job->target_worker, {{"op", "agent_migrate_teardown"},
+                                  {"job_id", job_id},
+                                  {"agent_id", job->agent_id},
+                                  {"name", agent_name_of(agents_, job->agent_id)}});
+    }
     send(job->source_worker, {{"op", "agent_migrate_abort"},
                               {"job_id", job_id}});
     send(job->target_worker, {{"op", "agent_migrate_abort"},
@@ -154,34 +165,76 @@ void MigrationService::on_worker_frame(const std::string& worker,
     if (!job || !MigrationStore::is_live(job->state)) return;
 
     if (op == "agent_export_ready") {
+        if (worker != job->source_worker) return;  // wrong sender
         store_.set_export(job_id, f.value("path", ""),
                           f.value("size", std::int64_t{0}));
         store_.set_state(job_id, "transferring", "", "streaming state");
         // Source pushes chunks to the hub; the hub relays to the target.
+        // begun_ makes the data_begin one-shot per transfer: the 2s
+        // sweep would otherwise re-drive it mid-stream and the source
+        // would restart at seq 0 while the target appends — a corrupted
+        // archive. On hub restart begun_ is empty: the re-driven begin
+        // restarts the stream at seq 0 and the target TRUNCATES on that
+        // seq, so the transfer converges.
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            begun_.insert(job_id);
+        }
         send(job->source_worker, {{"op", "agent_data_begin"},
                                   {"job_id", job_id},
                                   {"target_worker", job->target_worker}});
     } else if (op == "agent_export_error") {
+        if (worker != job->source_worker) return;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            begun_.erase(job_id);
+        }
         fail(*job, f.value("error", "export failed"));
     } else if (op == "agent_data_chunk") {
         // Relay verbatim; the hub never parses or stores blob bytes.
+        if (worker != job->source_worker) return;
         send(job->target_worker, f);
     } else if (op == "agent_data_done") {
+        if (worker != job->target_worker) return;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            begun_.erase(job_id);
+        }
         store_.set_state(job_id, "importing", "", "restoring state");
         send_import(*job);
     } else if (op == "agent_data_error") {
+        if (worker != job->target_worker) return;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            begun_.erase(job_id);
+        }
         fail(*job, f.value("error", "transfer failed"));
     } else if (op == "agent_import_done") {
-        flip_roster(*job);
+        if (worker != job->target_worker) return;
+        // flip_roster/spawn may throw (agent vanished mid-flight): a
+        // throw here would unwind into the WS handler thread — catch
+        // and fail the job instead.
+        try {
+            flip_roster(*job);
+        } catch (const std::exception& e) {
+            return fail(*job, std::string("roster flip: ") + e.what());
+        }
         store_.set_state(job_id, "verifying", "", "agent starting on target");
         {
             std::lock_guard<std::mutex> lk(m_);
             verifying_deadline_[job_id] = now_secs() + kVerifyTimeoutS;
         }
-        if (auto moved = agents_.get_agent(job->agent_id)) hub_.spawn_agent(*moved);
+        try {
+            if (auto moved = agents_.get_agent(job->agent_id))
+                hub_.spawn_agent(*moved);
+        } catch (const std::exception& e) {
+            return fail(*job, std::string("target spawn: ") + e.what());
+        }
     } else if (op == "agent_import_error") {
+        if (worker != job->target_worker) return;
         fail(*job, f.value("error", "import failed"));
     } else if (op == "agent_cleanup_done") {
+        if (worker != job->source_worker) return;
         store_.set_state(job_id, "done", "", "migration complete");
     } else if (op == "agent_cleanup_error") {
         // Agent IS migrated (roster flipped); only the source archive
@@ -234,7 +287,8 @@ void MigrationService::rollback(const Migration& job, const std::string& why) {
                                  a->avatar, job.source_worker, a->mcp_servers,
                                  a->type, a->memory, a->cpus, a->thinking_level,
                                  src_host ? 1 : 0);
-            hub_.spawn_agent(*agents_.get_agent(a->id));
+            if (auto respawned = agents_.get_agent(a->id))
+                hub_.spawn_agent(*respawned);
         } catch (const std::exception& e) {
             store_.set_state(job.id, "failed",
                              "rollback incomplete: " + std::string(e.what()),
@@ -242,6 +296,13 @@ void MigrationService::rollback(const Migration& job, const std::string& why) {
             return;
         }
     }
+    // Tear down any placement on the target BEFORE respawning the
+    // source — otherwise a half-imported (or fully running) target copy
+    // coexists with the respawned source: two live brains, one identity.
+    send(job.target_worker, {{"op", "agent_migrate_teardown"},
+                             {"job_id", job.id},
+                             {"agent_id", job.agent_id},
+                             {"name", agent_name_of(agents_, job.agent_id)}});
     send(job.source_worker, {{"op", "agent_migrate_abort"},
                              {"job_id", job.id}});
     send(job.target_worker, {{"op", "agent_migrate_abort"},
@@ -252,6 +313,10 @@ void MigrationService::rollback(const Migration& job, const std::string& why) {
 // ─── failure / driver / sweep ────────────────────────────────────────────────
 
 void MigrationService::fail(const Migration& job, const std::string& error) {
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        begun_.erase(job.id);
+    }
     store_.set_state(job.id, "failed", error, "");
 }
 
@@ -277,9 +342,14 @@ void MigrationService::drive(const Migration& job) {
                                  {"name", agent_name_of(agents_, job.agent_id)},
                                  {"force", job.force}});
     } else if (s == "transferring") {
-        send(job.source_worker, {{"op", "agent_data_begin"},
-                                 {"job_id", job.id},
-                                 {"target_worker", job.target_worker}});
+        // NEVER re-drive data_begin here: the source is mid-stream and
+        // a restart at seq 0 would corrupt the target's append. A live
+        // transfer (begun_ armed in this process) simply continues; a
+        // stale "transferring" (begun_ empty after a hub restart) is
+        // stepped back to "exporting" by the sweep — the worker reuses
+        // its archive, re-sends export_ready, and the stream restarts
+        // with a seq-0 truncate on the target.
+        return;
     } else if (s == "importing") {
         send_import(job);
     } else if (s == "cleanup") {
@@ -329,10 +399,26 @@ void MigrationService::sweep() {
             }
             continue;
         }
+        // Stale transfer across a hub restart: this process never
+        // armed begun_ for it, so re-export (worker archive reuse →
+        // export_ready → data_begin re-armed; target truncates at seq 0).
+        Migration stepback = job;
+        if (stepback.state == "transferring") {
+            bool begun = false;
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                begun = begun_.count(stepback.id) > 0;
+            }
+            if (!begun) {
+                store_.set_state(stepback.id, "exporting", "",
+                                 "re-export after hub restart");
+                stepback.state = "exporting";
+            }
+        }
         // All other live states: re-drive (idempotent per job_id).
         if (channel_.is_online(job.source_worker) &&
             channel_.is_online(job.target_worker)) {
-            drive(job);
+            drive(stepback);
         }
     }
 }

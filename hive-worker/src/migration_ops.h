@@ -43,6 +43,9 @@ struct Hooks {
     std::function<void(const std::string&)> remove_agent;
     /// hivex-<name> user if this agent runs host-side here, else "".
     std::function<std::string(const std::string&)> host_user_of;
+    /// Real workspace root for HOST agents ("" = container/unknown —
+    /// caller falls back to the shared staging workspace).
+    std::function<std::string(const std::string&)> workspace_root_of;
 };
 
 struct Ctx {

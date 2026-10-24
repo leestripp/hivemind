@@ -157,7 +157,14 @@ void do_export(const Ctx& ctx, const json& f) {
             return err("agent did not stop within 30s");
     }
 
-    const fs::path home = ctx.ws / ".hive-agent" / name;
+    // HOST agents keep state in their own workspace (hivex-owned),
+    // container agents in the shared staging workspace.
+    fs::path root = ctx.ws;
+    if (ctx.hooks.workspace_root_of) {
+        const std::string wr = ctx.hooks.workspace_root_of(agent);
+        if (!wr.empty()) root = wr;
+    }
+    const fs::path home = root / ".hive-agent" / name;
     if (!fs::is_directory(home))
         return err("no state dir for '" + name + "' on this worker");
 
@@ -167,7 +174,7 @@ void do_export(const Ctx& ctx, const json& f) {
     const fs::path arc = dir / "export.tar.zst";
     if (!fs::exists(arc, ec)) {  // idempotent: reuse a prior archive
         std::string out;
-        if (run_cmd({"tar", "--zstd", "-C", ctx.ws.string(), "-cf",
+        if (run_cmd({"tar", "--zstd", "-C", root.string(), "-cf",
                      arc.string(), ".hive-agent/" + name},
                     &out) != 0)
             return err("tar failed: " + out);
@@ -194,7 +201,9 @@ void do_data_begin(const Ctx& ctx, const json& f) {
                   {"error", "cannot read export archive"}});
         return;
     }
-    constexpr std::streamsize kChunk = 192 * 1024;
+    // OmniNet frames cap at 64KB (maxFrameSize) — 32KiB binary
+    // b64-encodes to ~43.7KB, envelope included, safely under.
+    constexpr std::streamsize kChunk = 32 * 1024;
     std::vector<char> buf(size_t{192} * 1024);
     uint64_t seq = 0;
     while (in) {
@@ -324,11 +333,13 @@ void do_cleanup(const Ctx& ctx, const json& f) {
             }
         }
     } else {
-        // Host source: remove ONLY the state dir as the hivex user. The
-        // unix account itself stays — a rollback respawns on it.
+        // Host source: remove ONLY the state dir as the hivex user —
+        // it lives in the HOST workspace (never the shared staging ws).
+        // The unix account itself stays — a rollback respawns on it.
         hwrunner::run_as_user(hx,
                               {"rm", "-rf",
-                               (ctx.ws / ".hive-agent" / name).string()},
+                               (fs::path(hwrunner::host_workspace(name)) /
+                                ".hive-agent" / name).string()},
                               "", nullptr);
     }
     fs::remove_all(staging_dir(ctx, job), ec);
@@ -338,6 +349,41 @@ void do_cleanup(const Ctx& ctx, const json& f) {
 void do_abort(const Ctx& ctx, const json& f) {
     std::error_code ec;
     fs::remove_all(staging_dir(ctx, f.value("job_id", "")), ec);
+}
+
+void do_teardown(const Ctx& ctx, const json& f) {
+    // Rollback after placement: the target may hold a half-imported or
+    // fully running copy of the agent. Stop it and remove its state so
+    // the respawned source is the ONLY live copy. Everything is
+    // best-effort/idempotent (job ids are unique fleet-wide, so a
+    // not-actually-imported agent simply has nothing to remove). The
+    // unix account of a host agent is NEVER touched here.
+    const std::string agent = f.value("agent_id", "");
+    const std::string name = f.value("name", "");
+    if (ctx.hooks.is_running && ctx.hooks.is_running(agent)) {
+        try { if (ctx.hooks.stop_agent) ctx.hooks.stop_agent(agent); }
+        catch (const std::exception&) {}
+        for (int i = 0; i < 150 && ctx.hooks.is_running(agent); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    const std::string hx = ctx.hooks.host_user_of
+                               ? ctx.hooks.host_user_of(agent) : "";
+    if (hx.empty()) {
+        if (ctx.hooks.remove_agent) {
+            try { ctx.hooks.remove_agent(agent); }
+            catch (const std::exception&) {}
+        }
+    } else if (!name.empty()) {
+        hwrunner::run_as_user(
+            hx, {"rm", "-rf",
+                 (fs::path(hwrunner::host_workspace(name)) /
+                  ".hive-agent" / name).string()},
+            "", nullptr);
+    }
+    std::error_code ec;
+    fs::remove_all(staging_dir(ctx, f.value("job_id", "")), ec);
+    // No ack frame: the hub never awaits teardown (rollback already
+    // respawned the source; this is hygiene on the losing side).
 }
 
 }  // namespace
@@ -351,6 +397,7 @@ void run_op(const json& frame, const Ctx& ctx) {
         if (op == "agent_import") return do_import(ctx, frame);
         if (op == "agent_cleanup") return do_cleanup(ctx, frame);
         if (op == "agent_migrate_abort") return do_abort(ctx, frame);
+        if (op == "agent_migrate_teardown") return do_teardown(ctx, frame);
         std::cerr << "migration_ops: unknown op '" << op << "'\n";
     } catch (const std::exception& e) {
         const std::string job = frame.value("job_id", "");
