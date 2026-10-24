@@ -1515,9 +1515,11 @@ int main(int argc, char* argv[]) {
 
             // Pump reads on a thread so the main flow can await welcome;
             // on close it wakes the handshake waiter and ends hb below.
+            std::atomic<bool> pump_done{false};
             std::thread pump([&] {
                 try { ws.readLoop(); } catch (...) {}
                 dead = true;
+                pump_done = true;
                 hs_cv.notify_all();
             });
 
@@ -1552,11 +1554,36 @@ int main(int argc, char* argv[]) {
                                     {"agents", g_fleet
                                         ? g_fleet->statuses()
                                         : json::object()}});
-                    } catch (...) { dead = true; }
+                    } catch (...) {
+                        // 2026-10-24 wedge: actively close so a blocked
+                        // readLoop gets a chance to unwind; the watchdog
+                        // below reconnects regardless.
+                        try { ws.close(); } catch (...) {}
+                        dead = true;
+                    }
                 }
             });
 
-            pump.join();   // blocks until the connection closes
+            // 2026-10-24 (ubuntu-pc fleet outage): do NOT block
+            // unconditionally on the pump. The TLS connection died
+            // silently mid-day — process alive, zero sockets, hub
+            // reporting "worker 'ubuntu-pc' offline (agent HoneyBee)" —
+            // but readLoop() never returned, so pump.join() blocked
+            // forever and the rig stayed offline until a manual restart.
+            // The heartbeat thread flags `dead` on send failure; poll the
+            // flag, give the pump a short grace to unwind cleanly, then
+            // reconnect regardless. A detached wedged pump thread is
+            // cheaper than a silent fleet outage.
+            while (!dead.load() && !g_stop)
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            if (!pump_done.load()) {
+                std::cerr << "worker: pump wedged after dead flag — "
+                             "detaching and reconnecting\n";
+                pump.detach();
+            } else if (pump.joinable()) {
+                pump.join();
+            }
             std::cerr << "worker: connection closed\n";
             if (hb.joinable()) hb.join();
         } catch (const std::exception& e) {
