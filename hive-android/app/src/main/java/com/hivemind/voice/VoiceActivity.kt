@@ -364,26 +364,64 @@ class VoiceActivity : Activity() {
                 return@stop
             }
             ui.post { status.text = "Sending…" }
-            io.execute {
+            io.execute { postTranscript(text) }
+        }
+    }
+
+    /** Split a final STT transcript into sentence-sized messages. The
+     *  hub hands the agent each message as its own user turn — a whole
+     *  voice session posted as one paragraph reads as a rambling
+     *  repeat-and-extend, so every sentence goes as its own message,
+     *  like the user typed them. (lee, 2026-10-25) */
+    private fun splitTranscript(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            while (i < text.length && text[i].isWhitespace()) i++
+            if (i >= text.length) break
+            var end = i
+            while (end < text.length) {
+                val c = text[end++]
+                if (c == '.' || c == '!' || c == '?' || c == '\n') break
+            }
+            val part = text.substring(i, end).trim()
+            if (part.isNotEmpty()) out.add(part)
+            i = end
+        }
+        return out.ifEmpty { listOf(text) }
+    }
+
+    /** Post a transcript as one message per sentence (see
+     *  [splitTranscript]), sequential on this io thread so hub ordering
+     *  matches speaking order. A vanished DM (404) mid-sequence is
+     *  retried ONCE with only the not-yet-posted parts — re-sending the
+     *  whole transcript would duplicate what already landed. */
+    private fun postTranscript(text: String) {
+        val parts = splitTranscript(text)
+        var i = 0
+        try {
+            while (i + 1 < parts.size) {
+                api.postMessage(threadId, parts[i], source = "voice")
+                i++
+            }
+            sendAndEnterWait(parts.last())
+        } catch (e: Exception) {
+            if (reresolveIfThreadGone(e)) {
                 try {
-                    sendAndEnterWait(text)
-                } catch (e: Exception) {
-                    // A vanished DM thread is recoverable: re-resolve and
-                    // retry the send ONCE before surfacing a failure.
-                    if (reresolveIfThreadGone(e)) {
-                        try {
-                            sendAndEnterWait(text)
-                            return@execute
-                        } catch (_: Exception) {
-                            // fall through to the visible failure below
-                        }
+                    while (i + 1 < parts.size) {
+                        api.postMessage(threadId, parts[i], source = "voice")
+                        i++
                     }
-                    ui.post {
-                        toIdle("Send failed: ${e.message}")
-                        speakNotice("Your message didn't send. " +
-                                    "Check the connection and try again.")
-                    }
+                    sendAndEnterWait(parts.last())
+                    return
+                } catch (_: Exception) {
+                    // fall through to the visible failure below
                 }
+            }
+            ui.post {
+                toIdle("Send failed: ${e.message}")
+                speakNotice("Your message didn't send. " +
+                            "Check the connection and try again.")
             }
         }
     }

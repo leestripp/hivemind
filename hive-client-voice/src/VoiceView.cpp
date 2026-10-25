@@ -259,6 +259,29 @@ void VoiceView::maybeStartListening() {
     stt_->start();
 }
 
+// Split a final STT transcript into sentence-sized messages. The hub
+// hands the agent each message as its own user turn — a whole voice
+// session posted as one paragraph reads as a rambling repeat-and-extend,
+// so every sentence goes as its own message, like the user typed them.
+// (lee, 2026-10-25)
+static std::vector<std::string> splitTranscript(const std::string& text) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && std::isspace((unsigned char)text[i])) ++i;
+        if (i >= text.size()) break;
+        size_t end = i;
+        while (end < text.size()) {
+            const char c = text[end++];
+            if (c == '.' || c == '!' || c == '?' || c == '\n') break;
+        }
+        std::string part = trimStr(text.substr(i, end - i));
+        if (!part.empty()) out.push_back(std::move(part));
+        i = end;
+    }
+    return out;
+}
+
 void VoiceView::sendTranscript() {
     if (sphere_) sphere_->setLevel(0.0f);
     if (fx_) fx_->recordingStopped();
@@ -289,26 +312,7 @@ void VoiceView::sendTranscript() {
                 return;
             }
             if (status_) status_->set_label("Sending…");
-            post([this, text] {
-                try {
-                    sendAndEnterWait(text);
-                } catch (const std::exception& e) {
-                    if (reresolveIfThreadGone(e)) {
-                        try {
-                            sendAndEnterWait(text);
-                            return;
-                        } catch (const std::exception&) {
-                            // fall through to the visible failure
-                        }
-                    }
-                    std::string msg = e.what();
-                    toUi([this, msg = std::move(msg)] {
-                        toIdle("Send failed: " + msg);
-                        speakNotice("Your message didn't send. Check the "
-                                    "connection and try again.");
-                    });
-                }
-            });
+            post([this, text] { postTranscript(text); });
         });
     });
 }
@@ -337,6 +341,39 @@ void VoiceView::sendAndEnterWait(const std::string& text) {
                 : "Thinking…");
         schedulePollTick(kPollMs);
     });
+}
+
+void VoiceView::postTranscript(const std::string& text) {
+    // Sentence-per-message: see splitTranscript. Posts are sequential on
+    // this worker thread, so hub ordering matches speaking order. If the
+    // thread 404s mid-sequence, re-resolve and retry ONLY the parts not
+    // yet posted — re-sending the whole transcript would duplicate what
+    // already landed.
+    std::vector<std::string> parts = splitTranscript(text);
+    if (parts.empty()) parts.push_back(text);
+    size_t i = 0;
+    try {
+        for (; i + 1 < parts.size(); ++i)
+            api_->postMessage(thread_id_, parts[i], "voice");
+        sendAndEnterWait(parts.back());
+    } catch (const std::exception& e) {
+        if (reresolveIfThreadGone(e)) {
+            try {
+                for (; i + 1 < parts.size(); ++i)
+                    api_->postMessage(thread_id_, parts[i], "voice");
+                sendAndEnterWait(parts.back());
+                return;
+            } catch (const std::exception&) {
+                // fall through to the visible failure
+            }
+        }
+        std::string msg = e.what();
+        toUi([this, msg = std::move(msg)] {
+            toIdle("Send failed: " + msg);
+            speakNotice("Your message didn't send. Check the "
+                        "connection and try again.");
+        });
+    }
 }
 
 bool VoiceView::reresolveIfThreadGone(const std::exception& e) {
@@ -935,22 +972,7 @@ void VoiceView::debugSay(const std::string& text) {
     lastProgressMs_ = nowMs();
     lastPartialLen_ = 0;
     netFailSince_ = 0;
-    post([this, text] {
-        try {
-            sendAndEnterWait(text);
-        } catch (const std::exception& e) {
-            if (reresolveIfThreadGone(e)) {
-                try {
-                    sendAndEnterWait(text);
-                    return;
-                } catch (const std::exception&) {}
-            }
-            std::string msg = e.what();
-            toUi([this, msg = std::move(msg)] {
-                toIdle("Send failed: " + msg);
-            });
-        }
-    });
+    post([this, text] { postTranscript(text); });
 }
 
 void VoiceView::debugSetSphere(SphereState state, float level) {

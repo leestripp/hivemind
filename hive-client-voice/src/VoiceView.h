@@ -77,6 +77,7 @@ class VoiceView : public Gtk::Box {
     void toIdle(const std::string& message);
     void maybeStartListening();
     void sendTranscript();
+    void postTranscript(const std::string& text);
     void sendAndEnterWait(const std::string& text);
     bool reresolveIfThreadGone(const std::exception& e);
     void startIdleNarration();
