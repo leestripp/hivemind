@@ -42,7 +42,6 @@ class VoiceActivity : Activity() {
         private const val NET_FAIL_TIMEOUT_MS = 45_000L  // consecutive poll failures
         private const val STOP_CONFIRM_MS = 12_000L  // bounded wait for a stop to confirm
         private const val MAX_UTTER_CHARS = 2000  // TTS rejects very long utterances
-        private const val INBOX_THREAD = "user"   // hub's User Inbox (kUserThreadId)
     }
 
     private enum class Phase { SETUP, IDLE, LISTENING, THINKING, STREAMING }
@@ -85,7 +84,6 @@ class VoiceActivity : Activity() {
     // -- inbox watch ----------------------------------------------------------
     /** Agent id -> display name, for "PA says: …" inbox attribution. */
     private var agentNames = mapOf<String, String>()
-    private var inboxLastId = ""
     /** A whole message awaiting speech: the text plus WHO sent it, so
      *  it can be read in the sender's own voice (Phase 68). */
     /** Edge-triggered state-change announcements (see AgentStateAnnouncer).
@@ -273,10 +271,6 @@ class VoiceActivity : Activity() {
                 agentNames = runCatching {
                     api.listAgents().associate { it.id to it.name }
                 }.getOrDefault(emptyMap())
-                // Inbox may not exist yet (no agent has ever posted) — the
-                // hub 404s; treat as empty rather than failing setup.
-                inboxLastId = runCatching { api.latestMessageId(INBOX_THREAD) }
-                    .getOrDefault("")
                 ui.post {
                     toIdle("Tap TALK and speak")
                     ui.postDelayed(inboxWatch, IDLE_POLL_MS)
@@ -492,19 +486,10 @@ class VoiceActivity : Activity() {
                     // stored message (2026-09-29: "chunks sit in the live
                     // feed while the user waits").
                     val act = runCatching { api.activity(threadId) }.getOrNull()
-                    val inbox = runCatching {
-                        api.messagesAfter(INBOX_THREAD, inboxLastId)
-                    }.getOrDefault(emptyList())
-                    var inboxConsumed = false
-                    for (m in inbox) {
-                        inboxLastId = m.id
-                        inboxConsumed = true
-                        if (m.senderKind == "agent" && m.body.isNotBlank()) {
-                            val who = agentNames[m.senderId] ?: "An agent"
-                            fresh.add(PendingNote(m.senderId,
-                                "$who says: ${m.body.trim()}"))
-                        }
-                    }
+                    // Deliberately no You/inbox narration: completion
+                    // notes there duplicate what the agent's DM narration
+                    // already spoke. The inbox is left unread for the text
+                    // UIs. (lee, 2026-10-25)
                     // Agent state edge watch (2026-10-01): read state
                     // transitions aloud, edge-triggered + dwelled. Also
                     // refresh agentNames so inbox notes name new agents.
@@ -527,7 +512,6 @@ class VoiceActivity : Activity() {
                     // this session consumed, or desktop/web show phantom
                     // unread from voice sessions.
                     if (dmConsumed) runCatching { api.markRead(threadId) }
-                    if (inboxConsumed) runCatching { api.markRead(INBOX_THREAD) }
                     ui.post {
                         // Stop confirmation (agent level): the agent was
                         // told to stop while a long-running command was

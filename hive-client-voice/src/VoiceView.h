@@ -144,7 +144,6 @@ class VoiceView : public Gtk::Box {
     std::string finalText_;
     std::size_t finalCredit_ = 0;
     std::map<std::string, std::string> agentNames_;
-    std::string inboxLastId_;
     std::deque<PendingNote> pendingSpeech_;
     std::string streamText_;
     std::size_t spokenLen_ = 0;

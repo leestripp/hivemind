@@ -22,7 +22,6 @@ constexpr long kStallTimeoutMs = 240000;
 constexpr long kNetFailTimeoutMs = 45000;
 constexpr long kStopConfirmMs = 12000;
 constexpr std::size_t kMaxUtterChars = 2000;
-const char* kInboxThread = "user";  // hub's User Inbox (kUserThreadId)
 
 std::string trimStr(std::string_view s) {
     const auto b = s.find_first_not_of(" \t\n\r");
@@ -191,8 +190,6 @@ void VoiceView::openThread() {
                 for (const auto& a : api_->listAgents())
                     agentNames_[a.id] = a.name;
             } catch (...) {}
-            try { inboxLastId_ = api_->latestMessageId(kInboxThread); }
-            catch (...) {}
             toUi([this] {
                 toIdle("Tap TALK and speak");
                 scheduleInboxWatch(kIdlePollMs);
@@ -636,22 +633,9 @@ void VoiceView::inboxWatchTick() {
                 act = api_->activity(thread_id_);
                 haveAct = true;
             } catch (...) {}
-            bool inboxConsumed = false;
-            try {
-                for (const auto& m :
-                     api_->messagesAfter(kInboxThread, inboxLastId_)) {
-                    inboxLastId_ = m.id;
-                    inboxConsumed = true;
-                    if (m.senderKind == "agent" && !m.body.empty()) {
-                        const auto it = agentNames_.find(m.senderId);
-                        const std::string who =
-                            it != agentNames_.end() ? it->second : "An agent";
-                        fresh.push_back({m.senderId,
-                                         who + " says: " +
-                                             trimStr(m.body)});
-                    }
-                }
-            } catch (...) {}
+            // Deliberately no You/inbox narration: completion notes there
+            // duplicate what the agent's DM narration already spoke. The
+            // inbox is left unread for the text UIs. (lee, 2026-10-25)
             std::vector<AgentSnapshot> roster;
             try {
                 for (const auto& a : api_->listAgents()) {
@@ -668,7 +652,6 @@ void VoiceView::inboxWatchTick() {
                     fresh.push_back({ann.agentId, ann.text});
             }
             try { if (dmConsumed) api_->markRead(thread_id_); } catch (...) {}
-            try { if (inboxConsumed) api_->markRead(kInboxThread); } catch (...) {}
         } catch (const std::exception& e) {
             if (!reresolveIfThreadGone(e)) {
                 // poll blip — reschedule below
