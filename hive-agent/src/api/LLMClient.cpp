@@ -2639,7 +2639,8 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
             // made every long routine uneditable. Exempt it; the tool
             // doc promises "complete prompt body". list_schedules stays
             // compact by design so the cap still protects context.
-            const bool no_truncate = (function_name == "get_schedule");
+            const bool no_truncate = (function_name == "get_schedule" ||
+                                      function_name == "update_schedule");
             if (!no_truncate && result_content.size() > max_tool_result_size_) {
                 std::ostringstream trunc_msg;
                 trunc_msg << "Tool result truncated from " << result_content.size()
