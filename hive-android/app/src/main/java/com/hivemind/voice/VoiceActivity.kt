@@ -373,6 +373,14 @@ class VoiceActivity : Activity() {
      *  voice session posted as one paragraph reads as a rambling
      *  repeat-and-extend, so every sentence goes as its own message,
      *  like the user typed them. (lee, 2026-10-25) */
+    // whisper silence/noise artifacts — never send these to the hub as
+    // user messages (lee, 2026-10-25: [BLANK_AUDIO] landed in Bob's
+    // context as an unanswered question).
+    private fun isSilenceArtifact(part: String): Boolean {
+        val norm = part.filter { it.isLetterOrDigit() }.lowercase()
+        return norm.isEmpty() || norm == "blankaudio" || norm == "silence"
+    }
+
     private fun splitTranscript(text: String): List<String> {
         val out = mutableListOf<String>()
         var i = 0
@@ -385,10 +393,10 @@ class VoiceActivity : Activity() {
                 if (c == '.' || c == '!' || c == '?' || c == '\n') break
             }
             val part = text.substring(i, end).trim()
-            if (part.isNotEmpty()) out.add(part)
+            if (part.isNotEmpty() && !isSilenceArtifact(part)) out.add(part)
             i = end
         }
-        return out.ifEmpty { listOf(text) }
+        return out
     }
 
     /** Post a transcript as one message per sentence (see
@@ -398,6 +406,9 @@ class VoiceActivity : Activity() {
      *  whole transcript would duplicate what already landed. */
     private fun postTranscript(text: String) {
         val parts = splitTranscript(text)
+        // All silence artifacts (or empty) — nothing was actually said;
+        // send nothing rather than an empty/artifact user message.
+        if (parts.isEmpty()) return
         var i = 0
         try {
             while (i + 1 < parts.size) {

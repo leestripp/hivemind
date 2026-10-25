@@ -264,6 +264,20 @@ void VoiceView::maybeStartListening() {
 // session posted as one paragraph reads as a rambling repeat-and-extend,
 // so every sentence goes as its own message, like the user typed them.
 // (lee, 2026-10-25)
+// True when a transcript "sentence" is a whisper silence/noise artifact
+// rather than speech — e.g. "[BLANK_AUDIO]", "(silence)", "[ noise ]".
+// These must never reach the hub as a user message: the agent burns a
+// turn on them and they sit in its context as an unanswered question
+// (lee, 2026-10-25 — Bob's store had a [BLANK_AUDIO] user entry).
+static bool isSilenceArtifact(const std::string& part) {
+    std::string norm;
+    norm.reserve(part.size());
+    for (unsigned char c : part) {
+        if (std::isalnum(c)) norm += (char)std::tolower(c);
+    }
+    return norm.empty() || norm == "blankaudio" || norm == "silence";
+}
+
 static std::vector<std::string> splitTranscript(const std::string& text) {
     std::vector<std::string> out;
     size_t i = 0;
@@ -276,7 +290,8 @@ static std::vector<std::string> splitTranscript(const std::string& text) {
             if (c == '.' || c == '!' || c == '?' || c == '\n') break;
         }
         std::string part = trimStr(text.substr(i, end - i));
-        if (!part.empty()) out.push_back(std::move(part));
+        if (!part.empty() && !isSilenceArtifact(part))
+            out.push_back(std::move(part));
         i = end;
     }
     return out;
@@ -350,7 +365,9 @@ void VoiceView::postTranscript(const std::string& text) {
     // yet posted — re-sending the whole transcript would duplicate what
     // already landed.
     std::vector<std::string> parts = splitTranscript(text);
-    if (parts.empty()) parts.push_back(text);
+    // All silence artifacts (or empty) — nothing was actually said; send
+    // nothing rather than an empty/artifact user message.
+    if (parts.empty()) return;
     size_t i = 0;
     try {
         for (; i + 1 < parts.size(); ++i)

@@ -18,6 +18,7 @@
 #include "core/ThreadPool.h"
 #include "core/Utf8Utils.h"  // §B11/B28: shared utf8_sanitize_replace_invalid
 #include "library/default_paths.h"   // §Phase 8.8 — resolve_agent_dir()
+#include <unordered_set>
 #include "types/AgentState.h"  // §State Machine — agent_state_from()
 #include "mcp/McpServerManager.h"  // §Phase 11 — injected via ctor
 
@@ -3119,6 +3120,103 @@ void LLMClient::uninstall_crash_handlers() {
     // Accumulated assistant text goes to sink_->on_assistant_delta(text).
     // ===================================================================
 
+// §CANCEL-RECONCILE (2026-10-25): repair the history segment a CANCELLED
+// turn added before it persists. A cancelled turn used to leave:
+//   (a) the user message that opened the turn permanently "unanswered"
+//       (the assistant reply is only pushed on completion), so every
+//       later turn saw a stack of unanswered questions and re-answered
+//       them — lee: "agents read out old tasks, think they're not done";
+//   (b) an assistant(tool_calls) entry whose calls never executed, with
+//       no tool results — a malformed chain many APIs reject.
+// Fix: synthesize a "[cancelled]" tool result for every orphaned call,
+// then close the segment with a note assistant message marking the
+// interrupted question as SEEN, not pending. Idempotent shape-wise; only
+// ever called on the cancel path.
+static void reconcile_interrupted_turn(json& messages, std::size_t turn_start) {
+    if (turn_start >= messages.size()) return;
+
+    const std::string note =
+        "[INTERRUPTED] This turn was cancelled by a newer incoming message "
+        "before a reply was produced. The message directly above was seen "
+        "and is NOT pending. Do not re-answer it unless a later message "
+        "explicitly asks. The full record lives in the hub thread.";
+    const std::string cancelled_result =
+        "[cancelled] this tool call was interrupted by a newer message "
+        "before it could run; its result is unavailable. Do not retry "
+        "unless a later message asks.";
+
+    json repaired = json::array();
+    for (std::size_t i = turn_start; i < messages.size(); ++i) {
+        json m = messages[i];
+        repaired.push_back(m);
+
+        if (!m.is_object() || m.value("role", "") != "assistant"
+            || !m.contains("tool_calls") || !m["tool_calls"].is_array()) {
+            continue;
+        }
+        // Collect the tool results that actually follow this assistant
+        // entry (before the next assistant/user boundary).
+        std::unordered_set<std::string> answered;
+        for (std::size_t j = i + 1; j < messages.size(); ++j) {
+            const json& n = messages[j];
+            if (!n.is_object()) break;
+            const std::string r = n.value("role", "");
+            if (r == "assistant" || r == "user" || r == "system") break;
+            if (r == "tool") answered.insert(n.value("tool_call_id", ""));
+        }
+        for (const auto& tc : m["tool_calls"]) {
+            if (!tc.is_object()) continue;
+            const std::string id = tc.value("id", "");
+            if (id.empty() || answered.count(id)) continue;
+            json name;
+            if (tc.contains("function") && tc["function"].is_object()) {
+                name = tc["function"].value("name", "");
+            }
+            repaired.push_back({
+                {"role", "tool"},
+                {"tool_call_id", id},
+                {"name", name},
+                {"content", cancelled_result}
+            });
+        }
+    }
+
+    // Close the segment: only when the turn produced no final answer.
+    const json& back = repaired.back();
+    bool answered = false;
+    if (back.is_object() && back.value("role", "") == "assistant") {
+        const bool has_calls = back.contains("tool_calls");
+        std::string content;
+        if (back.contains("content") && back["content"].is_string()) {
+            content = back["content"].get<std::string>();
+        }
+        answered = !has_calls && !content.empty();
+    }
+    if (!answered) {
+        if (back.is_object() && back.value("role", "") == "assistant"
+            && !back.contains("tool_calls")) {
+            // Empty assistant shell (cancelled stream) — fill in place
+            // rather than stacking a second consecutive assistant entry.
+            std::string content;
+            if (back.contains("content") && back["content"].is_string()) {
+                content = back["content"].get<std::string>();
+            }
+            if (content.empty()) {
+                repaired.back()["content"] = note;
+            } else {
+                repaired.push_back({{"role", "assistant"}, {"content", note}});
+            }
+        } else {
+            repaired.push_back({{"role", "assistant"}, {"content", note}});
+        }
+    }
+
+    json rebuilt = json::array();
+    for (std::size_t i = 0; i < turn_start; ++i) rebuilt.push_back(messages[i]);
+    for (auto& m : repaired) rebuilt.push_back(std::move(m));
+    messages = std::move(rebuilt);
+}
+
 AgentState LLMClient::run_one_turn(const std::string& user_message) {
     ended_on_fatal_breaker_ = false;
     fatal_breaker_error_.clear();
@@ -3305,6 +3403,11 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
     // the async path always used HttpSession (now also OmniNet).
 
     json& messages = messages_->get_messages();
+
+    // §CANCEL-RECONCILE: remember where this turn's segment starts so
+    // a CANCELLED exit can repair orphaned tool calls / unanswered
+    // user messages before they persist (see reconcile_interrupted_turn).
+    const std::size_t turn_start_index = messages.size();
 
     // Add the user message provided by the host (the *one* input we accept).
     if (messages.empty()) {
@@ -3560,6 +3663,15 @@ AgentState LLMClient::run_one_turn(const std::string& user_message) {
         LOG_INFO("✓ Task Complete");
         final_state = AgentState::DONE;
         break;
+    }
+
+    // §CANCEL-RECONCILE: a cancelled turn leaves the opening user
+    // message unanswered and may strand assistant(tool_calls) without
+    // results. Repair the segment before the final flush so later turns
+    // never see a stack of "unanswered" questions.
+    if (final_state == AgentState::CANCELLED
+        && turn_start_index < messages.size()) {
+        reconcile_interrupted_turn(messages, turn_start_index);
     }
 
     // PERSIST-DIRTY: catch every early-return mutation (API-error
