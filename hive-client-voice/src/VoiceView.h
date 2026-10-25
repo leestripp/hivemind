@@ -102,6 +102,7 @@ class VoiceView : public Gtk::Box {
 
     // -- speech ---------------------------------------------------------
     void drainSpeech(bool flush);
+    void speakFinalTail();
     void queueSpeech(const std::string& text);
     void queueSpeechChunk(const std::string& text);
     void startSpeakAnimator();
@@ -140,7 +141,8 @@ class VoiceView : public Gtk::Box {
     std::atomic<bool> stopping_{false};
     bool queuedBehindStop_ = false;
     std::string lastMessageId_;
-    std::string finalReply_;
+    std::string finalText_;
+    std::size_t finalCredit_ = 0;
     std::map<std::string, std::string> agentNames_;
     std::string inboxLastId_;
     std::deque<PendingNote> pendingSpeech_;
@@ -150,7 +152,7 @@ class VoiceView : public Gtk::Box {
     long lastProgressMs_ = 0;
     std::size_t lastPartialLen_ = 0;
     std::size_t narrationGiveUpLen_ = 0;
-    std::string narratedPrefix_;
+    std::string narratedLive_;  // text already queued from the live partial feed
     std::atomic<long> netFailSince_{0};
     int turnGen_ = 0;
     long lastStatusUpdate_ = 0;

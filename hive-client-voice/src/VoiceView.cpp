@@ -225,7 +225,9 @@ void VoiceView::toIdle(const std::string& message) {
     stopping_ = false;
     queuedBehindStop_ = false;
     phase_ = Phase::Idle;
-    finalReply_.clear();
+    finalText_.clear();
+    finalCredit_ = 0;
+    narratedLive_.clear();
     streamText_.clear();
     spokenLen_ = 0;
     turnDone_ = false;
@@ -265,7 +267,10 @@ void VoiceView::sendTranscript() {
     if (fx_) fx_->recordingStopped();
     phase_ = Phase::Thinking;
     ++turnGen_;
-    narratedPrefix_.clear();  // new turn: old live text must not trim new messages
+    // New turn: old narration state must not credit or trim new messages.
+    narratedLive_.clear();
+    finalText_.clear();
+    finalCredit_ = 0;
     tts_->applyVoice(voiceNameFor(agent_.id));
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {
@@ -344,7 +349,9 @@ bool VoiceView::reresolveIfThreadGone(const std::exception& e) {
         thread_id_ = api_->openDm(agent_.id);
         lastMessageId_ = api_->latestMessageId(thread_id_);
         try { api_->markRead(thread_id_); } catch (...) {}
-        narratedPrefix_.clear();
+        narratedLive_.clear();
+        finalText_.clear();
+        finalCredit_ = 0;
         return true;
     } catch (...) {
         return false;
@@ -354,8 +361,9 @@ bool VoiceView::reresolveIfThreadGone(const std::exception& e) {
 void VoiceView::startIdleNarration() {
     if (phase_ != Phase::Idle) return;
     ++turnGen_;
-    narratedPrefix_.clear();
-    finalReply_.clear();
+    narratedLive_.clear();
+    finalText_.clear();
+    finalCredit_ = 0;
     streamText_.clear();
     spokenLen_ = 0;
     lastPartialLen_ = 0;
@@ -616,16 +624,12 @@ void VoiceView::inboxWatchTick() {
                 lastMessageId_ = m.id;
                 dmConsumed = true;
                 if (m.senderKind == "agent" && !m.body.empty()) {
-                    std::string body = trimStr(m.body);
-                    // Already narrated live from the partial feed? Speak
-                    // only the tail that was never heard.
-                    const std::size_t lcp = speech::commonPrefixLen(body, narratedPrefix_);
-                    if (!narratedPrefix_.empty() && lcp >= 40) {
-                        narratedPrefix_.clear();
-                        body = trimStr(body.substr(lcp));
-                    }
-                    if (!body.empty())
-                        fresh.push_back({m.senderId, body});
+                    // Accumulate into the turn's final text and speak only
+                    // the unheard tail (credited against the live narration).
+                    // Per-message credit — never re-reads earlier messages.
+                    if (!finalText_.empty()) finalText_ += ' ';
+                    finalText_ += trimStr(m.body);
+                    toUi([this] { speakFinalTail(); });
                 }
             }
             try {
@@ -717,7 +721,7 @@ void VoiceView::pollTick() {
     const long now = nowMs();
     if (netFailSince_ != 0 && now - netFailSince_ > kNetFailTimeoutMs) {
         tts_->stop();
-        narratedPrefix_ = streamText_;
+        narratedLive_ = streamText_.substr(0, spokenLen_);
         narrationGiveUpLen_ = lastPartialLen_;
         toIdle("Connection lost");
         speakNotice("I lost the connection to the hub. Check your network, "
@@ -726,7 +730,7 @@ void VoiceView::pollTick() {
     }
     if (now - lastProgressMs_ > kStallTimeoutMs) {
         tts_->stop();
-        narratedPrefix_ = streamText_;
+        narratedLive_ = streamText_.substr(0, spokenLen_);
         narrationGiveUpLen_ = lastPartialLen_;
         toIdle("Agent stopped responding");
         speakNotice("The agent stopped responding partway through. I'll "
@@ -741,8 +745,8 @@ void VoiceView::pollTick() {
             for (const auto& m : api_->messagesAfter(thread_id_, lastMessageId_)) {
                 lastMessageId_ = m.id;
                 if (m.senderKind == "agent" && !m.body.empty()) {
-                    if (!finalReply_.empty()) finalReply_ += ' ';
-                    finalReply_ += trimStr(m.body);
+                    if (!finalText_.empty()) finalText_ += ' ';
+                    finalText_ += trimStr(m.body);
                     appended = true;
                 }
             }
@@ -794,27 +798,34 @@ void VoiceView::handleTick(bool busy, const std::string& error,
         schedulePollTick(kPollMs);
         return;
     }
-    const std::string next =
-        busy ? partial : (finalReply_.empty() ? partial : finalReply_);
-    if (busy && next.empty()) {
-        schedulePollTick(kPollMs);
-        return;
-    }
-    if (next.compare(0, streamText_.size(), streamText_) != 0 ||
-        next.size() < streamText_.size()) {
-        // Source diverged: re-speak only from the first differing char.
-        const std::size_t lcp = speech::commonPrefixLen(next, streamText_);
-        spokenLen_ = std::min(spokenLen_, lcp);
-        streamText_ = next;
+    if (!busy && !finalText_.empty()) {
+        // Turn over with posted messages: the final text is the source of
+        // truth. Speak only what neither the live feed nor an earlier
+        // final-tail pass already covered.
+        if (spokenLen_ > 0)
+            narratedLive_ = streamText_.substr(0, spokenLen_);
+        speakFinalTail();
     } else {
-        streamText_ = next;
+        const std::string next = partial;
+        if (busy && next.empty()) {
+            schedulePollTick(kPollMs);
+            return;
+        }
+        if (next.compare(0, streamText_.size(), streamText_) != 0 ||
+            next.size() < streamText_.size()) {
+            // Source diverged: re-speak only from the first differing char.
+            const std::size_t lcp = speech::commonPrefixLen(next, streamText_);
+            spokenLen_ = std::min(spokenLen_, lcp);
+            streamText_ = next;
+        } else {
+            streamText_ = next;
+        }
+        drainSpeech(!busy);
+        // Remember exactly what the live feed already queued so the final
+        // message handler can trim down to the unheard tail instead of
+        // re-reading the whole reply.
+        if (spokenLen_ > 0) narratedLive_ = streamText_.substr(0, spokenLen_);
     }
-    drainSpeech(!busy);
-    // The posted message for this turn arrives after the turn ends (or via
-    // the inbox watch mid-turn); remember what the live feed already spoke
-    // so the message handler can trim it down to the unheard tail instead
-    // of re-reading the whole reply.
-    if (spokenLen_ > 0) narratedPrefix_ = streamText_;
     if (busy) {
         schedulePollTick(kPollMs);
     } else {
@@ -824,6 +835,17 @@ void VoiceView::handleTick(bool busy, const std::string& error,
 }
 
 // -- speech -------------------------------------------------------------------
+
+void VoiceView::speakFinalTail() {
+    if (finalText_.empty()) return;
+    std::size_t credit = speech::commonPrefixLen(finalText_, narratedLive_);
+    if (credit < finalCredit_) credit = finalCredit_;  // append-only: never regress
+    if (credit < finalText_.size()) {
+        const std::string tail = trimStr(finalText_.substr(credit));
+        if (!tail.empty()) queueSpeech(tail);
+    }
+    finalCredit_ = finalText_.size();
+}
 
 void VoiceView::drainSpeech(bool flush) {
     if (flush) {
@@ -915,7 +937,9 @@ void VoiceView::debugSay(const std::string& text) {
     if (sphere_) sphere_->setLevel(0.0f);
     phase_ = Phase::Thinking;
     ++turnGen_;
-    narratedPrefix_.clear();
+    narratedLive_.clear();
+    finalText_.clear();
+    finalCredit_ = 0;
     tts_->applyVoice(voiceNameFor(agent_.id));
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {

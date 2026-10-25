@@ -119,10 +119,14 @@ class VoiceActivity : Activity() {
      *  re-narrate the same stuck turn until the partial GROWS past this
      *  (reset when the turn ends / busy goes false). */
     private var narrationGiveUpLen = 0
-    /** Text already narrated live from the partial feed. When the turn's
-     *  stored message arrives later (stall-abort recovery), only the tail
-     *  past this prefix is spoken — never the whole reply twice. */
-    private var narratedPrefix = ""
+    /** Text already queued to TTS from the live partial feed (snapshot of
+     *  streamText[0..spokenLen]). When the turn's stored messages arrive
+     *  later (stall-abort recovery / long gaps), only the final-text tail
+     *  past the credited prefix is spoken — never the whole reply twice. */
+    private var narratedLive = ""
+    /** Chars of finalReply already spoken, via live-feed credit or an
+     *  earlier final-tail pass. Monotonic within a turn. */
+    private var finalCredit = 0
     /** First consecutive poll-failure time (0 = polls healthy). Written on
      *  the io thread, read on the UI thread. */
     @Volatile private var netFailSince = 0L
@@ -299,6 +303,8 @@ class VoiceActivity : Activity() {
         queuedBehindStop = false
         phase = Phase.IDLE
         finalReply.clear()
+        finalCredit = 0
+        narratedLive = ""
         streamText = ""
         spokenLen = 0
         turnDone = false
@@ -334,7 +340,10 @@ class VoiceActivity : Activity() {
         sphere.setLevel(0f)
         phase = Phase.THINKING
         turnGen++
-        narratedPrefix = ""  // new turn: old live text must not trim new messages
+        // New turn: old narration state must not credit or trim new messages.
+        narratedLive = ""
+        finalReply.clear()
+        finalCredit = 0
         // The streamed reply comes from the SESSION agent — re-apply its
         // voice (a just-spoken inbox note may have left another agent's
         // voice active on the engine).
@@ -427,7 +436,9 @@ class VoiceActivity : Activity() {
             threadId = api.openDm(agentId)
             lastMessageId = api.latestMessageId(threadId)
             runCatching { api.markRead(threadId) }
-            narratedPrefix = ""
+            narratedLive = ""
+            finalReply.clear()
+            finalCredit = 0
             Log.w(TAG, "DM thread vanished - re-resolved to $threadId")
             true
         } catch (e2: Exception) {
@@ -463,16 +474,15 @@ class VoiceActivity : Activity() {
                         lastMessageId = m.id
                         dmConsumed = true
                         if (m.senderKind == "agent" && m.body.isNotBlank()) {
-                            var body = m.body.trim()
-                            // Already narrated live from the partial feed?
-                            // Speak only the tail that was never heard.
-                            val lcp = body.commonPrefixWith(narratedPrefix).length
-                            if (narratedPrefix.isNotEmpty() && lcp >= 40) {
-                                narratedPrefix = ""
-                                body = body.substring(lcp).trim()
-                            }
-                            if (body.isNotEmpty())
-                                fresh.add(PendingNote(m.senderId, body))
+                            // Accumulate into the turn's final text and speak
+                            // only the unheard tail (credited against the live
+                            // narration). Per-message credit — never re-reads
+                            // earlier messages.
+                            if (finalReply.isNotEmpty()) finalReply.append(' ')
+                            finalReply.append(m.body.trim())
+                            val tail = unheardFinalTail()
+                            if (tail.isNotEmpty())
+                                fresh.add(PendingNote(m.senderId, tail))
                         }
                     }
                     if (chatMode && dmConsumed) chatPanel?.refresh()
@@ -595,8 +605,9 @@ class VoiceActivity : Activity() {
     private fun startIdleNarration() {
         if (phase != Phase.IDLE) return
         turnGen++
-        narratedPrefix = ""
+        narratedLive = ""
         finalReply.clear()
+        finalCredit = 0
         streamText = ""
         spokenLen = 0
         lastPartialLen = 0
@@ -672,7 +683,7 @@ class VoiceActivity : Activity() {
             val now = System.currentTimeMillis()
             if (netFailSince != 0L && now - netFailSince > NET_FAIL_TIMEOUT_MS) {
                 tts.stop()
-                narratedPrefix = streamText
+                narratedLive = streamText.substring(0, spokenLen)
                 narrationGiveUpLen = lastPartialLen
                 toIdle("Connection lost")
                 speakNotice("I lost the connection to the hub. " +
@@ -681,7 +692,7 @@ class VoiceActivity : Activity() {
             }
             if (now - lastProgressMs > STALL_TIMEOUT_MS) {
                 tts.stop()
-                narratedPrefix = streamText
+                narratedLive = streamText.substring(0, spokenLen)
                 narrationGiveUpLen = lastPartialLen
                 toIdle("Agent stopped responding")
                 speakNotice("The agent stopped responding partway through. " +
@@ -768,8 +779,24 @@ class VoiceActivity : Activity() {
         }
         // The text the spoken length refers to: the live partial while the
         // turn runs, the final message body once it's stored.
-        val next = if (busy) partial
-        else finalReply.toString().ifEmpty { partial }
+        if (!busy && finalReply.isNotEmpty()) {
+            // Turn over with posted messages: the final text is the source
+            // of truth. Speak only what neither the live feed nor an
+            // earlier final-tail pass already covered.
+            if (spokenLen > 0) narratedLive = streamText.substring(0, spokenLen)
+            val tail = unheardFinalTail()
+            if (tail.isNotEmpty()) {
+                if (backgrounded)
+                    pendingSpeech.add(PendingNote(agentId, tail))
+                else
+                    queueSpeech(tail)
+            }
+            // Consumed: keep the backgrounded hand-off below from re-adding
+            // this text as a stream tail.
+            streamText = ""
+            spokenLen = 0
+        } else {
+        val next = partial
         if (busy && next.isEmpty()) {
             // Transient empty partial (tool call / turn hand-over): keep
             // the speech cursor — an empty source must NOT reset it.
@@ -777,9 +804,8 @@ class VoiceActivity : Activity() {
             return
         }
         if (!next.startsWith(streamText)) {
-            // Source diverged (the stored reply is normalized vs the live
-            // partial, or a genuinely new reply): re-speak only from the
-            // first differing character, never the whole message again.
+            // Source diverged (revision): re-speak only from the first
+            // differing character, never the whole message again.
             val lcp = next.commonPrefixWith(streamText).length
             if (streamText.isNotEmpty() && lcp < spokenLen) {
                 Log.d(TAG, "stream diverged at $lcp (spoken=$spokenLen)")
@@ -791,10 +817,11 @@ class VoiceActivity : Activity() {
         }
         drainSpeech(flush = !busy)
         // The posted message for this turn arrives after the turn ends (or
-        // via the inbox watch mid-turn); remember what the live feed
-        // already spoke so the message handler can trim it down to the
+        // via the inbox watch mid-turn); remember exactly what the live
+        // feed already queued so the message handler can trim down to the
         // unheard tail instead of re-reading the whole reply.
-        if (spokenLen > 0) narratedPrefix = streamText
+        if (spokenLen > 0) narratedLive = streamText.substring(0, spokenLen)
+        }
         if (busy) {
             ui.postDelayed(pollTick, POLL_MS)
         } else {
@@ -819,6 +846,19 @@ class VoiceActivity : Activity() {
      * spoken (the tail may be mid-sentence and still change); [flush]
      * speaks the remainder once the turn is done.
      */
+    /** The not-yet-heard tail of the turn's accumulated final messages.
+     *  Credits everything the live feed already queued (narratedLive) and
+     *  everything a previous pass spoke (finalCredit); advances the credit
+     *  so repeated calls never re-speak. */
+    private fun unheardFinalTail(): String {
+        val ft = finalReply.toString()
+        if (ft.isEmpty()) return ""
+        var credit = ft.commonPrefixWith(narratedLive).length
+        if (credit < finalCredit) credit = finalCredit
+        finalCredit = ft.length
+        return if (credit < ft.length) ft.substring(credit).trim() else ""
+    }
+
     private fun drainSpeech(flush: Boolean) {
         // Frozen while backgrounded: nothing reaches TTS (no pocket
         // audio) and the spoken cursor holds, so onResume can speak the
