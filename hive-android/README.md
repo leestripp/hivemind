@@ -81,7 +81,7 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──fi
   and drops straight back into recording; ✕ stops to idle.
 - The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
   the phone can't lock mid-rant, mid-think, or mid-reply.
-- INBOX: the bottom Agents / Inbox bar opens the hub's User Inbox
+- INBOX: the bottom icon-and-label Agents / Inbox bar opens the hub's User Inbox
   (thread "user"). The latest 300 messages render newest-first with
   sender avatar/name, local timestamp, body, and attachment names; the
   screen refreshes every 5 seconds and clears the persisted unread mark.

@@ -71,9 +71,13 @@ class InboxActivity : Activity() {
         }
         findViewById<Button>(R.id.agentsButton).apply {
             setTextColor(getColor(R.color.dim))
+            compoundDrawables[2]?.mutate()?.setTint(getColor(R.color.dim))
             setOnClickListener { finish() }
         }
-        findViewById<Button>(R.id.inboxButton).setTextColor(getColor(R.color.cyan))
+        findViewById<Button>(R.id.inboxButton).apply {
+            setTextColor(getColor(R.color.cyan))
+            compoundDrawables[2]?.mutate()?.setTint(getColor(R.color.cyan))
+        }
         list.setOnItemClickListener { _, _, position, _ ->
             adapter?.getItem(position)?.let(::readMessage)
         }

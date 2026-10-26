@@ -37,7 +37,7 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   markdown/lists/code, spoken-form numbers; consult via message_agent,
   report back via message_user), and replies pass a speech sanitizer
   (`SpeechText.forSpeech`) before TTS.
-- **Visible User Inbox** — the roster's bottom Agents / Inbox bar opens
+- **Visible User Inbox** — the roster's bottom icon-and-label Agents / Inbox bar opens
   hub thread `"user"`. The latest 300 messages render newest-first with
   sender avatar/name, local timestamps, bodies, and attachment names.
   The screen refreshes every 5 seconds and clears the persisted user

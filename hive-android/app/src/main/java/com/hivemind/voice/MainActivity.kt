@@ -79,10 +79,13 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-        findViewById<Button>(R.id.agentsButton).setTextColor(
-            getColor(R.color.cyan))
+        findViewById<Button>(R.id.agentsButton).apply {
+            setTextColor(getColor(R.color.cyan))
+            compoundDrawables[2]?.mutate()?.setTint(getColor(R.color.cyan))
+        }
         findViewById<Button>(R.id.inboxButton).apply {
             setTextColor(getColor(R.color.dim))
+            compoundDrawables[2]?.mutate()?.setTint(getColor(R.color.dim))
             setOnClickListener {
                 startActivity(Intent(this@MainActivity, InboxActivity::class.java))
             }

@@ -10,23 +10,29 @@
         style="?android:attr/buttonBarButtonStyle"
         android:id="@+id/agentsButton"
         android:layout_width="0dp"
-        android:layout_height="56dp"
+        android:layout_height="68dp"
         android:layout_weight="1"
         android:background="@android:color/transparent"
         android:contentDescription="@string/nav_agents"
+        android:drawableTop="@drawable/ic_agents"
+        android:drawablePadding="4dp"
+        android:drawableTint="@color/dim"
         android:text="@string/nav_agents"
         android:textAllCaps="false"
-        android:textSize="17sp" />
+        android:textSize="14sp" />
 
     <Button
         style="?android:attr/buttonBarButtonStyle"
         android:id="@+id/inboxButton"
         android:layout_width="0dp"
-        android:layout_height="56dp"
+        android:layout_height="68dp"
         android:layout_weight="1"
         android:background="@android:color/transparent"
         android:contentDescription="@string/nav_inbox"
+        android:drawableTop="@drawable/ic_inbox"
+        android:drawablePadding="4dp"
+        android:drawableTint="@color/dim"
         android:text="@string/nav_inbox"
         android:textAllCaps="false"
-        android:textSize="17sp" />
+        android:textSize="14sp" />
 </LinearLayout>
