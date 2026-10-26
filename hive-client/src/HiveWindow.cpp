@@ -937,6 +937,7 @@ void HiveWindow::maybe_show_connect_dialog() {
     error->add_css_class("error");
     error->set_visible(false);
     error->set_wrap(true);
+    error->set_max_width_chars(56);
     grid->attach(*sl, 0, 0);
     grid->attach(*server, 1, 0);
     grid->attach(*kl, 0, 1);
@@ -3257,6 +3258,7 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                         "The global library is empty — add skills on the web Skills page.");
                     l->set_halign(Gtk::Align::START);
                     l->set_wrap(true);
+                    l->set_max_width_chars(52);
                     l->add_css_class("dim-label");
                     list->append(*l);
                 }
@@ -3277,6 +3279,7 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                         auto* dl = Gtk::make_managed<Gtk::Label>(desc);
                         dl->set_halign(Gtk::Align::START);
                         dl->set_wrap(true);
+                        dl->set_max_width_chars(52);
                         dl->set_xalign(0);
                         dl->add_css_class("dim-label");
                         text->append(*dl);
@@ -3352,6 +3355,7 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                         "Local skills belong to " + aname + " — it manages them itself.");
                     note->set_halign(Gtk::Align::START);
                     note->set_wrap(true);
+                    note->set_max_width_chars(52);
                     note->set_xalign(0);
                     note->add_css_class("dim-label");
                     list->append(*note);
@@ -3400,6 +3404,7 @@ void HiveWindow::show_new_skill_dialog(Gtk::Window* parent) {
     err->add_css_class("error");
     err->set_halign(Gtk::Align::START);
     err->set_wrap(true);
+    err->set_max_width_chars(64);
 
     auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(label);
@@ -3454,6 +3459,7 @@ void HiveWindow::show_inspector(const nlohmann::json& agent) {
         vl->set_halign(Gtk::Align::START);
         vl->set_selectable(true);
         vl->set_wrap(true);
+        vl->set_max_width_chars(48);
         vl->set_xalign(0);
         row->append(*kl);
         row->append(*vl);
@@ -3817,6 +3823,7 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
     err->add_css_class("error");
     err->set_halign(Gtk::Align::START);
     err->set_wrap(true);
+    err->set_max_width_chars(64);
 
     auto add_row = [grid](const char* label, Gtk::Widget* w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(label);
@@ -4271,6 +4278,9 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         "machine you don't mind losing.\n"
         "Type I UNDERSTAND to enable:");
     host_warn->set_wrap(true);
+    // A wrapped label's natural width is its full unwrapped text unless
+    // capped; without this, Host mode makes the whole dialog ~2000 px wide.
+    host_warn->set_max_width_chars(64);
     host_warn->set_xalign(0);
     host_warn->add_css_class("error-label");
     auto* host_ack = Gtk::make_managed<Gtk::Entry>();
