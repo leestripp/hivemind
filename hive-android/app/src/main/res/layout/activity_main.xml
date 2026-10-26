@@ -49,4 +49,6 @@
         android:divider="@android:color/transparent"
         android:dividerHeight="12dp"
         android:paddingBottom="8dp" />
+
+    <include layout="@layout/view_bottom_nav" />
 </LinearLayout>

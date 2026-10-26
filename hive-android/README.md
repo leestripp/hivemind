@@ -1,6 +1,6 @@
 # hive-android — HiveMind Voice
 
-Voice-only Android client for the HiveMind hub. Pick an agent, get a
+Voice-first Android client for the HiveMind hub. Pick an agent, get a
 Jarvis-style sphere that moves with the voice signal, talk to it, hear
 the reply.
 
@@ -40,14 +40,13 @@ every agent can sound different. Sampling sets the voice, then speaks
 after a 250 ms beat: setVoice() races an immediately-queued speak()
 and the engine can drop the utterance silently.
 
-Voices follow the SENDER, not the session (Phase 68): an inbox note
-from Honey is read in Honey's configured voice even mid-chat with PA —
-the engine switches between utterances, never mid-sentence. A sender
-with no configured voice falls back to the session agent's voice, then
-the engine default. DM replies and system notices always use the
-session agent's voice. The app also clears the hub's persisted unread
-mark (`POST /api/threads/:id/read`) for every message it speaks, so
-voice sessions no longer leave phantom unread on desktop/web (66c).
+Voices follow the SENDER for state announcements and Inbox playback:
+a message from Honey is read in Honey's configured voice, not whichever
+agent's voice session was open previously. An inbox sender with no
+configured voice uses the engine default. DM replies and system notices
+use the session agent's voice. The app clears the hub's persisted unread
+mark (`POST /api/threads/:id/read`) for messages it speaks, and opening
+the Inbox clears that thread's unread mark on desktop/web too.
 
 ## Avatars
 
@@ -82,15 +81,14 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──fi
   and drops straight back into recording; ✕ stops to idle.
 - The voice screen holds FLAG_KEEP_SCREEN_ON for the whole session, so
   the phone can't lock mid-rant, mid-think, or mid-reply.
-- INBOX WATCH: at idle the app also polls the DM and the hub's User
-  Inbox (thread "user") for new agent messages and reads them out —
-  attributed ("PA says: …") for inbox notes, which can come from any
-  agent. Notes that arrive mid-recording or mid-reply queue silently
-  and play only at idle boundaries, in order — voices never interleave.
-  This is the voice-side answer to "ask PA to consult Bob and get back
-  to me": PA messages Bob (pair thread), then reports back with
-  message_user → the app speaks it. The outgoing prefix tells agents
-  exactly this flow.
+- INBOX: the bottom Agents / Inbox bar opens the hub's User Inbox
+  (thread "user"). The latest 300 messages render newest-first with
+  sender avatar/name, local timestamp, body, and attachment names; the
+  screen refreshes every 5 seconds and clears the persisted unread mark.
+  Tap a message to hear it in that sender's configured voice, tap another
+  to switch immediately, or use ■ to stop. The Inbox is deliberately not
+  auto-narrated during voice sessions (DM narration already covers the
+  agent's reply); it remains available for on-demand reading and speech.
 
 ## Build
 

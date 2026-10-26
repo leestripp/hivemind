@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout style="?android:attr/buttonBarStyle"
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingTop="8dp">
+
+    <Button
+        style="?android:attr/buttonBarButtonStyle"
+        android:id="@+id/agentsButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="@string/nav_agents"
+        android:text="@string/nav_agents"
+        android:textAllCaps="false"
+        android:textSize="17sp" />
+
+    <Button
+        style="?android:attr/buttonBarButtonStyle"
+        android:id="@+id/inboxButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="@string/nav_inbox"
+        android:text="@string/nav_inbox"
+        android:textAllCaps="false"
+        android:textSize="17sp" />
+</LinearLayout>

@@ -29,6 +29,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
     data class Message(
         val id: String, val senderKind: String, val body: String,
         val senderId: String,
+        val senderLabel: String = "",
         val createdAt: String = "",
         /** Raw attachments array: [{name, caption, path ("/workspace/…"),
          *  worker}] — see hive-client HiveWindow::show_image for the
@@ -298,6 +299,7 @@ class ApiClient(baseUrl: String, private val apiKey: String) {
                 senderKind = m.optString("sender_kind", ""),
                 body = m.optString("body", ""),
                 senderId = m.optString("sender_id", ""),
+                senderLabel = m.optString("sender_label", ""),
                 createdAt = m.optString("created_at", ""),
                 attachments = m.optJSONArray("attachments") ?: JSONArray(),
             ))

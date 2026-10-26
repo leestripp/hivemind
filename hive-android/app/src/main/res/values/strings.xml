@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HiveMind Voice</string>
+    <string name="nav_agents">Agents</string>
+    <string name="nav_inbox">Inbox</string>
+    <string name="inbox_title">Your Inbox</string>
+    <string name="loading_inbox">Loading inbox…</string>
+    <string name="stop_reading">Stop reading</string>
+    <string name="agent_avatar">Agent avatar</string>
+    <string name="empty_inbox">No inbox messages</string>
+    <string name="inbox_listen_hint">Tap a message to hear it</string>
+    <string name="no_tts_engine">No text-to-speech engine on this device</string>
+    <string name="hub_error">Hub error: %1$s</string>
+    <string name="reading_sender">Reading %1$s…</string>
+    <string name="no_readable_text">This message has no readable text</string>
+    <string name="stop_symbol" translatable="false">■</string>
+    <plurals name="inbox_message_count">
+        <item quantity="one">%1$d message · %2$s</item>
+        <item quantity="other">%1$d messages · %2$s</item>
+    </plurals>
 </resources>

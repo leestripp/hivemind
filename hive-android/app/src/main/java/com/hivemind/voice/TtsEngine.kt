@@ -290,7 +290,10 @@ class TtsEngine(
         currentId = null
         outstanding = 0
         speaking = false
-        epochBase = seq
+        // Advance BOTH counters: pocket synth does not consume utterance
+        // ids, so epochBase = seq left its in-flight jobs valid after stop.
+        // Advancing seq keeps new system utterances at/above the stale cutoff.
+        epochBase = ++seq
         player?.stop()
         tts?.stop()
     }

@@ -37,15 +37,15 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   markdown/lists/code, spoken-form numbers; consult via message_agent,
   report back via message_user), and replies pass a speech sanitizer
   (`SpeechText.forSpeech`) before TTS.
-- **Inbox watch** — at idle the app polls the DM AND the hub's User
-  Inbox (thread `"user"`) for new agent messages and reads them out,
-  attributed ("PA says: …") for inbox notes, which can come from any
-  agent. Notes arriving mid-recording or mid-reply queue silently and
-  play only at idle boundaries, in arrival order — voices never
-  interleave. With the agents' `message_agent` / `message_user` /
-  `read_user_inbox` tools this makes "ask PA to consult Bob and get
-  back to me" work end-to-end: pair-thread consultation, inbox
-  report-back, spoken delivery.
+- **Visible User Inbox** — the roster's bottom Agents / Inbox bar opens
+  hub thread `"user"`. The latest 300 messages render newest-first with
+  sender avatar/name, local timestamps, bodies, and attachment names.
+  The screen refreshes every 5 seconds and clears the persisted user
+  unread mark. Tapping a message reads it in the sender's configured
+  voice; tapping another switches playback, and ■ stops it. Inbox notes
+  are not auto-narrated during voice sessions (DM narration covers the
+  reply), avoiding duplicate speech while keeping them available on
+  demand.
 - **Per-agent voices** — long-press an agent card for the voice picker:
   single tap samples a voice ("Hi, I'm PA — this is my voice."), double
   tap selects it for that agent (Prefs `voice_<agentId>`; applied when

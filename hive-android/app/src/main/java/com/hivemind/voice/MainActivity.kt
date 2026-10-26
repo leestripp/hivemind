@@ -79,6 +79,14 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        findViewById<Button>(R.id.agentsButton).setTextColor(
+            getColor(R.color.cyan))
+        findViewById<Button>(R.id.inboxButton).apply {
+            setTextColor(getColor(R.color.dim))
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, InboxActivity::class.java))
+            }
+        }
         list.setOnItemClickListener { _, _, position, _ ->
             when (val row = adapter?.getItem(position) ?: return@setOnItemClickListener) {
                 is Row.Header -> adapter?.toggle(row.worker)

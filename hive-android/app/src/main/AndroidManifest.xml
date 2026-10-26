@@ -27,6 +27,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".InboxActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
         <activity android:name=".VoiceActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
         <activity android:name=".VoicePickerActivity" android:exported="false"
