@@ -11,7 +11,8 @@ namespace {
 
 // Static Kimi model table, from the platform model list
 // (https://platform.moonshot.ai/docs/models, 2026-07):
-//   kimi-k3                    1M context
+//   kimi-k3.1-pro(-highspeed)  1M context, temperature fixed at 1.0
+//   kimi-k3                    1M context, temperature fixed at 1.0
 //   kimi-k2.7-code(-highspeed) 256K context, temperature fixed at 1.0
 //   kimi-k2.6 / kimi-k2.5      256K context, thinking + non-thinking
 //   moonshot-v1-*              8K / 32K / 128K context
@@ -27,6 +28,8 @@ namespace {
 // for kimi-for-coding (confirmed against the live server 2026-07-31), so
 // clamp_temperature() covers both.
 const ProviderModelInfo kModels[] = {
+    {"kimi-k3.1-pro",             1000000, 1.0, true,  true},
+    {"kimi-k3.1-pro-highspeed",   1000000, 1.0, true,  true},
     {"kimi-k3",                     1000000, 1.0, true,  true},
     {"k3",                          1000000, 1.0, true,  true},
     {"k3-256k",                      262144, 1.0, true,  true},
@@ -34,7 +37,7 @@ const ProviderModelInfo kModels[] = {
     {"kimi-k2.7-code-highspeed",     262144, 1.0, true,  true},
     {"kimi-for-coding",              262144, 1.0, true,  true},
     {"kimi-for-coding-highspeed",    262144, 1.0, true,  true},
-    {"kimi-k2.6",                    262144, 0.6, true,  true},
+    {"kimi-k2.6",                    262144, 1.0, true,  true},
     {"kimi-k2.5",                    262144, 0.6, true,  true},
     {"moonshot-v1-8k",                 8192, 0.3, false, false},
     {"moonshot-v1-32k",               32768, 0.3, false, false},
@@ -83,9 +86,10 @@ double MoonshotPlugin::clamp_temperature(std::string_view model_id, double t) co
     // same rule; its k3/k3-256k IDs enforce it too (both confirmed
     // empirically against the live server 2026-07-31: "invalid
     // temperature: only 1 is allowed for this model"). Scoped to the
-    // exact Kimi Code k3 IDs so the platform's kimi-k3 (no documented
-    // or observed restriction) is left alone.
+    // K3/K3.1 platform IDs too (official Model Parameter Reference,
+    // 2026-10: K3.1 has the same fixed-1.0 constraint as K3).
     if (icontains(model_id, "k2.7-code") ||
+        istarts_with(model_id, "kimi-k3") ||
         icontains(model_id, "kimi-for-coding") ||
         iequals(model_id, "k3") ||
         istarts_with(model_id, "k3-")) {

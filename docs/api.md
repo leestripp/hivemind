@@ -112,6 +112,13 @@ override wins, else the model's, and the effective value rides
 `op.llm.thinking_level` to the agent, which applies it via its runtime
 `set_thinking_level`.
 
+`POST /api/providers/:name/discover` fetches `{host}/v1/models` and
+populates context/default-temperature metadata from the provider response,
+with the hub's Moonshot/MiniMax catalog filling omitted values. This
+includes `kimi-k3.1-pro` and `kimi-k3.1-pro-highspeed` (1M context,
+fixed temperature 1.0). Re-discovery preserves each model's
+`thinking_level` and any previously known metadata the provider omitted.
+
 ## Skills
 
 | Endpoint | Notes |

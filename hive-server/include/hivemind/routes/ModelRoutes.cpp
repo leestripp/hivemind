@@ -5,10 +5,12 @@
 #include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/routes/RouteUtil.h"
 #include "hivemind/LlmStore.h"
+#include "hivemind/ModelCatalog.h"
 
 #include <nlohmann/json.hpp>
 #include <http/HttpClient.h>
 
+#include <algorithm>
 #include <cctype>
 
 using json = nlohmann::json;
@@ -104,6 +106,7 @@ void register_model_routes(OmniNet::HTTP::Server& server, LlmStore& llm) {
             if (doc.is_discarded() || !doc.contains("data") || !doc["data"].is_array()) {
                 send_error(resp, 502, "unexpected /v1/models payload"); return;
             }
+            const auto existing_models = llm.list_models();
             json added = json::array();
             for (const auto& m : doc["data"]) {
                 const std::string id = m.value("id", "");
@@ -111,6 +114,18 @@ void register_model_routes(OmniNet::HTTP::Server& server, LlmStore& llm) {
                 try {
                     LlmModelInfo mi;
                     mi.name = id; mi.provider = prov->name; mi.model_id = id;
+                    const auto metadata = hivemind::model_metadata(prov->plugin, prov->host,
+                                                         id, &m);
+                    mi.max_context = metadata.max_context;
+                    mi.temperature = metadata.temperature;
+                    const auto existing = std::find_if(
+                        existing_models.begin(), existing_models.end(),
+                        [&id](const LlmModelInfo& old) { return old.name == id; });
+                    if (existing != existing_models.end()) {
+                        mi.thinking_level = existing->thinking_level;
+                        if (mi.max_context == 0) mi.max_context = existing->max_context;
+                        if (mi.temperature == 0.0) mi.temperature = existing->temperature;
+                    }
                     llm.upsert_model(mi);
                     added.push_back(id);
                 } catch (...) {}

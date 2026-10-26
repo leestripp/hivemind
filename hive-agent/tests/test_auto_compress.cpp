@@ -1115,21 +1115,23 @@ TEST_SUITE("handle_compress_context_result (§COMPRESS-TOOL)") {
     TEST_CASE("Reason is optional for acceptance") {
         LLMClient client(make_compress_handler_config(
             make_temp_home("handler_noreason")));
-        CHECK(client.handle_compress_context_result(
-                  {{"status", "compress_context"}}) == true);
+        json no_reason = {{"status", "compress_context"}};
+        CHECK(client.handle_compress_context_result(no_reason) == true);
     }
 
     TEST_CASE("Rejected payloads return false") {
         LLMClient client(make_compress_handler_config(
             make_temp_home("handler_reject")));
-        CHECK(client.handle_compress_context_result(json::object()) == false);
-        CHECK(client.handle_compress_context_result(
-                  {{"status", "success"}}) == false);
-        CHECK(client.handle_compress_context_result(
-                  {{"status", "error"}, {"message", "boom"}}) == false);
-        CHECK(client.handle_compress_context_result(
-                  {{"status", "set_state"}, {"state", "Acting"}}) == false);
-        CHECK(client.handle_compress_context_result(json::array()) == false);
+        json empty_object = json::object();
+        json wrong_status = {{"status", "success"}};
+        json error_status = {{"status", "error"}, {"message", "boom"}};
+        json wrong_tool = {{"status", "set_state"}, {"state", "Acting"}};
+        json array_result = json::array();
+        CHECK(client.handle_compress_context_result(empty_object) == false);
+        CHECK(client.handle_compress_context_result(wrong_status) == false);
+        CHECK(client.handle_compress_context_result(error_status) == false);
+        CHECK(client.handle_compress_context_result(wrong_tool) == false);
+        CHECK(client.handle_compress_context_result(array_result) == false);
     }
 
     // 2026-10-23 (Bob stuck-loop): one voluntary compress per turn. The

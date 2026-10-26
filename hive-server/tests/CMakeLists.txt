@@ -52,4 +52,5 @@ hivemind_test(test_secret_routes)
 
 # Phase 43: hub LlmStore (provider/model registry, dispatch resolution).
 hivemind_test(test_llmstore)
+hivemind_test(test_model_catalog)
 hivemind_test(test_share_store)

@@ -58,17 +58,18 @@ void test_ms2_temperature_clamp() {
     EXPECT(p->clamp_temperature("kimi-k2.7-code-highspeed", 0.3) == 1.0);
     // Other models pass through unchanged.
     EXPECT(p->clamp_temperature("kimi-k2.6", 0.7) == 0.7);
-    EXPECT(p->clamp_temperature("kimi-k3", 0.2) == 0.2);
+    EXPECT(p->clamp_temperature("kimi-k3", 0.2) == 1.0);
+    EXPECT(p->clamp_temperature("kimi-k3.1-pro", 0.2) == 1.0);
+    EXPECT(p->clamp_temperature("kimi-k3.1-pro-highspeed", 0.7) == 1.0);
     EXPECT(p->clamp_temperature("moonshot-v1-8k", 0.5) == 0.5);
     // Kimi Code endpoint IDs are the same K2.7 Code model — same clamp
     // (the live server rejects other temperatures).
     EXPECT(p->clamp_temperature("kimi-for-coding", 0.0) == 1.0);
     EXPECT(p->clamp_temperature("kimi-for-coding-highspeed", 0.5) == 1.0);
-    // The Kimi Code k3 IDs enforce temperature=1.0 too (live server);
-    // the platform's kimi-k3 is deliberately NOT clamped (no evidence).
+    // Kimi Code and platform K3/K3.1 IDs all enforce temperature=1.0.
     EXPECT(p->clamp_temperature("k3", 0.0) == 1.0);
     EXPECT(p->clamp_temperature("k3-256k", 0.3) == 1.0);
-    EXPECT(p->clamp_temperature("kimi-k3", 0.2) == 0.2);
+    EXPECT(p->clamp_temperature("kimi-k3", 0.2) == 1.0);
     std::cout << "[ok] MS2: Moonshot temperature clamp\n";
 }
 
@@ -103,6 +104,8 @@ void test_ms4_context_sizes() {
     auto p = hive::ProviderRegistry::plugin_for_name("moonshot");
     EXPECT(p != nullptr);
     EXPECT(p->context_size_for("kimi-k3") == 1000000);
+    EXPECT(p->context_size_for("kimi-k3.1-pro") == 1000000);
+    EXPECT(p->context_size_for("kimi-k3.1-pro-highspeed") == 1000000);
     EXPECT(p->context_size_for("kimi-k2.7-code") == 262144);
     EXPECT(p->context_size_for("kimi-k2.6") == 262144);
     EXPECT(p->context_size_for("Kimi-K2.5") == 262144);   // case-insensitive
