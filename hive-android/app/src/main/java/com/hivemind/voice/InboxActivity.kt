@@ -26,6 +26,7 @@ class InboxActivity : Activity() {
         private const val INBOX_THREAD_ID = "user"
         private const val POLL_MS = 5_000L
         private const val MAX_UTTERANCE_CHARS = 3_000
+        private const val SENTENCE_ENDINGS = ".!?;:\n"
     }
 
     private val io = Executors.newSingleThreadExecutor()
@@ -172,18 +173,34 @@ class InboxActivity : Activity() {
         queueSpeech(clean)
     }
 
-    /** Android's TTS engines reject oversized utterances; preserve every
-     *  word and avoid splitting a UTF-16 surrogate pair at a hard cut. */
+    /** Queue sentences separately so the first one can play while later
+     *  sentences synthesize in the background. Oversized sentences are
+     *  split at word boundaries, never through a UTF-16 surrogate pair. */
     private fun queueSpeech(text: String) {
-        var rest = text
-        while (rest.length > MAX_UTTERANCE_CHARS) {
-            var cut = rest.lastIndexOf(' ', MAX_UTTERANCE_CHARS)
-            if (cut < MAX_UTTERANCE_CHARS / 2) cut = MAX_UTTERANCE_CHARS
-            if (cut > 0 && rest[cut - 1].isHighSurrogate()) cut--
-            tts.speakQueued(rest.substring(0, cut).trim())
-            rest = rest.substring(cut).trimStart()
+        for (sentence in sentenceChunks(text)) {
+            var rest = sentence
+            while (rest.length > MAX_UTTERANCE_CHARS) {
+                var cut = rest.lastIndexOf(' ', MAX_UTTERANCE_CHARS)
+                if (cut < MAX_UTTERANCE_CHARS / 2) cut = MAX_UTTERANCE_CHARS
+                if (cut > 0 && rest[cut - 1].isHighSurrogate()) cut--
+                tts.speakQueued(rest.substring(0, cut).trim())
+                rest = rest.substring(cut).trimStart()
+            }
+            if (rest.isNotEmpty()) tts.speakQueued(rest)
         }
-        if (rest.isNotEmpty()) tts.speakQueued(rest)
+    }
+
+    private fun sentenceChunks(text: String): List<String> = buildList {
+        var start = 0
+        for (i in text.indices) {
+            if (text[i] !in SENTENCE_ENDINGS) continue
+            if (i + 1 < text.length && !text[i + 1].isWhitespace()) continue
+            val sentence = text.substring(start, i + 1).trim()
+            if (sentence.isNotEmpty()) add(sentence)
+            start = i + 1
+        }
+        val tail = text.substring(start).trim()
+        if (tail.isNotEmpty()) add(tail)
     }
 
     private fun senderName(message: ApiClient.Message): String =

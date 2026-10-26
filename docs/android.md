@@ -42,7 +42,9 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   sender avatar/name, local timestamps, bodies, and attachment names.
   The screen refreshes every 5 seconds and clears the persisted user
   unread mark. Tapping a message reads it in the sender's configured
-  voice; tapping another switches playback, and ■ stops it. Inbox notes
+  voice, streamed sentence-by-sentence so playback starts while later
+  sentences synthesize; tapping another switches playback, and ■ stops
+  it. Inbox notes
   are not auto-narrated during voice sessions (DM narration covers the
   reply), avoiding duplicate speech while keeping them available on
   demand.

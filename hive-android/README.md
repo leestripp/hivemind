@@ -85,8 +85,9 @@ IDLE ──tap TALK──▶ LISTENING ──tap SEND──▶ THINKING ──fi
   (thread "user"). The latest 300 messages render newest-first with
   sender avatar/name, local timestamp, body, and attachment names; the
   screen refreshes every 5 seconds and clears the persisted unread mark.
-  Tap a message to hear it in that sender's configured voice, tap another
-  to switch immediately, or use ■ to stop. The Inbox is deliberately not
+  Tap a message to hear it in that sender's configured voice, streamed
+  sentence-by-sentence so the first sentence plays while later ones
+  synthesize; tap another message to switch, or use ■ to stop. The Inbox is deliberately not
   auto-narrated during voice sessions (DM narration already covers the
   agent's reply); it remains available for on-demand reading and speech.
 
