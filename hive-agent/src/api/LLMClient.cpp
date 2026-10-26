@@ -219,8 +219,6 @@ LLMClient::LLMClient(const AppConfig& config, hive::SettingsStore* settings_stor
     LOG_INFO(std::string("[ProviderPlugin] active plugin: ") + plugin_->name() +
              " (provider='" + config_.provider + "', model='" + config_.model + "')");
 
-    // Load persisted command approvals
-    ToolHandler::load_persisted_approvals(config.target_directory, config.agent_name);
     // Initialize current working directory tracker with project root
     ToolHandler::init_current_working_directory(config.target_directory);
     
@@ -255,12 +253,6 @@ LLMClient::LLMClient(const AppConfig& config, hive::SettingsStore* settings_stor
         max_request_size_ = settings_store->get_max_request_size();
         max_response_size_ = settings_store->get_max_response_size();
 
-        // §BUG-007 fix: honour AppConfig::auto_mode (computed by AgentImpl,
-        // the single authority) unconditionally. Previously this only ever
-        // set the global flag ON from the settings store, so a host-forced
-        // OFF was silently re-enabled when the LLMClient was constructed.
-        ToolHandler::set_auto_mode(config_.auto_mode);
-        
         // Initialize Messages with settings
         MessageCompressionConfig messages_config;
         // §Phase 8.5+: use the *selected* model's max_context_size, not the

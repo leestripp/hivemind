@@ -102,13 +102,6 @@ public:
     ///        `cfg.mcp_enabled == false` or no servers are configured.
     [[nodiscard]] std::vector<std::string> mcp_configured_servers() const;
     [[nodiscard]] ModelInfo              active_model() const noexcept;
-    [[nodiscard]] bool                   auto_approve() const noexcept;
-
-    // §BUG-006/007/008: host-facing approval control. See hive-brain/Agent.h.
-    void set_auto_approve(bool enabled) noexcept;
-    void clear_session_approvals() noexcept;
-    void clear_persisted_approvals() noexcept;
-    void set_remember_approvals(bool enabled) noexcept;
     static std::string     library_version() noexcept;
     static ModelDiscoveryResult discover_models(
         const std::string& model_name,

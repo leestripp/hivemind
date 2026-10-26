@@ -121,7 +121,6 @@ std::string SystemPromptBuilder::getStateMachineSection() {
         "| State | Meaning |\n"
         "|-------|---------|\n"
         "| `Idle` | Constructed / resting between turns — no work in flight. |\n"
-        "| `AwaitingApproval` | A bash command is waiting for host approval. |\n"
         "| `Compressing` | Context compaction in flight. |\n"
         "\n"
         "**`set_status` never exits the agent loop** — no state does, not\n"

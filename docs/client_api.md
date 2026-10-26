@@ -38,7 +38,6 @@ What the window currently shows/knows (GTK-thread snapshot).
   "connected": true,
   "current_thread": "cf0b48a8-…",
   "busy": false,
-  "pending_approvals": 0,
   "status": "Connected — 1 agents, 2 threads",
   "agents":  [ { "id": "…", "name": "Bob", … } ],
   "threads": [ { "id": "…", "title": "…", "kind": "dm", … } ],

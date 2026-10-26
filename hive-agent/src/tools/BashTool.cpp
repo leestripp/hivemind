@@ -154,32 +154,9 @@ json BashTool::execute(const json& args, FileIO& file_io, ToolProgressFn progres
 
         const std::string project_path = file_io.get_project_path().string();
 
-        // ===== Security / approval (only for run and start) =====
-        if (action == Action::Run || action == Action::Start) {
-            if (command.empty()) {
-                return json::object({{"status", "error"}, {"message", "Missing or empty 'command' argument"}});
-            }
-
-            // Block privilege escalation
-            if (BashPathChecker::contains_privilege_escalation(command) && !ToolHandler::is_auto_mode_enabled()) {
-                return json::object({
-                    {"status", "error"},
-                    {"message", BashPathChecker::privilege_escalation_message(command)}
-                });
-            }
-
-            // Ask host for approval
-            if (!ToolHandler::request_command_approval(command)) {
-                return json::object({
-                    {"status", "denied"},
-                    {"message", "Command denied by host."}
-                });
-            }
-            // §BUG-008: hosts can opt out of auto-recording approvals
-            // ("ask every time" semantics) via set_remember_approvals(false).
-            if (ToolHandler::remember_approvals_enabled()) {
-                ToolHandler::add_session_approved_command_internal(command);
-            }
+        if ((action == Action::Run || action == Action::Start) && command.empty()) {
+            return json::object({{"status", "error"},
+                                 {"message", "Missing or empty 'command' argument"}});
         }
 
         // ===== Dispatch =====
@@ -426,24 +403,4 @@ json BashTool::stop_background(const std::string& process_id) {
         {"process_id", process_id},
         {"message", "Process stopped and resources cleaned up"}
     });
-}
-
-// Safe diagnostic prefixes for syntax checking (allowed without path restrictions)
-const std::vector<std::string>& BashTool::get_safe_diagnostic_prefixes() {
-    static const std::vector<std::string> prefixes = {
-        "node --check", "node -c",
-        "python -m py_compile", "python -m pyflakes", "python -m mypy",
-        "python -m pylint", "python -m flake8", "python -m ruff",
-        "python -m black --check", "python -m isort --check-only",
-        "python -m pytest --collect-only", "python -m pytest --dry-run",
-        "rustc --check", "cargo check", "cargo clippy",
-        "cargo test --no-run", "cargo build --dry-run",
-        "g++ -fsyntax-only", "gcc -fsyntax-only",
-        "clang++ -fsyntax-only", "clang -fsyntax-only",
-        "cmake -N", "cmake --build . --target help",
-        "go build -n", "go vet", "go test -c", "go mod verify",
-        "npx tsc --noEmit", "npx eslint --no-eslintrc --quiet",
-        "ruby -c", "perl -c", "shellcheck",
-    };
-    return prefixes;
 }

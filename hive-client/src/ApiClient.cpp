@@ -82,25 +82,18 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& role,
                                        const std::string& model,
                                        const std::string& workspace_mode,
-                                       bool require_approval,
                                        const std::string& avatar,
                                        const std::string& worker,
                                        const std::string& type,
                                        const std::string& memory,
                                        double cpus,
                                        const std::string& thinking_level,
-                                       int host_agent,
-                                       const std::string& host_agent_ack) {
+                                       int host_agent) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
-                        {"require_approval", require_approval},
                         {"avatar", avatar}};
-    // Phase 72: host agent (bare-metal sudo) — the hub 400s without the
-    // ack; we only send the flag when the dialog set it.
-    if (host_agent >= 0) {
-        body["host_agent"] = host_agent == 1;
-        if (!host_agent_ack.empty()) body["host_agent_ack"] = host_agent_ack;
-    }
+    // Phase 72: host agent (bare-metal sudo); omit when unchanged.
+    if (host_agent >= 0) body["host_agent"] = host_agent == 1;
     if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
     if (!type.empty())   body["type"]   = type;     // Phase 35
     if (!memory.empty()) body["memory"] = memory;   // Phase 69
@@ -114,18 +107,15 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& role,
                                        const std::string& model,
                                        const std::string& workspace_mode,
-                                       bool require_approval,
                                        const std::string& avatar,
                                        const std::string& worker,
                                        const std::string& type,
                                        const std::string& memory,
                                        double cpus,
                                        const std::string& thinking_level,
-                                       int host_agent,
-                                       const std::string& host_agent_ack) {
+                                       int host_agent) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
-                        {"require_approval", require_approval},
                         {"avatar", avatar},
                         {"worker", worker}};   // server: "" = keep current
     if (!type.empty()) body["type"] = type;    // Phase 35: "" keep, "default" clears
@@ -134,12 +124,8 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
     // 2026-10-01: the dialog always sends the effective selection —
     // "" (inherit), "default" (clear), or a level.
     body["thinking_level"] = thinking_level;
-    // Phase 72: -1 = omit (keep); 0/1 = set (clearing needs no ack,
-    // enabling does — the hub enforces).
-    if (host_agent >= 0) {
-        body["host_agent"] = host_agent == 1;
-        if (!host_agent_ack.empty()) body["host_agent_ack"] = host_agent_ack;
-    }
+    // Phase 72: -1 = omit (keep); 0/1 = set.
+    if (host_agent >= 0) body["host_agent"] = host_agent == 1;
     return request("PATCH", "/api/agents/" + id, &body);
 }
 
@@ -367,17 +353,6 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
 
 nlohmann::json ApiClient::activity(const std::string& thread_id) {
     return request("GET", "/api/threads/" + thread_id + "/activity");
-}
-
-// ── approvals ───────────────────────────────────────────────────────────────
-
-nlohmann::json ApiClient::list_approvals(const std::string& status) {
-    return request("GET", "/api/approvals?status=" + status);
-}
-
-nlohmann::json ApiClient::resolve_approval(const std::string& id, bool approve) {
-    return request("POST", "/api/approvals/" + id +
-                   (approve ? "/approve" : "/deny"), nullptr);
 }
 
 // ── misc ────────────────────────────────────────────────────────────────────

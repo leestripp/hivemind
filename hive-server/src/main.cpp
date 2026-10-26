@@ -32,7 +32,6 @@
 #include "hivemind/routes/ConnectorRoutes.h"
 #include "hivemind/ConnectorStore.h"
 #include "hivemind/routes/ContainerRoutes.h"
-#include "hivemind/routes/ApprovalRoutes.h"
 #include "hivemind/routes/RoutineRoutes.h"
 #include "hivemind/routes/SkillRoutes.h"
 #include "hivemind/routes/SecretRoutes.h"
@@ -57,7 +56,6 @@
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/ShareStore.h"
 #include "hivemind/HubRouter.h"
-#include "hivemind/ApprovalStore.h"
 
 #include <OmniNet.h>
 #include <nlohmann/json.hpp>
@@ -136,15 +134,6 @@ int main(int argc, char* argv[]) {
     AgentStore agent_store;
     ThreadStore thread_store;
     thread_store.ensure_user_thread();   // Phase 44: User Inbox always exists
-    ApprovalStore approval_store;
-    // 2026-10-22 (bug sweep 3): approvals still 'pending' at boot are
-    // orphans — the in-memory request-id relay (HubRouter pend_appr_)
-    // died with the previous process, so no client decision can ever
-    // reach them and the waiting turn is already gone (broker auto-deny
-    // / watchdog). Deny them so the client never sees unresolvable
-    // ghost approvals after a hub restart/deploy.
-    for (auto& a : approval_store.list("pending"))
-        approval_store.resolve(a.id, false);
     RoutineStore routine_store;
     // 2026-09-23 migration: routine threads were created as kind "dm",
     // which made find_dm() resolve an agent's user DM to the LAST-created
@@ -166,7 +155,7 @@ int main(int argc, char* argv[]) {
     // Phase C: pure hub. Turns run on workers (hive-agent); the HubRouter
     // dispatches task ops over the worker channel and feeds results back.
     hivemind::SecretStore secret_store;   // hoisted: hub handles secret_req
-    HubRouter hub{agent_store, thread_store, worker_channel, approval_store,
+    HubRouter hub{agent_store, thread_store, worker_channel,
                   routine_store, secret_store};
     hub.set_llm_store(&llm_store);
     // Phase 66b: durable delivery queue. Boot recovery — wakes left
@@ -330,7 +319,6 @@ int main(int argc, char* argv[]) {
                          &worker_channel);
     register_connector_routes(server, connector_store, secret_store);
     register_container_routes(server, agent_store);
-    register_approval_routes(server, hub, approval_store, agent_store);
     register_key_routes(server, auth_store);
     register_worker_routes(server, worker_store, worker_channel);
     register_migration_routes(server, migration_service);

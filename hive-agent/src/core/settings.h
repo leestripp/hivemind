@@ -140,12 +140,6 @@ public:
     /// Set the current provider label in kv_settings.
     void set_current_provider(std::string_view provider);
 
-    /// Get auto_approve from kv_settings. Default false.
-    bool get_auto_approve() const;
-
-    /// Set auto_approve in kv_settings.
-    void set_auto_approve(bool value);
-
     /// Get the resolved max_context_size for `model_name`.
     /// Returns the user's setting from `models` table if set (non-zero),
     /// otherwise falls back to the built-in default for known models.

@@ -40,7 +40,6 @@ public:
                         const nlohmann::json&) noexcept override {}
     void on_state_change(int, int) noexcept override {}
     void on_log(hive::LogLevel, std::string_view) noexcept override {}
-    bool request_command_approval(std::string_view) override { return false; }
     void on_bell() noexcept override {}
 };
 

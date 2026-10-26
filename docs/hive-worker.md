@@ -13,8 +13,9 @@ NO container, NO sandbox. Machine-destroying power; see
 [docs/host-agents.md](host-agents.md) before opting in. Provisioning is
 manual and local only: `sudo hive-worker provision-host-agent <name>`
 (hostname type-to-confirm; creates user, sudoers entry via `visudo -c`,
-installs the binary). The hub gates creation on both the worker's
-advertised `host_agents` capability and a typed `I UNDERSTAND` ack.
+installs the binary). The hub checks the worker's advertised
+`host_agents` capability. No typed acknowledgment or command approval is
+required; host agents execute directly as their provisioned unix user.
 
 Two operational flags round the story out:
 
@@ -88,8 +89,7 @@ Hub -> worker:
 | `welcome` / `error` | | handshake reply |
 | `task` | id, agent_id, thread_id, text, roster, user_inbox, disabled_skills, llm | run one agent turn (roster/user_inbox feed the agent's list_agents and read_user_inbox tools) |
 | `cancel` | agent_id | abort the in-flight turn |
-| `approval_resp` | id, allow | user's approve/deny for a pending tool call |
-| `agent_spawn` | agent_id, name, model, system_prompt, auto_approve, mcp_servers, secret_env | create/ensure container + exec hive-agent. Re-spawn of a running agent compares the whole spec: identical = no-op, changed (new secret grants, model, prompt...) = graceful restart with the fresh spec (Phase 65) |
+| `agent_spawn` | agent_id, name, model, system_prompt, mcp_servers, secret_env | create/ensure container + exec hive-agent. Re-spawn of a running agent compares the whole spec: identical = no-op, changed (new secret grants, model, prompt...) = graceful restart with the fresh spec (Phase 65) |
 | `agent_stop` / `agent_remove` | agent_id | stop exec / reap container + home |
 | `exec` | id, agent, argv, env, timeout_s | one-shot command in the agent's container (exec_chunk/exec_done back) |
 | `file_fetch` / `file_push` / `file_list` | | move bytes hub<->worker workspace, list dirs |
@@ -107,7 +107,6 @@ Worker -> hub:
 | `spawn_req` | ask the hub to re-push `agent_spawn` (sent after a crash-respawn, which reuses the worker's cached spec — keeps secret grants/model/prompt fresh across restarts) |
 | `task_delta` | streamed reply text while a turn runs |
 | `task_result` | final reply body (or error) + any attachment records for a task |
-| `approval_req` | agent asks for human approval (tool call) |
 | `agent_msg` | agent->agent message (fan-in at the hub) |
 | `agent_log` | anything else the agent emits |
 | `exec_chunk` / `exec_done` | exec output / completion |
@@ -181,8 +180,8 @@ hub --task--> worker --stdin--> hive-agent (podman exec -i, CWD=/workspace)
 hub <--ops--- worker <--stdout-- hive-agent
 ```
 
-hive-agent stdin ops: `task` {id,text,thread_id}, `approval_resp`
-{id,allow}, `cancel`, `shutdown` (persists hive-brain history, exits 0).
+hive-agent stdin ops: `task` {id,text,thread_id}, `cancel`, `shutdown`
+(persists hive-brain history, exits 0).
 
 hive-agent stdout events and the channel op the worker maps them to:
 
@@ -191,7 +190,6 @@ hive-agent stdout events and the channel op the worker maps them to:
 | `ready` | `agent_status` state=ready |
 | `delta` {task,text} | `task_delta` |
 | `message` {task,thread_id,body,error} | `task_result` |
-| `approval_request` {id,command} | `approval_req` |
 | `send_agent_message` {target,text} | `agent_msg` |
 | `status` {state,error} | `agent_status` |
 | anything else | `agent_log` |

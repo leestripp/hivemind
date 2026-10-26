@@ -355,14 +355,6 @@ int main(int argc, char* argv[]) {
                 if (ev.contains("stats") && ev["stats"].is_object())
                     f["stats"] = ev["stats"];
             }
-            else if (kind == "approval_request")
-                f = {{"op","approval_req"},{"agent",agent_id},
-                     {"id",ev.value("id","")},
-                     {"command",ev.value("command","")}};
-            else if (kind == "approval_resolved")
-                f = {{"op","approval_resolved"},{"agent",agent_id},
-                     {"id",ev.value("id","")},
-                     {"allow",ev.value("allow",false)}};
             else if (kind == "send_agent_message")
                 f = {{"op","agent_msg"},{"agent",agent_id},
                      {"target",ev.value("target","")},
@@ -729,7 +721,6 @@ int main(int argc, char* argv[]) {
                             spec.provider      = specj.value("provider","");
                             spec.max_context   = specj.value("max_context",0L);
                             spec.temperature   = specj.value("temperature",-1.0);
-                            spec.auto_approve  = specj.value("auto_approve",false);
                             spec.system_prompt = specj.value("system_prompt","");
                             spec.mcp_servers   = specj.value("mcp_servers",
                                                              json::array());
@@ -836,7 +827,7 @@ int main(int argc, char* argv[]) {
                     }).detach();
                     return;
                 }
-                if (op == "task" || op == "approval_resp" || op == "cancel" ||
+                if (op == "task" || op == "cancel" ||
                     op == "routine_resp" || op == "secret_resp" ||
                     op == "msg_send_resp" || op == "msg_status_resp" ||
                     op == "msg_mark_resp" ||

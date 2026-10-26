@@ -12,7 +12,6 @@
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/SecretStore.h"
 
@@ -61,21 +60,20 @@ int main() {
 
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
-    ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
-    MockHub hub{agents, threads, wchannel, approvals, routines, secrets};
+    MockHub hub{agents, threads, wchannel, routines, secrets};
     hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
     ChatService chat{agents, threads, hub, deliveries};
     hub.set_chat_service(&chat);
 
     (void)wstore.enroll("testrig");
-    auto bob   = agents.create_agent("Bob",   "", "", "", false, "",
+    auto bob   = agents.create_agent("Bob",   "", "", "", "",
                                      "testrig");
-    auto honey = agents.create_agent("Honey", "", "", "", false, "",
+    auto honey = agents.create_agent("Honey", "", "", "", "",
                                      "testrig");
     auto dm = threads.create_thread("Bob", "dm", {bob.id});
 

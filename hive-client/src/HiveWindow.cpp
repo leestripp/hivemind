@@ -270,9 +270,7 @@ static void install_dialog_titlebar(Gtk::Dialog& dialog,
 
 void HiveWindow::setup_icons() {
     // Build the persistent widget structure exactly once. Retinting on theme
-    // change only swaps pixbufs into these same Gtk::Image widgets —
-    // reparenting a managed member widget on retint let GTK destroy
-    // approvals_label_ and crashed poll_approvals (2026-08-23).
+    // change only swaps pixbufs into these same Gtk::Image widgets.
     auto slot = [this](Gtk::Button& btn, const std::string& icon,
                        const std::string& tip) {
         auto* img = Gtk::make_managed<Gtk::Image>();
@@ -289,20 +287,11 @@ void HiveWindow::setup_icons() {
     slot(send_btn_,          "send",       "Send message");
 
 
-    // Approvals: icon + live count label, stable structure.
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
-    approvals_icon_.set(themed_icon_pixbuf("approvals", 16, dark_mode_));
-    approvals_label_.set_label("Approvals");
-    box->append(approvals_icon_);
-    box->append(approvals_label_);
-    approvals_btn_.set_child(*box);
-    approvals_btn_.set_tooltip_text("Pending approvals");
 }
 
 void HiveWindow::refresh_themed_icons() {
     for (auto& s : icon_slots_)
         s.img->set(themed_icon_pixbuf(s.icon, 16, dark_mode_));
-    approvals_icon_.set(themed_icon_pixbuf("approvals", 16, dark_mode_));
 }
 
 nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
@@ -310,7 +299,6 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
         if (name == "new-thread")      on_new_thread();
         else if (name == "new-agent")  on_new_agent();
         else if (name == "settings")   on_settings();
-        else if (name == "approvals")  on_approvals();
         else return json{{"error", "unknown dialog"}};
         return json{{"opened", name}};
     });
@@ -594,25 +582,15 @@ HiveWindow::HiveWindow() {
         sigc::mem_fun(*this, &HiveWindow::on_new_thread));
     tasks_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_new_task));
-    approvals_btn_.signal_clicked().connect(
-        sigc::mem_fun(*this, &HiveWindow::on_approvals));
     connect_btn_.signal_clicked().connect(
         [this] { maybe_show_connect_dialog(); });
     settings_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_settings));
-    learn_btn_.set_label("🎓 Learn");
-    learn_btn_.set_tooltip_text(
-        "Learn-by-demonstration: the agent distills this thread's workflow "
-        "into a scheduled routine (save_routine)");
-    learn_btn_.signal_clicked().connect([this] { on_learn_routine(); });
-    learn_btn_.set_sensitive(false);   // enabled with a thread selection
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(settings_btn_);
-    header_.pack_end(learn_btn_);
-    header_.pack_end(approvals_btn_);
     // CSD: install our HeaderBar AS the window titlebar so the compositor
     // doesn't draw a second (server-side) title bar above it.
     set_titlebar(header_);
@@ -776,14 +754,13 @@ HiveWindow::HiveWindow() {
         }
     });
 
-    // 1.5 s poll: chat stream + approvals badge.
+    // 1.5 s poll: chat stream and roster state.
     poll_timer_ = Glib::signal_timeout().connect([this] {
         // While the connect dialog is up, every request would 401 and (pre-fix)
         // spawn yet another modal dialog. Skip polling until we're connected.
         if (connect_dialog_ || api_.api_key().empty()) return alive_;
         try {
             poll_chat();
-            poll_approvals();
             poll_roster();
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[hive-client] poll threw: %s\n", e.what());
@@ -1251,32 +1228,6 @@ void HiveWindow::poll_roster() {
     });
 }
 
-void HiveWindow::poll_approvals() {
-    run_async([this] {
-        json ap = api_.list_approvals("pending");
-        {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, ap] {
-                if (!alive_) return;
-                int n = (int)ap.value("approvals", json::array()).size();
-                if (n != pending_approvals_) {
-                    // Phase 14.1: a NEW parked approval deserves a notification.
-                    if (pending_approvals_ >= 0 && n > pending_approvals_)
-                        notify("Approval needed",
-                               std::to_string(n) + " command(s) waiting for review");
-                    pending_approvals_ = n;
-                    approvals_label_.set_label(n > 0
-                        ? "Approvals (" + std::to_string(n) + ")"
-                        : "Approvals");
-                    if (n > 0) approvals_btn_.add_css_class("destructive-action");
-                    else approvals_btn_.remove_css_class("destructive-action");
-                }
-            });
-        }
-        dispatcher_.emit();
-    });
-}
-
 // ── rendering ───────────────────────────────────────────────────────────────
 
 void HiveWindow::rebuild_roster() {
@@ -1389,7 +1340,7 @@ void HiveWindow::rebuild_roster() {
             for (auto& ch : st_) ch = (char)tolower((unsigned char)ch);
             // Brain state machine (hive-brain, via worker heartbeats):
             // understanding/planning/acting/verifying/documenting/compressing
-            // are active phases; awaitingapproval parks on a human.
+            // are active phases.
             const bool working = a.value("busy", false) ||
                 st_ == "acting" || st_ == "starting" || st_ == "restarting" ||
                 st_ == "understanding" || st_ == "planning" ||
@@ -1404,15 +1355,12 @@ void HiveWindow::rebuild_roster() {
             }
             {
                 std::string label = st_;
-                if (label == "awaitingapproval") label = "awaiting approval";
                 auto* tag = Gtk::make_managed<Gtk::Label>(label);
                 tag->add_css_class(
                     st_ == "ready" || st_ == "idle"   ? "hv-state-ready" :
                     st_ == "down"  || st_ == "error" ||
                     st_ == "cancelled"                ? "hv-state-down"  :
                                                         "hv-state-tag");
-                if (st_ == "awaitingapproval")
-                    tag->set_tooltip_text("Waiting on your approval");
                 tag->set_valign(Gtk::Align::CENTER);
                 row_box->append(*tag);
             }
@@ -2772,7 +2720,6 @@ void HiveWindow::load_audio_attachment(Gtk::Box* holder,
 // ── callbacks ───────────────────────────────────────────────────────────────
 
 void HiveWindow::set_composer_enabled(bool enabled) {
-    learn_btn_.set_sensitive(enabled);
     entry_.set_sensitive(enabled);
     send_btn_.set_sensitive(enabled);
     attach_btn_.set_sensitive(enabled);
@@ -2900,26 +2847,6 @@ void HiveWindow::on_send() {
     std::string tid = current_thread_;
     run_async([this, tid, text, atts] {
         api_.post_message(tid, text, atts);
-        {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this] { if (alive_) poll_chat(); });
-        }
-        dispatcher_.emit();
-    });
-}
-
-void HiveWindow::on_learn_routine() {
-    if (current_thread_.empty()) return;
-    const std::string tid = current_thread_;
-    const std::string text =
-        "[learn] Please save the workflow demonstrated in this thread as a "
-        "routine using the save_routine tool. Distill the steps into a "
-        "self-contained prompt (include every URL, file path, and value "
-        "used — future runs have no access to this conversation). Pick a "
-        "clear kebab-case name. If I haven't specified a schedule, ask me "
-        "for one before saving.";
-    run_async([this, tid, text] {
-        api_.post_message(tid, text);
         {
             std::lock_guard<std::mutex> lk(queue_m_);
             done_queue_.push_back([this] { if (alive_) poll_chat(); });
@@ -3467,7 +3394,6 @@ void HiveWindow::show_inspector(const nlohmann::json& agent) {
     };
     kv("Model", agent.value("model", ""));
     kv("Workspace mode", agent.value("workspace_mode", ""));
-    kv("Require approval", agent.value("require_approval", false) ? "yes" : "no");
     // Phase 72: host agents run bare-metal with sudo — make it unmissable.
     if (agent.value("host_agent", false)) {
         auto* hl = Gtk::make_managed<Gtk::Label>(
@@ -4261,30 +4187,19 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         cpus_entry->set_text(buf);
     }
 
-    // Phase 72: host agents are the "Host" entry in the Type dropdown.
-    auto* appr = Gtk::make_managed<Gtk::CheckButton>("Require my approval for commands");
-    if (existing) {
-        appr->set_active(existing->value("require_approval", false));
-    }
-
-    // Phase 72: Host is a TYPE (dropdown at the top). The red warning +
-    // typed ack live at the bottom and appear only while Host is
-    // selected — see refresh_type_ui after the layout below.
+    // Host is a runtime type; show its warning only while selected.
     auto* host_warn = Gtk::make_managed<Gtk::Label>(
         "⚠ HOST AGENT: runs DIRECTLY on the worker machine as a real user "
         "with passwordless sudo — NO container, NO sandbox. It can install "
         "software, modify system files, and DESTROY the machine — through "
         "error, hallucination, or prompt injection. Only use this on a "
-        "machine you don't mind losing.\n"
-        "Type I UNDERSTAND to enable:");
+        "machine you don't mind losing.");
     host_warn->set_wrap(true);
     // A wrapped label's natural width is its full unwrapped text unless
     // capped; without this, Host mode makes the whole dialog ~2000 px wide.
     host_warn->set_max_width_chars(64);
     host_warn->set_xalign(0);
     host_warn->add_css_class("error-label");
-    auto* host_ack = Gtk::make_managed<Gtk::Entry>();
-    host_ack->set_placeholder_text("I UNDERSTAND");
 
     // Avatar picker: the 20 department-head SVGs (10 depts x male/female).
     // "Auto" (default) hashes the agent name into the set. ToggleButton
@@ -4354,13 +4269,12 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     auto* tpl = Gtk::make_managed<Gtk::DropDown>(
         Gtk::StringList::create(tpl_items));
     tpl->property_selected().signal_changed().connect(
-        [tpl, templates_json, name, role, appr, chosen_avatar, avatar_tiles] {
+        [tpl, templates_json, name, role, chosen_avatar, avatar_tiles] {
             const auto sel = tpl->get_selected();
             if (sel == 0 || sel > templates_json->size()) return;
             const auto& t = (*templates_json)[sel - 1];
             name->set_text(t.value("name", ""));
             role->set_text(t.value("role", ""));
-            appr->set_active(t.value("require_approval", false));
             const std::string av = t.value("avatar", "");
             *chosen_avatar = av;
             for (auto& pr : *avatar_tiles)
@@ -4404,23 +4318,18 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     }
     // (no Workspace row — always containerized)
     add_row("Avatar", avatar_grid, row_i++);
-    grid->attach(*appr, 1, row_i);
-    ++row_i;
     grid->attach(*host_warn, 1, row_i);
     ++row_i;
-    grid->attach(*host_ack, 1, row_i);
 
-    // Phase 72: type-driven visibility. Host selected -> red warn + ack
-    // shown, approvals forced on, and the container-only Memory/CPU rows
+    // Type-driven visibility. Host selected -> warning shown and the
+    // container-only Memory/CPU rows
     // hidden (meaningless off-container). Worker switches rebuild the
     // type list, whose set_selected refires this via property_selected.
-    auto refresh_type_ui = [type_dd, type_vals, host_warn, host_ack, appr,
+    auto refresh_type_ui = [type_dd, type_vals, host_warn,
                             memory_entry, cpus_entry, mem_lbl, cpu_lbl] {
         const bool host = type_dd->get_selected() < type_vals->size() &&
                           (*type_vals)[type_dd->get_selected()] == "host";
         host_warn->set_visible(host);
-        host_ack->set_visible(host);
-        if (host) appr->set_active(true);   // host agents are gated
         memory_entry->set_visible(!host);
         cpus_entry->set_visible(!host);
         if (mem_lbl) mem_lbl->set_visible(!host);
@@ -4431,7 +4340,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
 
     dialog->get_content_area()->append(*grid);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, appr, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, type_vals, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, host_ack, was_host](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, type_vals, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, was_host](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -4483,31 +4392,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 if (editing && think.empty() &&
                     !existing->value("thinking_level", "").empty())
                     think = "default";
-                // Phase 72: enabling a host agent needs the typed ack —
-                // validated client-side for UX, re-validated by the hub.
-                int host = -1;   // -1 = omit (keep)
-                std::string host_ack_str;
-                if (tval == "host" && !was_host) {
-                    host_ack_str = host_ack->get_text();
-                    if (host_ack_str != "I UNDERSTAND") {
-                        auto* err = Gtk::make_managed<Gtk::MessageDialog>(
-                            *dialog, "Type I UNDERSTAND in the red box to "
-                            "enable a host agent.", false,
-                            Gtk::MessageType::WARNING,
-                            Gtk::ButtonsType::OK, true);
-                        err->signal_response().connect(
-                            [err](int) { err->destroy(); });
-                        err->present();
-                        return;   // stay in the dialog
-                    }
-                    host = 1;
-                } else if (tval == "host" && was_host) {
-                    host = 1;   // keep; hub only re-asks if approvals drop
-                    if (!appr->get_active())
-                        host_ack_str = host_ack->get_text();
-                } else if (was_host) {
-                    host = 0;   // clearing — safe direction, no ack
-                }
+                int host = tval == "host" ? 1 : (was_host ? 0 : -1);
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
@@ -4516,14 +4401,13 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete type_vals;
                 run_async([this, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
-                           ap = appr->get_active(), mem, cp, think,
-                           host, host_ack = host_ack_str] {
+                           mem, cp, think, host] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, ap, av, wk, ty, mem, cp, think,
-                                          host, host_ack);
+                        api_.create_agent(n, r2, m, ws, av, wk, ty, mem, cp, think,
+                                          host);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, ap, av, wk, ty, mem, cp, think,
-                                          host, host_ack);
+                        api_.update_agent(edit_id, n, r2, m, ws, av, wk, ty, mem, cp, think,
+                                          host);
                     {
                         std::lock_guard<std::mutex> lk(queue_m_);
                         done_queue_.push_back([this] { if (alive_) refresh_all(); });
@@ -4798,7 +4682,6 @@ void HiveWindow::on_delete_thread(const std::string& thread_id) {
                                                 // the agent must recreate it
                     last_message_id_.clear();
                     rendered_msg_ids_.clear();
-                    learn_btn_.set_sensitive(false);
                     while (auto* ch = messages_box_.get_first_child())
                         messages_box_.remove(*ch);
                     rendered_.clear();
@@ -4836,7 +4719,6 @@ nlohmann::json HiveWindow::ui_state() {
         return nlohmann::json{
             {"current_thread", current_thread_},
             {"busy", thread_busy_},
-            {"pending_approvals", pending_approvals_},
             {"status", std::string{status_label_.get_text()}},
             {"agents", agents_},
             {"threads", threads_},
@@ -5008,90 +4890,6 @@ nlohmann::json HiveWindow::ui_delete_thread(const std::string& id) {
         refresh_threads();
         return nlohmann::json{{"deleted", true}, {"id", id}};
     });
-}
-
-void HiveWindow::on_approvals() {
-    auto* dialog = Gtk::make_managed<Gtk::Dialog>();
-    dialog->set_title("Approvals");
-    install_dialog_titlebar(*dialog, "Approvals");
-    dialog->set_transient_for(*this);
-    dialog->set_modal(true);
-    dialog->set_default_size(560, 360);
-    dialog->add_button("Close", Gtk::ResponseType::CLOSE);
-
-    auto* scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
-    auto* list = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-    list->set_margin(8);
-    list->set_spacing(6);
-    scroll->set_child(*list);
-    dialog->get_content_area()->append(*scroll);
-    dialog->signal_response().connect([dialog](int) { dialog->destroy(); });
-
-    // Populate async; rebuild after each resolve.
-    auto* alive = new bool(true);
-    dialog->signal_destroy().connect([alive] { delete alive; });
-
-    std::function<void()> populate;
-    populate = [this, dialog, list, alive, &populate] {
-        run_async([this, list, alive, &populate] {
-            json ap = api_.list_approvals("pending");
-            {
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, list, alive, ap, &populate] {
-                    if (!alive_ || !*alive) return;
-                    while (auto* c = list->get_first_child()) list->remove(*c);
-                    auto arr = ap.value("approvals", json::array());
-                    if (arr.empty())
-                        list->append(*Gtk::make_managed<Gtk::Label>("No pending approvals 🎉"));
-                    for (auto& a : arr) {
-                        std::string id = a.value("id", "");
-                        auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-                        row->add_css_class("card");
-                        row->set_margin(4);
-                        auto* head = Gtk::make_managed<Gtk::Label>(
-                            a.value("agent_name", "?") + " wants to run:");
-                        head->set_halign(Gtk::Align::START);
-                        head->add_css_class("heading");
-                        auto* cmd = Gtk::make_managed<Gtk::Label>(a.value("payload", ""));
-                        cmd->set_halign(Gtk::Align::START);
-                        cmd->set_selectable(true);
-                        {
-            Pango::AttrList attrs;
-            auto family = Pango::Attribute::create_attr_family("monospace");
-            attrs.insert(family);
-            cmd->set_attributes(attrs);
-        }
-                        auto* btns = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
-                        btns->set_spacing(6);
-                        auto* yes = Gtk::make_managed<Gtk::Button>("Approve");
-                        yes->add_css_class("suggested-action");
-                        auto* no = Gtk::make_managed<Gtk::Button>("Deny");
-                        no->add_css_class("destructive-action");
-                        btns->append(*yes);
-                        btns->append(*no);
-                        row->append(*head);
-                        row->append(*cmd);
-                        row->append(*btns);
-                        list->append(*row);
-
-                        auto resolve = [this, id, alive, &populate](bool ok) {
-                            run_async([this, id, ok] {
-                                api_.resolve_approval(id, ok);
-                                dispatcher_.emit();
-                            });
-                            Glib::signal_timeout().connect_once(
-                                [&populate] { populate(); }, 400);
-                        };
-                        yes->signal_clicked().connect([resolve] { resolve(true); });
-                        no->signal_clicked().connect([resolve] { resolve(false); });
-                    }
-                });
-            }
-            dispatcher_.emit();
-        });
-    };
-    populate();
-    dialog->present();
 }
 
 } // namespace hive

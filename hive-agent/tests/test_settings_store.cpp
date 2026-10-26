@@ -193,15 +193,15 @@ void test_s6_kv_roundtrip() {
     auto s = hive::SettingsStore::for_home(h.path);
 
     EXPECT(s.get_string("default_model", "fallback") == "fallback");
-    EXPECT(s.get_bool("auto_approve", false)         == false);
+    EXPECT(s.get_bool("sample_flag", false)         == false);
     EXPECT(s.get_int("max_iterations", 7)            == 7);
 
     s.set_string("default_model", "minimax-m3");
-    s.set_bool("auto_approve", true);
+    s.set_bool("sample_flag", true);
     s.set_int("max_iterations", 42);
 
     EXPECT(s.get_string("default_model") == "minimax-m3");
-    EXPECT(s.get_bool("auto_approve")    == true);
+    EXPECT(s.get_bool("sample_flag")    == true);
     EXPECT(s.get_int("max_iterations")   == 42);
     std::cout << "[ok] S6: kv_settings round-trip\n";
 }

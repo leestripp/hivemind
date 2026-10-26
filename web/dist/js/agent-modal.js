@@ -80,16 +80,10 @@ function ensureEditor() {
                 <input id="am-cpus" type="number" min="0" step="0.5" placeholder="Worker default">
               </div>
             </div>
-            <label class="check-row" for="am-appr">
-              <input type="checkbox" id="am-appr">
-              <span>Require my approval for commands</span>
-            </label>
             <button type="button" class="btn agent-wide hidden" id="am-migrate">⇄ Migrate to another worker…</button>
             <div id="am-host-warn" class="danger-callout hidden" role="warning">
               <strong>⚠ Bare-metal host agent</strong>
-              <p>This runs directly on the worker as a real user with passwordless sudo — no container and no sandbox. It can modify or destroy the machine. Approvals remain required.</p>
-              <label for="am-host-ack">Type <strong>I UNDERSTAND</strong> to enable or change this setting</label>
-              <input id="am-host-ack" autocomplete="off" placeholder="I UNDERSTAND">
+              <p>This runs directly on the worker as a real user with passwordless sudo — no container and no sandbox. It can modify or destroy the machine.</p>
             </div>
           </fieldset>
 
@@ -236,7 +230,9 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
     $('am-host-warn').classList.toggle('hidden', !host);
     editor.querySelectorAll('.container-cap').forEach((field) =>
       field.classList.toggle('hidden', host));
-    if (host) $('am-appr').checked = true;
+    // Force the gate on only when newly entering host mode. Existing host
+    // agents may have explicitly disabled it; preserve that saved setting.
+    if (host && currentType !== 'host') $('am-appr').checked = true;
   };
   workerSelect.onchange = refreshType;
   typeSelect.onchange = refreshType;
@@ -278,11 +274,9 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
   const applyTemplate = (template) => {
     $('am-name').value = template?.name || '';
     $('am-role').value = template?.role || '';
-    $('am-appr').checked = !!template?.require_approval;
     selectAvatar(template?.avatar || '');
   };
   applyTemplate(existing || prefill);
-  $('am-host-ack').value = '';
   $('am-memory').value = existing?.memory || '';
   $('am-cpus').value = existing?.cpus > 0 ? existing.cpus : '';
   $('am-thinking').value = existing?.thinking_level || '';
@@ -304,19 +298,12 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
     }
     const host = typeSelect.value === 'host';
     const wasHost = !!existing?.host_agent;
-    const requireApproval = $('am-appr').checked;
-    const ack = $('am-host-ack').value.trim();
-    const needsAck = host && (!wasHost || (!requireApproval && existing?.require_approval));
-    if (needsAck && ack !== 'I UNDERSTAND') {
-      return setError('Type I UNDERSTAND in the bare-metal warning to continue.');
-    }
 
     const body = {
       name,
       role: $('am-role').value.trim(),
       model: modelSelect.value,
       workspace_mode: 'shared',
-      require_approval: requireApproval,
       avatar: selectedAvatar(),
     };
     if (!editing) body.worker = workerSelect.value;
@@ -335,10 +322,9 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
     const thinking = $('am-thinking').value;
     if (thinking) body.thinking_level = thinking;
     else if (existing?.thinking_level) body.thinking_level = 'default';
-    if (host && needsAck) {
+    if (host) {
       body.host_agent = true;
-      body.host_agent_ack = ack;
-    } else if (!host && wasHost) {
+    } else if (wasHost) {
       body.host_agent = false;
     }
 

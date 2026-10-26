@@ -51,12 +51,6 @@ public:
     static BuildEventCallback get_build_callback() { return build_callback_; }
 
     // ====== Public Helper Functions for Testing ======
-    static bool is_dangerous_command(const std::string& command) {
-        return BashPathChecker::is_dangerous_command(command);
-    }
-    static bool contains_privilege_escalation(const std::string& command) {
-        return BashPathChecker::contains_privilege_escalation(command);
-    }
     static std::string extract_path_from_command(const std::string& command) {
         return BashPathChecker::extract_path_from_command(command);
     }
@@ -88,9 +82,6 @@ private:
     static json poll_background(const std::string& process_id, bool clear_output);
     static json send_background(const std::string& process_id, const std::string& input);
     static json stop_background(const std::string& process_id);
-
-    // Safe diagnostic prefixes that can be auto-approved
-    static const std::vector<std::string>& get_safe_diagnostic_prefixes();
 
     // Static callback for build events
     static BuildEventCallback build_callback_;

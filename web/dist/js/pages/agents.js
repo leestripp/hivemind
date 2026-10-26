@@ -107,11 +107,9 @@ async function refresh() {
       const status = st && st.cancelling ? 'cancelling'
                    : ACTIVE.includes(brain) ? 'busy'
                    : (brain === 'ready' || brain === 'idle' || !brain) ? 'idle'
-                   : brain === 'awaitingapproval' ? 'cancelling'
                    : 'down';
       const label = st && st.cancelling ? '\u25cc cancelling'
                   : status === 'busy' ? '\u25cf ' + (ACTIVE.includes(brain) ? brain : 'busy')
-                  : brain === 'awaitingapproval' ? 'awaiting approval'
                   : brain === 'down' || brain === 'error' || brain === 'cancelled' ? brain
                   : 'idle';
       const card = document.createElement('div');
@@ -130,14 +128,12 @@ async function refresh() {
           <div><span>Model</span>${esc(a.model || 'default')}</div>
           <div><span>Workspace</span>${esc(a.workspace_mode || 'shared')}</div>
           ${a.type ? `<div><span>Type</span>⚡ ${esc(a.type)}</div>` : ''}
-          <div><span>Approvals</span>${a.require_approval ? 'required' : 'auto'}</div>
           <div><span>Created</span>${fmtDate(a.created_at)}</div>
         </div>
         <div class="agent-actions">
           <button class="btn btn-sm" data-edit="${esc(a.id)}" title="Edit agent (worker, type, model…)">✎ Edit</button>
           <button class="btn btn-sm" data-migrate="${esc(a.id)}" title="Move this agent and its state to another worker">⇄ Migrate</button>
           <button class="btn btn-sm" data-screen="${esc(a.id)}" title="Live container desktop (Phase 6)">🖥 Computer</button>
-          <button class="btn btn-sm" data-rules="${esc(a.id)}" title="Auto-review rules for approvals (Phase 16)">⚖ Rules</button>
         </div>`;
       card.querySelector('[data-edit]').addEventListener('click',
         () => showAgentModal(a));
@@ -145,8 +141,6 @@ async function refresh() {
         () => showMigrationModal(a));
       card.querySelector('[data-screen]').addEventListener('click',
         () => openScreen(a.id, a.name));
-      card.querySelector('[data-rules]').addEventListener('click',
-        () => openRules(a.id, a.name));
       sub.appendChild(card);
       }
     }
@@ -218,90 +212,6 @@ function hideScreen() {
   screenModal.classList.add('hidden');
   screenModal.querySelector('iframe')?.remove();   // drops the VNC session
   screenAgent = null;
-}
-
-// ── Phase 16: auto-review rules editor ──────────────────────────────────
-let rulesModal = null, rulesAgent = null;
-
-function ensureRulesModal() {
-  if (rulesModal) return rulesModal;
-  rulesModal = document.createElement('div');
-  rulesModal.className = 'modal-overlay hidden';
-  rulesModal.innerHTML = `
-    <div class="modal-panel" style="width:min(720px,94vw)">
-      <div class="modal-head">
-        <strong id="rules-title">Auto-review rules</strong>
-        <span style="flex:1"></span>
-        <button class="btn btn-sm" id="rules-add">+ Add rule</button>
-        <button class="btn btn-sm btn-primary" id="rules-save">Save</button>
-        <button class="btn btn-sm" id="rules-close">Close</button>
-      </div>
-      <p class="muted" style="margin:4px 0 10px">First match wins. Globs:
-        <code>*</code> = any run, <code>?</code> = one char. Tool is
-        <code>command</code> or <code>browser</code>. No match → the human
-        approval queue (when the agent requires approvals).</p>
-      <div id="rules-rows"></div>
-    </div>`;
-  document.body.appendChild(rulesModal);
-  rulesModal.querySelector('#rules-close').addEventListener('click', () => {
-    rulesModal.classList.add('hidden'); rulesAgent = null;
-  });
-  rulesModal.querySelector('#rules-add').addEventListener('click', () =>
-    addRuleRow({tool: 'command', command: '', action: 'allow'}));
-  rulesModal.querySelector('#rules-save').addEventListener('click', saveRules);
-  return rulesModal;
-}
-
-function addRuleRow(rule) {
-  const rows = rulesModal.querySelector('#rules-rows');
-  const row = document.createElement('div');
-  row.className = 'rule-row';
-  row.innerHTML = `
-    <select class="rule-action">
-      <option value="allow"${rule.action === 'allow' ? ' selected' : ''}>allow</option>
-      <option value="deny"${rule.action === 'deny' ? ' selected' : ''}>deny</option>
-    </select>
-    <input class="rule-tool" placeholder="tool glob" value="${esc(rule.tool)}" size="9">
-    <input class="rule-cmd" placeholder="command glob  e.g. git *" value="${esc(rule.command)}">
-    <button class="icon-btn" data-up title="Move up">↑</button>
-    <button class="icon-btn" data-down title="Move down">↓</button>
-    <button class="icon-btn" data-del title="Delete">✕</button>`;
-  row.querySelector('[data-del]').addEventListener('click', () => row.remove());
-  row.querySelector('[data-up]').addEventListener('click', () =>
-    row.previousElementSibling && rows.insertBefore(row, row.previousElementSibling));
-  row.querySelector('[data-down]').addEventListener('click', () =>
-    row.nextElementSibling && rows.insertBefore(row.nextElementSibling, row));
-  rows.appendChild(row);
-}
-
-async function openRules(id, name) {
-  ensureRulesModal();
-  rulesAgent = id;
-  rulesModal.classList.remove('hidden');
-  document.getElementById('rules-title').textContent = `⚖ ${name} — auto-review rules`;
-  const rows = rulesModal.querySelector('#rules-rows');
-  rows.innerHTML = '';
-  const data = await API.get(`/api/agents/${id}/approval-rules`);
-  for (const r of data.rules || []) addRuleRow(r);
-}
-
-async function saveRules() {
-  const rules = [...rulesModal.querySelectorAll('.rule-row')].map(row => ({
-    action: row.querySelector('.rule-action').value,
-    tool: row.querySelector('.rule-tool').value.trim(),
-    command: row.querySelector('.rule-cmd').value.trim(),
-  }));
-  if (rules.some(r => !r.tool || !r.command)) {
-    alert('Every rule needs a tool and a command pattern.');
-    return;
-  }
-  try {
-    await API.req('PUT', `/api/agents/${rulesAgent}/approval-rules`, {rules});
-    rulesModal.classList.add('hidden');
-    rulesAgent = null;
-  } catch (e) {
-    alert('Save failed — ' + e.message);
-  }
 }
 
 export function enterAgents() {

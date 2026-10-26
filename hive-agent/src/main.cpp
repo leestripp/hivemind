@@ -7,7 +7,6 @@
 // Ops in (stdin, one JSON object per line):
 //   {"op":"task","id":"t1","text":"...","thread_id":"...",
 //    "attachments":[{"path":"/workspace/attachments/<tid>/x.png"}]}
-//   {"op":"approval_resp","id":"a1","allow":true}
 //   {"op":"cancel"}
 //   {"op":"shutdown"}                     (persists history, exits 0)
 //
@@ -15,7 +14,6 @@
 //   {"ev":"ready","agent":"Name","version":"...","pid":123}
 //   {"ev":"delta","task":"t1","text":"..."}
 //   {"ev":"message","task":"t1","body":"...","error":""}
-//   {"ev":"approval_request","id":"a1","command":"..."}
 //   {"ev":"error","text":"..."}           (fatal/startup errors)
 //
 // Config via environment (injected by the worker at spawn; credentials
@@ -26,7 +24,6 @@
 //   HIVEMIND_MODEL               (remote model id)
 //   HIVEMIND_MAX_CONTEXT / HIVEMIND_TEMPERATURE
 //   HIVEMIND_SYSTEM_PROMPT or HIVEMIND_SYSTEM_PROMPT_FILE
-//   HIVEMIND_AUTO_APPROVE=1      (default: approvals become events)
 //   HIVEMIND_SKILLS_DIR          (read-only synced skills library mount;
 //                                 ':'-separated for several)
 //   HIVEMIND_MCP_SERVERS         (JSON array; seeded into hive-agent.db)
@@ -75,7 +72,7 @@ std::string env_or(const char* name, const std::string& fallback = "") {
 }
 
 // NDJSON stdout writer (serialized: deltas stream off the turn thread
-// while approval events may interleave).
+// while response events may interleave).
 std::mutex g_out_mtx;
 
 void emit(const json& j) {
@@ -95,7 +92,7 @@ void log_err(const std::string& msg) {
 // tasks. Tools emit {"ev":"routine_req",...}; the worker forwards it as
 // an op frame; the hub applies it against RoutineStore and replies with
 // {"op":"routine_resp","id":...,"ok":bool,"result"|"error"} on stdin.
-// Same blocking pattern as the approval broker, 30s timeout.
+// Request/response bridge with a 30s timeout.
 class RoutineBridge {
 public:
     json call(const std::string& action, const json& payload) {
@@ -274,67 +271,11 @@ private:
 };
 SecretBridge g_secrets;
 
-// Approval broker: hive-brain' sink hook blocks until an approval_resp
-// arrives on stdin (or a 10-minute safety timeout denies).
-class ApprovalBroker {
-public:
-    bool ask(const std::string& command) {
-        const std::string id = "a" + std::to_string(++seq_);
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            pending_[id] = std::nullopt;
-        }
-        emit({{"ev", "approval_request"}, {"id", id}, {"command", command}});
-        std::unique_lock<std::mutex> lk(m_);
-        const bool decided = cv_.wait_for(lk, std::chrono::minutes(10), [&] {
-            return pending_[id].has_value();
-        });
-        const bool allow = decided && *pending_[id];
-        pending_.erase(id);
-        // Resolved locally (cancel/shutdown deny_all, or the safety
-        // timeout) rather than by a hub approval_resp: tell the hub to
-        // clear its pending row, or the client accumulates ghost
-        // approvals (QueenBee incident, 2026-10-12).
-        const bool local = !hub_answered_.erase(id);
-        lk.unlock();
-        if (local)
-            emit({{"ev", "approval_resolved"}, {"id", id},
-                  {"allow", allow}});
-        return allow;
-    }
-
-    void resolve(const std::string& id, bool allow) {
-        std::lock_guard<std::mutex> lk(m_);
-        auto it = pending_.find(id);
-        if (it != pending_.end()) {
-            it->second = allow;
-            hub_answered_.insert(id);
-            cv_.notify_all();
-        }
-    }
-
-    void deny_all() {
-        std::lock_guard<std::mutex> lk(m_);
-        for (auto& kv : pending_)
-            if (!kv.second) kv.second = false;
-        cv_.notify_all();
-    }
-
-private:
-    std::mutex m_;
-    std::condition_variable cv_;
-    std::unordered_map<std::string, std::optional<bool>> pending_;
-    std::unordered_set<std::string> hub_answered_;
-    std::atomic<int> seq_{0};
-};
-
 // NDJSON sink: hive-brain events -> protocol events; collects the turn's
 // user-facing output (assistant prose + untruncated tell_user payloads,
 // same semantics as the v1 hive-server sink).
 class NdjsonSink : public hive::AgentSink {
 public:
-    explicit NdjsonSink(ApprovalBroker& approvals) : approvals_(approvals) {}
-
     void begin_task(const std::string& id) {
         std::lock_guard<std::mutex> lk(m_);
         task_id_ = id;
@@ -444,10 +385,6 @@ public:
         std::fflush(stderr);
     }
 
-    bool request_command_approval(std::string_view command) override {
-        return approvals_.ask(std::string(command));
-    }
-
 private:
     std::string current_task() const {
         std::lock_guard<std::mutex> lk(m_);
@@ -464,7 +401,6 @@ private:
         dst += src;
     }
 
-    ApprovalBroker& approvals_;
     mutable std::mutex m_;
     std::string task_id_;
     std::string pending_;            // current assistant message's prose
@@ -580,9 +516,6 @@ int main(int argc, char** argv) {
     // registry and injects the resolved config (endpoint + key + tuning)
     // into every task frame; applied to the settings store before the turn.
 
-    // Approvals: host-authoritative. Default off -> hive-brain asks the
-    // sink; the sink emits approval_request and blocks for approval_resp.
-    cfg.auto_approve = (env_or("HIVEMIND_AUTO_APPROVE") == "1");
 
     cfg.stream = true;
     cfg.max_agent_iterations = 600;
@@ -712,8 +645,7 @@ int main(int argc, char** argv) {
     }
 
     // -- agent + sink ----------------------------------------------------
-    ApprovalBroker approvals;
-    auto sink = std::make_shared<NdjsonSink>(approvals);
+    auto sink = std::make_shared<NdjsonSink>();
 
     hive::Agent agent(cfg, sink);
     // message_agent: async agent-to-agent via the hub (v1-validated
@@ -1766,8 +1698,6 @@ int main(int argc, char** argv) {
                 queue.push_back(std::move(t));
             }
             q_cv.notify_one();
-        } else if (kind == "approval_resp") {
-            approvals.resolve(op.value("id", ""), op.value("allow", false));
         } else if (kind == "routine_resp") {
             g_routines.resolve(op.value("id", ""), op);
         } else if (kind == "secret_resp") {
@@ -1780,12 +1710,6 @@ int main(int argc, char** argv) {
             g_shares.resolve(op.value("id", ""), op);
         } else if (kind == "cancel") {
             agent.cancel();
-            // A turn wedged in ApprovalBroker::ask() must die with the
-            // turn: deny every pending approval so the broker wakes and
-            // the tool call unwinds as refused. Without this a cancelled
-            // agent sat mute for the broker's 10-minute safety timeout
-            // (QueenBee incident, 2026-10-12).
-            approvals.deny_all();
         } else if (kind == "shutdown") {
             break;
         }
@@ -1793,7 +1717,6 @@ int main(int argc, char** argv) {
 
     // stdin EOF (worker stopped the pipe) == shutdown.
     stopping = true;
-    approvals.deny_all();
     q_cv.notify_all();
     if (turn_thread.joinable()) turn_thread.join();
     try { agent.shutdown(); }           // persists history + memory

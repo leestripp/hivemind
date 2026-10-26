@@ -10,7 +10,6 @@
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/SecretStore.h"
 
@@ -55,22 +54,21 @@ int main() {
 
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
-    ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
-    HubRouter hub{agents, threads, wchannel, approvals, routines,
+    HubRouter hub{agents, threads, wchannel, routines,
                   secrets};
     hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
     ChatService chat{agents, threads, hub, deliveries};
 
     const std::string wkey = wstore.enroll("testrig");
     (void)wkey;
-    auto alpha = agents.create_agent("Alpha", "", "", "", false, "",
+    auto alpha = agents.create_agent("Alpha", "", "", "", "",
                                      "testrig");
-    auto beta  = agents.create_agent("Beta",  "", "", "", false, "",
+    auto beta  = agents.create_agent("Beta",  "", "", "", "",
                                      "testrig");
 
     // ── 65a: cancel_agent_turns mutes the agent ────────────────────────
@@ -97,9 +95,9 @@ int main() {
     // Fresh pair/thread so the mute test's history doesn't interfere.
     // Breaker: max 3 fan-ins per window (user fan-ins are generation 0
     // and do not count).
-    auto gamma   = agents.create_agent("Gamma", "", "", "", false, "",
+    auto gamma   = agents.create_agent("Gamma", "", "", "", "",
                                        "testrig");
-    auto delta   = agents.create_agent("Delta", "", "", "", false, "",
+    auto delta   = agents.create_agent("Delta", "", "", "", "",
                                        "testrig");
     const std::string t2 =
         chat.post_agent_message(gamma.id, delta.id, "m1");

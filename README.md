@@ -6,7 +6,7 @@ A **self-hosted team of always-on AI agents** for Linux — spread across as
 many machines as you own. Create named teammates, message them like
 colleagues, and hand off real work — they run in their own podman
 containers with sudo, remember everything, share files with each other,
-and only come back when they need your approval.
+and complete their work autonomously.
 
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
@@ -35,8 +35,10 @@ and only come back when they need your approval.
 - **Agents send files to chat** — the `attach_file` tool copies any
   workspace artifact into the thread's attachment store and it lands as
   a normal chat attachment (images/videos render inline).
-- **Approvals** — flip `require_approval` on an agent and its commands park
-  in an approval queue until you approve/deny them.
+- **Autonomous execution** — valid tool calls run immediately under the
+  agent's configured runtime identity, including package installation and
+  other work permitted by its container or host account. Execution and exec
+  logs remain available for inspection; they do not pause work for review.
 - **Distributed workers** (`hive-worker`) — enroll any Linux machine and
   assign agents to it: their containers, exec and screen sessions run on
   that machine over a persistent, auto-reconnecting WebSocket channel.
@@ -59,7 +61,7 @@ and only come back when they need your approval.
   (Anthropic SKILL.md format) shared across agents via per-agent enable
   toggles — plus per-agent learned skills that stay agent-owned.
 - **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
-  live chat, approvals inbox, scheduled-task dialog, right-click agent
+  live chat, scheduled-task dialog, right-click agent
   management. Plus the **web dashboard**: Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
 - **Android app** (`hive-android`) — pick an agent from the info-card
@@ -74,6 +76,30 @@ and only come back when they need your approval.
 - **Any model** — providers/models live in HiveMind's own store
   (`llm.db`, managed on the web Models page) and are injected into agents
   at spawn; pick per agent. No vendor lock-in.
+
+## Why there is no command-approval system
+
+HiveMind is an **agent harness for autonomous work**, not an interactive
+command-permission system. A queue of individual commands works against that
+purpose: unattended tasks stall until someone clicks **Approve**, and a person
+reviewing an isolated command cannot reliably infer the agent's whole plan or
+make a meaningful risk decision. Command-pattern rules have the same problem —
+they guess at intent from text while creating maintenance work and false
+confidence. They do not add a dependable security boundary.
+
+The meaningful decision is made when the user chooses the agent's runtime,
+machine, account, and access. After that, a valid tool call should run and the
+agent should finish its work. Execution and audit logs remain available for
+inspection without becoming checkpoints that interrupt the work.
+
+> **Your hardware, your choice, your responsibility.** HiveMind does not decide
+> how much access you should grant. Linux already provides enforceable
+> safeguards: per-user and group permissions, sudoers rules, capabilities,
+> namespaces, resource controls, and firewalls. Use dedicated restricted users
+> or the supplied rootless podman containers when you want isolation, and tighten
+> those controls to suit your machine and risk tolerance. Container or host
+> selection is explicit configuration; HiveMind will not repeatedly ask you to
+> acknowledge that choice.
 
 ## Quick start (Ubuntu 26.04)
 
@@ -109,7 +135,7 @@ catalogs, which is what the client's New Agent dialog offers. Blank model
 ## Layout
 
 ```
-hive-server/   C++23 + OmniNet server: roster, threads, approvals,
+hive-server/   C++23 + OmniNet server: roster, threads, messaging,
                routines, containers, worker channel, web UI (web/dist)
 hive-agent/    the agent runtime itself (runs in worker containers)
 hive-client/   GTK4/gtkmm4 native client
@@ -139,7 +165,6 @@ POST/GET/PATCH/DELETE /api/agents[/:id]
 POST/GET/DELETE       /api/threads[/:id]      GET/POST …/messages
 POST                  /api/threads/:id/attachments      user/agent file attachments
 GET  /api/threads/:id/activity                live turn state
-GET  /api/approvals?status=pending            POST …/:id/approve|deny
 POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
 GET/POST/DELETE       /api/agents/:id/skills[/name]          local (agent-owned) skills
 GET/POST/DELETE       /api/skills[/name]                     global skill library

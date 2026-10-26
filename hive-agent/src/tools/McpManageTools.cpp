@@ -198,15 +198,6 @@ json McpAddTool::execute(const json& args, FileIO&)
         for (auto it = args["env"].begin(); it != args["env"].end(); ++it)
             s.env[it.key()] = it.value().get<std::string>();
 
-    // Approval parity with bash: this spawns a process / opens a connection.
-    std::string shown = s.url.empty()
-        ? s.command + (s.args.empty() ? "" : " " + [&] {
-              std::string j; for (const auto& a : s.args) j += a + " ";
-              j.pop_back(); return j; }())
-        : s.url;
-    if (!ToolHandler::request_command_approval("mcp_add " + name + ": " + shown))
-        return err("approval denied by user");
-
     svc_.store->upsert_mcp_server(s);
 
     json out;
@@ -258,9 +249,6 @@ json McpEnableTool::execute(const json& args, FileIO&)
     auto existing = svc_.store->get_mcp_server(name);
     if (!existing)
         return err("unknown server '" + name + "' — see mcp_list");
-
-    if (!ToolHandler::request_command_approval("mcp_enable " + name))
-        return err("approval denied by user");
 
     existing->enabled = true;
     svc_.store->upsert_mcp_server(*existing);

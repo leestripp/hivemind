@@ -9,7 +9,6 @@
 #include "hivemind/routes/MigrationRoutes.h"
 
 #include "hivemind/AgentStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/ChatService.h"
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
@@ -62,12 +61,11 @@ int main() {
 
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
-    ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
     hivemind::SecretStore secrets{tmp / "secrets.db", tmp / "secrets.key"};
-    HubRouter hub{agents, threads, wchannel, approvals, routines, secrets};
+    HubRouter hub{agents, threads, wchannel, routines, secrets};
     hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
     ChatService chat{agents, threads, hub, deliveries};
     hivemind::MigrationStore mstore{tmp / "migrations.db"};
@@ -96,9 +94,9 @@ int main() {
     // Roster routes aren't registered here — create agents store-direct.
     // (RosterRoutes already regression-covers worker validation.)
     const std::string local_id =
-        agents.create_agent("Localo", "x", "", "shared", false, "", "local").id;
+        agents.create_agent("Localo", "x", "", "shared", "", "local").id;
     const std::string buzz =
-        agents.create_agent("Buzz", "news", "", "shared", false, "", "testrig").id;
+        agents.create_agent("Buzz", "news", "", "shared", "", "testrig").id;
 
     // agent on hub-side "local" → 400 (not migratable yet)
     r = request("POST", port, "/api/agents/" + local_id + "/migrate",
@@ -108,11 +106,6 @@ int main() {
     // offline target worker → 400
     r = request("POST", port, "/api/agents/" + buzz + "/migrate",
                 {{"target_worker", "ghost-rig"}});
-    assert(r.statusCode() == 400);
-
-    // host target without the typed ack → 400
-    r = request("POST", port, "/api/agents/" + buzz + "/migrate",
-                {{"target_worker", "testrig"}, {"target_type", "host"}});
     assert(r.statusCode() == 400);
 
     // bogus target_type → 400

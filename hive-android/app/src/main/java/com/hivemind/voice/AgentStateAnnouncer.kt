@@ -17,7 +17,7 @@ import android.util.Log
  *    previous state cancels the pending note;
  *  - [suppressedAgentId]'s routine working/finished edges are skipped
  *    (in-chat, the reply stream already narrates that agent) while its
- *    actionable states (approval/error/offline) always speak.
+ *    actionable states (error/offline) always speak.
  *
  * All state lives in this class; activities own timing, TTS and voices.
  */
@@ -48,7 +48,6 @@ class AgentStateAnnouncer(
      *  null = not trackable ("starting" flicker, no state yet). */
     private fun bucket(a: ApiClient.Agent): String? = when {
         a.busy || a.state == "acting" || a.state == "working" -> "working"
-        a.state == "awaitingapproval" -> "awaiting"
         a.state == "error"          -> "error"
         a.state == "down"           -> "down"
         a.state == "starting" || a.state.isEmpty() -> null
@@ -60,7 +59,6 @@ class AgentStateAnnouncer(
         when {
             to == "working" && from != "working" -> "$name started working."
             to == "idle" && from == "working"    -> "$name finished."
-            to == "awaiting" -> "$name is waiting for your approval."
             to == "error"    -> "$name hit an error."
             to == "down"     -> "$name went offline."
             else             -> null

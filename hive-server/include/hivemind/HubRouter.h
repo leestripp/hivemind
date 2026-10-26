@@ -8,7 +8,6 @@
 //   thread message -> task op -> owning worker (hive-agent in container)
 //   worker task_delta   -> ChatService live-turn partial (client polls)
 //   worker task_result  -> ChatService complete_turn -> thread message
-//   worker approval_req -> ApprovalStore (client decides) -> approval_resp
 //   worker agent_msg    -> ChatService::post_agent_message (agent->agent)
 //   heartbeat agents{}  -> presence map (roster online/state)
 //   worker online       -> reconcile: agent_spawn for roster agents homed
@@ -31,7 +30,6 @@ class RoutineStore;
 class ThreadStore;
 namespace hivemind { class SecretStore; class ShareStore; }
 class WorkerChannel;
-class ApprovalStore;
 class ChatService;
 struct RosterAgent;
 class LlmStore;
@@ -70,8 +68,8 @@ nlohmann::json secret_delete_apply(hivemind::SecretStore& secrets,
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,
-              WorkerChannel& channel, ApprovalStore& approvals,
-              RoutineStore& routines, hivemind::SecretStore& secrets);
+              WorkerChannel& channel, RoutineStore& routines,
+              hivemind::SecretStore& secrets);
     virtual ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
@@ -169,10 +167,6 @@ public:
     /// Build the agent_spawn op for a roster agent.
     nlohmann::json spawn_frame(const RosterAgent& agent) const;
 
-    /// ApprovalRoutes hook: the client decided a pending approval.
-    /// Returns false when the id is unknown / not worker-owned.
-    bool resolve_approval(const std::string& id, bool allow);
-
     /// Roster presence: last known state ("ready"/"acting"/"restarting"/
     /// "down") from heartbeats + agent_status frames. "" = unknown.
     std::string agent_state(const std::string& agent_id) const;
@@ -181,7 +175,6 @@ private:
     AgentStore& agents_;
     ThreadStore& threads_;
     WorkerChannel& channel_;
-    ApprovalStore& approvals_;
     RoutineStore& routines_;
     hivemind::SecretStore& secrets_;
     ChatService* chat_ = nullptr;
@@ -198,10 +191,6 @@ private:
     // sweeps stale entries to "offline".
     std::unordered_map<std::string, std::chrono::steady_clock::time_point>
         last_seen_;
-    // approval id -> (worker, agent_id) for the response relay
-    struct PendAppr { std::string worker; std::string agent_id;
-                      std::string req_id; };  // req_id = worker-side id
-    std::unordered_map<std::string, PendAppr> pend_appr_;
     // Agents whose grant-push spawn frame is waiting for their current
     // turn to finish (flush_pending_spawns: task_result + heartbeat).
     std::unordered_set<std::string> pending_spawn_;

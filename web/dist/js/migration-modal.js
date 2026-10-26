@@ -45,8 +45,6 @@ function ensureModal() {
         <div id="migration-host-warn" class="danger-callout hidden" role="warning">
           <strong>⚠ Bare-metal target</strong>
           <p>The agent will run directly on the target worker with passwordless sudo — no container and no sandbox. Its state and history move with it.</p>
-          <label for="migration-ack">Type <strong>I UNDERSTAND</strong> to continue</label>
-          <input id="migration-ack" autocomplete="off" placeholder="I UNDERSTAND">
         </div>
         <fieldset class="migration-options">
           <legend>Recovery options</legend>
@@ -191,7 +189,6 @@ async function prepareMigration(agent, { onComplete }, ticket) {
   $('migration-type').onchange = refreshTarget;
   $('migration-force').checked = false;
   $('migration-no-rollback').checked = false;
-  $('migration-ack').value = '';
   refreshTarget();
 
   $('migration-form').onsubmit = async (event) => {
@@ -199,11 +196,7 @@ async function prepareMigration(agent, { onComplete }, ticket) {
     migrationError();
     const targetWorker = workerSelect.value;
     const targetType = $('migration-type').value;
-    const ack = $('migration-ack').value.trim();
     if (!targetWorker) return migrationError('Select a target worker.');
-    if (targetType === 'host' && ack !== 'I UNDERSTAND') {
-      return migrationError('Type I UNDERSTAND in the bare-metal warning to continue.');
-    }
     $('migration-start').disabled = true;
     try {
       const response = await API.post(`/api/agents/${agent.id}/migrate`, {
@@ -211,7 +204,6 @@ async function prepareMigration(agent, { onComplete }, ticket) {
         target_type: targetType,
         force: $('migration-force').checked,
         no_rollback: $('migration-no-rollback').checked,
-        ack,
       });
       await watchMigration(response.job_id, { onComplete }, ticket);
     } catch (error) {

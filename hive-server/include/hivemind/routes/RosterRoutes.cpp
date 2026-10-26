@@ -43,8 +43,7 @@ json agent_json(const RosterAgent& a) {
     return {
         {"id", a.id}, {"name", a.name}, {"role", a.role},
         {"model", a.model}, {"workspace_mode", a.workspace_mode},
-        {"container_id", a.container_id},
-        {"require_approval", a.require_approval}, {"avatar", a.avatar},
+        {"container_id", a.container_id}, {"avatar", a.avatar},
         {"worker", a.worker}, {"type", a.type},                   // Phase 35
         {"memory", a.memory}, {"cpus", a.cpus},                  // Phase 69
         {"thinking_level", a.thinking_level},                     // 2026-10-01
@@ -137,11 +136,6 @@ static bool validate_type(WorkerStore& workers, const std::string& w,
 // worker's own allow_host_agents config, advertised as the "host_agents"
 // hello cap. A hub route can never conjure a host agent on a rig whose
 // operator didn't opt in.
-constexpr std::string_view kHostAgentAck = "I UNDERSTAND";
-constexpr std::string_view kHostAgentWarning =
-    "a host agent runs WITHOUT a sandbox, as a real user with sudo, and can "
-    "install software, modify system files, and DESTROY the machine. Only "
-    "use it on a machine you don't mind losing.";
 
 static bool validate_host_capable(WorkerStore& workers,
                                   const std::string& w, std::string& err) {
@@ -202,7 +196,6 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 "filesystem.";
             static const json templates = json::array({
                 {{"id", "chief"}, {"name", "Chief"}, {"avatar", "executive"},
-                 {"require_approval", false},
                  {"role", "Chief of staff — coordinates the whole team. Uses "
                          "list_agents and message_agent to delegate work to "
                          "the right department head, tracks open threads and "
@@ -210,62 +203,53 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                          "departments, and reports progress back to the user "
                          "concisely." + DRIVE_HINT}},
                 {{"id", "eng"}, {"name", "Eng"}, {"avatar", "engineering-female"},
-                 {"require_approval", false},
                  {"role", "Head of engineering — reads and writes code in the "
                          "shared workspace, runs builds and tests, reviews "
                          "diffs carefully, and explains tradeoffs briefly. "
                          "Verifies claims by running things, not guessing; "
                          "keeps design notes next to the code." + DRIVE_HINT}},
                 {{"id", "marketing"}, {"name", "Mark"}, {"avatar", "marketing-female"},
-                 {"require_approval", false},
                  {"role", "Head of marketing — plans campaigns, drafts "
                          "announcements and social copy, and keeps a content "
                          "calendar in the workspace. Punchy, on-brand tone; "
                          "backs claims with market research and links."
                          + DRIVE_HINT}},
                 {{"id", "sales"}, {"name", "Sales"}, {"avatar", "sales"},
-                 {"require_approval", false},
                  {"role", "Head of sales — researches leads, drafts outreach "
                          "sequences, and keeps CRM notes and pipeline "
                          "summaries in the workspace. Friendly, concise "
                          "tone; always cites sources and logs objections "
                          "heard." + DRIVE_HINT}},
                 {{"id", "people"}, {"name", "People"}, {"avatar", "hr-female"},
-                 {"require_approval", false},
                  {"role", "Head of people — writes job descriptions, "
                          "onboarding checklists and team policies, and keeps "
                          "the org chart and roster notes current. Warm, "
                          "clear, discreet with sensitive topics."
                          + DRIVE_HINT}},
                 {{"id", "finance"}, {"name", "Fin"}, {"avatar", "finance"},
-                 {"require_approval", true},
                  {"role", "Head of finance — builds budgets and forecasts as "
                          "spreadsheets in the workspace, reconciles figures "
                          "across documents, and flags anomalies with exact "
                          "numbers. Precise and conservative; shows working."
                          + DRIVE_HINT}},
                 {{"id", "support"}, {"name", "Support"}, {"avatar", "it-support-female"},
-                 {"require_approval", true},
                  {"role", "Head of IT support — triages technical issues, "
                          "reproduces problems before fixing them, writes "
                          "runbooks and how-tos, and escalates with exact "
                          "error output and steps tried." + DRIVE_HINT}},
                 {{"id", "design"}, {"name", "Design"}, {"avatar", "design"},
-                 {"require_approval", false},
                  {"role", "Head of design — produces wireframes, SVG assets "
                          "and style guides in the workspace, reviews UI for "
                          "consistency and accessibility, and presents "
                          "options with rationale rather than one take."
                          + DRIVE_HINT}},
                 {{"id", "legal"}, {"name", "Legal"}, {"avatar", "legal"},
-                 {"require_approval", true},
                  {"role", "Head of legal — reviews contracts and policies, "
                          "drafts plain-language summaries with risk flags, "
                          "and keeps a register of obligations in the "
                          "workspace. Cautious, precise, always cites the "
                          "clause or source relied on." + DRIVE_HINT}},
                 {{"id", "ops"}, {"name", "Ops"}, {"avatar", "operations"},
-                 {"require_approval", true},
                  {"role", "Head of operations — monitors systems, triages "
                          "alerts, and runs routine checks. Prefers "
                          "checklists, gathers evidence before reporting, "
@@ -287,7 +271,6 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string model = body.value("model", "");
             std::string ws = body.value("workspace_mode", "shared");
             if (ws == "host") ws = "shared";   // host mode removed (2026-08-25)
-            bool req_appr = body.value("require_approval", false);
             // an unknown name is accepted here — same contract as the PATCH.
             const std::string worker = body.value("worker", "");
             const std::string type = body.value("type", "");   // Phase 35
@@ -323,29 +306,15 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     send_error(resp, 400, werr); return;
                 }
             }
-            // Phase 72: host agent gate — ack + worker opt-in + forced
-            // approvals. The ack string is an act of informed consent, so
-            // a client can never flip this flag silently.
             const bool host_agent = body.value("host_agent", false);
             if (host_agent) {
-                if (body.value("host_agent_ack", "") != kHostAgentAck) {
-                    send_error(resp, 400,
-                        std::string("host_agent requires host_agent_ack: \"") +
-                        std::string(kHostAgentAck) + "\" — " +
-                        std::string(kHostAgentWarning));
-                    return;
-                }
                 std::string herr;
                 if (!validate_host_capable(workers, worker, herr)) {
                     send_error(resp, 409, herr); return;
                 }
-                req_appr = true;   // shell commands park in the approval queue
-                std::cerr << "HOST AGENT created: '" << name << "' on worker '"
-                          << worker << "' — ack received ("
-                          << kHostAgentAck << "); unsandboxed sudo\n";
             }
             try {
-                auto a = agents.create_agent(name, role, model, ws, req_appr,
+                auto a = agents.create_agent(name, role, model, ws,
                                              body.value("avatar", ""), worker,
                                              type, memory, cpus,
                                              thinking_level, host_agent);
@@ -453,8 +422,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     }
                 }
             }
-            // Phase 72: host_agent tri-state — absent = keep, false = clear
-            // (safe direction, no ack), true = enable (ack + caps).
+            // host_agent tri-state: absent = keep, false = container, true = host.
             int phost = -1;
             if (body.contains("host_agent")) {
                 if (!body["host_agent"].is_boolean()) {
@@ -465,14 +433,6 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
             const bool eff_host = phost == 1 ||
                                   (phost < 0 && existing->host_agent);
-            if (phost == 1 &&
-                body.value("host_agent_ack", "") != kHostAgentAck) {
-                send_error(resp, 400,
-                    std::string("enabling host_agent requires host_agent_ack: "
-                                "\"") + std::string(kHostAgentAck) + "\" — " +
-                    std::string(kHostAgentWarning));
-                return;
-            }
             if (eff_host) {
                 // Caps must hold on the EFFECTIVE worker — covers enabling
                 // AND moving an existing host agent to a new rig.
@@ -482,41 +442,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     send_error(resp, 409, herr); return;
                 }
             }
-            bool preq_appr = body.value("require_approval",
-                                        existing->require_approval);
-            if (eff_host && !preq_appr) {
-                if (body.contains("require_approval")) {
-                    // Explicitly disabling approvals on a host agent is the
-                    // other dangerous direction — same ack gate.
-                    if (body.value("host_agent_ack", "") != kHostAgentAck) {
-                        send_error(resp, 400,
-                            std::string("disabling require_approval on a host "
-                                        "agent requires host_agent_ack: \"") +
-                            std::string(kHostAgentAck) + "\"");
-                        return;
-                    }
-                    std::cerr << "HOST AGENT approvals disabled: '"
-                              << existing->name << "' — ack received\n";
-                } else if (phost == 1 && !existing->host_agent) {
-                    // Freshly ENABLING host mode with no explicit approvals
-                    // choice: the gate is forced ON. A routine update of an
-                    // existing host agent (role/memory/mcp/...) keeps the
-                    // operator's current choice — forcing it ON here silently
-                    // re-gated Bob on an unrelated PATCH (2026-10-22).
-                    preq_appr = true;
-                }
-            }
-            if (phost == 1 && !existing->host_agent)
-                std::cerr << "HOST AGENT enabled: '" << existing->name
-                          << "' — ack received (" << kHostAgentAck
-                          << "); unsandboxed sudo\n";
             try {
                 auto a = agents.update_agent(seg[2],
                     body.value("name", existing->name),
                     body.value("role", existing->role),
                     body.value("model", existing->model),
                     body.value("workspace_mode", existing->workspace_mode),
-                    preq_appr,
                     body.value("avatar", existing->avatar),
                     body.value("worker", ""),   // "" = keep current
                     // Phase 33: accept array or string; "" = keep current

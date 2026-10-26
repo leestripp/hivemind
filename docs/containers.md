@@ -40,7 +40,7 @@ The container's main process is hive-agent, a thin hive-brain host:
 - Reads its identity + model credentials from env (injected by the worker
   at spawn; credentials live on the worker host only).
 - Speaks NDJSON on stdio: `task` ops in, events out (ready / delta /
-  message / approval_request / send_agent_message / status / log).
+  message / send_agent_message / status / log).
   Full mapping table: `docs/hive-worker.md`.
 - Skills load from `/skills` (global mount) AND `/workspace/.agents/
   skills/` (project-local, shared) automatically; helper scripts execute
@@ -59,8 +59,8 @@ read-only to the agent); `local` rows are agent self-service and
 survive re-seeds and container recreations. The boot seed
 (`core/McpSeed.cpp`, fed by `HIVEMIND_MCP_SERVERS`, ALWAYS emitted by
 the worker even when empty) manages only `origin='hub'` rows.
-`mcp_add`/`mcp_enable` pass through the same approval flow as bash on
-approval-gated agents. A built-in `mcp-self-service` skill (image-baked
+`mcp_add`/`mcp_enable` apply immediately, like other valid tool calls.
+A built-in `mcp-self-service` skill (image-baked
 at `/usr/local/share/hive-agent/skills`, appended to `skills_dirs`)
 teaches the install → register → verify → document loop.
 

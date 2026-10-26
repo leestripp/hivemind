@@ -9,7 +9,6 @@
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/SecretStore.h"
 
@@ -109,22 +108,21 @@ int main() {
 
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
-    ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
-    MockHub hub{agents, threads, wchannel, approvals, routines, secrets};
+    MockHub hub{agents, threads, wchannel, routines, secrets};
     hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
     ChatService chat{agents, threads, hub, deliveries};
     hub.set_chat_service(&chat);
 
     const std::string wkey = wstore.enroll("testrig");
     (void)wkey;
-    auto chief = agents.create_agent("Chief", "", "", "", false, "",
+    auto chief = agents.create_agent("Chief", "", "", "", "",
                                      "testrig");
-    auto honey = agents.create_agent("Honey", "", "", "", false, "",
+    auto honey = agents.create_agent("Honey", "", "", "", "",
                                      "testrig");
 
     // User DM with Chief (kind "dm", one agent).

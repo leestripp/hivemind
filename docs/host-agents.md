@@ -28,8 +28,8 @@ hallucination, or prompt injection it can **destroy the machine**. Only
 run host agents on machines you don't mind losing. Container agents
 remain the default and the recommendation for everything else.
 
-The safety model is *informed, repeated consent*, not technical
-containment:
+The safety model is explicit runtime provisioning and isolation, not
+per-command review:
 
 1. **Worker opt-in** — the worker must be started with
    `--allow-host-agents` (or `HIVE_ALLOW_HOST_AGENTS=1`). Default is OFF;
@@ -43,19 +43,15 @@ containment:
    user on a rig that never ran this — the helpers + grant ARE the
    consent. After it, creating a host agent in a client auto-provisions
    the unix user at spawn; deleting one auto-deprovisions.
-3. **API ack gate** — creating (or converting) a host agent requires the
-   literal string `I UNDERSTAND` in `host_agent_ack`; without it the hub
-   answers **400**. On a worker without the capability it answers **409**.
-4. **Approvals forced on** — a host agent is created with
-   `require_approval=true`. Turning approvals OFF on a host agent needs
-   the same `I UNDERSTAND` ack.
-5. **Journal audit** — every creation/enable/disable writes a
-   `HOST AGENT …` line to the hub log.
-6. **Unmissable UI** — host agents are a first-class **Type** choice in
+3. **Autonomous execution** — host agents run valid tools directly with
+   the privileges of their provisioned unix account, including sudo.
+   There is no command-approval queue and no typed API acknowledgment.
+   Existing exec and worker logs provide audit visibility without gating.
+4. **Unmissable UI** — host agents are a first-class **Type** choice in
    the clients' agent dialog ("Bare-Metal ⚠", offered only when the
    selected worker advertises the capability).
-   Selecting it reveals the red warning block + `I UNDERSTAND` entry at
-   the bottom, forces approvals on, and hides the container-only rows
+   Selecting it reveals the red warning block and hides the
+   container-only rows
    (memory/CPU caps). Existing host agents show a red **HOST ⚠** badge
    wherever they appear.
 
@@ -67,7 +63,7 @@ sudo hive-worker install-host-agent-support --worker-user <account>
 ```
 
 After that, **creating a host agent in a client is the whole flow**:
-Type → Bare-Metal ⚠ → type `I UNDERSTAND` → save. At spawn the worker
+Type → Bare-Metal ⚠ → save. At spawn the worker
 auto-provisions via the `hivex-provision` helper, creating:
 
 | Piece | Where |
@@ -212,9 +208,8 @@ then re-run `hivex-provision` for each host agent.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `host_agent` | bool | `false` needs no ack; `true` requires the ack |
-| `host_agent_ack` | string | must be exactly `I UNDERSTAND` when enabling host mode or disabling approvals on a host agent |
+| `host_agent` | bool | `true` selects bare-metal; `false` selects a container |
 
-Errors: **400** missing/incorrect ack (response body carries the
-warning); **409** target worker lacks the `host_agents` capability.
-Roster JSON exposes `host_agent` on every agent.
+Errors: **409** target worker lacks the `host_agents` capability.
+Roster JSON exposes `host_agent` on every agent. Legacy `require_approval`
+and `host_agent_ack` request fields are ignored, never used to gate work.

@@ -73,8 +73,6 @@ std::string AgentProcess::build_env_file() {
     // Phase 43: no LLM env here — the hub injects provider/model config
     // (endpoint + key + tuning) into every task frame; the brain upserts
     // it live. models.json / secrets.json are gone.
-    if (spec_.auto_approve)
-        env_line(body, "HIVEMIND_AUTO_APPROVE", "1");
     const std::string prompt_path = write_prompt_file();
     if (!prompt_path.empty())
         env_line(body, "HIVEMIND_SYSTEM_PROMPT_FILE", prompt_path);

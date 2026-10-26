@@ -18,7 +18,6 @@ enum class AgentState : std::uint8_t {
     Acting,           ///< ACT phase (tools, edits)
     Verifying,        ///< BUILD_TEST phase
     Documenting,      ///< Documentation / changelog / README updates
-    AwaitingApproval, ///< bash approval in flight (sink->request_command_approval blocked)
     Compressing,      ///< Context compression in progress
     Done,             ///< Agent emitted stop() cleanly
     Cancelled,        ///< Cancelled by host (cancel() or stop_token)

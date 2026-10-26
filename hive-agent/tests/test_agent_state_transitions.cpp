@@ -16,7 +16,7 @@ TEST_CASE("AgentState - all states are distinct") {
     // for what should be handled in the main loop
     
     SUBCASE("State count matches enum definition") {
-        // AgentState enum has states: Idle, Understanding, Planning, Acting, Verifying, Documenting, AwaitingApproval, Compressing, Done, Cancelled, Error
+        // AgentState enum has states: Idle, Understanding, Planning, Acting, Verifying, Documenting, Compressing, Done, Cancelled, Error
         CHECK(true); // Documentation: if you add a state, update this test
     }
     

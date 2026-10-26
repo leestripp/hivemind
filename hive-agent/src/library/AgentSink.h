@@ -1,11 +1,11 @@
 /**
  * @file hive-brain/AgentSink.h
  * @brief Callback interface that host applications implement to receive
- *        events from the agent and to answer blocking I/O requests.
+ *        events from the agent.
  *
  * AgentSink is the *only* way the library talks to the outside world.
  * All logging, streaming text, tool lifecycle, state transitions, and
- * host I/O requests (user input, command approval) flow through here.
+ * host events flow through here.
  *
  * Default implementations of every method are no-ops (or sane defaults),
  * so hosts only override what they care about. The methods marked
@@ -28,7 +28,6 @@
 
 #include "types/ErrorKind.h"
 #include "types/LogLevel.h"
-#include "types/ApprovalSource.h"
 
 namespace hive {
 
@@ -182,40 +181,6 @@ public:
     /// Default: no-op. CLI/TUI may ring the bell, web may play a sound.
     virtual void on_bell() noexcept {}
 
-    // ------------------------------------------------------------------
-    // Blocking host I/O requests
-    //
-    // These are called on the agent's worker thread. They may block.
-    // Hosts that cannot block (UI thread, async event loop) MUST
-    // implement these by posting to the appropriate event loop and
-    // waiting for the response synchronously on the worker thread,
-    // or by returning an immediate fallback.
-    //
-    // These methods are not noexcept precisely so hosts CAN throw
-    // to abort the current turn if input/approval fails.
-    // ------------------------------------------------------------------
-
-    /// @brief The execute_bash tool wants permission to run a command.
-    /// @return true to approve, false to deny.
-    /// @throws Anything to abort the turn.
-    virtual bool request_command_approval(std::string_view command)
-    {
-        (void)command;
-        return false;
-    }
-
-    /// @brief §BUG-008: a command was approved WITHOUT calling
-    ///        request_command_approval() — via auto-approve mode or one of
-    ///        the approval caches. Purely informational; the command will
-    ///        run regardless. Default: no-op, so existing hosts are
-    ///        unaffected. Override to render the bypass in your UI or to
-    ///        audit it.
-    virtual void on_command_auto_approved(
-        std::string_view command,
-        hive::ApprovalSource source) noexcept
-    {
-        (void)command; (void)source;
-    }
 };
 
 }  // namespace hive

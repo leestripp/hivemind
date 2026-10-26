@@ -9,8 +9,7 @@
 //       stage="starting" then stage="executing".
 //   P2. Each emitted event has the right JSON shape:
 //       { "stage": <str>, "percent": <int>, "message": <str> }.
-//   P3. Tool blocked before execution (e.g. privilege-escalation
-//       check) emits ZERO progress events.
+//   P3. sudo commands execute autonomously and emit progress.
 //   P4. The 2-arg execute() default (no progress) still works — every
 //       other tool in the codebase keeps using it and must not break.
 //   P5. ToolHandler wires the progress callback through to its sink
@@ -58,17 +57,6 @@ struct ScratchDir {
     }
 };
 
-// RAII auto-mode wrapper — flips ToolHandler into auto-approve so test
-// commands actually run (the sink-attached approval gate would otherwise
-// deny every command). Restored on destruction.
-struct AutoMode {
-    AutoMode()  { prev_ = ToolHandler::is_auto_mode_enabled();
-                  ToolHandler::set_auto_mode(true); }
-    ~AutoMode() { ToolHandler::set_auto_mode(prev_); }
-private:
-    bool prev_ = false;
-};
-
 // ---------------------------------------------------------------------------
 // RecordingSink — captures on_tool_progress events so we can assert
 // against them in P5.
@@ -92,7 +80,6 @@ struct RecordingSink : public hive::AgentSink {
 // P1 / P2 — BashTool emits at least two progress events with the right shape.
 // ---------------------------------------------------------------------------
 TEST_CASE("P1+P2: BashTool emits starting+executing progress events") {
-    AutoMode _am;
     ScratchDir scratch("bash-progress");
     FileIO file_io(scratch.path);
     BashTool bash;
@@ -125,26 +112,17 @@ TEST_CASE("P1+P2: BashTool emits starting+executing progress events") {
 }
 
 // ---------------------------------------------------------------------------
-// P3 — A command rejected BEFORE execution (privilege escalation: `sudo ...`)
-//      emits NO progress events. The progress events only fire after all
-//      guards pass.
+// P3 — Autonomous execution includes commands that use the runtime's sudo.
 // ---------------------------------------------------------------------------
-TEST_CASE("P3: pre-execution rejection fires zero progress events") {
-    // Even with auto_mode off, sudo is blocked by BashPathChecker
-    // before any progress emission.
-    ScratchDir scratch("bash-progress-deny");
+TEST_CASE("P3: sudo command executes without approval") {
+    ScratchDir scratch("bash-progress-sudo");
     FileIO file_io(scratch.path);
     BashTool bash;
-
     std::atomic<int> call_count{0};
     ToolProgressFn cb = [&](const json&) { ++call_count; };
-
-    // Privilege escalation triggers Rule 2 (BashPathChecker), which
-    // runs BEFORE the approval gate and BEFORE the progress emissions.
-    auto result = bash.execute({{"command", "sudo rm -rf /tmp"}}, file_io, cb);
-
-    REQUIRE(result.value("status", "") == "error");
-    CHECK(call_count.load() == 0);
+    auto result = bash.execute({{"command", "sudo --version"}}, file_io, cb);
+    REQUIRE(result.value("status", "") == "success");
+    CHECK(call_count.load() >= 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +131,6 @@ TEST_CASE("P3: pre-execution rejection fires zero progress events") {
 //      succeed and return the expected output.
 // ---------------------------------------------------------------------------
 TEST_CASE("P4: 2-arg execute() still works (back-compat)") {
-    AutoMode _am;
     ScratchDir scratch("bash-2arg");
     FileIO file_io(scratch.path);
     BashTool bash;
@@ -170,7 +147,6 @@ TEST_CASE("P4: 2-arg execute() still works (back-compat)") {
 //      same way LLMClient does. Verifies the end-to-end wiring.
 // ---------------------------------------------------------------------------
 TEST_CASE("P5: ToolHandler wires progress through to sink") {
-    AutoMode _am;
     auto sink = std::make_shared<RecordingSink>();
     ToolHandler::set_sink(sink);
 

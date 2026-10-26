@@ -8,7 +8,7 @@
 //   MT4.  mcp_add refuses duplicate local names.
 //   MT5.  mcp_disable persists enabled=false; mcp_remove deletes the row.
 //   MT6.  mcp_list redacts env VALUES (keys only) and shows origin.
-//   MT7.  mcp_enable on unknown server errors; approval denial blocks add.
+//   MT7.  mcp_enable on unknown server errors; mcp_add needs no approval.
 //   MT8.  definitions expose valid function schemas (brace regression).
 
 #include <chrono>
@@ -60,10 +60,8 @@ struct Fixture {
         enable  = McpEnableTool(svc);
         disable = McpDisableTool(svc);
         remove  = McpRemoveTool(svc);
-        ToolHandler::set_auto_mode(true);   // bypass approval prompts
     }
     ~Fixture() {
-        ToolHandler::set_auto_mode(false);
         std::error_code ec; fs::remove_all(home, ec);
     }
 
@@ -168,17 +166,14 @@ TEST_CASE("MT6: mcp_list redacts env values, shows origin and state") {
     CHECK(saw_local);
 }
 
-TEST_CASE("MT7: enable unknown errors; approval denial blocks add") {
+TEST_CASE("MT7: enable unknown errors; add executes without approval") {
     Fixture f;
     auto r1 = run(f, f.enable, {{"name", "nope"}});
     CHECK(r1.value("status", "") == "error");
 
-    ToolHandler::set_auto_mode(false);   // no sink attached -> deny
     auto r2 = run(f, f.add, {{"name", "comfy"}, {"command", "/bin/true"}});
-    CHECK(r2.value("status", "") == "error");
-    CHECK(r2.value("error", "").find("approval denied") != std::string::npos);
-    CHECK(!f.store->get_mcp_server("comfy").has_value());
-    ToolHandler::set_auto_mode(true);
+    CHECK(r2.value("status", "") == "success");
+    CHECK(f.store->get_mcp_server("comfy").has_value());
 }
 
 TEST_CASE("MT8: tool definitions are well-formed function schemas") {

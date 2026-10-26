@@ -215,35 +215,7 @@ TEST_SUITE("ToolDefinitions") {
         CHECK(std::find(names.begin(), names.end(), "compress_context") == names.end());
     }
 
-    TEST_CASE("matches_pattern wildcard semantics (§FIX-leading-wildcard)") {
-        // Exact and prefix (no wildcard)
-        CHECK(ToolHandler::matches_pattern("git status", "git status") == true);
-        CHECK(ToolHandler::matches_pattern("git status -s", "git status") == true);
-
-        // Pure wildcard matches everything
-        CHECK(ToolHandler::matches_pattern("anything at all", "*") == true);
-        CHECK(ToolHandler::matches_pattern("ls -la", "***") == true);
-
-        // Trailing wildcard = prefix match
-        CHECK(ToolHandler::matches_pattern("rm -rf build", "rm -rf *") == true);
-        CHECK(ToolHandler::matches_pattern("ls build", "rm -rf *") == false);
-
-        // Leading wildcard = suffix match
-        CHECK(ToolHandler::matches_pattern("cat notes.txt", "*.txt") == true);
-        CHECK(ToolHandler::matches_pattern("cat notes.md", "*.txt") == false);
-
-        // Leading + trailing wildcard = contains match
-        CHECK(ToolHandler::matches_pattern("git status -s", "*status*") == true);
-        CHECK(ToolHandler::matches_pattern("git log", "*status*") == false);
-
-        // Anchored on both ends with middle parts in order
-        CHECK(ToolHandler::matches_pattern("make all install", "make*install") == true);
-        CHECK(ToolHandler::matches_pattern("make install all", "make*all") == true);
-        CHECK(ToolHandler::matches_pattern("xmake all", "make*all") == false);
-    }
-}
-
-TEST_CASE("discover_skills reports the skill directories (§SKILL-DIRS)") {
+    TEST_CASE("discover_skills reports the skill directories (§SKILL-DIRS)") {
     // Regression: the agent had no way to learn where skills live -
     // discover_skills only returned paths of skills that already exist,
     // so empty directories were invisible and the model could not know
@@ -356,3 +328,5 @@ TEST_CASE("list_tools honours the per-agent ToolFilter via execute_tool(filter)"
                                                file_io, nullptr, filter);
     CHECK(blocked["status"] == "error");
 }
+
+} // TEST_SUITE("ToolDefinitions")

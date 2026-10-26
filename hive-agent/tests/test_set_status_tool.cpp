@@ -11,7 +11,7 @@
  *      branch on it and fire the public state-change event.
  *   6. agent_state_from() (the inverse of to_string()) round-trips.
  *   7. §IdleLoopFix (2026-08-20): runtime-owned states (Idle,
- *      AwaitingApproval, Compressing) are REJECTED with an actionable
+ *      Compressing) are REJECTED with an actionable
  *      error.  A model used to call set_status("Idle") expecting the
  *      agent loop to exit ("Idle = no work in flight"), got
  *      status=success, and looped forever.  The loop ends only via the
@@ -150,10 +150,10 @@ TEST_SUITE("SetStatusTool — runtime-owned states rejected") {
         }
     }
 
-    TEST_CASE("AwaitingApproval and Compressing are rejected as runtime-owned") {
+    TEST_CASE("Compressing is rejected as runtime-owned") {
         SetStatusTool tool;
         FileIO io(std::filesystem::temp_directory_path());
-        for (const auto& name : {"AwaitingApproval", "Compressing"}) {
+        for (const auto& name : {"Compressing"}) {
             json r = tool.execute({{"state", name}}, io);
             CHECK(r["status"] == "error");
             std::string msg = r["message"].get<std::string>();
@@ -177,7 +177,7 @@ TEST_SUITE("SetStatusTool — runtime-owned states rejected") {
         // reach the sink.  Belt-and-braces check on the contract.
         SetStatusTool tool;
         FileIO io(std::filesystem::temp_directory_path());
-        for (const auto& name : {"Idle", "AwaitingApproval", "Compressing"}) {
+        for (const auto& name : {"Idle", "Compressing"}) {
             json r = tool.execute({{"state", name}}, io);
             CHECK(r["status"] != "set_state");
             CHECK_FALSE(r.contains("state"));
@@ -274,7 +274,6 @@ TEST_SUITE("hive::agent_state_from") {
         CHECK(hive::agent_state_from("Acting", &ok)           == hive::AgentState::Acting);           CHECK(ok);
         CHECK(hive::agent_state_from("Verifying", &ok)        == hive::AgentState::Verifying);        CHECK(ok);
         CHECK(hive::agent_state_from("Documenting", &ok)      == hive::AgentState::Documenting);      CHECK(ok);
-        CHECK(hive::agent_state_from("AwaitingApproval", &ok) == hive::AgentState::AwaitingApproval); CHECK(ok);
         CHECK(hive::agent_state_from("Compressing", &ok)      == hive::AgentState::Compressing);      CHECK(ok);
         CHECK(hive::agent_state_from("Done", &ok)             == hive::AgentState::Done);             CHECK(ok);
         CHECK(hive::agent_state_from("Cancelled", &ok)        == hive::AgentState::Cancelled);        CHECK(ok);
@@ -318,7 +317,7 @@ TEST_SUITE("to_string ↔ agent_state_from round-trip") {
     TEST_CASE("Every public name survives a round-trip") {
         const std::vector<std::string> names = {
             "Idle", "Understanding", "Planning", "Acting", "Verifying",
-            "Documenting", "AwaitingApproval", "Compressing",
+            "Documenting", "Compressing",
             "Done", "Cancelled", "Error",
         };
         for (const auto& name : names) {

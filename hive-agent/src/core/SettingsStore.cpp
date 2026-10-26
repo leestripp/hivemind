@@ -951,16 +951,6 @@ std::vector<std::string> SettingsStore::list_providers() const
     return out;
 }
 
-bool SettingsStore::get_auto_approve() const
-{
-    return get_bool("auto_approve", false);
-}
-
-void SettingsStore::set_auto_approve(bool value)
-{
-    set_bool("auto_approve", value);
-}
-
 int SettingsStore::get_max_context_size_for_model(std::string_view model_name) const
 {
     // 1. Check if the user has set an explicit max_context_size for this model.

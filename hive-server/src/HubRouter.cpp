@@ -6,7 +6,6 @@
 #include "hivemind/Schedule.h"
 #include "hivemind/LlmStore.h"
 #include "hivemind/AgentStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/ContainerManager.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/ChatService.h"
@@ -24,10 +23,10 @@
 using nlohmann::json;
 
 HubRouter::HubRouter(AgentStore& agents, ThreadStore& threads,
-                     WorkerChannel& channel, ApprovalStore& approvals,
-                     RoutineStore& routines, hivemind::SecretStore& secrets)
+                     WorkerChannel& channel, RoutineStore& routines,
+                     hivemind::SecretStore& secrets)
     : agents_(agents), threads_(threads), channel_(channel),
-      approvals_(approvals), routines_(routines), secrets_(secrets) {}
+      routines_(routines), secrets_(secrets) {}
 
 namespace {
 
@@ -437,7 +436,6 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"model", agent.model},          // NAME - worker resolves
             {"provider", ""},                // worker's models.json knows
             {"system_prompt", agent.role},
-            {"auto_approve", !agent.require_approval},
             {"mcp_servers", mcp},
             {"image", ""},                  // "" = worker default (v2)
             {"type", agent.type},             // Phase 35: "" / "gpu"
@@ -580,48 +578,6 @@ void HubRouter::on_worker_frame(const std::string& worker,
         flush_pending_spawns();
         return;
     }
-    if (op == "approval_req") {
-        // Register a PENDING approval the client can see and decide; the
-        // worker-side request id is remembered for the response relay.
-        auto agent = agents_.get_agent(agent_id);
-        const std::string store_id = approvals_.create(
-            agent_id, agent ? agent->name : agent_id,
-            "command", frame.value("command", ""));
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            pend_appr_[store_id] = {worker, agent_id,
-                                    frame.value("id", "")};
-        }
-        std::cerr << "[hub] approval_req " << store_id << " from "
-                  << agent_id << ": "
-                  << frame.value("command", "").substr(0, 80) << "\n";
-        return;
-    }
-    if (op == "approval_resolved") {
-        // The agent settled this approval itself (cancel/shutdown deny
-        // or the broker safety timeout) — clear the pending row so the
-        // client doesn't show ghosts. No approval_resp relay: the agent
-        // already knows.
-        const std::string agent_id = frame.value("agent", "");
-        const std::string req_id = frame.value("id", "");
-        std::string store_id;
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            for (auto it = pend_appr_.begin(); it != pend_appr_.end(); ++it)
-                if (it->second.agent_id == agent_id &&
-                    it->second.req_id == req_id) {
-                    store_id = it->first;
-                    pend_appr_.erase(it);
-                    break;
-                }
-        }
-        if (!store_id.empty()) {
-            approvals_.resolve(store_id, frame.value("allow", false));
-            std::cerr << "[hub] approval " << store_id
-                      << " settled agent-side (deny)\n";
-        }
-        return;
-    }
     if (op == "agent_status") {
         const std::string st = frame.value("state", "");
         {
@@ -720,22 +676,6 @@ void HubRouter::on_worker_frame(const std::string& worker,
         return;
     }
     // Unknown ops fall through silently (forward-compatible).
-}
-
-bool HubRouter::resolve_approval(const std::string& id, bool allow) {
-    PendAppr pa;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        auto it = pend_appr_.find(id);
-        if (it == pend_appr_.end()) return false;
-        pa = it->second;
-        pend_appr_.erase(it);
-    }
-    approvals_.resolve(id, allow);
-    return channel_.send(pa.worker, {{"op", "approval_resp"},
-                                     {"agent_id", pa.agent_id},
-                                     {"id", pa.req_id},
-                                     {"allow", allow}});
 }
 
 std::string HubRouter::agent_state(const std::string& agent_id) const {

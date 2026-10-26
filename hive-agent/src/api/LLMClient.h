@@ -47,7 +47,6 @@ struct AppConfig {
     // prompt_cache_key, which Kimi Code Plan requires for good hit
     // rates) when agent_name is empty (the default agent).
     std::string session_id;
-    bool auto_mode = false;  // Automatically approve tool executions
     bool memory_disabled = false;  // Disable session memory
     // §ContextCache follow-up (2026-08-02): omit the Session Memory
     // section from the composed system prompt (memory collection is
@@ -397,11 +396,7 @@ public:
     ///        next turn's first cycle. Thread-safe.
     void compress_context() noexcept;
 
-    /// @brief Attach a sink. Call this after construction and before
-    ///        initialize(). Required for streaming output, log routing, and
-    ///        blocking I/O (bash approval).
-    ///        Also propagates the sink to ToolHandler so execute_bash can
-    ///        call request_command_approval when not auto-approved.
+    /// @brief Attach a sink before initialize() for streaming and events.
     void set_sink(std::shared_ptr<hive::AgentSink> sink) {
         sink_ = sink;
         ToolHandler::set_sink(std::move(sink));

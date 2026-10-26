@@ -58,12 +58,11 @@ void register_migration_routes(OmniNet::HTTP::Server& server,
         const std::string target_type = body.value("target_type", "container");
         const bool force = body.value("force", false);
         const bool no_rollback = body.value("no_rollback", false);
-        const std::string ack = body.value("ack", "");
 
         try {
             const std::string job_id = svc.begin(agent_id, target_worker,
                                                  target_type, force,
-                                                 no_rollback, ack);
+                                                 no_rollback);
             return hivemind::routes::send_json(resp, {{"job_id", job_id}}, 202),
                    true;
         } catch (const std::invalid_argument& e) {

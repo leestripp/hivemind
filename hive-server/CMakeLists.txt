@@ -24,7 +24,6 @@ set(CORE_SOURCES
     src/ShareStore.cpp
     src/ContainerManager.cpp
     src/ExecAuditStore.cpp
-    src/ApprovalStore.cpp
     src/AgentTools.cpp
     src/ChatService.cpp
     src/FanInPolicy.cpp
@@ -50,7 +49,6 @@ set(ROUTE_SOURCES
     include/hivemind/routes/SkillRoutes.cpp
     include/hivemind/routes/SecretRoutes.cpp
     include/hivemind/routes/ContainerRoutes.cpp
-    include/hivemind/routes/ApprovalRoutes.cpp
     include/hivemind/routes/RoutineRoutes.cpp
     include/hivemind/routes/KeyRoutes.cpp
     include/hivemind/routes/ConfigRoutes.cpp

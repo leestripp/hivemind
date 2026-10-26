@@ -39,7 +39,7 @@ int main() {
 
     // ── worker placement (Phase 30) ───────────────────────────────────────
     assert(a.worker == "local");   // default when not specified
-    auto w = store.create_agent("Rigger", "gpu jobs", "", "shared", false, "",
+    auto w = store.create_agent("Rigger", "gpu jobs", "", "shared", "",
                                 "rig-gpu");
     assert(w.worker == "rig-gpu");
     assert(store.get_agent(w.id)->worker == "rig-gpu");   // persisted
@@ -54,29 +54,26 @@ int main() {
     assert(!store.get_agent("no-such-id"));
 
     // ── update ────────────────────────────────────────────────────────────
-    auto updated = store.update_agent(a.id, "Nova", "ops lead", "", "shared", true);
+    auto updated = store.update_agent(a.id, "Nova", "ops lead", "", "shared");
     assert(updated.role == "ops lead");
     assert(updated.model.empty());
     assert(updated.updated_at >= a.created_at);
-    assert(updated.require_approval == true);
 
     // update_agent worker: "" keeps current, explicit value replaces
-    auto moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared",
-                                    false, "", "" /*keep*/);
+    auto moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared", "", "" /*keep*/);
     assert(moved.worker == "rig-gpu");
-    moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared",
-                               false, "", "local");
+    moved = store.update_agent(w.id, "Rigger", "gpu jobs", "", "shared", "", "local");
     assert(moved.worker == "local");
 
     // name clash on update rejected
     threw = false;
-    try { store.update_agent(a.id, "Pixel", "", "", "", false); }
+    try { store.update_agent(a.id, "Pixel", "", "", ""); }
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 
     // updating a missing agent rejected
     threw = false;
-    try { store.update_agent("no-such-id", "X", "", "", "", false); }
+    try { store.update_agent("no-such-id", "X", "", "", ""); }
     catch (const std::invalid_argument&) { threw = true; }
     assert(threw);
 
@@ -89,26 +86,26 @@ int main() {
     }
 
     // ── type (Phase 35) ───────────────────────────────────────────────────
-    auto g = store.create_agent("Forge", "3d artist", "", "shared", false, "",
+    auto g = store.create_agent("Forge", "3d artist", "", "shared", "",
                                 "", "gpu");
     assert(g.type == "gpu");
     assert(store.get_agent(g.id)->type == "gpu");    // persisted
     assert(store.get_agent(a.id)->type.empty());     // default: standard
     // update with "" keeps the current type
-    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false);
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared");
     assert(store.get_agent(g.id)->type == "gpu");
     // "default" explicitly clears back to standard
-    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false, "",
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared", "",
                        "", "", "default");
     assert(store.get_agent(g.id)->type.empty());
     // ...and can be set again
-    store.update_agent(g.id, "Forge", "3d artist", "", "shared", false, "",
+    store.update_agent(g.id, "Forge", "3d artist", "", "shared", "",
                        "", "", "gpu");
     assert(store.get_agent(g.id)->type == "gpu");
 
     // ── memory / cpus (Phase 69) ──────────────────────────────────────────
     // create with explicit caps; defaults are ""/0 (worker decides).
-    auto big = store.create_agent("Comfy", "image gen", "", "shared", false,
+    auto big = store.create_agent("Comfy", "image gen", "", "shared",
                                   "", "", "", "32g", 12);
     assert(big.memory == "32g");
     assert(big.cpus == 12);
@@ -117,23 +114,23 @@ int main() {
     assert(store.get_agent(a.id)->memory.empty());        // default unset
     assert(store.get_agent(a.id)->cpus == 0);
     // fractional cpus survive the REAL roundtrip
-    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", "",
                        "", "", "", "", 1.5);
     assert(store.get_agent(big.id)->cpus == 1.5);
     assert(store.get_agent(big.id)->memory == "32g");     // "" = keep
     // cpus = -1 keeps, 0 resets to the worker default
-    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", "",
                        "", "", "", "", -1);
     assert(store.get_agent(big.id)->cpus == 1.5);
-    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", "",
                        "", "", "", "", 0);
     assert(store.get_agent(big.id)->cpus == 0);
     // memory "default" explicitly clears
-    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", "",
                        "", "", "", "default", -1);
     assert(store.get_agent(big.id)->memory.empty());
     // ...and both can be set again via update
-    store.update_agent(big.id, "Comfy", "image gen", "", "shared", false, "",
+    store.update_agent(big.id, "Comfy", "image gen", "", "shared", "",
                        "", "", "", "1536m", 8);
     {
         auto r = store.get_agent(big.id);
@@ -147,18 +144,18 @@ int main() {
 
 
     // ── thinking level (2026-10-01): "" = inherit from model ──────────────
-    auto t = store.create_agent("Thinker", "", "", "shared", false, "",
+    auto t = store.create_agent("Thinker", "", "", "shared", "",
                                 "", "", "", 0, "low");
     assert(t.thinking_level == "low");
     assert(store.get_agent(t.id)->thinking_level == "low");   // persisted
     // PATCH: "" = keep, "default" = clear, a level = set.
-    auto t2 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+    auto t2 = store.update_agent(t.id, "Thinker", "", "", "shared", "",
                                  "", "", "", "", 0, "");
     assert(t2.thinking_level == "low");                       // kept
-    auto t3 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+    auto t3 = store.update_agent(t.id, "Thinker", "", "", "shared", "",
                                  "", "", "", "", 0, "default");
     assert(t3.thinking_level.empty());                        // cleared
-    auto t4 = store.update_agent(t.id, "Thinker", "", "", "shared", false, "",
+    auto t4 = store.update_agent(t.id, "Thinker", "", "", "shared", "",
                                  "", "", "", "", 0, "max");
     assert(t4.thinking_level == "max");                       // set
     assert(store.get_agent(t.id)->thinking_level == "max");   // persisted

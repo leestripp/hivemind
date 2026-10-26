@@ -33,11 +33,9 @@ struct RosterAgent {
     // 2026-10-01: thinking-level override (none|low|high|max);
     // "" = inherit from the model's own thinking_level.
     std::string thinking_level;
-    bool require_approval = false; // Phase 3: gate shell commands for human review
     // Phase 72 (2026-10-12): host agent — runs bare-metal on the worker as
-    // user hivex-<name> with passwordless sudo. NO sandbox. Two-level opt-in
-    // (worker allow_host_agents + this flag) and the "I UNDERSTAND" ack are
-    // enforced in RosterRoutes; the store just persists the flag.
+    // user hivex-<name> with passwordless sudo. Worker opt-in and runtime
+    // selection are configuration, not per-command permission prompts.
     bool host_agent = false;
     std::string created_at;
     std::string updated_at;
@@ -65,7 +63,6 @@ public:
                              const std::string& role = "",
                              const std::string& model = "",
                              const std::string& workspace_mode = "shared",
-                             bool require_approval = false,
                              const std::string& avatar = "",
                              const std::string& worker = "",
                              const std::string& type = "",   // Phase 35: "gpu" = workhorse
@@ -85,7 +82,6 @@ public:
                              const std::string& role,
                              const std::string& model,
                              const std::string& workspace_mode,
-                             bool require_approval,
                              const std::string& avatar = "",
                              const std::string& worker = "",   // "" = keep current
                              const std::string& mcp_servers = "", // "" = keep current (Phase 33)

@@ -18,16 +18,15 @@ namespace {
 // expecting the agent loop to exit — but set_status only *reports*
 // state to the host; the loop ends exclusively via the `stop` tool
 // (or host cancel).  The tool returned status=success, so the model
-// looped forever.  Idle / AwaitingApproval / Compressing are now
+// looped forever.  Idle / Compressing are now
 // rejected with an actionable error instead of being accepted.
-constexpr std::array<std::string_view, 11> kValidStates = {
+constexpr std::array<std::string_view, 10> kValidStates = {
     "Idle",
     "Understanding",
     "Planning",
     "Acting",
     "Verifying",
     "Documenting",
-    "AwaitingApproval",
     "Compressing",
     "Done",
     "Cancelled",
@@ -35,9 +34,8 @@ constexpr std::array<std::string_view, 11> kValidStates = {
 };
 
 // States the library sets itself — never accepted from the model.
-constexpr std::array<std::string_view, 3> kRuntimeOwnedStates = {
+constexpr std::array<std::string_view, 2> kRuntimeOwnedStates = {
     "Idle",
-    "AwaitingApproval",
     "Compressing",
 };
 
@@ -106,7 +104,7 @@ json SetStatusTool::get_definition() const {
                         {"description",
                          "The state to transition to. One of: Understanding, Planning, "
                          "Acting, Verifying, Documenting, Done, Cancelled, Error. "
-                         "(Idle, AwaitingApproval and Compressing are runtime-managed — the "
+                         "(Idle and Compressing are runtime-managed — the "
                          "library sets them itself; passing them is an error.) "
                          "NOTE: set_status only updates the host UI stage — it NEVER exits "
                          "the agent loop, not even 'Done'. To end your turn, call the 'stop' "

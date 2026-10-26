@@ -8,7 +8,6 @@
 #include "hivemind/HubRouter.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
-#include "hivemind/ApprovalStore.h"
 #include "hivemind/RoutineStore.h"
 #include "hivemind/SecretStore.h"
 
@@ -53,13 +52,12 @@ int main() {
 
     AgentStore agents{tmp / "agents.db"};
     ThreadStore threads{tmp / "threads.db"};
-    ApprovalStore approvals{tmp / "approvals.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
-    HubRouter hub{agents, threads, wchannel, approvals, routines,
+    HubRouter hub{agents, threads, wchannel, routines,
                   secrets};
     hivemind::DeliveryStore deliveries{tmp / "deliveries.db"};
     ChatService chat{agents, threads, hub, deliveries};
@@ -88,9 +86,15 @@ int main() {
     assert(r.statusCode() == 400);
 
     r = request("POST", port, "/api/agents",
-                {{"name", "Alpha"}, {"role", "coder"}, {"worker", "testrig"}});
+                {{"name", "Alpha"}, {"role", "coder"}, {"worker", "testrig"},
+                 {"avatar", "engineering-female"}});
     assert(r.statusCode() == 201);
     const std::string a1 = json::parse(r.bodyAsString())["id"];
+    assert(json::parse(r.bodyAsString())["avatar"] == "engineering-female");
+    assert(jget(port, "/api/agents/" + a1)["avatar"] == "engineering-female");
+    r = request("PATCH", port, "/api/agents/" + a1, {{"role", "builder"}});
+    assert(r.statusCode() == 200);
+    assert(jget(port, "/api/agents/" + a1)["avatar"] == "engineering-female");
     r = request("POST", port, "/api/agents",
                 {{"name", "Beta"}, {"role", "reviewer"}, {"worker", "testrig"}});
     const std::string a2 = json::parse(r.bodyAsString())["id"];
@@ -292,73 +296,35 @@ int main() {
     for (const auto& m : im["messages"])
         assert(m.value("sender_kind", "") == "agent");
 
-    // ── Phase 72: host agents (bare-metal, sudo — ack-gated) ─────────────
-    // No ack -> 400 (the ack string is informed consent).
+    // ── Phase 72: host agents use capability checks, not acknowledgments ──
     r = request("POST", port, "/api/agents",
                 {{"name", "Rooty"}, {"worker", "testrig"},
                  {"host_agent", true}});
-    assert(r.statusCode() == 400);
-    // Wrong ack -> still 400.
-    r = request("POST", port, "/api/agents",
-                {{"name", "Rooty"}, {"worker", "testrig"},
-                 {"host_agent", true}, {"host_agent_ack", "yes"}});
-    assert(r.statusCode() == 400);
-    // Correct ack but worker has NOT opted in (no host_agents cap) -> 409.
-    r = request("POST", port, "/api/agents",
-                {{"name", "Rooty"}, {"worker", "testrig"},
-                 {"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
-    assert(r.statusCode() == 409);
+    assert(r.statusCode() == 409);   // worker has not opted in
 
-    // Worker opts in (hello cap) -> 201, approvals forced on, flag exposed.
     wstore.validate(wkey,
                     R"({"arch":"x86_64","gpu":"amd","host_agents":true})");
     r = request("POST", port, "/api/agents",
                 {{"name", "Rooty"}, {"worker", "testrig"},
-                 {"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
+                 {"host_agent", true}, {"require_approval", true},
+                 {"host_agent_ack", "legacy-value-is-ignored"}});
     assert(r.statusCode() == 201);
+    assert(!json::parse(r.bodyAsString()).contains("require_approval"));
     const std::string a4 = json::parse(r.bodyAsString())["id"];
-    {
-        auto j = jget(port, "/api/agents/" + a4);
-        assert(j["host_agent"] == true);
-        assert(j["require_approval"] == true);   // forced at creation
-    }
+    assert(jget(port, "/api/agents/" + a4)["host_agent"] == true);
 
-    // PATCH enable without ack -> 400; with ack -> 200 + approvals forced.
-    r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", true}});
-    assert(r.statusCode() == 400);
     r = request("PATCH", port, "/api/agents/" + a2,
-                {{"host_agent", true}, {"host_agent_ack", "I UNDERSTAND"}});
+                {{"host_agent", true}, {"model", "changed-model"}});
     assert(r.statusCode() == 200);
-    assert(jget(port, "/api/agents/" + a2)["host_agent"] == true);
-    assert(jget(port, "/api/agents/" + a2)["require_approval"] == true);
+    auto updated = jget(port, "/api/agents/" + a2);
+    assert(updated["host_agent"] == true);
+    assert(updated["model"] == "changed-model");
+    assert(!updated.contains("require_approval"));
 
-    // Disabling approvals on a host agent needs the ack too.
-    r = request("PATCH", port, "/api/agents/" + a2,
-                {{"require_approval", false}});
-    assert(r.statusCode() == 400);
-    r = request("PATCH", port, "/api/agents/" + a2,
-                {{"require_approval", false},
-                 {"host_agent_ack", "I UNDERSTAND"}});
-    assert(r.statusCode() == 200);
-    assert(jget(port, "/api/agents/" + a2)["require_approval"] == false);
-
-    // 2026-10-22 (Bob incident): a routine PATCH that never mentions
-    // require_approval must NOT silently re-gate an existing host agent —
-    // only freshly ENABLING host mode forces the gate ON.
-    r = request("PATCH", port, "/api/agents/" + a2, {{"role", "builder"}});
-    assert(r.statusCode() == 200);
-    assert(jget(port, "/api/agents/" + a2)["require_approval"] == false);
-
-    // Moving a host agent to a non-opted-in worker -> 409.
     r = request("PATCH", port, "/api/agents/" + a2, {{"worker", "plainrig"}});
     assert(r.statusCode() == 409);
-
-    // Clearing host_agent (safe direction) needs no ack.
     r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", false}});
     assert(r.statusCode() == 200);
-    assert(jget(port, "/api/agents/" + a2)["host_agent"] == false);
-
-    // Non-boolean host_agent -> 400.
     r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", "yes"}});
     assert(r.statusCode() == 400);
 

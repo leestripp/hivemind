@@ -69,7 +69,7 @@ public:
     std::string begin(const std::string& agent_id,
                       const std::string& target_worker,
                       const std::string& target_type, bool force,
-                      bool no_rollback, const std::string& ack);
+                      bool no_rollback);
 
     /// Cancel a live job. Before the roster flip this just abandons
     /// staging (agent untouched); after the flip it performs a rollback.

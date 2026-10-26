@@ -18,7 +18,6 @@ const char* to_string(AgentState state) noexcept {
         case AgentState::Acting:           return "Acting";
         case AgentState::Verifying:        return "Verifying";
         case AgentState::Documenting:      return "Documenting";
-        case AgentState::AwaitingApproval:  return "AwaitingApproval";
         case AgentState::Compressing:      return "Compressing";
         case AgentState::Done:             return "Done";
         case AgentState::Cancelled:        return "Cancelled";
@@ -43,7 +42,6 @@ AgentState agent_state_from(std::string_view name, bool* ok) noexcept {
     if (eq_ci("Acting"))           { if (ok) *ok = true;  return AgentState::Acting; }
     if (eq_ci("Verifying"))         { if (ok) *ok = true;  return AgentState::Verifying; }
     if (eq_ci("Documenting"))       { if (ok) *ok = true;  return AgentState::Documenting; }
-    if (eq_ci("AwaitingApproval"))  { if (ok) *ok = true;  return AgentState::AwaitingApproval; }
     if (eq_ci("Compressing"))      { if (ok) *ok = true;  return AgentState::Compressing; }
     if (eq_ci("Done"))             { if (ok) *ok = true;  return AgentState::Done; }
     if (eq_ci("Cancelled"))        { if (ok) *ok = true;  return AgentState::Cancelled; }

@@ -108,7 +108,6 @@ int main() {
     cfg.project_root  = "/tmp";
     cfg.session_id    = "no-dup-test";
     cfg.model_name    = "minimax-m2.7";
-    cfg.auto_approve  = true;
 
     auto sink = std::make_shared<DedupSink>();
     hive::Agent agent(cfg, sink);

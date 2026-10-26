@@ -186,14 +186,6 @@ public:
     ///        could be resolved (e.g. settings.json is empty).
     [[nodiscard]] ModelInfo active_model() const noexcept;
 
-    /// @brief Effective auto-approve flag. When `cfg.auto_approve` is set
-    ///        (std::optional has a value) it is authoritative; when unset,
-    ///        falls back to the SettingsStore `auto_approve` row (legacy).
-    ///        The library's tool dispatcher uses this combined value, so
-    ///        hosts that display it should too. (Previously the daedalus-cli
-    ///        banner showed only the cfg value, missing settings.)
-    [[nodiscard]] bool auto_approve() const noexcept;
-
     /// @brief Compress the conversation context (§AutoCompress). When no
     ///        turn is running, compression happens immediately —
     ///        synchronously on the caller's thread, with
@@ -207,32 +199,6 @@ public:
     ///        docs/how_compress_works.md). No-op when no model is
     ///        configured (no LLMClient yet).
     void compress_context() noexcept;
-
-    // ------------------------------------------------------------------
-    // Approval control (§BUG-006/007/008)
-    // ------------------------------------------------------------------
-
-    /// @brief Flip this agent's auto-approve mode at runtime. Authoritative:
-    ///        overrides both the config field and the SettingsStore row for
-    ///        this agent. Takes effect on the next command approval check.
-    ///        Does NOT persist anything — hosts that want persistence
-    ///        read/write the SettingsStore themselves.
-    void set_auto_approve(bool enabled);
-
-    /// @brief Drop the in-memory session-approved command cache. Subsequent
-    ///        commands will prompt again (unless auto-approve is on).
-    void clear_session_approvals();
-
-    /// @brief Delete this project's persisted approvals
-    ///        (`<project>/.daedalus/hive-brain[-<name>]/approvals.json`) and
-    ///        clear the in-memory persisted-approval set. Idempotent.
-    void clear_persisted_approvals();
-
-    /// @brief Opt in/out of auto-recording host-approved commands into the
-    ///        session-approved cache. Default true (legacy). Set false for
-    ///        "ask every time" semantics. Note: like the underlying
-    ///        ToolHandler state, this switch is process-wide.
-    void set_remember_approvals(bool enabled);
 
     /// @brief Library version (git hash or fallback "v0.0.0").
     ///        Useful for hosts that want to display the lib they link.

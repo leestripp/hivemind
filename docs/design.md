@@ -23,10 +23,10 @@ client. This document describes the current architecture.
 
 ### hive-server — the comms hub
 
-- Owns: threads, messages, attachments, roster, approvals relay, skills
-  library (canonical copy), worker registry.
+- Owns: threads, messages, attachments, roster, skills library
+  (canonical copy), worker registry.
 - Routes: client→agent tasks, agent→client replies, agent↔agent messages
-  (pair threads, generation-capped), approval round-trips.
+  (pair threads, generation-capped).
 - Does NOT: run agents, hold LLM keys, spawn containers, proxy shells.
 
 ### hive-worker — fleet manager + router
@@ -53,7 +53,7 @@ client. This document describes the current architecture.
   hive-agent state lives side by side at `/workspace/.hive-agent/<Name>/`, and
   `/workspace/.agents/skills/` is a shared project-local skills dir all
   agents auto-scan.
-- stdio NDJSON task protocol in; delta/message/approval/image events out.
+- stdio NDJSON task protocol in; delta/message/image events out.
 - Full hive-brain feature set: skills with scripts, MCP servers spawned as
   local child processes, persistent memory + conversation history on the
   home volume.
@@ -62,7 +62,7 @@ client. This document describes the current architecture.
 
 ### hive-client — GTK4/gtkmm4 (unchanged shape)
 
-- Roster, threads, chat, streaming replies, inline images, approvals UI.
+- Roster, threads, chat, streaming replies, inline images, agent management.
 - Connects to the hub only; knows nothing about containers or workers
   beyond presence display.
 
@@ -70,18 +70,18 @@ client. This document describes the current architecture.
 
 ```
 hive-client --REST :8421 (Bearer)--> hive-server
-                                      |  threads, roster, approvals,
+                                      |  threads, roster, routines,
                                       |  routines, files; no LLM keys
 hive-worker --WS :8423 /api/workers/channel--> hive-server
    hello+hmwk_ key in; welcome back; then:
-   hub->worker: task, cancel, approval_resp, agent_spawn/stop/remove,
+   hub->worker: task, cancel, agent_spawn/stop/remove,
                 exec, file_*, skill_*, screen_ctl, stream_*
    worker->hub: heartbeat, agent_status, task_delta, task_result,
-                approval_req, agent_msg, agent_log, exec_*, file_*,
+                agent_msg, agent_log, exec_*, file_*,
                 skill_ack, screen_result, stream_*
 hive-worker --podman exec -i (NDJSON stdio)--> hive-agent (in container)
-   stdin:  task, approval_resp, cancel, shutdown
-   stdout: ready, delta, message, approval_request,
+   stdin:  task, cancel, shutdown
+   stdout: ready, delta, message,
            send_agent_message, status, log
 ```
 

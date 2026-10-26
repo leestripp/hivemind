@@ -23,8 +23,7 @@ namespace hive {
  *
  * Left sidebar: agent roster + threads. Right: chat transcript with live
  * streaming (polled /activity + incremental /messages) and a composer.
- * Header: new-agent / new-thread buttons and the approvals inbox (badge
- * shows pending count).
+ * Header: new-agent / new-thread / task and connection controls.
  */
 class HiveWindow : public Gtk::Window {
 public:
@@ -83,7 +82,6 @@ private:
     /// thread — advances ONLY the reserved "user" hub-side mark, never
     /// an agent's delivery receipt. Debounced 10s per thread.
     void maybe_post_user_read(const std::string& tid);
-    void poll_approvals();
     void poll_roster();          // agents busy/state (Phase 27)
     std::string roster_sig_;   // last busy/state signature
     std::string current_dm_agent_;  // agent whose DM is focused ("" if none)
@@ -121,9 +119,7 @@ private:
     /// Badge/notify pass over threads_ after a refresh (Phase 14.1).
     void process_thread_activity();
     void on_new_thread();
-    void on_approvals();
     void on_stop_agent(const nlohmann::json& agent);
-    void on_learn_routine();   // Phase 20: distill thread into a routine
     void on_delete_thread(const std::string& thread_id);
     void on_clear_thread(const std::string& thread_id,
                          const std::string& title);
@@ -135,7 +131,7 @@ private:
     void rebuild_thread_list();
     /// Select `id`'s row in the Threads sidebar (no-op when absent).
     void select_thread_row(const std::string& id);
-    /// Single switch for the composer (entry/send/attach/learn). Two
+    /// Single switch for the composer (entry/send/attach). Two
     /// call sites used to set these independently and drifted apart.
     void set_composer_enabled(bool enabled);
     /// Phase 52: render/remove the live streaming bubble from the
@@ -243,7 +239,6 @@ private:
     // return the same new message — without this dedupe the bubble appends
     // twice (observed 2026-08-27 over a high-latency link to hub.example.com).
     std::unordered_set<std::string> rendered_msg_ids_;
-    int pending_approvals_ = -1;   // -1 = first poll (don't notify on load)
     bool thread_busy_ = false;
     // Phase 14.1 — attention: per-thread last-seen activity (ISO strings
     // compare lexicographically) driving unread badges + notifications.
@@ -268,12 +263,8 @@ private:
     Gtk::Button new_agent_btn_;
     Gtk::Button new_thread_btn_;
     Gtk::Button tasks_btn_;              // schedule a routine ("Add Task")
-    Gtk::Button approvals_btn_;          // icon + count label (approvals_label_)
-    Gtk::Label approvals_label_;         // child of approvals_btn_
-    Gtk::Image approvals_icon_;          // child of approvals_btn_
     Gtk::Button settings_btn_;           // user profile settings
     Gtk::Button connect_btn_;
-    Gtk::Button learn_btn_;              // Phase 20: learn-by-demonstration
     bool dark_mode_ = false;             // persisted in config.json
     // User profile (persisted in config.json): chat identity for the human.
     std::string display_name_;           // "" = "You"

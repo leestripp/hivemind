@@ -20,9 +20,9 @@ int main() {
     fs::create_directories(tmp);
 
     AgentStore store{tmp / "agents.db"};
-    auto buzz  = store.create_agent("Buzz",  "", "", "", false, "", "droplet");
-    auto bob   = store.create_agent("Bob",   "", "", "", false, "", "ubuntu-pc");
-    auto local = store.create_agent("Local", "", "", "", false, "", "");
+    auto buzz  = store.create_agent("Buzz",  "", "", "", "", "droplet");
+    auto bob   = store.create_agent("Bob",   "", "", "", "", "ubuntu-pc");
+    auto local = store.create_agent("Local", "", "", "", "", "");
 
     const json dir = agent_directory_json(store.list_agents());
     assert(dir.is_array());

@@ -31,8 +31,9 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   render as a card: big round play/pause button + filename + size,
   playing in place via Gtk::MediaFile (GStreamer). On a media error the
   card falls back to a chip that opens the file externally.
-- **Approvals** — agents run with approval gates in-container; requests
-  relay hub→client and the decision routes back.
+- **Agent management** — create/edit agents, choose their runtime and
+  model, inspect execution history, and migrate them between workers.
+  Tool calls execute autonomously; there is no approval inbox.
 - **Skills page** — browse the hub's library, install from the registry,
   per-agent enable toggles.
 - **Computer use** — watch an agent's browser live (worker-hosted

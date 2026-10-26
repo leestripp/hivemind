@@ -244,7 +244,6 @@ int main() {
     spec.provider      = "kimi";
     spec.max_context   = 256000;
     spec.temperature   = 1.0;
-    spec.auto_approve  = true;   // headless test: no approval round-trips
 
     try { fleet.spawn(spec); }
     catch (const std::exception& e) {

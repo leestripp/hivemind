@@ -23,7 +23,6 @@ static FileIO make_test_file_io() {
 }
 
 TEST_CASE("BashTool background mode starts a detached process") {
-    ToolHandler::set_auto_mode(true);
     auto file_io = make_test_file_io();
     BashTool tool;
 
@@ -50,7 +49,6 @@ TEST_CASE("BashTool background mode starts a detached process") {
 }
 
 TEST_CASE("BashTool auto-detects trailing & as background intent") {
-    ToolHandler::set_auto_mode(true);
     auto file_io = make_test_file_io();
     BashTool tool;
 
@@ -80,7 +78,6 @@ TEST_CASE("BashTool auto-detects trailing & as background intent") {
 }
 
 TEST_CASE("BashTool can stop a background process") {
-    ToolHandler::set_auto_mode(true);
     auto file_io = make_test_file_io();
     BashTool tool;
 
@@ -105,7 +102,6 @@ TEST_CASE("BashTool can stop a background process") {
 }
 
 TEST_CASE("BashTool background poll reads stdout") {
-    ToolHandler::set_auto_mode(true);
     auto file_io = make_test_file_io();
     BashTool tool;
 
@@ -146,7 +142,6 @@ TEST_CASE("BashTool background poll reads stdout") {
 }
 
 TEST_CASE("BashTool synchronous mode still works") {
-    ToolHandler::set_auto_mode(true);
     auto file_io = make_test_file_io();
     BashTool tool;
 

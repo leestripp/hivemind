@@ -59,7 +59,7 @@ void MigrationService::send(const std::string& worker, const json& f) {
 std::string MigrationService::begin(const std::string& agent_id,
                                     const std::string& target_worker,
                                     const std::string& target_type, bool force,
-                                    bool no_rollback, const std::string& ack) {
+                                    bool no_rollback) {
     auto a = agents_.get_agent(agent_id);
     if (!a) throw std::invalid_argument("no such agent");
 
@@ -85,15 +85,6 @@ std::string MigrationService::begin(const std::string& agent_id,
     if (!channel_.is_online(target_worker))
         throw std::invalid_argument("target worker '" + target_worker +
                                     "' is offline");
-
-    if (tgt_host) {
-        if (ack != "I UNDERSTAND")
-            throw std::invalid_argument(
-                "bare-metal target requires typed ack: I UNDERSTAND");
-        // Phase 72 capability gate is enforced again at the target
-        // worker: the agent_import op refuses when the worker was not
-        // started with host-agent support (agent_import_error).
-    }
 
     if (chat_ && chat_->agent_busy(agent_id) && !force)
         throw std::invalid_argument(
@@ -276,9 +267,7 @@ void MigrationService::flip_roster(const Migration& job) {
     auto a = agents_.get_agent(job.agent_id);
     if (!a) throw std::runtime_error("agent vanished mid-migration");
     const bool tgt_host = job.target_type == "host";
-    // Phase 72 policy: bare-metal placement forces the approval gate on.
-    agents_.update_agent(a->id, a->name, a->role, a->model, a->workspace_mode,
-                         tgt_host ? true : a->require_approval, a->avatar,
+    agents_.update_agent(a->id, a->name, a->role, a->model, a->workspace_mode, a->avatar,
                          job.target_worker,   // worker = "" keeps; we set it
                          a->mcp_servers, a->type, a->memory, a->cpus,
                          a->thinking_level, tgt_host ? 1 : 0);
@@ -290,7 +279,7 @@ void MigrationService::rollback(const Migration& job, const std::string& why) {
         const bool src_host = job.source_type == "host";
         try {
             agents_.update_agent(a->id, a->name, a->role, a->model,
-                                 a->workspace_mode, a->require_approval,
+                                 a->workspace_mode,
                                  a->avatar, job.source_worker, a->mcp_servers,
                                  a->type, a->memory, a->cpus, a->thinking_level,
                                  src_host ? 1 : 0);

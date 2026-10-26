@@ -16,8 +16,6 @@
  * Hub-roster rows (origin='hub') are hub-authoritative: disable/remove
  * are refused with a clear message. mcp_add/mcp_enable spawn a child
  * process (stdio) or open a connection (http) — same risk class as
- * bash — so they pass through ToolHandler::request_command_approval
- * exactly like shell commands on approval-gated agents.
  */
 #pragma once
 

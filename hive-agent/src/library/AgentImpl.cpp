@@ -96,14 +96,6 @@ AppConfig make_app_config(const AgentConfig& cfg,
         out.chat_endpoint = cfg.chat_endpoint.empty()
                                 ? "/v1/chat/completions" : cfg.chat_endpoint;
 
-    // §BUG-006: cfg.auto_approve is authoritative when the host sets it;
-    // only when unset do we fall back to the SettingsStore row (legacy).
-    if (cfg.auto_approve) {
-        out.auto_mode = *cfg.auto_approve;
-    } else {
-        try { out.auto_mode = store.get_auto_approve(); }
-        catch (...) { out.auto_mode = false; }
-    }
     out.memory_disabled = !cfg.memory_enabled;
     out.memory_in_prompt = cfg.memory_in_prompt;
     out.system_prompt  = cfg.system_prompt;   // §Phase 6: host-supplied role
@@ -313,15 +305,6 @@ void AgentImpl::initialize()
                 + " to set it up.");
         }
     }
-
-    // §BUG-004 fix: honour cfg_.auto_approve even when no LLMClient is
-    // constructed (e.g. hosts driving Agent::execute_tool() directly).
-    // §BUG-007 fix: set the flag unconditionally — auto_approve()==false
-    // must also take effect, otherwise a sticky global left ON by a previous
-    // agent or a runtime toggle keeps bypassing the host's approval prompt.
-    // AgentImpl::auto_approve() is the single authority for the effective
-    // value (see also the LLMClient ctor, which honours AppConfig::auto_mode).
-    ToolHandler::set_auto_mode(auto_approve());
 
     // §Phase 1+: only spin up the LLMClient if we have something to talk to.
     // "Explicit creds" now includes three sources (highest first):
@@ -667,7 +650,6 @@ void AgentImpl::cancel() noexcept
                       s == AgentState::Acting           ||
                       s == AgentState::Verifying        ||
                       s == AgentState::Documenting      ||
-                      s == AgentState::AwaitingApproval ||
                       s == AgentState::Compressing;
     if (busy || !pending_user_messages_.empty()) {
         cancel_requested_.store(true, std::memory_order_release);
@@ -981,55 +963,6 @@ ModelDiscoveryResult AgentImpl::discover_models(
     return hive::discover_models(*cfg);
 }
 
-bool AgentImpl::auto_approve() const noexcept
-{
-    // §BUG-006: when the host sets cfg.auto_approve it is authoritative —
-    // the SettingsStore row is ignored so a host can force approval prompts
-    // ON even if another front-end persisted auto_approve=true. Unset =
-    // legacy behaviour: fall back to the store.
-    if (cfg_.auto_approve) return *cfg_.auto_approve;
-    if (body_->store) {
-        try {
-            return body_->store->get_auto_approve();
-        } catch (...) { /* fall through */ }
-    }
-    return false;
-}
-
-void AgentImpl::set_auto_approve(bool enabled) noexcept
-{
-    // §BUG-006/007: the host's runtime toggle is authoritative. Store it in
-    // cfg_ so initialize()/execute_tool() re-apply it, and flip the global
-    // ToolHandler flag immediately so a mid-session toggle takes effect on
-    // the very next command.
-    cfg_.auto_approve = enabled;
-    ToolHandler::set_auto_mode(enabled);
-}
-
-void AgentImpl::clear_session_approvals() noexcept
-{
-    // §BUG-008: drop the in-memory approved-command cache.
-    ToolHandler::clear_session_approved_commands();
-}
-
-void AgentImpl::clear_persisted_approvals() noexcept
-{
-    // §BUG-008: delete this project's approvals.json and clear the
-    // in-memory persisted set.
-    try {
-        ToolHandler::clear_persisted_approvals(
-            cfg_.project_root.empty() ? std::filesystem::current_path()
-                                      : cfg_.project_root,
-            cfg_.agent_name);
-    } catch (...) { /* noexcept contract */ }
-}
-
-void AgentImpl::set_remember_approvals(bool enabled) noexcept
-{
-    // §BUG-008: opt out of auto-recording host-approved commands.
-    ToolHandler::set_remember_approvals(enabled);
-}
-
 nlohmann::json AgentImpl::execute_tool(const std::string& name,
                                        const nlohmann::json& args)
 {
@@ -1057,13 +990,6 @@ nlohmann::json AgentImpl::execute_tool(const std::string& name,
                        ? std::filesystem::current_path()
                        : cfg_.project_root,
                    cfg_.agent_name);
-
-    // §BUG-004 fix: honour cfg_.auto_approve even when no LLMClient
-    // was ever constructed (the LLMClient ctor is otherwise the only
-    // place that flips ToolHandler's auto mode).
-    // §BUG-007 fix: set unconditionally so auto_approve()==false also
-    // takes effect (a sticky global must not keep bypassing approvals).
-    ToolHandler::set_auto_mode(auto_approve());
 
     // §Phase 16: route skill tools to this Agent's owned SkillManager and
     // enforce the per-agent tool filter for direct execution.

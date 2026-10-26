@@ -45,23 +45,22 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.container_id   = col(5);
     a.created_at     = col(6);
     a.updated_at     = col(7);
-    a.require_approval = sqlite3_column_int(st, 8) != 0;
-    a.avatar         = col(9);
-    a.worker         = col(10);
+    a.avatar         = col(8);
+    a.worker         = col(9);
     if (a.worker.empty()) a.worker = "local";
-    a.mcp_servers    = col(11);
+    a.mcp_servers    = col(10);
     if (a.mcp_servers.empty()) a.mcp_servers = "[]";
-    a.type           = col(12);   // Phase 35
-    a.memory         = col(13);   // Phase 69
-    a.cpus           = sqlite3_column_double(st, 14);  // Phase 69
-    a.thinking_level = col(15);   // 2026-10-01: "" = inherit from model
-    a.host_agent     = sqlite3_column_int(st, 16) != 0;  // Phase 72
+    a.type           = col(11);   // Phase 35
+    a.memory         = col(12);   // Phase 69
+    a.cpus           = sqlite3_column_double(st, 13);  // Phase 69
+    a.thinking_level = col(14);   // 2026-10-01: "" = inherit from model
+    a.host_agent     = sqlite3_column_int(st, 15) != 0;  // Phase 72
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
-    "       created_at, updated_at, require_approval, avatar, worker,"
+    "       created_at, updated_at, avatar, worker,"
     "       mcp_servers, type, memory, cpus, thinking_level, host_agent FROM agents";
 
 } // namespace
@@ -112,7 +111,7 @@ void AgentStore::ensure_schema() {
         "  created_at TEXT NOT NULL,"
         "  updated_at TEXT NOT NULL"
         ")");
-    // Schema migration (idempotent): require_approval added 2026-08-23.
+    // Legacy approval data is inert; retained only for non-destructive upgrades.
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN require_approval"
                      " INTEGER NOT NULL DEFAULT 0",
                  nullptr, nullptr, nullptr);
@@ -147,8 +146,7 @@ void AgentStore::ensure_schema() {
                      " TEXT NOT NULL DEFAULT ''",
                  nullptr, nullptr, nullptr);
     // Phase 72 (2026-10-12): host agent — bare-metal on the worker as
-    // user hivex-<name> with sudo, no sandbox. The two-level opt-in and
-    // ack gate live in RosterRoutes; the default stays a container agent.
+    // user hivex-<name> with sudo, no sandbox; default is a container agent.
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN host_agent"
                      " INTEGER NOT NULL DEFAULT 0",
                  nullptr, nullptr, nullptr);
@@ -159,7 +157,6 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& role,
                                      const std::string& model,
                                      const std::string& workspace_mode,
-                                     bool require_approval,
                                      const std::string& avatar,
                                      const std::string& worker,
                                      const std::string& type,
@@ -179,7 +176,6 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.model          = model;
     a.workspace_mode = (workspace_mode.empty() || workspace_mode == "host")
                            ? "shared" : workspace_mode;
-    a.require_approval = require_approval;
     a.avatar         = avatar;
     a.worker         = worker.empty() ? "local" : worker;   // Phase 30
     a.type           = type;                                    // Phase 35
@@ -194,10 +190,10 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
-        "                   container_id, created_at, updated_at, require_approval,"
+        "                   container_id, created_at, updated_at,"
         "                   avatar, worker, type, memory, cpus, thinking_level,"
         "                   host_agent)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?,?,?)";
+        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -210,14 +206,13 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     bind_text(st, 5, a.workspace_mode);
     bind_text(st, 6, a.created_at);
     bind_text(st, 7, a.updated_at);
-    sqlite3_bind_int(st, 8, a.require_approval ? 1 : 0);
-    bind_text(st, 9, a.avatar);
-    bind_text(st, 10, a.worker);
-    bind_text(st, 11, a.type);
-    bind_text(st, 12, a.memory);
-    sqlite3_bind_double(st, 13, a.cpus);
-    bind_text(st, 14, a.thinking_level);
-    sqlite3_bind_int(st, 15, a.host_agent ? 1 : 0);
+    bind_text(st, 8, a.avatar);
+    bind_text(st, 9, a.worker);
+    bind_text(st, 10, a.type);
+    bind_text(st, 11, a.memory);
+    sqlite3_bind_double(st, 12, a.cpus);
+    bind_text(st, 13, a.thinking_level);
+    sqlite3_bind_int(st, 14, a.host_agent ? 1 : 0);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -271,7 +266,6 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& role,
                                      const std::string& model,
                                      const std::string& workspace_mode,
-                                     bool require_approval,
                                      const std::string& avatar,
                                      const std::string& worker,
                                      const std::string& mcp_servers,
@@ -293,7 +287,7 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "UPDATE agents SET name=?, role=?, model=?, workspace_mode=?,"
-        " updated_at=?, require_approval=?, avatar=?,"
+        " updated_at=?, avatar=?,"
         " worker = CASE WHEN ? = '' THEN worker ELSE ? END,"
         " mcp_servers = CASE WHEN ? = '' THEN mcp_servers ELSE ? END,"
         // Phase 35: "" = keep current, "default" = explicit clear to standard
@@ -305,9 +299,7 @@ RosterAgent AgentStore::update_agent(const std::string& id,
         // 2026-10-01: same keep/default/set contract as type + memory.
         " thinking_level = CASE WHEN ? = '' THEN thinking_level"
         "   WHEN ? = 'default' THEN '' ELSE ? END,"
-        // Phase 72: -1 = keep current, 0/1 = set. Clearing a host agent
-        // back to container is allowed; the DANGEROUS direction (enabling)
-        // is gated on the "I UNDERSTAND" ack in RosterRoutes.
+        // Phase 72: -1 = keep current, 0/1 = set.
         " host_agent = CASE WHEN ? < 0 THEN host_agent ELSE ? END"
         " WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -321,26 +313,25 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 4, (workspace_mode.empty() || workspace_mode == "host")
                          ? "shared" : workspace_mode);
     bind_text(st, 5, now);
-    sqlite3_bind_int(st, 6, require_approval ? 1 : 0);
-    bind_text(st, 7, avatar);
+    bind_text(st, 6, avatar);
+    bind_text(st, 7, worker);
     bind_text(st, 8, worker);
-    bind_text(st, 9, worker);
+    bind_text(st, 9, mcp_servers);
     bind_text(st, 10, mcp_servers);
-    bind_text(st, 11, mcp_servers);
+    bind_text(st, 11, type);
     bind_text(st, 12, type);
     bind_text(st, 13, type);
-    bind_text(st, 14, type);
+    bind_text(st, 14, memory);
     bind_text(st, 15, memory);
     bind_text(st, 16, memory);
-    bind_text(st, 17, memory);
+    sqlite3_bind_double(st, 17, cpus);
     sqlite3_bind_double(st, 18, cpus);
-    sqlite3_bind_double(st, 19, cpus);
+    bind_text(st, 19, thinking_level);
     bind_text(st, 20, thinking_level);
     bind_text(st, 21, thinking_level);
-    bind_text(st, 22, thinking_level);
+    sqlite3_bind_int(st, 22, host_agent);
     sqlite3_bind_int(st, 23, host_agent);
-    sqlite3_bind_int(st, 24, host_agent);
-    bind_text(st, 25, id);
+    bind_text(st, 24, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

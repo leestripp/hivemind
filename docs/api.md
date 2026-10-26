@@ -38,9 +38,9 @@ stores the records with the reply message (injecting the worker name).
 | `POST /api/agents` | create (name, role, model, worker, memory, cpus) |
 | `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills/memory/cpus edits |
 
-Both also accept `host_agent` (+ `host_agent_ack: "I UNDERSTAND"`) — see
-[host-agents.md](host-agents.md): 400 without the ack, 409 when the
-worker lacks the `host_agents` capability.
+Both also accept `host_agent`; see [host-agents.md](host-agents.md).
+The hub returns 409 when the worker lacks the `host_agents` capability.
+Runtime selection needs no command-approval or typed-acknowledgment field.
 | `DELETE /api/agents/:id` | remove (worker reaps the container) |
 | `GET /api/agents/:id/activity` | per-agent live state |
 
@@ -127,9 +127,9 @@ fixed temperature 1.0). Re-discovery preserves each model's
 | `POST /api/skills/install` | install from registry → syncs to all workers |
 | per-agent enable | roster PATCH; applied to containers at next spawn |
 
-## Approvals
+## Autonomous execution
 
-Approvals originate INSIDE agents now (hive-brain approval hooks) and relay
-through the hub: `GET /api/approvals?status=pending`,
-`POST /api/approvals/:id/resolve`. The hub holds no tool proxy of its
-own.
+Agents execute valid tool calls directly under their configured runtime
+identity. There is no command-approval queue or approval-rules API. Legacy
+`require_approval`, `auto_approve`, and approval-frame input is inert;
+historical approval databases/files are not used to gate execution.

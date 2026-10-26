@@ -13,8 +13,8 @@ the HiveMind repository. Read it before making changes.
 Users create named, persistent agent "teammates," chat with them in
 threads, and hand off real work. Agents run inside rootless **podman**
 containers (with passwordless sudo as user `hive`), remember everything,
-share files, and park commands in an approval queue when
-`require_approval` is set.
+share files, and execute valid tools directly and autonomously under their
+configured runtime identity.
 
 **Architecture (see `docs/design.md`):**
 
@@ -102,7 +102,7 @@ needed).
 ```
 CMakeLists.txt        Superbuild: deps (FetchContent), options, lint targets
 cmake/clang.cmake     Clang toolchain file (stricter warnings)
-hive-server/          C++23 + OmniNet hub: REST API, threads, approvals,
+hive-server/          C++23 + OmniNet hub: REST API, threads, messaging,
                       routines, worker channel, web UI (serves web/dist)
   include/hivemind/   Public headers + route implementations
     routes/           One file pair per API area (RosterRoutes, ThreadRoutes…)
@@ -114,7 +114,7 @@ hive-worker/          Remote executor daemon (fleet manager). Links OmniNet
                       ONLY — no hive-brain, no LLM keys, no roster DB.
 hive-agent/           In-container brain: thin hive-brain::Agent host speaking
                       stdio NDJSON with hive-worker. No HTTP.
-hive-client/          GTK4/gtkmm4 native client (roster, threads, approvals,
+hive-client/          GTK4/gtkmm4 native client (roster, threads, chat,
                       screen view). Icons/avatars bundled via GResource.
 */tests/              per-app ctest suites — one binary per area, assert()-based
 web/dist/             Web dashboard (vanilla JS pages under js/pages/)
@@ -130,7 +130,7 @@ Key architectural mapping:
 - Server is a pure hub: OmniNet + SQLite only. hive-brain linkage was
   deliberately removed from the server (Phase C).
 - Hub ↔ worker: JSON text frames over WS. Worker ↔ agent: stdio NDJSON
-  (task/delta/message/approval/image events).
+  (task/delta/message/image events).
 
 ## Code Style & Conventions
 
@@ -335,7 +335,7 @@ as its cwd (≈ the containers' shared /workspace bind-mount). Deleting
 the agent removes the per-agent half (user+home, archived) and never
 touches the shared half — same cleanup boundaries as podman.
 
-Safety model (several independent gates):
+Runtime configuration model:
 
 - **Worker opt-in**: the worker refuses host spawns unless started with
   `--allow-host-agents` / `HIVE_ALLOW_HOST_AGENTS=1`.
@@ -343,10 +343,10 @@ Safety model (several independent gates):
   <name> --worker-user <worker> --binary <path>` (red warning +
   hostname type-to-confirm; creates the user with a locked password,
   sudoers via `visudo -c`, installs the binary).
-- **Hub gates**: creation requires the worker's advertised `host_agents`
-  capability + a typed `I UNDERSTAND` ack; `require_approval` is FORCED
-  ON (explicitly disabling it needs the ack again). Both UIs show red
-  HOST ⚠ badges/warnings.
+- **Hub capability check**: creation requires the worker's advertised
+  `host_agents` capability. Both UIs show red HOST ⚠ badges/warnings.
+  There are no per-command approvals or typed acknowledgments; host agents
+  execute directly with the privileges of their provisioned unix account.
 
 Lifecycle: the workspace is **shared and permanent** — with the
 worker's `--host-workspace-root DIR` (e.g. the host's `/workspace` RAID

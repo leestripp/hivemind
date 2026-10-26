@@ -6,8 +6,8 @@
 // environment: volumes, user, network) plus one hive-agent process per
 // agent (the brain: `podman exec -i ... hive-agent /workspace`) whose
 // stdin/stdout pipes the worker holds directly. NDJSON ops go in
-// (task/approval_resp/cancel/shutdown), NDJSON events come out
-// (ready/delta/message/approval_request/error) and are forwarded to the
+// (task/cancel/shutdown), NDJSON events come out
+// (ready/delta/message/error) and are forwarded to the
 // server over the worker channel.
 //
 // Credentials never transit the server: agent_spawn carries everything
@@ -45,7 +45,6 @@ struct AgentSpec {
     std::string provider;      // key into secrets.json
     long    max_context = 0;
     double  temperature = -1;
-    bool    auto_approve = false;
     std::string system_prompt; // written to the shared volume, passed by path
     nlohmann::json mcp_servers = nlohmann::json::array();
     std::string image;         // "" -> kImageLatest (verbatim override wins)
@@ -196,7 +195,7 @@ public:
     /// Roster delete: stop the brain AND destroy its container + env file
     /// + home dir (best-effort; agent row is already gone server-side).
     void remove(const std::string& agent_id);
-    /// Route an op (task / approval_resp / cancel) to an agent.
+    /// Route an op (task / cancel) to an agent.
     /// Returns false if the agent is not running here.
     bool send_to(const std::string& agent_id, const nlohmann::json& op);
 
