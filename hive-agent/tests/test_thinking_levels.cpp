@@ -71,7 +71,7 @@ void test_t2_moonshot_k3() {
     auto p = hive::ProviderRegistry::plugin_for_name("moonshot");
     EXPECT(p != nullptr);
 
-    for (const char* id : {"kimi-k3", "k3", "k3-256k"}) {
+    for (const char* id : {"kimi-k3", "k3", "k3-256k", "k3.1-pro", "k3.1-pro-highspeed"}) {
         // Platform endpoint -> top-level reasoning_effort, no thinking object.
         json payload = {{"model", id}, {"messages", json::array()}};
         p->mutate_chat_payload(payload,
@@ -201,6 +201,8 @@ void test_t6_capability_query() {
 
     EXPECT(moonshot->supported_thinking_levels("kimi-k3").size() == 3);
     EXPECT(moonshot->supported_thinking_levels("k3-256k").size() == 3);
+    EXPECT(moonshot->supported_thinking_levels("k3.1-pro").size() == 3);
+    EXPECT(moonshot->supported_thinking_levels("k3.1-pro-highspeed").size() == 3);
     EXPECT(moonshot->supported_thinking_levels("kimi-k2.6").size() == 1);
     EXPECT(moonshot->supported_thinking_levels("kimi-k2.6")[0] == ThinkingLevel::None);
     EXPECT(moonshot->supported_thinking_levels("kimi-for-coding").empty());

@@ -30,6 +30,8 @@ namespace {
 const ProviderModelInfo kModels[] = {
     {"kimi-k3.1-pro",             1000000, 1.0, true,  true},
     {"kimi-k3.1-pro-highspeed",   1000000, 1.0, true,  true},
+    {"k3.1-pro",                  1000000, 1.0, true,  true},
+    {"k3.1-pro-highspeed",        1000000, 1.0, true,  true},
     {"kimi-k3",                     1000000, 1.0, true,  true},
     {"k3",                          1000000, 1.0, true,  true},
     {"k3-256k",                      262144, 1.0, true,  true},
@@ -70,6 +72,11 @@ bool istarts_with(std::string_view s, std::string_view prefix) {
     return s.size() >= prefix.size() && iequals(s.substr(0, prefix.size()), prefix);
 }
 
+bool is_k3_family(std::string_view id) {
+    return istarts_with(id, "kimi-k3") || iequals(id, "k3") ||
+           istarts_with(id, "k3-") || istarts_with(id, "k3.1-");
+}
+
 } // namespace
 
 bool MoonshotPlugin::matches(std::string_view host) const {
@@ -89,10 +96,8 @@ double MoonshotPlugin::clamp_temperature(std::string_view model_id, double t) co
     // K3/K3.1 platform IDs too (official Model Parameter Reference,
     // 2026-10: K3.1 has the same fixed-1.0 constraint as K3).
     if (icontains(model_id, "k2.7-code") ||
-        istarts_with(model_id, "kimi-k3") ||
-        icontains(model_id, "kimi-for-coding") ||
-        iequals(model_id, "k3") ||
-        istarts_with(model_id, "k3-")) {
+        is_k3_family(model_id) ||
+        icontains(model_id, "kimi-for-coding")) {
         return 1.0;
     }
     return t;
@@ -122,8 +127,7 @@ void MoonshotPlugin::mutate_chat_payload(nlohmann::json& payload,
     //     never send anything (passing disabled is a hard error).
     if (ctx.thinking_level != ThinkingLevel::Default) {
         const std::string& id = ctx.model_id;
-        const bool is_k3 = istarts_with(id, "kimi-k3") ||
-                           iequals(id, "k3") || istarts_with(id, "k3-");
+        const bool is_k3 = is_k3_family(id);
         const bool is_k25_k26 = icontains(id, "k2.5") || icontains(id, "k2.6");
         if (is_k3 &&
             (ctx.thinking_level == ThinkingLevel::Low ||
@@ -146,8 +150,7 @@ void MoonshotPlugin::mutate_chat_payload(nlohmann::json& payload,
 
 std::vector<ThinkingLevel>
 MoonshotPlugin::supported_thinking_levels(std::string_view model_id) const {
-    if (istarts_with(model_id, "kimi-k3") ||
-        iequals(model_id, "k3") || istarts_with(model_id, "k3-")) {
+    if (is_k3_family(model_id)) {
         return {ThinkingLevel::Low, ThinkingLevel::High, ThinkingLevel::Max};
     }
     if (icontains(model_id, "k2.5") || icontains(model_id, "k2.6")) {

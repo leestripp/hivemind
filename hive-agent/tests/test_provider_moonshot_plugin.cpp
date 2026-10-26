@@ -61,6 +61,8 @@ void test_ms2_temperature_clamp() {
     EXPECT(p->clamp_temperature("kimi-k3", 0.2) == 1.0);
     EXPECT(p->clamp_temperature("kimi-k3.1-pro", 0.2) == 1.0);
     EXPECT(p->clamp_temperature("kimi-k3.1-pro-highspeed", 0.7) == 1.0);
+    EXPECT(p->clamp_temperature("k3.1-pro", 0.2) == 1.0);
+    EXPECT(p->clamp_temperature("k3.1-pro-highspeed", 0.7) == 1.0);
     EXPECT(p->clamp_temperature("moonshot-v1-8k", 0.5) == 0.5);
     // Kimi Code endpoint IDs are the same K2.7 Code model — same clamp
     // (the live server rejects other temperatures).
@@ -106,6 +108,8 @@ void test_ms4_context_sizes() {
     EXPECT(p->context_size_for("kimi-k3") == 1000000);
     EXPECT(p->context_size_for("kimi-k3.1-pro") == 1000000);
     EXPECT(p->context_size_for("kimi-k3.1-pro-highspeed") == 1000000);
+    EXPECT(p->context_size_for("k3.1-pro") == 1000000);
+    EXPECT(p->context_size_for("k3.1-pro-highspeed") == 1000000);
     EXPECT(p->context_size_for("kimi-k2.7-code") == 262144);
     EXPECT(p->context_size_for("kimi-k2.6") == 262144);
     EXPECT(p->context_size_for("Kimi-K2.5") == 262144);   // case-insensitive

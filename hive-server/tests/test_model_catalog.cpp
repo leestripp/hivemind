@@ -12,6 +12,9 @@ int main() {
     const auto k31hs = model_metadata("moonshot", "https://api.kimi.com",
                                       "Kimi-K3.1-Pro-Highspeed");
     assert(k31hs.max_context == 1000000 && k31hs.temperature == 1.0);
+    const auto code_alias = model_metadata("", "https://api.kimi.com/coding",
+                                           "k3.1-pro-highspeed");
+    assert(code_alias.max_context == 1000000 && code_alias.temperature == 1.0);
     const auto k26 = model_metadata("", "https://api.moonshot.cn", "kimi-k2.6");
     assert(k26.max_context == 262144 && k26.temperature == 1.0);
     const auto mm = model_metadata("", "https://api.minimax.io", "minimax-m3");

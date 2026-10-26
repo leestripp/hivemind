@@ -26,6 +26,8 @@ struct CatalogEntry {
 constexpr CatalogEntry kMoonshot[] = {
     {"kimi-k3.1-pro", 1000000, 1.0},
     {"kimi-k3.1-pro-highspeed", 1000000, 1.0},
+    {"k3.1-pro", 1000000, 1.0},
+    {"k3.1-pro-highspeed", 1000000, 1.0},
     {"kimi-k3", 1000000, 1.0},
     {"k3", 1000000, 1.0},
     {"k3-256k", 262144, 1.0},
