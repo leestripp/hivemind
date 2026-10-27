@@ -3,8 +3,8 @@
 import { API } from '../api.js';
 import { $, esc } from '../util.js';
 import { avatarSrc } from '../avatars.js';
-import { openAgentModal } from '../agent-modal.js';
-import { openMigrationModal } from '../migration-modal.js';
+import { openAgentModal } from '../agent-modal.js?v=20261027a';
+import { openMigrationModal } from '../migration-modal.js?v=20261027a';
 
 function fmtDate(iso) {
   const d = new Date(iso);

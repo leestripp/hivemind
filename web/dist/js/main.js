@@ -1,6 +1,6 @@
 // js/main.js — boot + page router. Agents is the default landing page.
 import { $ } from './util.js';
-import { enterAgents, leaveAgents, initAgents } from './pages/agents.js';
+import { enterAgents, leaveAgents, initAgents } from './pages/agents.js?v=20261027a';
 import { enterSettings, initSettings } from './pages/settings.js';
 import { enterKeys, initKeys } from './pages/keys.js';
 import { enterModels, initModels } from './pages/models.js';

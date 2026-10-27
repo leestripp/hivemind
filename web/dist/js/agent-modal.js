@@ -169,6 +169,26 @@ export function openAgentModal(existing = null, prefill = null,
 
 async function prepareEditor(existing, prefill, callbacks, ticket) {
   const editing = !!existing;
+  const identity = existing || prefill;
+  // Never show or submit the previously edited agent while async options load.
+  // This function runs synchronously up to the first await, so identity is
+  // correct from the user's first visible frame of the popup.
+  $('am-form').onsubmit = (event) => event.preventDefault();
+  $('am-migrate').onclick = null;
+  $('am-name').value = identity?.name || '';
+  $('am-role').value = identity?.role || '';
+  $('am-memory').value = existing?.memory || '';
+  $('am-cpus').value = existing?.cpus > 0 ? existing.cpus : '';
+  $('am-thinking').value = existing?.thinking_level || '';
+  selectAvatar(identity?.avatar || '');
+  for (const id of ['am-template', 'am-worker', 'am-type', 'am-provider', 'am-model']) {
+    const select = $(id);
+    select.replaceChildren();
+    select.onchange = null;
+  }
+  $('am-host-warn').classList.add('hidden');
+  editor.querySelectorAll('.container-cap').forEach((field) =>
+    field.classList.remove('hidden'));
   $('am-title').textContent = editing ? `Edit ${existing.name}` : 'New agent';
   $('am-subtitle').textContent = editing
     ? 'Configuration changes apply to this agent. Use Migrate for a state-preserving worker move.'
@@ -230,9 +250,6 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
     $('am-host-warn').classList.toggle('hidden', !host);
     editor.querySelectorAll('.container-cap').forEach((field) =>
       field.classList.toggle('hidden', host));
-    // Force the gate on only when newly entering host mode. Existing host
-    // agents may have explicitly disabled it; preserve that saved setting.
-    if (host && currentType !== 'host') $('am-appr').checked = true;
   };
   workerSelect.onchange = refreshType;
   typeSelect.onchange = refreshType;
