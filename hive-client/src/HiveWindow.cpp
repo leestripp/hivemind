@@ -3845,6 +3845,8 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
     scroll->set_vexpand(true);
     auto* list = Gtk::make_managed<Gtk::ListBox>();
     list->add_css_class("boxed-list");
+    // Expanding an agent must not select/highlight its entire task group.
+    list->set_selection_mode(Gtk::SelectionMode::NONE);
     scroll->set_child(*list);
     vbox->append(*scroll);
     auto* status = Gtk::make_managed<Gtk::Label>("Loading…");
