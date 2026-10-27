@@ -34,6 +34,7 @@ add_executable(hive-client-voice
     src/Prefs.cpp
     src/ApiClient.cpp
     src/SpeechText.cpp
+    src/TranscriptText.cpp
     src/AgentStateAnnouncer.cpp
     src/AudioCommon.cpp
     src/AudioCapture.cpp

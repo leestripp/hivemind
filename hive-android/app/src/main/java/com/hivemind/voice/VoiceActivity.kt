@@ -368,11 +368,37 @@ class VoiceActivity : Activity() {
         }
     }
 
-    /** Split a final STT transcript into sentence-sized messages. The
-     *  hub hands the agent each message as its own user turn — a whole
-     *  voice session posted as one paragraph reads as a rambling
-     *  repeat-and-extend, so every sentence goes as its own message,
-     *  like the user typed them. (lee, 2026-10-25) */
+    /** Clean whisper artifacts without ever splitting the user's input
+     *  into separate hub messages. Sentence splitting is for outbound TTS
+     *  narration only. */
+    private fun sanitizeTranscript(text: String): String {
+        val original = text.trim()
+        if (original.isEmpty()) return ""
+        val cleaned = StringBuilder()
+        var removedArtifact = false
+        var i = 0
+        while (i < original.length) {
+            while (i < original.length && original[i].isWhitespace()) i++
+            if (i >= original.length) break
+            var end = i
+            while (end < original.length) {
+                val c = original[end++]
+                if (c == '.' || c == '!' || c == '?' || c == '\n') break
+            }
+            val part = original.substring(i, end).trim()
+            if (part.isNotEmpty()) {
+                if (isSilenceArtifact(part)) {
+                    removedArtifact = true
+                } else {
+                    if (cleaned.isNotEmpty()) cleaned.append(' ')
+                    cleaned.append(part)
+                }
+            }
+            i = end
+        }
+        return if (removedArtifact) cleaned.toString() else original
+    }
+
     // whisper silence/noise artifacts — never send these to the hub as
     // user messages (lee, 2026-10-25: [BLANK_AUDIO] landed in Bob's
     // context as an unanswered question).
@@ -381,49 +407,20 @@ class VoiceActivity : Activity() {
         return norm.isEmpty() || norm == "blankaudio" || norm == "silence"
     }
 
-    private fun splitTranscript(text: String): List<String> {
-        val out = mutableListOf<String>()
-        var i = 0
-        while (i < text.length) {
-            while (i < text.length && text[i].isWhitespace()) i++
-            if (i >= text.length) break
-            var end = i
-            while (end < text.length) {
-                val c = text[end++]
-                if (c == '.' || c == '!' || c == '?' || c == '\n') break
-            }
-            val part = text.substring(i, end).trim()
-            if (part.isNotEmpty() && !isSilenceArtifact(part)) out.add(part)
-            i = end
-        }
-        return out
-    }
-
-    /** Post a transcript as one message per sentence (see
-     *  [splitTranscript]), sequential on this io thread so hub ordering
-     *  matches speaking order. A vanished DM (404) mid-sequence is
-     *  retried ONCE with only the not-yet-posted parts — re-sending the
-     *  whole transcript would duplicate what already landed. */
+    /** Post the complete transcript as exactly ONE user message. A vanished
+     *  DM is re-resolved once before surfacing a failure. */
     private fun postTranscript(text: String) {
-        val parts = splitTranscript(text)
-        // All silence artifacts (or empty) — nothing was actually said;
-        // send nothing rather than an empty/artifact user message.
-        if (parts.isEmpty()) return
-        var i = 0
+        val cleaned = sanitizeTranscript(text)
+        if (cleaned.isEmpty()) {
+            ui.post { toIdle("Didn't catch that — tap TALK to retry") }
+            return
+        }
         try {
-            while (i + 1 < parts.size) {
-                api.postMessage(threadId, parts[i], source = "voice")
-                i++
-            }
-            sendAndEnterWait(parts.last())
+            sendAndEnterWait(cleaned)
         } catch (e: Exception) {
             if (reresolveIfThreadGone(e)) {
                 try {
-                    while (i + 1 < parts.size) {
-                        api.postMessage(threadId, parts[i], source = "voice")
-                        i++
-                    }
-                    sendAndEnterWait(parts.last())
+                    sendAndEnterWait(cleaned)
                     return
                 } catch (_: Exception) {
                     // fall through to the visible failure below

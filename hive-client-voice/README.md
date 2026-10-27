@@ -4,6 +4,8 @@ GTK4 (gtkmm-4.0) voice client for the HiveMind hub — a 1:1 port of the
 Android voice app (`hive-android`). Talk to an agent hands-free: tap
 TALK, speak, tap SEND; the reply streams back sentence-by-sentence as
 speech while the Jarvis swarm sphere reacts to mic level and agent state.
+The complete STT transcript is posted as exactly one user message;
+sentence splitting is used only for outbound TTS narration.
 
 ## Build
 
