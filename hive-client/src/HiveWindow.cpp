@@ -549,9 +549,13 @@ void HiveWindow::on_settings() {
                     rendered_msg_ids_.clear();
                     while (auto* c = messages_box_.get_first_child())
                         messages_box_.remove(*c);
-                        live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+                    live_row_ = nullptr;
+                    live_label_ = nullptr;
+                    live_agent_key_.clear();
+                    load_earlier_btn_ = nullptr;
+                    has_more_history_ = false;
+                    oldest_message_id_.clear();
+                    loading_earlier_ = false;
                     rendered_.clear();
                     poll_chat();
                 }
@@ -1789,32 +1793,32 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
     if (partial.empty()) {
         if (live_row_) {
             messages_box_.remove(*live_row_);
-            live_row_ = nullptr;
-            live_label_ = nullptr;
-            live_agent_key_.clear();
+        live_row_ = nullptr;
+        live_label_ = nullptr;
+        live_agent_key_.clear();
         }
         return;
-    }
+        }
 
-    // A different agent's turn took over: rebuild the row identity.
-    if (live_row_ && live_agent_key_ != agent_id) {
+        // A different agent's turn took over: rebuild the row identity.
+        if (live_row_ && live_agent_key_ != agent_id) {
         messages_box_.remove(*live_row_);
         live_row_ = nullptr;
         live_label_ = nullptr;
-    }
+        }
 
-    if (!live_row_) {
+        if (!live_row_) {
         live_row_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
         live_row_->add_css_class("hv-msg-agent");
         live_row_->add_css_class("hv-msg-live");
         std::string avatar;
         for (auto& a : agents_)
-            if (a.value("name", "") == agent_name) {
-                avatar = a.value("avatar", "");
-                break;
-            }
+        if (a.value("name", "") == agent_name) {
+        avatar = a.value("avatar", "");
+        break;
+        }
         live_row_->append(*make_avatar(agent_name, false, AVATAR_LOGICAL,
-                                       avatar));
+        avatar));
         auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
         box->set_hexpand(true);
         auto* header = Gtk::make_managed<Gtk::Label>(agent_name + " — live");
@@ -1830,82 +1834,82 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         live_row_->append(*box);
         messages_box_.append(*live_row_);
         live_agent_key_ = agent_id;
-    }
-    live_label_->set_text(partial + " \u258C");
-}
+        }
+        live_label_->set_text(partial + " \u258C");
+        }
 
-// Phase 55: row construction extracted so history page-back can PREPEND
-// older bubbles as well as append new ones. Returns nullptr when there
-// is nothing to show (pure tool transcript). Caller owns placement and
-// rendered_ bookkeeping.
-Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
-                                           const std::string& sender_label,
-                                           const std::string& body,
-                                           const std::string& created_at,
-                                           const nlohmann::json& attachments,
-                                           const nlohmann::json& stats) {
-    // Raw transcript to debug log when HIVEMIND_DEBUG=1
-    static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
-    if (debug) {
+        // Phase 55: row construction extracted so history page-back can PREPEND
+        // older bubbles as well as append new ones. Returns nullptr when there
+        // is nothing to show (pure tool transcript). Caller owns placement and
+        // rendered_ bookkeeping.
+        Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
+        const std::string& sender_label,
+        const std::string& body,
+        const std::string& created_at,
+        const nlohmann::json& attachments,
+        const nlohmann::json& stats) {
+        // Raw transcript to debug log when HIVEMIND_DEBUG=1
+        static const bool debug = std::getenv("HIVEMIND_DEBUG") != nullptr;
+        if (debug) {
         namespace fs = std::filesystem;
         fs::path dir = fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
-                     / ".local" / "share" / "hivemind";
+        / ".local" / "share" / "hivemind";
         std::error_code ec;
         fs::create_directories(dir, ec);
         std::ofstream f{dir / "client-raw.log", std::ios::app};
         f << "[" << created_at << "] " << sender_kind << "/" << sender_label
-          << "\n" << body << "\n\n";
-    }
+        << "\n" << body << "\n\n";
+        }
 
-    // Older thread history still holds raw hive-brain transcripts (pre-fix
-    // server posted those); new messages arrive clean. Filter defensively.
-    const std::string clean = sender_kind == "agent" ? strip_tool_transcript(body) : body;
-    if (clean.empty()) return nullptr;   // pure tool-call transcript — nothing to show
+        // Older thread history still holds raw hive-brain transcripts (pre-fix
+        // server posted those); new messages arrive clean. Filter defensively.
+        const std::string clean = sender_kind == "agent" ? strip_tool_transcript(body) : body;
+        if (clean.empty()) return nullptr;   // pure tool-call transcript — nothing to show
 
-    // System messages stay minimal: centered dim line, no avatar.
-    if (sender_kind != "user" && sender_kind != "agent") {
+        // System messages stay minimal: centered dim line, no avatar.
+        if (sender_kind != "user" && sender_kind != "agent") {
         auto* sys = Gtk::make_managed<Gtk::Label>(clean);
         sys->add_css_class("hv-msg-system");
         sys->set_wrap(true);
         sys->set_selectable(true);
         return sys;
-    }
+        }
 
-    // Bubble row: avatar | (name + time / content)
-    auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
-    row->add_css_class(sender_kind == "user" ? "hv-msg-user" : "hv-msg-agent");
-    std::string sender_avatar;
-    if (sender_kind == "agent")
+        // Bubble row: avatar | (name + time / content)
+        auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+        row->add_css_class(sender_kind == "user" ? "hv-msg-user" : "hv-msg-agent");
+        std::string sender_avatar;
+        if (sender_kind == "agent")
         for (auto& a : agents_)
-            if (a.value("name", "") == sender_label) {
-                sender_avatar = a.value("avatar", "");
-                break;
-            }
-    row->append(*make_avatar(sender_label, sender_kind == "user",
-                             AVATAR_LOGICAL,
-                             sender_kind == "user" ? user_avatar_ : sender_avatar));
+        if (a.value("name", "") == sender_label) {
+        sender_avatar = a.value("avatar", "");
+        break;
+        }
+        row->append(*make_avatar(sender_label, sender_kind == "user",
+        AVATAR_LOGICAL,
+        sender_kind == "user" ? user_avatar_ : sender_avatar));
 
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-    box->set_hexpand(true);
-    auto* header = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
-    auto* who = Gtk::make_managed<Gtk::Label>(sender_label);
-    who->set_halign(Gtk::Align::START);
-    who->add_css_class("hv-name");
-    who->add_css_class(sender_kind == "user"
+        auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+        box->set_hexpand(true);
+        auto* header = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+        auto* who = Gtk::make_managed<Gtk::Label>(sender_label);
+        who->set_halign(Gtk::Align::START);
+        who->add_css_class("hv-name");
+        who->add_css_class(sender_kind == "user"
         ? "hv-name-user"
         : "hv-name-" + std::to_string(palette_index(sender_label)));
-    header->append(*who);
-    std::string when = format_msg_time(created_at);
-    if (!when.empty()) {
+        header->append(*who);
+        std::string when = format_msg_time(created_at);
+        if (!when.empty()) {
         auto* time = Gtk::make_managed<Gtk::Label>(when);
         time->set_halign(Gtk::Align::END);
         time->set_hexpand(true);
         time->add_css_class("hv-time");
         header->append(*time);
-    }
-    box->append(*header);
+        }
+        box->append(*header);
 
-    for (auto& seg : split_segments(clean)) {
+        for (auto& seg : split_segments(clean)) {
         auto* text = Gtk::make_managed<Gtk::Label>();
         text->set_halign(Gtk::Align::START);
         text->set_wrap(true);
@@ -1913,136 +1917,136 @@ Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
         text->set_selectable(true);
         text->set_xalign(0);
         if (seg.code) {
-            text->set_text(seg.text);
-            text->add_css_class("hv-code");
+        text->set_text(seg.text);
+        text->add_css_class("hv-code");
         } else {
-            text->set_markup(prose_to_markup(seg.text));
+        text->set_markup(prose_to_markup(seg.text));
         }
         box->append(*text);
-    }
+        }
 
-    // Phase 64: per-turn stats footer on agent bubbles — context usage,
-    // prompt-cache hits and iteration count for the turn that produced
-    // this message. Small dim line, same style class as the timestamp.
-    if (sender_kind == "agent" && stats.is_object() && !stats.empty()) {
+        // Phase 64: per-turn stats footer on agent bubbles — context usage,
+        // prompt-cache hits and iteration count for the turn that produced
+        // this message. Small dim line, same style class as the timestamp.
+        if (sender_kind == "agent" && stats.is_object() && !stats.empty()) {
         const int total   = stats.value("total_tokens", 0);
         const int maxctx  = stats.value("max_context_size", 0);
         const int cached  = stats.value("cached_tokens", 0);
         const int iters   = stats.value("iterations", 0);
         const int comp    = stats.value("completion_tokens", 0);
         if (total > 0) {
-            const double pct =
-                maxctx > 0 ? (100.0 * total / maxctx) : 0.0;
-            std::ostringstream line;
-            line << "ctx " << total << "/" << maxctx << " ("
-                 << std::fixed << std::setprecision(1) << pct << "%)"
-                 << " · +" << comp << " out";
-            if (cached > 0)
-                line << " · cache " << cached << "/"
-                     << stats.value("prompt_tokens", 0);
-            line << " · " << iters << " iter" << (iters == 1 ? "" : "s");
-            auto* foot = Gtk::make_managed<Gtk::Label>(line.str());
-            foot->set_halign(Gtk::Align::START);
-            foot->add_css_class("hv-time");   // reuse the dim small style
-            foot->set_selectable(true);
-            box->append(*foot);
+        const double pct =
+        maxctx > 0 ? (100.0 * total / maxctx) : 0.0;
+        std::ostringstream line;
+        line << "ctx " << total << "/" << maxctx << " ("
+        << std::fixed << std::setprecision(1) << pct << "%)"
+        << " · +" << comp << " out";
+        if (cached > 0)
+        line << " · cache " << cached << "/"
+        << stats.value("prompt_tokens", 0);
+        line << " · " << iters << " iter" << (iters == 1 ? "" : "s");
+        auto* foot = Gtk::make_managed<Gtk::Label>(line.str());
+        foot->set_halign(Gtk::Align::START);
+        foot->add_css_class("hv-time");   // reuse the dim small style
+        foot->set_selectable(true);
+        box->append(*foot);
         }
-    }
+        }
 
-    // Phase 18 + 34: attachments. Images render inline (downloaded via
-    // the API into the client cache — host_path is the SERVER's path and
-    // is wrong cross-machine); other files keep the Phase 18 chips.
-    if (attachments.is_array() && !attachments.empty()) {
+        // Phase 18 + 34: attachments. Images render inline (downloaded via
+        // the API into the client cache — host_path is the SERVER's path and
+        // is wrong cross-machine); other files keep the Phase 18 chips.
+        if (attachments.is_array() && !attachments.empty()) {
         auto* chips = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
         bool any_chip = false;
         for (auto& a : attachments) {
-            const std::string name = a.value("name", "file");
-            std::string ext = std::filesystem::path(name).extension().string();
-            for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
-            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
-                ext == ".gif" || ext == ".webp") {
-                auto* holder = Gtk::make_managed<Gtk::Box>(
-                    Gtk::Orientation::VERTICAL, 4);
-                box->append(*holder);
-                load_image_attachment(holder, a);
-                add_download_button(box, a, current_thread_, false);
-                continue;
-            }
-            if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" ||
-                ext == ".mov" || ext == ".avi" || ext == ".m4v") {
-                auto* holder = Gtk::make_managed<Gtk::Box>(
-                    Gtk::Orientation::VERTICAL, 4);
-                box->append(*holder);
-                load_video_attachment(holder, a);
-                add_download_button(box, a, current_thread_, false);
-                continue;
-            }
-            if (ext == ".mp3" || ext == ".flac" || ext == ".wav" ||
-                ext == ".ogg" || ext == ".oga" || ext == ".m4a" ||
-                ext == ".aac" || ext == ".opus" || ext == ".wma") {
-                auto* holder = Gtk::make_managed<Gtk::Box>(
-                    Gtk::Orientation::VERTICAL, 4);
-                box->append(*holder);
-                load_audio_attachment(holder, a);
-                add_download_button(box, a, current_thread_, false);
-                continue;
-            }
-            // 2026-09-17: the old chip opened file://host_path — the
-            // WORKER's path, meaningless on this machine, and empty for
-            // agent-originated records (no click handler at all → dead
-            // button). Download via the hub API instead, same as images.
-            auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
-            chip->add_css_class("flat");
-            chip->set_tooltip_text("Download " + name);
-            const std::string tid = current_thread_;
-            chip->signal_clicked().connect([this, a, tid, chip] {
-                open_file_attachment(chip, a, tid);
-            });
-            chips->append(*chip);
-            add_download_button(chips, a, tid, true);
-            any_chip = true;
+        const std::string name = a.value("name", "file");
+        std::string ext = std::filesystem::path(name).extension().string();
+        for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+        ext == ".gif" || ext == ".webp") {
+        auto* holder = Gtk::make_managed<Gtk::Box>(
+        Gtk::Orientation::VERTICAL, 4);
+        box->append(*holder);
+        load_image_attachment(holder, a);
+        add_download_button(box, a, current_thread_, false);
+        continue;
+        }
+        if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" ||
+        ext == ".mov" || ext == ".avi" || ext == ".m4v") {
+        auto* holder = Gtk::make_managed<Gtk::Box>(
+        Gtk::Orientation::VERTICAL, 4);
+        box->append(*holder);
+        load_video_attachment(holder, a);
+        add_download_button(box, a, current_thread_, false);
+        continue;
+        }
+        if (ext == ".mp3" || ext == ".flac" || ext == ".wav" ||
+        ext == ".ogg" || ext == ".oga" || ext == ".m4a" ||
+        ext == ".aac" || ext == ".opus" || ext == ".wma") {
+        auto* holder = Gtk::make_managed<Gtk::Box>(
+        Gtk::Orientation::VERTICAL, 4);
+        box->append(*holder);
+        load_audio_attachment(holder, a);
+        add_download_button(box, a, current_thread_, false);
+        continue;
+        }
+        // 2026-09-17: the old chip opened file://host_path — the
+        // WORKER's path, meaningless on this machine, and empty for
+        // agent-originated records (no click handler at all → dead
+        // button). Download via the hub API instead, same as images.
+        auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
+        chip->add_css_class("flat");
+        chip->set_tooltip_text("Download " + name);
+        const std::string tid = current_thread_;
+        chip->signal_clicked().connect([this, a, tid, chip] {
+        open_file_attachment(chip, a, tid);
+        });
+        chips->append(*chip);
+        add_download_button(chips, a, tid, true);
+        any_chip = true;
         }
         if (any_chip) box->append(*chips);
-    }
-    row->append(*box);
-    return row;
-}
+        }
+        row->append(*box);
+        return row;
+        }
 
-// ── Phase 55: history page-back ───────────────────────────────────────
-// The "load earlier…" affordance sits at the top of the message list
-// while the hub reports older messages beyond the current window.
-void HiveWindow::update_load_earlier_row() {
-    if (has_more_history_) {
+        // ── Phase 55: history page-back ───────────────────────────────────────
+        // The "load earlier…" affordance sits at the top of the message list
+        // while the hub reports older messages beyond the current window.
+        void HiveWindow::update_load_earlier_row() {
+        if (has_more_history_) {
         if (!load_earlier_btn_) {
-            load_earlier_btn_ =
-                Gtk::make_managed<Gtk::Button>("\u2B06 load earlier messages\u2026");
-            load_earlier_btn_->add_css_class("flat");
-            load_earlier_btn_->add_css_class("hv-time");
-            load_earlier_btn_->signal_clicked().connect(
-                [this] { load_earlier(); });
-            messages_box_.prepend(*load_earlier_btn_);
+        load_earlier_btn_ =
+        Gtk::make_managed<Gtk::Button>("\u2B06 load earlier messages\u2026");
+        load_earlier_btn_->add_css_class("flat");
+        load_earlier_btn_->add_css_class("hv-time");
+        load_earlier_btn_->signal_clicked().connect(
+        [this] { load_earlier(); });
+        messages_box_.prepend(*load_earlier_btn_);
         }
         load_earlier_btn_->set_sensitive(!loading_earlier_);
-    } else if (load_earlier_btn_) {
+        } else if (load_earlier_btn_) {
         messages_box_.remove(*load_earlier_btn_);
         load_earlier_btn_ = nullptr;
-    }
-}
+        }
+        }
 
-void HiveWindow::load_earlier() {
-    if (current_thread_.empty() || oldest_message_id_.empty() ||
+        void HiveWindow::load_earlier() {
+        if (current_thread_.empty() || oldest_message_id_.empty() ||
         loading_earlier_ || !has_more_history_)
         return;
-    loading_earlier_ = true;
-    if (load_earlier_btn_) load_earlier_btn_->set_sensitive(false);
-    const std::string tid = current_thread_;
-    const std::string before = oldest_message_id_;
-    run_async([this, tid, before] {
+        loading_earlier_ = true;
+        if (load_earlier_btn_) load_earlier_btn_->set_sensitive(false);
+        const std::string tid = current_thread_;
+        const std::string before = oldest_message_id_;
+        run_async([this, tid, before] {
         json msgs = api_.list_messages_before(tid, before);
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, tid, msgs] {
-                loading_earlier_ = false;
+        std::lock_guard<std::mutex> lk(queue_m_);
+        done_queue_.push_back([this, tid, msgs] {
+        loading_earlier_ = false;
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
                 // Detach the button first: the page's bubbles prepend
@@ -2775,9 +2779,13 @@ void HiveWindow::on_agent_selected() {
                 rendered_msg_ids_.clear();
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
-                    live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+                live_row_ = nullptr;
+                live_label_ = nullptr;
+                live_agent_key_.clear();
+                load_earlier_btn_ = nullptr;
+                has_more_history_ = false;
+                oldest_message_id_.clear();
+                loading_earlier_ = false;
                 rendered_.clear();
                 refresh_threads();
                 poll_chat();
@@ -2823,9 +2831,13 @@ void HiveWindow::on_thread_selected() {
     update_thread_title();
     while (auto* c = messages_box_.get_first_child())
         messages_box_.remove(*c);
-        live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+    live_row_ = nullptr;
+    live_label_ = nullptr;
+    live_agent_key_.clear();
+    load_earlier_btn_ = nullptr;
+    has_more_history_ = false;
+    oldest_message_id_.clear();
+    loading_earlier_ = false;
     rendered_.clear();
     poll_chat();
 }
@@ -3084,7 +3096,8 @@ void HiveWindow::show_exec_log(const nlohmann::json& agent) {
         catch (const std::exception& e) { err = e.what(); }
         {
             std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([=] {
+            done_queue_.push_back([this, id, name, buf, status, tag_ok, tag_bad,
+                                     tag_to, tag_dim, data, err] {
                 if (!alive_) return;
                 if (!err.empty()) { status->set_text("Error: " + err); return; }
                 auto entries = data.value("entries", json::array());
@@ -3992,14 +4005,40 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                             del->add_css_class("destructive-action");
                             del->set_valign(Gtk::Align::CENTER);
                             del->set_tooltip_text("Delete task");
-                            del->signal_clicked().connect([this, rid, reload] {
-                                run_async([this, rid, reload] {
-                                    try { api_.delete_routine(rid); } catch (...) {}
-                                    std::lock_guard<std::mutex> lk(queue_m_);
-                                    done_queue_.push_back(
-                                        [reload] { if (*reload) (*reload)(); });
-                                    dispatcher_.emit();
+                            del->signal_clicked().connect(
+                                [this, rid, task_name, reload] {
+                                auto* confirm = Gtk::make_managed<Gtk::Dialog>();
+                                confirm->set_title("Delete scheduled task?");
+                                confirm->set_transient_for(*this);
+                                confirm->set_modal(true);
+                                confirm->add_button("Cancel",
+                                    Gtk::ResponseType::CANCEL);
+                                confirm->add_button("Delete",
+                                    Gtk::ResponseType::OK);
+                                auto* message = Gtk::make_managed<Gtk::Label>(
+                                    "Delete “" + task_name +
+                                    "”? This cannot be undone.");
+                                message->set_margin(18);
+                                message->set_wrap(true);
+                                message->set_max_width_chars(48);
+                                confirm->get_content_area()->append(*message);
+                                confirm->signal_response().connect(
+                                    [this, confirm, rid, reload](int response) {
+                                    if (response == static_cast<int>(
+                                            Gtk::ResponseType::OK)) {
+                                        run_async([this, rid, reload] {
+                                            try { api_.delete_routine(rid); }
+                                            catch (...) {}
+                                            std::lock_guard<std::mutex> lk(queue_m_);
+                                            done_queue_.push_back([reload] {
+                                                if (*reload) (*reload)();
+                                            });
+                                            dispatcher_.emit();
+                                        });
+                                    }
+                                    confirm->destroy();
                                 });
+                                confirm->present();
                             });
                             actions->append(*sw);
                             actions->append(*run);
@@ -4561,9 +4600,13 @@ void HiveWindow::on_new_thread() {
                             rendered_msg_ids_.clear();
                             while (auto* c = messages_box_.get_first_child())
                                 messages_box_.remove(*c);
-                                live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+                            live_row_ = nullptr;
+                            live_label_ = nullptr;
+                            live_agent_key_.clear();
+                            load_earlier_btn_ = nullptr;
+                            has_more_history_ = false;
+                            oldest_message_id_.clear();
+                            loading_earlier_ = false;
                             rendered_.clear();
                             refresh_threads();
                         });
@@ -4844,9 +4887,13 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
         rendered_msg_ids_.clear();
         while (auto* c = messages_box_.get_first_child())
             messages_box_.remove(*c);
-            live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+        live_row_ = nullptr;
+        live_label_ = nullptr;
+        live_agent_key_.clear();
+        load_earlier_btn_ = nullptr;
+        has_more_history_ = false;
+        oldest_message_id_.clear();
+        loading_earlier_ = false;
         rendered_.clear();
         refresh_threads();
         return nt;
@@ -4862,9 +4909,13 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
                 rendered_msg_ids_.clear();
                 while (auto* c = messages_box_.get_first_child())
                     messages_box_.remove(*c);
-                    live_row_ = nullptr; live_label_ = nullptr; live_agent_key_.clear();
-                        load_earlier_btn_ = nullptr; has_more_history_ = false;
-                        oldest_message_id_.clear(); loading_earlier_ = false;
+                live_row_ = nullptr;
+                live_label_ = nullptr;
+                live_agent_key_.clear();
+                load_earlier_btn_ = nullptr;
+                has_more_history_ = false;
+                oldest_message_id_.clear();
+                loading_earlier_ = false;
                 rendered_.clear();
                 set_composer_enabled(id != "user");
                 select_thread_row(id);

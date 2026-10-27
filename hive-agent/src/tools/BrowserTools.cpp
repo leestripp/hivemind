@@ -18,6 +18,10 @@ json prop(const char* desc) {
     return {{"type", "string"}, {"description", desc}};
 }
 
+json typed_prop(const char* type, const char* desc) {
+    return {{"type", type}, {"description", desc}};
+}
+
 /// POSIX single-quote shell escaping: wrap in '...', escape embedded
 /// quotes as '\'' (end quote, escaped quote, reopen).
 std::string q(const std::string& s) {
@@ -116,13 +120,16 @@ std::vector<BrowserTool::Spec> BrowserTool::specs() {
                 "whatever element currently has focus.")},
           {"text", prop("Text to type, one key press per character.")},
           {"delay_ms",
-           prop("Milliseconds between key presses (default 75, min 20). "
+           typed_prop("integer",
+                "Milliseconds between key presses (default 75, min 20). "
                 "Don't go below ~25 on X.com — it rate-limits.")},
           {"clear",
-           prop("true to select-all + delete the existing content "
+           typed_prop("boolean",
+                "true to select-all + delete the existing content "
                 "before typing (default false).")},
           {"timeout",
-           prop("Overall timeout in seconds (default 150). Raise it "
+           typed_prop("integer",
+                "Overall timeout in seconds (default 150). Raise it "
                 "for very long texts: chars x delay_ms / 1000 + ~15s.")}},
          {"text"},
          {"selector", "text", "delay_ms", "clear"},
@@ -180,9 +187,30 @@ json BrowserTool::execute(const json& args, HostToolContext& /*ctx*/) {
         const json& v = args[key];
         cmdline += " " + q(v.is_string() ? v.get<std::string>() : v.dump());
     }
-    const int timeout = args.value("timeout", spec_.default_timeout);
-    return run_driver(cmdline, timeout);
+    return run_driver(cmdline, browser_detail::timeout_seconds(
+                                  args, spec_.default_timeout));
 }
+
+namespace browser_detail {
+
+int timeout_seconds(const json& args, int fallback) {
+    const auto it = args.find("timeout");
+    if (it == args.end() || it->is_null()) return fallback;
+    if (it->is_number_integer()) return it->get<int>();
+    if (it->is_string()) {
+        try {
+            std::size_t consumed = 0;
+            const std::string text = it->get<std::string>();
+            const int value = std::stoi(text, &consumed);
+            if (consumed == text.size()) return value;
+        } catch (const std::exception&) {
+            // Fall through to the safe default.
+        }
+    }
+    return fallback;
+}
+
+}  // namespace browser_detail
 
 json BrowserFillSecretTool::execute(const json& args, HostToolContext& /*ctx*/) {
     const std::string selector = args.value("selector", "");

@@ -157,6 +157,26 @@ TEST_SUITE("ToolDefinitions") {
               json::array({"username", "password"}));
     }
 
+    TEST_CASE("browser_type_keys uses typed arguments and legacy timeout strings") {
+        const auto specs = hive::BrowserTool::specs();
+        const auto it = std::find_if(specs.begin(), specs.end(),
+            [](const auto& spec) { return spec.name == "browser_type_keys"; });
+        REQUIRE(it != specs.end());
+        CHECK(it->properties["delay_ms"]["type"] == "integer");
+        CHECK(it->properties["clear"]["type"] == "boolean");
+        CHECK(it->properties["timeout"]["type"] == "integer");
+
+        // HoneyBee's failed call supplied timeout as a numeric string,
+        // exactly as the old schema instructed. It must never throw 302.
+        CHECK(hive::browser_detail::timeout_seconds(
+                  json{{"timeout", "45"}}, 150) == 45);
+        CHECK(hive::browser_detail::timeout_seconds(
+                  json{{"timeout", 30}}, 150) == 30);
+        CHECK(hive::browser_detail::timeout_seconds(
+                  json{{"timeout", "bad"}}, 150) == 150);
+        CHECK(hive::browser_detail::timeout_seconds(json::object(), 150) == 150);
+    }
+
     TEST_CASE("compress_context tool definition is well-formed (§COMPRESS-TOOL)") {
         std::string defs = ToolHandler::get_tool_definitions();
         json parsed = json::parse(defs);

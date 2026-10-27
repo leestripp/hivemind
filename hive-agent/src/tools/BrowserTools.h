@@ -25,6 +25,12 @@ namespace hive {
 
 using nlohmann::json;
 
+namespace browser_detail {
+// Accept numeric strings from the legacy all-string schema. Malformed or
+// missing values use the tool default instead of throwing a JSON type error.
+int timeout_seconds(const json& args, int fallback);
+}  // namespace browser_detail
+
 class BrowserTool final : public BaseTool {
 public:
     struct Spec {

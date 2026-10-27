@@ -28,3 +28,14 @@ target_link_libraries(test_upload_wire_format PRIVATE
     hive_client_core OmniNet nlohmann_json::nlohmann_json)
 target_compile_options(test_upload_wire_format PRIVATE -UNDEBUG)
 add_test(NAME test_upload_wire_format COMMAND test_upload_wire_format)
+
+# Optional live GTK regression (requires a running client + GNOME AT-SPI).
+# Not part of headless ctest; run `cmake --build build --target check-routines-ui`.
+if(EXISTS "/usr/bin/python3")
+    add_custom_target(check-routines-ui
+        COMMAND /usr/bin/python3
+                ${CMAKE_CURRENT_SOURCE_DIR}/routines_ui_regression.py
+        DEPENDS hive-client
+        USES_TERMINAL
+        COMMENT "Checking Scheduled Tasks grouping, sizing, selection, and delete confirmation")
+endif()
