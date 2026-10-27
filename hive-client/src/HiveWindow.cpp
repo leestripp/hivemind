@@ -299,6 +299,7 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
         if (name == "new-thread")      on_new_thread();
         else if (name == "new-agent")  on_new_agent();
         else if (name == "settings")   on_settings();
+        else if (name == "tasks")      on_new_task();
         else return json{{"error", "unknown dialog"}};
         return json{{"opened", name}};
     });
@@ -3836,7 +3837,7 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
     auto* win = Gtk::make_managed<Gtk::Window>();
     win->set_title("Scheduled Tasks");
     win->set_transient_for(*this);
-    win->set_default_size(640, 420);
+    win->set_default_size(760, 520);
 
     auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
     vbox->set_margin(10);
@@ -3849,102 +3850,171 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
     auto* status = Gtk::make_managed<Gtk::Label>("Loading…");
     status->set_halign(Gtk::Align::START);
     vbox->append(*status);
-    // Phase 58: Add folds into the manager — one Scheduled Tasks entry
-    // point (preselects the agent whose menu opened this).
     auto* add_btn = Gtk::make_managed<Gtk::Button>("\u2795 Add task\u2026");
     add_btn->set_halign(Gtk::Align::START);
     vbox->append(*add_btn);
     win->set_child(*vbox);
 
+    // Keep the user's expanded/collapsed choices across data reloads.
+    auto collapsed = std::make_shared<std::unordered_set<std::string>>();
     auto reload = std::make_shared<std::function<void()>>();
     add_btn->signal_clicked().connect(
         [this, preselect_agent_id, reload] {
             show_task_dialog(preselect_agent_id, nullptr,
                              [reload] { if (*reload) (*reload)(); });
         });
-    *reload = [this, list, status, reload] {
-        run_async([this, list, status, reload] {
+    *reload = [this, list, status, reload, collapsed] {
+        run_async([this, list, status, reload, collapsed] {
             std::string err; json data;
             try { data = api_.list_routines(); }
             catch (const std::exception& e) { err = e.what(); }
             {
                 std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, list, status, err, data, reload] {
-                    if (!alive_) return;
-                    if (!list->get_root()) return;   // window closed
+                done_queue_.push_back(
+                    [this, list, status, err, data, reload, collapsed] {
+                    if (!alive_ || !list->get_root()) return;
                     while (auto* row = list->get_row_at_index(0))
                         list->remove(*row);
                     if (!err.empty()) { status->set_text("Error: " + err); return; }
-                    auto rs = data.value("routines", json::array());
-                    for (auto& r : rs) {
-                        const std::string rid = r.value("id", "");
-                        auto* rowbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
-                        rowbox->set_margin_top(6); rowbox->set_margin_bottom(6);
-                        auto* text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-                        text->set_hexpand(true);
-                        auto* nm = Gtk::make_managed<Gtk::Label>(r.value("name", "?"));
-                        nm->set_halign(Gtk::Align::START); nm->add_css_class("heading");
-                        // Lead with the owning agent — tasks from
-                        // different agents were indistinguishable.
-                        std::string sum = agent_name_of(agents_,
-                                                        r.value("agent_id", ""));
-                        // agent_name_of falls back to the raw id — show a
-                        // readable label for deleted agents instead.
-                        if (sum == r.value("agent_id", ""))
-                            sum = "(former agent)";
-                        if (!r.value("schedule_text", "").empty())
-                            sum += "  ·  " + r.value("schedule_text", "");
-                        sum += "  ·  next: " + r.value("next_fire_at", std::string("—"));
-                        auto* sub = Gtk::make_managed<Gtk::Label>(sum);
-                        sub->set_halign(Gtk::Align::START); sub->add_css_class("dim-label");
-                        text->append(*nm); text->append(*sub);
 
-                        auto* sw = Gtk::make_managed<Gtk::Switch>();
-                        sw->set_active(r.value("enabled", true));
-                        sw->set_valign(Gtk::Align::CENTER);
-                        sw->set_tooltip_text(r.value("enabled", true)
-                            ? "Enabled — click to pause this task"
-                            : "Paused — click to resume this task");
-                        sw->property_active().signal_changed().connect(
-                            [this, rid, sw] {
-                                run_async([this, rid, on = sw->get_active()] {
-                                    try { api_.set_routine_enabled(rid, on); }
-                                    catch (...) {}
+                    const auto rs = data.value("routines", json::array());
+                    struct TaskGroup {
+                        std::string name;
+                        std::vector<json> tasks;
+                    };
+                    std::map<std::string, TaskGroup> groups;
+                    for (const auto& r : rs) {
+                        const std::string aid = r.value("agent_id", "");
+                        std::string name = agent_name_of(agents_, aid);
+                        if (name == aid) name = "(former agent)";
+                        groups[aid].name = name;
+                        groups[aid].tasks.push_back(r);
+                    }
+                    std::vector<std::pair<std::string, TaskGroup>> ordered(
+                        groups.begin(), groups.end());
+                    std::sort(ordered.begin(), ordered.end(),
+                        [](const auto& a, const auto& b) {
+                            return a.second.name < b.second.name;
+                        });
+
+                    for (const auto& [agent_id, group] : ordered) {
+                        auto* expander = Gtk::make_managed<Gtk::Expander>(
+                            group.name + "  (" +
+                            std::to_string(group.tasks.size()) + ")");
+                        expander->set_expanded(
+                            collapsed->find(agent_id) == collapsed->end());
+                        expander->property_expanded().signal_changed().connect(
+                            [collapsed, agent_id, expander] {
+                                if (expander->get_expanded())
+                                    collapsed->erase(agent_id);
+                                else
+                                    collapsed->insert(agent_id);
+                            });
+                        auto* tasks = Gtk::make_managed<Gtk::Box>(
+                            Gtk::Orientation::VERTICAL);
+                        expander->set_child(*tasks);
+
+                        for (const auto& r : group.tasks) {
+                            const std::string rid = r.value("id", "");
+                            auto* rowbox = Gtk::make_managed<Gtk::Box>(
+                                Gtk::Orientation::HORIZONTAL, 8);
+                            rowbox->set_hexpand(true);
+                            rowbox->set_margin_start(12);
+                            rowbox->set_margin_end(6);
+                            rowbox->set_margin_top(6);
+                            rowbox->set_margin_bottom(6);
+
+                            auto* text = Gtk::make_managed<Gtk::Box>(
+                                Gtk::Orientation::VERTICAL, 2);
+                            text->set_hexpand(true);
+                            text->set_size_request(0, -1);
+                            const std::string task_name = r.value("name", "?");
+                            auto* nm = Gtk::make_managed<Gtk::Label>(task_name);
+                            nm->set_halign(Gtk::Align::START);
+                            nm->add_css_class("heading");
+                            nm->set_width_chars(16);
+                            nm->set_max_width_chars(48);
+                            nm->set_ellipsize(Pango::EllipsizeMode::END);
+                            nm->set_tooltip_text(task_name);
+
+                            std::string sum;
+                            if (!r.value("schedule_text", "").empty())
+                                sum = r.value("schedule_text", "");
+                            if (!sum.empty()) sum += "  ·  ";
+                            sum += "next: " + r.value("next_fire_at",
+                                                     std::string("—"));
+                            auto* sub = Gtk::make_managed<Gtk::Label>(sum);
+                            sub->set_halign(Gtk::Align::START);
+                            sub->add_css_class("dim-label");
+                            sub->set_width_chars(16);
+                            sub->set_max_width_chars(48);
+                            sub->set_ellipsize(Pango::EllipsizeMode::END);
+                            sub->set_tooltip_text(sum);
+                            text->append(*nm);
+                            text->append(*sub);
+
+                            auto* actions = Gtk::make_managed<Gtk::Box>(
+                                Gtk::Orientation::HORIZONTAL, 6);
+                            actions->set_halign(Gtk::Align::END);
+                            actions->set_valign(Gtk::Align::CENTER);
+                            actions->set_hexpand(false);
+                            auto* sw = Gtk::make_managed<Gtk::Switch>();
+                            sw->set_active(r.value("enabled", true));
+                            sw->set_valign(Gtk::Align::CENTER);
+                            sw->set_tooltip_text(r.value("enabled", true)
+                                ? "Enabled — click to pause this task"
+                                : "Paused — click to resume this task");
+                            sw->property_active().signal_changed().connect(
+                                [this, rid, sw] {
+                                    run_async([this, rid, on = sw->get_active()] {
+                                        try { api_.set_routine_enabled(rid, on); }
+                                        catch (...) {}
+                                    });
+                                });
+                            auto* run = Gtk::make_managed<Gtk::Button>("\u25B6");
+                            run->set_tooltip_text("Run now");
+                            run->set_valign(Gtk::Align::CENTER);
+                            run->signal_clicked().connect([this, rid] {
+                                run_async([this, rid] {
+                                    try { api_.run_routine(rid); } catch (...) {}
                                 });
                             });
-                        auto* run = Gtk::make_managed<Gtk::Button>("\u25B6");
-                        run->set_tooltip_text("Run now");
-                        run->set_valign(Gtk::Align::CENTER);
-                        run->signal_clicked().connect([this, rid] {
-                            run_async([this, rid] {
-                                try { api_.run_routine(rid); } catch (...) {}
+                            auto* edit = Gtk::make_managed<Gtk::Button>("Edit");
+                            edit->set_valign(Gtk::Align::CENTER);
+                            const json rcopy = r;
+                            edit->signal_clicked().connect([this, rcopy, reload] {
+                                show_task_dialog("", &rcopy,
+                                    [reload] { if (*reload) (*reload)(); });
                             });
-                        });
-                        auto* edit = Gtk::make_managed<Gtk::Button>("Edit");
-                        edit->set_valign(Gtk::Align::CENTER);
-                        json rcopy = r;
-                        edit->signal_clicked().connect([this, rcopy, reload] {
-                            // on_saved: reload the list after Save lands
-                            // (it previously stayed stale until reopen).
-                            show_task_dialog("", &rcopy,
-                                             [reload] { if (*reload) (*reload)(); });
-                        });
-                        auto* del = Gtk::make_managed<Gtk::Button>("\u2715");
-                        del->add_css_class("destructive-action");
-                        del->set_valign(Gtk::Align::CENTER);
-                        del->signal_clicked().connect([this, rid, reload] {
-                            run_async([this, rid, reload] {
-                                try { api_.delete_routine(rid); } catch (...) {}
-                                std::lock_guard<std::mutex> lk(queue_m_);
-                                done_queue_.push_back([reload] { if (*reload) (*reload)(); });
-                                dispatcher_.emit();
+                            auto* del = Gtk::make_managed<Gtk::Button>("\u2715");
+                            del->add_css_class("destructive-action");
+                            del->set_valign(Gtk::Align::CENTER);
+                            del->set_tooltip_text("Delete task");
+                            del->signal_clicked().connect([this, rid, reload] {
+                                run_async([this, rid, reload] {
+                                    try { api_.delete_routine(rid); } catch (...) {}
+                                    std::lock_guard<std::mutex> lk(queue_m_);
+                                    done_queue_.push_back(
+                                        [reload] { if (*reload) (*reload)(); });
+                                    dispatcher_.emit();
+                                });
                             });
-                        });
-                        rowbox->append(*text); rowbox->append(*sw);
-                        rowbox->append(*run); rowbox->append(*edit); rowbox->append(*del);
-                        list->append(*rowbox);
+                            actions->append(*sw);
+                            actions->append(*run);
+                            actions->append(*edit);
+                            actions->append(*del);
+                            rowbox->append(*text);
+                            rowbox->append(*actions);
+                            tasks->append(*rowbox);
+                        }
+                        list->append(*expander);
                     }
-                    status->set_text(std::to_string(rs.size()) + " routines");
+                    if (ordered.empty()) {
+                        list->append(*Gtk::make_managed<Gtk::Label>(
+                            "No scheduled tasks yet."));
+                    }
+                    status->set_text(std::to_string(rs.size()) + " tasks across " +
+                                     std::to_string(ordered.size()) + " agents");
                 });
             }
             dispatcher_.emit();
