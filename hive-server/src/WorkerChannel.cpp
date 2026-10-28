@@ -349,6 +349,11 @@ void WorkerChannel::handle(Connection& ws) {
                                         nlohmann::json::object())); }
                 catch (...) {}
             }
+            // 2026-10-28 silent-outage lesson: a successful local send is
+            // not proof of a usable hub connection. Acknowledge through the
+            // existing per-connection writer so the worker can detect a
+            // black-holed transport even while its kernel accepts writes.
+            send(st->name, json{{"op", "heartbeat_ack"}});
         } else if (op == "exec_chunk" || op == "exec_done") {
             std::shared_ptr<Job> job;
             {

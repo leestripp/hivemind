@@ -15,6 +15,7 @@
 #include "hostagent.h"
 #include "fleet.h"
 #include "migration_ops.h"
+#include "heartbeat_watchdog.h"
 
 #include <nlohmann/json.hpp>
 
@@ -646,6 +647,7 @@ int main(int argc, char* argv[]) {
             };
             g_send_frame = send_frame;
             std::atomic<bool> dead{false};
+            std::atomic<uint64_t> heartbeat_acks{0};
             auto connected_at = std::chrono::steady_clock::now();
 
             // ── 30.4: TCP streams over the channel ─────────────────────
@@ -695,6 +697,10 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 const std::string op = frame.value("op", "");
+                if (op == "heartbeat_ack") {
+                    heartbeat_acks.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
                 if (op != "exec") {
                     json shown = frame;
                     // Never log injected credentials (Phase 43 llm block).
@@ -1603,18 +1609,27 @@ int main(int argc, char* argv[]) {
                 }
             });
 
-            // 2026-10-24 (ubuntu-pc fleet outage): do NOT block
-            // unconditionally on the pump. The TLS connection died
-            // silently mid-day — process alive, zero sockets, hub
-            // reporting "worker 'ubuntu-pc' offline (agent HoneyBee)" —
-            // but readLoop() never returned, so pump.join() blocked
-            // forever and the rig stayed offline until a manual restart.
-            // The heartbeat thread flags `dead` on send failure; poll the
-            // flag, give the pump a short grace to unwind cleanly, then
-            // reconnect regardless. A detached wedged pump thread is
-            // cheaper than a silent fleet outage.
-            while (!dead.load() && !g_stop)
+            // 2026-10-24/28 ubuntu-pc fleet outages: do NOT block
+            // unconditionally on the pump, and do NOT mistake successful
+            // heartbeat sends for a live connection. A black-holed TCP
+            // path can accept local writes for hours while readLoop()
+            // never wakes. The hub answers every heartbeat; require fresh
+            // acknowledgements at least once per four heartbeat intervals.
+            hwliveness::HeartbeatWatchdog watchdog{
+                connected_at, std::chrono::seconds{60}};
+            while (!dead.load() && !g_stop) {
+                const auto now = std::chrono::steady_clock::now();
+                watchdog.acknowledge(
+                    heartbeat_acks.load(std::memory_order_relaxed), now);
+                if (watchdog.expired(now)) {
+                    std::cerr << "worker: no hub heartbeat acknowledgement "
+                                 "for 60s — closing and reconnecting\n";
+                    dead = true;
+                    try { ws.close(); } catch (...) {}
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
             std::this_thread::sleep_for(std::chrono::seconds(5));
             if (!pump_done.load()) {
                 std::cerr << "worker: pump wedged after dead flag — "

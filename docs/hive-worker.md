@@ -87,6 +87,7 @@ Hub -> worker:
 | op | payload | purpose |
 |----|---------|---------|
 | `welcome` / `error` | | handshake reply |
+| `heartbeat_ack` | | application-level liveness reply to each worker heartbeat |
 | `task` | id, agent_id, thread_id, text, roster, user_inbox, disabled_skills, llm | run one agent turn (roster/user_inbox feed the agent's list_agents and read_user_inbox tools) |
 | `cancel` | agent_id | abort the in-flight turn |
 | `agent_spawn` | agent_id, name, model, system_prompt, mcp_servers, secret_env | create/ensure container + exec hive-agent. Re-spawn of a running agent compares the whole spec: identical = no-op, changed (new secret grants, model, prompt...) = graceful restart with the fresh spec (Phase 65) |
@@ -126,6 +127,11 @@ Transport rules that are LOAD-BEARING (both ends):
   mutex: WorkerChannel::send() enqueues onto a per-connection outbound
   queue drained by a dedicated writer thread (a blocking sendText to a
   NAT-dead peer otherwise wedges every other worker's connect).
+- Every `heartbeat` receives `heartbeat_ack` through that same writer.
+  The worker requires a fresh acknowledgement within 60s (four 15s
+  heartbeat intervals); otherwise it closes and reconnects. Successful
+  local sends alone are not liveness proof: the 2026-10-28 ubuntu-pc
+  outage stayed silent for hours while the transport was black-holed.
 
 ## Fleet management
 

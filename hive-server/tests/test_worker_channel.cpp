@@ -71,11 +71,14 @@ int main() {
     // -- Immediate same-name reconnect (races the old conn's cleanup) -----
     std::atomic<bool> got_ping{false};
     std::atomic<bool> got_welcome{false};
+    std::atomic<bool> got_heartbeat_ack{false};
     {
         Connection b{kUrl};
         b.onText([&](std::string msg) {
             if (msg.find("\"welcome\"") != std::string::npos) got_welcome = true;
             if (msg.find("\"ping\"") != std::string::npos) got_ping = true;
+            if (msg.find("\"heartbeat_ack\"") != std::string::npos)
+                got_heartbeat_ack = true;
         });
         std::thread rl([&] { b.readLoop(); });
         b.sendText(hello(key).dump());
@@ -88,6 +91,15 @@ int main() {
         // the replacement conn.
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         assert(ch.is_online("rig1") && "replacement conn orphaned by cleanup");
+
+        // Every heartbeat must receive an application-level reply. The
+        // worker uses this to detect a black-holed connection whose local
+        // sends still succeed (2026-10-28 ubuntu-pc outage).
+        b.sendText(json{{"op", "heartbeat"},
+                        {"agents", json::object()}}.dump());
+        for (int i = 0; i < 30 && !got_heartbeat_ack; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        assert(got_heartbeat_ack && "heartbeat was not acknowledged");
 
         // Channel must accept + deliver work via the writer thread.
         assert(ch.send("rig1", json{{"op", "ping"}, {"n", 1}}));

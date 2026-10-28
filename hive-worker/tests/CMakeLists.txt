@@ -23,3 +23,6 @@ hive_worker_test(test_workspace_seed)
 # Per-agent service-port registry + advertised host address (2026-10-09).
 hive_worker_test(test_service_ports)
 hive_worker_test(test_migration_ops)
+
+# Hub heartbeat acknowledgements must reset the silent-connection watchdog.
+hive_worker_test(test_heartbeat_watchdog)
