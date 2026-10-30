@@ -2542,13 +2542,45 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
     holder->append(*ph);
 
     const std::string key = cache.string();
-    if (!image_downloads_.insert(key).second)
-        return;   // already downloading (re-render)
-
     auto weak = std::make_shared<Gtk::Box*>(holder);
     holder->signal_destroy().connect([weak] { *weak = nullptr; });
-
     const std::string tid = current_thread_;
+    if (!image_downloads_.insert(key).second) {
+        // A re-render during a download creates a NEW holder. The original
+        // completion belongs to the old (now destroyed) holder, so merely
+        // returning here stranded this one on "loading video" forever.
+        // Wait for the shared download, then render into THIS holder. If
+        // it failed, make one fresh attempt rather than keeping a dead card.
+        auto retried = std::make_shared<bool>(false);
+        Glib::signal_timeout().connect(
+            [this, weak, key, tid, name, att, retried]() -> bool {
+                if (!alive_ || !*weak || tid != current_thread_) return false;
+                std::error_code wait_ec;
+                if (fs::is_regular_file(key, wait_ec) &&
+                    fs::file_size(key, wait_ec) > 0) {
+                    while (auto* child = (*weak)->get_first_child())
+                        (*weak)->remove(*child);
+                    show_video_widget(*weak, key, name);
+                    return false;
+                }
+                if (image_downloads_.count(key) != 0) return true;
+                while (auto* child = (*weak)->get_first_child())
+                    (*weak)->remove(*child);
+                if (!*retried) {
+                    *retried = true;
+                    load_video_attachment(*weak, att);
+                } else {
+                    auto* el = Gtk::make_managed<Gtk::Label>(
+                        "video unavailable; use External player to retry");
+                    el->add_css_class("hv-time");
+                    el->set_halign(Gtk::Align::START);
+                    (*weak)->append(*el);
+                }
+                return false;
+            }, 500);
+        return;
+    }
+
     run_async([this, rel, worker, key, tid, name, weak] {
         std::string err;
         try {

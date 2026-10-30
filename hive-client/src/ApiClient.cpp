@@ -417,14 +417,32 @@ std::string ApiClient::download(const std::string& path) {
     if (!api_key_.empty())
         req.header("Authorization", "Bearer " + api_key_);
 
-    auto result = Client::get_instance().send_blocking(req, cfg);
-    if (!result.has_value())
-        throw std::runtime_error(std::string{"download failed: "} +
-                                 clientErrorName(result.error()));
-    if (result->statusCode() >= 400)
-        throw std::runtime_error("download HTTP " +
-                                 std::to_string(result->statusCode()));
-    return result->bodyAsString();
+    // Attachment metadata can arrive while the worker/hub path is briefly
+    // unable to serve the file. A single transient 400 used to leave the
+    // video card, External player and Download button permanently broken
+    // until the whole thread was reloaded. Retry the shared path a bounded
+    // number of times, and retain the server's error body for diagnosis.
+    std::string last_error;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        auto result = Client::get_instance().send_blocking(req, cfg);
+        if (!result.has_value()) {
+            last_error = std::string{"download failed: "} +
+                         clientErrorName(result.error());
+        } else if (result->statusCode() >= 400) {
+            last_error = "download HTTP " +
+                         std::to_string(result->statusCode());
+            const std::string detail = result->bodyAsString();
+            if (!detail.empty()) last_error += ": " + detail;
+        } else {
+            return result->bodyAsString();
+        }
+        if (attempt < 2) {
+            std::this_thread::sleep_for(
+                attempt == 0 ? std::chrono::milliseconds(250)
+                             : std::chrono::seconds(1));
+        }
+    }
+    throw std::runtime_error(last_error);
 }
 
 } // namespace hive

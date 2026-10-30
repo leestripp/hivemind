@@ -54,6 +54,7 @@ int main() {
     bool cl_seen = false;
     bool cl_all_digits = false;
     size_t body_len = 0;
+    int flaky_calls = 0;
 
     Server::Config cfg;
     cfg.address = "127.0.0.1";
@@ -73,6 +74,16 @@ int main() {
                     res.setStatus(201);
                     res.setBody(R"({"name":"big.bin","size":1000000})");
                 });
+    server.get("/api/flaky", [&](const Request&, Response& res) {
+        ++flaky_calls;
+        if (flaky_calls < 3) {
+            res.setStatus(400);
+            res.setBody("temporary worker failure");
+        } else {
+            res.setStatus(200);
+            res.setBody("video-bytes");
+        }
+    });
 
     std::jthread server_thread{[&server] { server.start(); }};
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
@@ -82,6 +93,7 @@ int main() {
         const std::string bytes(1000000, 'x');  // >= 1000 triggers grouping
         auto meta = api.upload_attachment("thread-1", "big.bin", bytes);
         assert(meta.value("size", 0) == 1000000);
+        assert(api.download("/api/flaky") == "video-bytes");
     } catch (const std::exception& e) {
         std::cerr << "upload threw: " << e.what() << std::endl;
         server.stop();
@@ -94,6 +106,7 @@ int main() {
     assert(cl_all_digits &&
            "Content-Length on the wire must be plain digits (locale leak!)");
     assert(body_len == 1000000);
+    assert(flaky_calls == 3 && "transient downloads must retry then succeed");
 
     server.stop();   // lets the jthread join at scope exit
     std::cout << "test_upload_wire_format OK" << std::endl;
