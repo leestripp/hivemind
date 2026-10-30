@@ -2447,14 +2447,51 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
 // -- Phase E: video attachments ------------------------------------------
 // Same download/cache pattern as images. 2026-10-21: no Gtk::Video /
 // Gtk::MediaFile anywhere — in-process decodebin3 can g_error-abort the
-// app (uncatchable). The poster (first frame) is extracted by an ffmpeg
-// CHILD at first render and cached as <file>.poster.png. 2026-10-23:
-// playback is the desktop's assigned app via launch_default_for_uri
-// (xdg-open equivalent) — no in-house player at all.
+// app (uncatchable). WebKit builds embed native video controls and decode
+// in WebKit's web process. The fallback keeps the ffmpeg-child poster and
+// hands playback to the desktop's assigned app.
 
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
     namespace fs = std::filesystem;
+#ifdef HIVEMIND_WITH_WEBKIT
+    // Native controls in the chat, with media decoding in WebKit's web
+    // process rather than in the GUI process. This restores an actual
+    // embedded player without reviving the fatal in-process decodebin3
+    // crash that forced the old Gtk::Video implementation out.
+    auto* wv = webkit_web_view_new();
+    gtk_widget_set_size_request(wv, 640, 360);
+    gtk_widget_set_halign(wv, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(wv, FALSE);
+    gtk_widget_set_vexpand(wv, FALSE);
+    holder->append(*Glib::wrap(GTK_WIDGET(wv)));
+    const auto video_file = Gio::File::create_for_path(file);
+    const std::string uri = video_file->get_uri();
+    const std::string base_uri = video_file->get_parent()->get_uri() + "/";
+    // An explicit media element (unlike loading the mp4 as a document)
+    // never autoplays: opening a thread with two attachments must not
+    // start two audio tracks at once.
+    const std::string html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;width:100%;height:100%;"
+        "background:black;overflow:hidden}video{display:block;width:100%;"
+        "height:100%;object-fit:contain}</style></head><body>"
+        "<video controls preload=\"metadata\" src=\"" +
+        Glib::Markup::escape_text(uri) + "\"></video></body></html>";
+    webkit_web_view_load_html(WEBKIT_WEB_VIEW(wv), html.c_str(),
+                              base_uri.c_str());
+
+    auto* open_btn = Gtk::make_managed<Gtk::Button>(
+        "open in external player: " + name);
+    open_btn->add_css_class("flat");
+    open_btn->set_halign(Gtk::Align::START);
+    open_btn->signal_clicked().connect([file] {
+        Gio::AppInfo::launch_default_for_uri(
+            Gio::File::create_for_path(file)->get_uri());
+    });
+    holder->append(*open_btn);
+    return;
+#endif
     const std::string poster = file + ".poster.png";
 
     // 2026-10-23: playback is the DESKTOP'S assigned app (mpv etc.) via

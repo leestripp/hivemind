@@ -2,12 +2,10 @@
 
 // Poster extraction for video attachment cards.
 //
-// 2026-10-23: playback left this module entirely — clicking a video or
-// audio attachment now opens the file in the DESKTOP'S assigned app via
-// Gio::AppInfo::launch_default_for_uri (xdg-open equivalent). Only the
-// ffmpeg-child poster (first-frame thumbnail) remains here, and it is
-// not a player: a decoder crash in the child can never touch the GUI
-// process.
+// Playback is not in this module: WebKit builds embed video controls,
+// while the non-WebKit video card and audio attachments hand off to the
+// desktop's assigned app. Only the ffmpeg-child poster remains here; a
+// decoder crash in the child can never touch the GUI process.
 
 #include <string>
 
