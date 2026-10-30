@@ -107,6 +107,9 @@ const char* kCss = R"(
                    border-radius: 8px; }
 .hv-prompt-frame textview { padding: 6px; }
 .error { color: @error_color; }
+.hv-video-play { background: #d93025; color: white; border-radius: 32px;
+                 min-width: 64px; min-height: 64px; padding: 0; font-size: 28px; }
+.hv-video-play:hover { background: #b3261e; }
 .hv-unread-dot { color: @accent_color; font-weight: bold; }
 .hv-group-header { font-weight: bold; }
 .hv-group-meta { opacity: 0.65; font-size: 0.9em; }
@@ -2460,13 +2463,12 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
 }
 
 // -- Phase E: video attachments ------------------------------------------
-// Same download/cache pattern as images. The paused Gtk::Video shows
-// the first frame without autoplay. External-player and Download actions
-// share a centred row below the player.
+// Same download/cache pattern as images. The paused Gtk::Video has a
+// clear red play overlay and never autoplays. External-player and Download
+// actions share a centred row below the player.
 
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
-    namespace fs = std::filesystem;
     auto media = Gtk::MediaFile::create_for_filename(file);
     auto* video = Gtk::make_managed<Gtk::Video>();
     video->set_media_stream(media);
@@ -2488,52 +2490,16 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
     overlay->set_halign(Gtk::Align::CENTER);
     holder->append(*overlay);
 
-    // Gtk::Video is black before its first playback even after the stream
-    // is prepared. Cover ONLY that initial surface with the actual first
-    // frame; input passes through to the native controls. Once playback
-    // starts the poster stays hidden, including on later pauses.
-    auto started = std::make_shared<bool>(false);
-    auto* poster_view = Gtk::make_managed<Gtk::Picture>();
-    poster_view->set_content_fit(Gtk::ContentFit::CONTAIN);
-    poster_view->set_size_request(640, 360);
-    poster_view->set_halign(Gtk::Align::CENTER);
-    poster_view->set_can_target(false);
-    poster_view->set_visible(false);
-    overlay->add_overlay(*poster_view);
-    media->property_playing().signal_changed().connect(
-        [media, poster_view, started] {
-            if (!media->get_playing()) return;
-            *started = true;
-            poster_view->set_visible(false);
-        });
-
-    const std::string poster = file + ".poster.png";
-    auto show_poster = [poster_view, started](const std::string& png) {
-        if (*started || png.empty()) return;
-        auto texture = Gdk::Texture::create_from_filename(png);
-        if (!texture) return;
-        poster_view->set_paintable(texture);
-        poster_view->set_visible(true);
-    };
-    std::error_code ec;
-    const bool have_poster = fs::is_regular_file(poster, ec) &&
-                             fs::file_size(poster, ec) > 0;
-    if (have_poster) {
-        show_poster(poster);
-    } else {
-        auto weak = std::make_shared<Gtk::Overlay*>(overlay);
-        overlay->signal_destroy().connect([weak] { *weak = nullptr; });
-        const std::string tid = current_thread_;
-        run_async([this, file, poster, weak, tid, show_poster] {
-            const bool ok = media_player::make_poster(file, poster);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, poster, weak, tid, ok, show_poster] {
-                if (!alive_ || !*weak || tid != current_thread_) return;
-                if (ok) show_poster(poster);
-            });
-            dispatcher_.emit();
-        });
-    }
+    auto* play = Gtk::make_managed<Gtk::Button>("▶");
+    play->add_css_class("hv-video-play");
+    play->set_halign(Gtk::Align::CENTER);
+    play->set_valign(Gtk::Align::CENTER);
+    play->set_tooltip_text("Play " + name);
+    play->signal_clicked().connect([media] { media->play(); });
+    overlay->add_overlay(*play);
+    media->property_playing().signal_changed().connect([media, play] {
+        play->set_visible(!media->get_playing());
+    });
 
     auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
     chip->add_css_class("flat");
@@ -2542,12 +2508,10 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
     chip->signal_clicked().connect([file] {
         Gio::AppInfo::launch_default_for_uri("file://" + file);
     });
-    media->property_error().signal_changed().connect(
-        [overlay, poster_view, chip] {
-            poster_view->set_visible(false);
-            if (overlay->get_parent()) overlay->unparent();
-            chip->set_visible(true);
-        });
+    media->property_error().signal_changed().connect([overlay, chip] {
+        if (overlay->get_parent()) overlay->unparent();
+        chip->set_visible(true);
+    });
     holder->append(*chip);
 }
 

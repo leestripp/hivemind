@@ -24,7 +24,7 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   `org.gnome.desktop.interface` keys are watched. Non-GNOME desktops
   keep GTK's default.
 - **Video** (Phase 34 follow-up): video attachments show a centred
-  640x360 inline player, paused on the first frame (never autoplayed).
+  640x360 inline player with a red play overlay (never autoplayed).
   Click toggles play/pause. Download and External player actions sit side
   by side below the player; the latter uses the desktop's default app.
 - **Audio** — audio attachments (mp3/flac/wav/ogg/m4a/aac/opus/wma)
