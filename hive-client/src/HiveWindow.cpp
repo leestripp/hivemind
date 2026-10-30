@@ -1978,7 +1978,22 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         Gtk::Orientation::VERTICAL, 4);
         box->append(*holder);
         load_video_attachment(holder, a);
-        add_download_button(box, a, current_thread_, false);
+        auto* actions = Gtk::make_managed<Gtk::Box>(
+        Gtk::Orientation::HORIZONTAL, 8);
+        actions->set_halign(Gtk::Align::CENTER);
+        box->append(*actions);
+        add_download_button(actions, a, current_thread_, false);
+        auto* external = Gtk::make_managed<Gtk::Button>(
+        "↗ External player");
+        external->add_css_class("flat");
+        external->add_css_class("hv-dl");
+        external->set_tooltip_text("Open " + name +
+        " in the desktop's default video player");
+        const std::string tid = current_thread_;
+        external->signal_clicked().connect([this, a, tid, external] {
+        open_file_attachment(external, a, tid);
+        });
+        actions->append(*external);
         continue;
         }
         if (ext == ".mp3" || ext == ".flac" || ext == ".wav" ||
@@ -2445,129 +2460,42 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
 }
 
 // -- Phase E: video attachments ------------------------------------------
-// Same download/cache pattern as images. 2026-10-21: no Gtk::Video /
-// Gtk::MediaFile anywhere — in-process decodebin3 can g_error-abort the
-// app (uncatchable). WebKit builds embed native video controls and decode
-// in WebKit's web process. The fallback keeps the ffmpeg-child poster and
-// hands playback to the desktop's assigned app.
+// Same download/cache pattern as images. The paused Gtk::Video shows
+// the first frame without autoplay. External-player and Download actions
+// share a centred row below the player.
 
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
-    namespace fs = std::filesystem;
-#ifdef HIVEMIND_WITH_WEBKIT
-    // Native controls in the chat, with media decoding in WebKit's web
-    // process rather than in the GUI process. This restores an actual
-    // embedded player without reviving the fatal in-process decodebin3
-    // crash that forced the old Gtk::Video implementation out.
-    auto* wv = webkit_web_view_new();
-    gtk_widget_set_size_request(wv, 640, 360);
-    gtk_widget_set_halign(wv, GTK_ALIGN_START);
-    gtk_widget_set_hexpand(wv, FALSE);
-    gtk_widget_set_vexpand(wv, FALSE);
-    holder->append(*Glib::wrap(GTK_WIDGET(wv)));
-    const auto video_file = Gio::File::create_for_path(file);
-    const std::string uri = video_file->get_uri();
-    const std::string base_uri = video_file->get_parent()->get_uri() + "/";
-    // An explicit media element (unlike loading the mp4 as a document)
-    // never autoplays: opening a thread with two attachments must not
-    // start two audio tracks at once.
-    const std::string html =
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<style>html,body{margin:0;width:100%;height:100%;"
-        "background:black;overflow:hidden}video{display:block;width:100%;"
-        "height:100%;object-fit:contain}</style></head><body>"
-        "<video controls preload=\"metadata\" src=\"" +
-        Glib::Markup::escape_text(uri) + "\"></video></body></html>";
-    webkit_web_view_load_html(WEBKIT_WEB_VIEW(wv), html.c_str(),
-                              base_uri.c_str());
+    auto media = Gtk::MediaFile::create_for_filename(file);
+    auto* video = Gtk::make_managed<Gtk::Video>();
+    video->set_media_stream(media);
+    video->set_autoplay(false);
+    video->set_size_request(640, 360);
+    video->set_hexpand(false);
+    video->set_vexpand(false);
+    video->set_halign(Gtk::Align::CENTER);
+    video->set_tooltip_text(name + "  -  click to play/pause");
 
-    auto* open_btn = Gtk::make_managed<Gtk::Button>(
-        "open in external player: " + name);
-    open_btn->add_css_class("flat");
-    open_btn->set_halign(Gtk::Align::START);
-    open_btn->signal_clicked().connect([file] {
-        Gio::AppInfo::launch_default_for_uri(
-            Gio::File::create_for_path(file)->get_uri());
+    auto click = Gtk::GestureClick::create();
+    click->signal_pressed().connect([media](int, double, double) {
+        if (media->get_playing()) media->pause(); else media->play();
     });
-    holder->append(*open_btn);
-    return;
-#endif
-    const std::string poster = file + ".poster.png";
+    video->add_controller(click);
 
-    // 2026-10-23: playback is the DESKTOP'S assigned app (mpv etc.) via
-    // the default-uri launcher — the homemade gst-play player is gone
-    // (lee: "un-make it; don't reinvent the wheel"). The launcher spawns
-    // a detached child, so a decoder crash can never take the client
-    // down either.
-    auto start_playback = [file] {
+    auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
+    chip->add_css_class("flat");
+    chip->set_halign(Gtk::Align::CENTER);
+    chip->set_visible(false);
+    chip->signal_clicked().connect([file] {
         Gio::AppInfo::launch_default_for_uri("file://" + file);
-    };
+    });
+    media->property_error().signal_changed().connect([video, chip] {
+        if (video->get_parent()) video->unparent();
+        chip->set_visible(true);
+    });
 
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 6);
-    box->set_halign(Gtk::Align::START);
-    holder->append(*box);
-
-    // Poster area: 16:9 box pinned left (lee 2026-10-14). Clicking the
-    // poster plays the video.
-    auto append_poster = [this, box, start_playback](
-                             const std::string& png,
-                             const std::string& label_text) {
-        std::error_code pec;
-        if (!png.empty() && fs::is_regular_file(png, pec) &&
-            fs::file_size(png, pec) > 0) {
-            auto* pic = Gtk::make_managed<Gtk::Picture>(
-                Gdk::Texture::create_from_filename(png));
-            pic->set_content_fit(Gtk::ContentFit::CONTAIN);
-            pic->set_size_request(640, 360);
-            pic->set_halign(Gtk::Align::START);
-            pic->set_tooltip_text(label_text + "  -  click to play");
-            auto click = Gtk::GestureClick::create();
-            click->signal_pressed().connect(
-                [this, start_playback](int, double, double) {
-                    start_playback();
-                });
-            pic->add_controller(click);
-            box->append(*pic);
-        } else {
-            auto* ph = Gtk::make_managed<Gtk::Label>("video: " + label_text);
-            ph->add_css_class("hv-time");
-            ph->set_halign(Gtk::Align::START);
-            box->append(*ph);
-        }
-    };
-
-    std::error_code ec;
-    const bool have_poster = fs::is_regular_file(poster, ec) &&
-                             fs::file_size(poster, ec) > 0;
-    append_poster(have_poster ? poster : "", name);
-
-    if (!have_poster) {
-        // Extract the first frame in a worker thread (ffmpeg child), then
-        // swap the placeholder for the poster on the GTK thread.
-        auto weak = std::make_shared<Gtk::Box*>(box);
-        box->signal_destroy().connect([weak] { *weak = nullptr; });
-        const std::string tid = current_thread_;
-        run_async([this, file, poster, name, weak, tid,
-                   append_poster] {
-            const bool ok = media_player::make_poster(file, poster);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, poster, name, weak, tid, ok,
-                                   append_poster] {
-                if (!alive_ || !*weak || tid != current_thread_) return;
-                while (auto* child = (*weak)->get_first_child())
-                    (*weak)->remove(*child);
-                append_poster(ok ? poster : "", name);
-            });
-            dispatcher_.emit();
-        });
-    }
-
-    auto* play_btn = Gtk::make_managed<Gtk::Button>("\u25b6 play: " + name);
-    play_btn->add_css_class("flat");
-    play_btn->set_halign(Gtk::Align::START);
-    play_btn->signal_clicked().connect([start_playback] { start_playback(); });
-    holder->append(*play_btn);
-
+    holder->append(*video);
+    holder->append(*chip);
 }
 
 void HiveWindow::load_video_attachment(Gtk::Box* holder,

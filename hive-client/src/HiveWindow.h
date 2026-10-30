@@ -160,7 +160,7 @@ private:
     void load_image_attachment(Gtk::Box* holder, const nlohmann::json& att);
     void show_image_picture(Gtk::Box* holder, const std::string& file,
                             const std::string& caption);
-    // Phase E: video attachments (embedded player; external-open fallback)
+    // Phase E: centred inline video player, paused on the first frame
     void load_video_attachment(Gtk::Box* holder, const nlohmann::json& att);
     /// Generic (non-image/video) attachment chip: download via the hub
     /// API into the client cache, then open locally.
