@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ApiClient.h"
+#include "GstVideoPlayer.h"
 
 namespace hive {
 
@@ -42,6 +43,7 @@ public:
     nlohmann::json ui_send(const std::string& body);
     nlohmann::json ui_attach(const std::string& path);  // POST /ui/action/attach
     nlohmann::json ui_download_attachment(const std::string& name);
+    nlohmann::json ui_play_attachment(const std::string& name);
     /// Shared connect flow (Connect dialog OK + POST /ui/action/connect).
     void connect_with_credentials(const std::string& url, const std::string& key,
                                   std::function<void(std::string)> done);
@@ -177,8 +179,22 @@ private:
                              const std::string& tid);
     void show_video_widget(Gtk::Box* holder, const std::string& file,
                            const std::string& name);
+    /// Lazily create one reusable in-process video surface. Paused cards
+    /// are posters; starting another card reuses the same surface/media.
+    void play_video(Gtk::Stack* stack, Gtk::Overlay* overlay,
+                    Gtk::Button* play, Gtk::Button* chip,
+                    const std::string& file, const std::string& name);
+    void stop_active_video();
+    Gtk::Stack* active_video_stack_ = nullptr;
+    Gtk::Overlay* active_video_overlay_ = nullptr;
+    Gtk::Button* active_video_play_ = nullptr;
+    Gtk::Button* active_video_chip_ = nullptr;
+    // Non-managed member: reparenting/removing a card must NOT destroy it.
+    // The persistent playbin's paintable is displayed only in the active card.
+    Gtk::Picture video_player_;
+    std::unique_ptr<GstVideoPlayer> active_video_media_;
     // Audio attachments: card with a big round play/pause button plus
-    // filename and size (Gtk::MediaFile playback, in place).
+    // filename and size (opens the desktop's assigned media player).
     void load_audio_attachment(Gtk::Box* holder, const nlohmann::json& att);
     void show_audio_widget(Gtk::Box* holder, const std::string& file,
                            const std::string& name);

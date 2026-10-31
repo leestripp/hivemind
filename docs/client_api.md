@@ -78,6 +78,12 @@ Same as the Send button: fills the composer entry and fires `on_send()`
 (posts to the selected thread, async agent turns). `400` if no thread is
 selected or body empty.
 
+### POST /ui/action/play-attachment
+Body: `{"name": "<attachment filename>"}` → `{"activated": "<name>"}` or
+`404`. Finds the named inline video's red play button and activates it on
+the GTK main loop. Activating the same card again toggles pause/resume;
+activating another card moves the single persistent player to that card.
+
 ### POST /ui/action/stop
 → `{"cancel_requested": true}`. Same as the Stop button: `POST
 /api/threads/:id/cancel` on the selected thread (cancels live agent turns

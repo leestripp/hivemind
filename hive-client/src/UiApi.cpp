@@ -149,6 +149,17 @@ void UiApi::start() {
             else send_json(resp, r);
         });
 
+    // Activate an inline video card through the same button callback as the
+    // desktop UI. Used by lifecycle/FD-regression tests and UI automation.
+    server_->post("/ui/action/play-attachment",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            std::string name = body_json(req).value("name", "");
+            if (name.empty()) { send_err(resp, 400, "name required"); return; }
+            json r = w.ui_play_attachment(name);
+            if (r.contains("error")) send_err(resp, 404, r["error"]);
+            else send_json(resp, r);
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());

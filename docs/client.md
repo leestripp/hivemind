@@ -27,10 +27,14 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   640x360 inline player with a red play overlay (never autoplayed).
   Click toggles play/pause. Download and External player actions sit side
   by side below the player; the latter uses the desktop's default app.
+  Paused cards are cached first-frame posters. One persistent GStreamer
+  `playbin` + `gtk4paintablesink` supplies the active card's paintable;
+  track changes follow READY → new URI → PLAYING. This bounds FD/GL use
+  instead of constructing a decoder for every attachment.
 - **Audio** — audio attachments (mp3/flac/wav/ogg/m4a/aac/opus/wma)
   render as a card: big round play/pause button + filename + size,
-  playing in place via Gtk::MediaFile (GStreamer). On a media error the
-  card falls back to a chip that opens the file externally.
+  opens the file in the desktop's assigned media player (no in-process
+  audio decoder).
 - **Agent management** — create/edit agents, choose their runtime and
   model, inspect execution history, and migrate them between workers.
   Tool calls execute autonomously; there is no approval inbox.

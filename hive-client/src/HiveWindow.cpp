@@ -836,6 +836,9 @@ HiveWindow::HiveWindow() {
 
 HiveWindow::~HiveWindow() {
     alive_ = false;
+    stop_active_video();
+    video_player_.set_paintable(Glib::RefPtr<Gdk::Paintable>{});
+    active_video_media_.reset();
     poll_timer_.disconnect();
     threads_timer_.disconnect();
 }
@@ -2462,44 +2465,137 @@ nlohmann::json HiveWindow::ui_download_attachment(const std::string& name) {
                           {"size", std::filesystem::file_size(cache)}};
 }
 
+nlohmann::json HiveWindow::ui_play_attachment(const std::string& name) {
+    return invoke_on_ui([this, name] {
+        const std::string tooltip = "Play " + name;
+        std::function<Gtk::Button*(Gtk::Widget*)> find =
+            [&](Gtk::Widget* widget) -> Gtk::Button* {
+                if (!widget) return nullptr;
+                auto* button = dynamic_cast<Gtk::Button*>(widget);
+                if (button && button->get_tooltip_text() == tooltip) return button;
+                for (auto* child = widget->get_first_child(); child;
+                     child = child->get_next_sibling()) {
+                    if (auto* hit = find(child)) return hit;
+                }
+                return nullptr;
+            };
+        auto* button = find(&messages_box_);
+        if (!button)
+            return nlohmann::json{{"error", "no video play button named: " + name}};
+        button->activate();
+        return nlohmann::json{{"activated", name}};
+    });
+}
+
 // -- Phase E: video attachments ------------------------------------------
 // Same download/cache pattern as images. The paused Gtk::Video has a
 // clear red play overlay and never autoplays. External-player and Download
 // actions share a centred row below the player.
 
+void HiveWindow::stop_active_video() {
+    // Clear the identity first: changing playbin state posts bus messages,
+    // and callbacks must not operate on a half-torn-down card.
+    auto* stack = active_video_stack_;
+    auto* play = active_video_play_;
+    active_video_stack_ = nullptr;
+    active_video_overlay_ = nullptr;
+    active_video_play_ = nullptr;
+    active_video_chip_ = nullptr;
+
+    if (active_video_media_) active_video_media_->stop();
+    // video_player_ is a NON-MANAGED HiveWindow member. Removing it from a
+    // card only unparks it; the persistent playbin and paintable stay alive.
+    if (stack && video_player_.get_parent() == stack)
+        stack->remove(video_player_);
+    if (stack) stack->set_visible_child("poster");
+    if (play) play->set_visible(true);
+}
+
+void HiveWindow::play_video(Gtk::Stack* stack, Gtk::Overlay* overlay,
+                            Gtk::Button* play, Gtk::Button* chip,
+                            const std::string& file, const std::string& name) {
+    if (!stack || !overlay || !play || !chip) return;
+    if (active_video_stack_ == stack && active_video_media_) {
+        active_video_media_->toggle_pause();
+        play->set_visible(!active_video_media_->playing());
+        return;
+    }
+
+    // Paused cards are posters. Only the selected card receives the one
+    // persistent playbin paintable, so N attachments never create N decoders.
+    stop_active_video();
+    if (!active_video_media_) {
+        active_video_media_ = std::make_unique<GstVideoPlayer>();
+        if (!active_video_media_->available()) {
+            std::fprintf(stderr, "[hive-client] video unavailable: %s\n",
+                         active_video_media_->last_error().c_str());
+            active_video_media_.reset();
+            if (overlay->get_parent()) overlay->unparent();
+            chip->set_visible(true);
+            return;
+        }
+        video_player_.set_paintable(active_video_media_->paintable());
+        video_player_.set_content_fit(Gtk::ContentFit::CONTAIN);
+        video_player_.set_size_request(640, 360);
+        video_player_.set_hexpand(false);
+        video_player_.set_vexpand(false);
+        video_player_.set_halign(Gtk::Align::CENTER);
+
+        auto click = Gtk::GestureClick::create();
+        click->signal_pressed().connect([this](int, double, double) {
+            if (!active_video_stack_ || !active_video_media_) return;
+            active_video_media_->toggle_pause();
+            if (active_video_play_)
+                active_video_play_->set_visible(!active_video_media_->playing());
+        });
+        video_player_.add_controller(click);
+        active_video_media_->set_on_eos([this] {
+            if (active_video_stack_) stop_active_video();
+        });
+        active_video_media_->set_on_error([this](const std::string&) {
+            auto* failed_overlay = active_video_overlay_;
+            auto* failed_chip = active_video_chip_;
+            stop_active_video();
+            if (failed_overlay && failed_overlay->get_parent())
+                failed_overlay->unparent();
+            if (failed_chip) failed_chip->set_visible(true);
+        });
+    }
+
+    if (video_player_.get_parent() == nullptr)
+        stack->add(video_player_, "player");
+    video_player_.set_tooltip_text(name + "  -  click to play/pause");
+    active_video_stack_ = stack;
+    active_video_overlay_ = overlay;
+    active_video_play_ = play;
+    active_video_chip_ = chip;
+    stack->set_visible_child("player");
+    active_video_media_->play(file);
+    play->set_visible(!active_video_media_->playing());
+}
+
 void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {
-    auto media = Gtk::MediaFile::create_for_filename(file);
-    auto* video = Gtk::make_managed<Gtk::Video>();
-    video->set_media_stream(media);
-    video->set_autoplay(false);
-    video->set_size_request(640, 360);
-    video->set_hexpand(false);
-    video->set_vexpand(false);
-    video->set_halign(Gtk::Align::CENTER);
-    video->set_tooltip_text(name + "  -  click to play/pause");
-
-    auto click = Gtk::GestureClick::create();
-    click->signal_pressed().connect([media](int, double, double) {
-        if (media->get_playing()) media->pause(); else media->play();
-    });
-    video->add_controller(click);
-
+    namespace fs = std::filesystem;
     auto* overlay = Gtk::make_managed<Gtk::Overlay>();
-    overlay->set_child(*video);
     overlay->set_halign(Gtk::Align::CENTER);
     holder->append(*overlay);
+
+    auto* stack = Gtk::make_managed<Gtk::Stack>();
+    auto* poster_view = Gtk::make_managed<Gtk::Picture>();
+    poster_view->set_content_fit(Gtk::ContentFit::CONTAIN);
+    poster_view->set_size_request(640, 360);
+    poster_view->set_halign(Gtk::Align::CENTER);
+    poster_view->set_can_target(false);
+    stack->add(*poster_view, "poster");
+    overlay->set_child(*stack);
 
     auto* play = Gtk::make_managed<Gtk::Button>("▶");
     play->add_css_class("hv-video-play");
     play->set_halign(Gtk::Align::CENTER);
     play->set_valign(Gtk::Align::CENTER);
     play->set_tooltip_text("Play " + name);
-    play->signal_clicked().connect([media] { media->play(); });
     overlay->add_overlay(*play);
-    media->property_playing().signal_changed().connect([media, play] {
-        play->set_visible(!media->get_playing());
-    });
 
     auto* chip = Gtk::make_managed<Gtk::Button>("attachment: " + name);
     chip->add_css_class("flat");
@@ -2508,11 +2604,46 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
     chip->signal_clicked().connect([file] {
         Gio::AppInfo::launch_default_for_uri("file://" + file);
     });
-    media->property_error().signal_changed().connect([overlay, chip] {
-        if (overlay->get_parent()) overlay->unparent();
-        chip->set_visible(true);
-    });
     holder->append(*chip);
+
+    play->signal_clicked().connect(
+        [this, stack, overlay, play, chip, file, name] {
+            play_video(stack, overlay, play, chip, file, name);
+        });
+    stack->signal_destroy().connect([this, stack] {
+        if (active_video_stack_ != stack) return;
+        active_video_stack_ = nullptr;
+        active_video_overlay_ = nullptr;
+        active_video_play_ = nullptr;
+        active_video_chip_ = nullptr;
+        if (active_video_media_) active_video_media_->stop();
+        // video_player_ and active_video_media_ deliberately survive as
+        // window members, ready for the next card. Only their parent went away.
+    });
+
+    const std::string poster = file + ".poster.png";
+    auto show_poster = [poster_view](const std::string& png) {
+        if (png.empty()) return;
+        auto texture = Gdk::Texture::create_from_filename(png);
+        if (texture) poster_view->set_paintable(texture);
+    };
+    std::error_code ec;
+    if (fs::is_regular_file(poster, ec) && fs::file_size(poster, ec) > 0) {
+        show_poster(poster);
+    } else {
+        auto weak = std::make_shared<Gtk::Stack*>(stack);
+        stack->signal_destroy().connect([weak] { *weak = nullptr; });
+        const std::string tid = current_thread_;
+        run_async([this, file, poster, weak, tid, show_poster] {
+            const bool ok = media_player::make_poster(file, poster);
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, poster, weak, tid, ok, show_poster] {
+                if (!alive_ || !*weak || tid != current_thread_) return;
+                if (ok) show_poster(poster);
+            });
+            dispatcher_.emit();
+        });
+    }
 }
 
 void HiveWindow::load_video_attachment(Gtk::Box* holder,
@@ -2634,9 +2765,8 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
 // Same download/cache pattern as video (Phase E), via the shared
 // resolve_attachment/download_to_cache helpers. The card mirrors the
 // Android audio card: a big round play/pause button plus filename and
-// size. Playback is Gtk::MediaFile (GStreamer) — no separate window;
-// on a media error the card swaps to a chip that opens the file in the
-// system player, exactly like the video fallback.
+// size. Playback opens the desktop's assigned media player; no separate
+// in-process audio pipeline is created.
 
 void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
                                    const std::string& name) {

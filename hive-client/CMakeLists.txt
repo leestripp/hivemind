@@ -6,6 +6,8 @@
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
+# One persistent playbin/gtk4paintablesink for inline video attachments.
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 
 # Optional: WebKitGTK 6.0 — embeds the noVNC screen view (agent context
 # menu → Computer). Without it the menu item falls back to the system
@@ -47,6 +49,7 @@ add_executable(hive-client
     src/HiveApplication.cpp
     src/HiveWindow.cpp
     src/MediaPlayer.cpp
+    src/GstVideoPlayer.cpp
     src/ApiClient.cpp
     src/UiApi.cpp
     ${GRESOURCE_C}
@@ -56,6 +59,7 @@ target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
     hive_client_core
     PkgConfig::GTKMM
+    PkgConfig::GSTREAMER
     nlohmann_json::nlohmann_json
     OmniNet
 )
