@@ -97,9 +97,9 @@ class VoiceView : public Gtk::Box {
     void schedulePollTick(int ms);
     void inboxWatchTick();
     void pollTick();
-    void handleTick(bool busy, const std::string& error,
-                    const std::string& partial, bool cancelling, int gen,
-                    bool grew);
+    void handleTick(bool threadBusy, bool agentBusy,
+                    const std::string& error, const std::string& partial,
+                    bool cancelling, int gen, bool grew);
 
     // -- speech ---------------------------------------------------------
     void drainSpeech(bool flush);

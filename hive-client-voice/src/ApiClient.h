@@ -74,6 +74,9 @@ class ApiClient {
                                              const std::string& after_id);
     std::string latestMessageId(const std::string& thread_id);
     ThreadActivity activity(const std::string& thread_id);
+    // Agent-wide live status across EVERY thread (DM activity is blind to
+    // agent-to-agent pair threads). Lightweight /api/agents/activity lookup.
+    bool agentBusy(const std::string& agent_id);
     // Returns the new message id. source="voice" lets the hub stamp the
     // channel server-side (2026-10-04 Plan.md §3.4).
     std::string postMessage(const std::string& thread_id,

@@ -182,6 +182,12 @@ ThreadActivity ApiClient::activity(const std::string& thread_id) {
     return act;
 }
 
+bool ApiClient::agentBusy(const std::string& agent_id) {
+    const auto j = request("GET", "/api/agents/activity", nullptr, false);
+    const auto it = j.find(agent_id);
+    return it != j.end() && it->is_object() && it->value("busy", false);
+}
+
 std::string ApiClient::postMessage(const std::string& thread_id,
                                    const std::string& body,
                                    const std::string& source) {

@@ -58,6 +58,17 @@ and API key live in Settings; they're persisted to
 
 ## Tests
 
-`test_speech_text`, `test_announcer`, `test_prefs`, `test_avatars`,
+`test_speech_text`, `test_announcer`, `test_voice_turn_logic`,
+`test_prefs`, `test_avatars`,
 `test_wav_codec` (pure-logic units; run via ctest from the top-level
 build).
+
+
+## Turn activity scopes
+
+A voice session streams reply text from the selected agent's DM, but its
+lifetime follows the agent-wide activity signal (`GET /api/agents/activity`).
+During agent-to-agent relays the DM can be idle while the agent is still
+working in another thread. In that state the app keeps listening and speaks
+new DM messages, then returns to idle only when the agent is idle across all
+threads. `test_voice_turn_logic` covers the scope transitions.

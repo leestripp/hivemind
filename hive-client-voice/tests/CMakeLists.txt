@@ -25,6 +25,13 @@ add_executable(test_announcer test_announcer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AgentStateAnnouncer.cpp)
 target_link_libraries(test_announcer PRIVATE Catch2::Catch2WithMain)
 
+# DM/agent-wide activity scope — regression coverage for agent-to-agent
+# relay chains outliving the selected agent's direct-message turn.
+add_executable(test_voice_turn_logic test_voice_turn_logic.cpp)
+target_link_libraries(test_voice_turn_logic PRIVATE Catch2::Catch2WithMain)
+target_include_directories(test_voice_turn_logic PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
 add_executable(test_prefs test_prefs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/Prefs.cpp)
 target_link_libraries(test_prefs PRIVATE Catch2::Catch2WithMain
@@ -46,7 +53,7 @@ add_executable(test_audio_common test_audio_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AudioCommon.cpp)
 target_link_libraries(test_audio_common PRIVATE Catch2::Catch2WithMain)
 
-foreach(t test_speech_text test_transcript_text test_announcer test_prefs test_avatars test_wav_codec test_audio_common)
+foreach(t test_speech_text test_transcript_text test_announcer test_voice_turn_logic test_prefs test_avatars test_wav_codec test_audio_common)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()

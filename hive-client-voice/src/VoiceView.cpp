@@ -8,6 +8,7 @@
 #include "SoundFx.h"
 #include "SpeechText.h"
 #include "TranscriptText.h"
+#include "VoiceTurnLogic.h"
 #include "SttEngine.h"
 #include "TtsEngine.h"
 
@@ -307,11 +308,16 @@ void VoiceView::sendAndEnterWait(const std::string& text) {
         for (const auto& a : api_->listAgents())
             if (a.id == agent_.id) agentBusy = a.busy;
     } catch (...) {}
-    const bool queued = (havePre && preAct.cancelling) || agentBusy;
+    const bool queuedBehindStop = havePre && preAct.cancelling;
+    const bool queued = queuedBehindStop || agentBusy;
     api_->postMessage(thread_id_, text, "voice");
-    toUi([this, queued] {
+    toUi([this, queued, queuedBehindStop] {
         if (phase_ != Phase::Thinking) return;
-        queuedBehindStop_ = queued;
+        // Only a cancelling DM needs the special dead-zone wait below.
+        // Ordinary agent-wide busy is usually an agent-to-agent turn in
+        // ANOTHER thread; tying this flag to that busy state can leave the
+        // voice UI waiting forever after the relay chain goes idle.
+        queuedBehindStop_ = queuedBehindStop;
         if (sphere_) sphere_->setState(SphereState::Thinking);
         if (status_)
             status_->set_label(queued
@@ -733,6 +739,7 @@ void VoiceView::pollTick() {
     post([this, gen] {
         try {
             ThreadActivity act = api_->activity(thread_id_);
+            const bool agentBusy = api_->agentBusy(agent_.id);
             bool appended = false;
             for (const auto& m : api_->messagesAfter(thread_id_, lastMessageId_)) {
                 lastMessageId_ = m.id;
@@ -745,9 +752,9 @@ void VoiceView::pollTick() {
             netFailSince_ = 0;
             const bool grew = appended || act.partial.size() > lastPartialLen_;
             if (!act.partial.empty()) lastPartialLen_ = act.partial.size();
-            toUi([this, act, gen, grew] {
-                handleTick(act.busy, act.error, act.partial, act.cancelling,
-                           gen, grew);
+            toUi([this, act, agentBusy, gen, grew] {
+                handleTick(act.busy, agentBusy, act.error, act.partial,
+                           act.cancelling, gen, grew);
             });
         } catch (const std::exception& e) {
             fprintf(stderr, "hive-poll: tick threw: %s\n", e.what());
@@ -761,12 +768,15 @@ void VoiceView::pollTick() {
     });
 }
 
-void VoiceView::handleTick(bool busy, const std::string& error,
-                             const std::string& partial, bool cancelling,
-                             int gen, bool grew) {
+void VoiceView::handleTick(bool threadBusy, bool agentBusy,
+                           const std::string& error,
+                           const std::string& partial, bool cancelling,
+                           int gen, bool grew) {
     if (gen != turnGen_) return;  // stale tick from a cancelled turn
     if (phase_ != Phase::Thinking && phase_ != Phase::Streaming) return;
     if (grew) lastProgressMs_ = nowMs();
+    const bool busy = threadBusy;
+    const hv::voice_turn::ActivityScope scope{threadBusy, agentBusy};
     if (!error.empty()) {
         tts_->stop();
         toIdle("Agent error: " + error);
@@ -787,6 +797,15 @@ void VoiceView::handleTick(bool busy, const std::string& error,
     }
     if (busy && queuedBehindStop_) queuedBehindStop_ = false;
     if (!busy && queuedBehindStop_) {
+        schedulePollTick(kPollMs);
+        return;
+    }
+    if (hv::voice_turn::workingOffThread(scope)) {
+        // The DM is idle, but the selected agent is still working in an
+        // agent-to-agent thread. Speak any new DM messages now, then keep
+        // waiting for the AGENT-wide idle edge instead of prematurely
+        // completing (or wedging behind) this thread's activity feed.
+        if (!finalText_.empty()) speakFinalTail();
         schedulePollTick(kPollMs);
         return;
     }
@@ -812,13 +831,13 @@ void VoiceView::handleTick(bool busy, const std::string& error,
         } else {
             streamText_ = next;
         }
-        drainSpeech(!busy);
+        drainSpeech(!hv::voice_turn::inFlight(scope));
         // Remember exactly what the live feed already queued so the final
         // message handler can trim down to the unheard tail instead of
         // re-reading the whole reply.
         if (spokenLen_ > 0) narratedLive_ = streamText_.substr(0, spokenLen_);
     }
-    if (busy) {
+    if (hv::voice_turn::inFlight(scope)) {
         schedulePollTick(kPollMs);
     } else {
         turnDone_ = true;
