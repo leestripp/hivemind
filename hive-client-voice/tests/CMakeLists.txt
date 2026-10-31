@@ -32,6 +32,14 @@ target_link_libraries(test_voice_turn_logic PRIVATE Catch2::Catch2WithMain)
 target_include_directories(test_voice_turn_logic PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+# Real HTTP envelope regression for the live-agent activity lookup.
+add_executable(test_api_client_activity test_api_client_activity.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ApiClient.cpp)
+target_include_directories(test_api_client_activity PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(test_api_client_activity PRIVATE Catch2::Catch2WithMain
+    OmniNet nlohmann_json::nlohmann_json)
+
 add_executable(test_tts_tag_ledger test_tts_tag_ledger.cpp)
 target_link_libraries(test_tts_tag_ledger PRIVATE Catch2::Catch2WithMain)
 target_include_directories(test_tts_tag_ledger PRIVATE
@@ -58,7 +66,7 @@ add_executable(test_audio_common test_audio_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AudioCommon.cpp)
 target_link_libraries(test_audio_common PRIVATE Catch2::Catch2WithMain)
 
-foreach(t test_speech_text test_transcript_text test_announcer test_voice_turn_logic test_tts_tag_ledger test_prefs test_avatars test_wav_codec test_audio_common)
+foreach(t test_speech_text test_transcript_text test_announcer test_voice_turn_logic test_api_client_activity test_tts_tag_ledger test_prefs test_avatars test_wav_codec test_audio_common)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()
