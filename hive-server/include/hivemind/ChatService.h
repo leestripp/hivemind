@@ -130,6 +130,12 @@ public:
     std::string post_nudge(const std::string& thread_id,
                            const std::string& body);
 
+    /// Targeted system nudge for one participating agent (e.g. background
+    /// process completion). Does not wake other members of a group/pair.
+    std::string post_agent_nudge(const std::string& thread_id,
+                                 const std::string& agent_id,
+                                 const std::string& body);
+
     // -- HubRouter callbacks (worker channel events) --------------------
     void append_delta(const std::string& task_id, const std::string& text);
     /// 2026-10-15 (Plan.md): an attach_file attachment shipped MID-TURN.

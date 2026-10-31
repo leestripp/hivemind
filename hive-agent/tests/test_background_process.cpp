@@ -7,6 +7,9 @@
 #include <doctest/doctest.h>
 #include <core/BackgroundProcessManager.h>
 #include <string>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <chrono>
 #include <thread>
 
@@ -160,4 +163,62 @@ TEST_CASE("BackgroundProcessManager - cleanup all") {
     // Verify all stopped
     auto active = manager.list_active_processes();
     CHECK(active.empty());
+}
+TEST_CASE("BackgroundProcessManager - natural exit notifies exactly once") {
+    auto& manager = BackgroundProcessManager::get_instance();
+    manager.cleanup_all();
+    manager.set_completion_callback({});
+    manager.set_current_origin("task-123", "thread-456");
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    int calls = 0;
+    BackgroundProcessInfo completed_info;
+    ProcessOutput completed_output;
+    manager.set_completion_callback(
+        [&](const BackgroundProcessInfo& info, const ProcessOutput& output) {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++calls;
+            completed_info = info;
+            completed_output = output;
+            cv.notify_all();
+        });
+
+    const std::string id = manager.start_background(
+        "printf 'download complete'; printf 'warning' >&2; exit 7");
+    REQUIRE(!id.empty());
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(5),
+                            [&] { return calls == 1; }));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+    std::lock_guard<std::mutex> lock(mutex);
+    CHECK(calls == 1);
+    CHECK(completed_info.process_id == id);
+    CHECK(completed_info.origin_task_id == "task-123");
+    CHECK(completed_info.origin_thread_id == "thread-456");
+    CHECK(completed_output.exited);
+    CHECK(completed_output.exit_code == 7);
+    CHECK(completed_output.stdout == "download complete");
+    CHECK(completed_output.stderr == "warning");
+
+    manager.set_completion_callback({});
+    manager.cleanup_all();
+}
+
+TEST_CASE("BackgroundProcessManager - explicit stop does not notify") {
+    auto& manager = BackgroundProcessManager::get_instance();
+    manager.cleanup_all();
+    std::atomic<int> calls{0};
+    manager.set_completion_callback(
+        [&](const BackgroundProcessInfo&, const ProcessOutput&) { ++calls; });
+    const std::string id = manager.start_background("sleep 30");
+    REQUIRE(!id.empty());
+    CHECK(manager.stop_process(id));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    CHECK(calls.load() == 0);
+    manager.set_completion_callback({});
+    manager.cleanup_all();
 }

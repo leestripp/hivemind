@@ -14,6 +14,7 @@
 //   {"ev":"ready","agent":"Name","version":"...","pid":123}
 //   {"ev":"delta","task":"t1","text":"..."}
 //   {"ev":"message","task":"t1","body":"...","error":""}
+//   {"ev":"background_done","process_id":"bg_1","thread_id":"...",...}
 //   {"ev":"error","text":"..."}           (fatal/startup errors)
 //
 // Config via environment (injected by the worker at spawn; credentials
@@ -38,6 +39,8 @@
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
 #include "core/McpSeed.h"
+#include "core/BackgroundProcessManager.h"
+#include "core/Utf8Utils.h"
 #include "tools/BrowserTools.h"
 #include "tools/SecretTools.h"
 #include "tools/ServiceTools.h"
@@ -1548,6 +1551,30 @@ int main(int argc, char** argv) {
         emit({{"ev", "error"}, {"text", std::string("init: ") + e.what()}});
         return 2;
     }
+    auto& background_processes = BackgroundProcessManager::get_instance();
+    background_processes.set_completion_callback(
+        [](const BackgroundProcessInfo& info, const ProcessOutput& output) {
+            const auto clean = [](const std::string& text, size_t max_bytes) {
+                std::string out = utf8_sanitize_replace_invalid(text);
+                if (out.size() > max_bytes) {
+                    out = utf8_truncate_safe(out, max_bytes) +
+                          "\n...[truncated]";
+                }
+                return out;
+            };
+            emit({{"ev", "background_done"},
+                  {"process_id", info.process_id},
+                  {"pid", static_cast<int>(info.pid)},
+                  {"task", info.origin_task_id},
+                  {"thread_id", info.origin_thread_id},
+                  {"command", clean(info.command, 1000)},
+                  {"exit_code", output.exit_code},
+                  {"signaled", output.signaled},
+                  {"signal", output.signal_num},
+                  {"stdout", clean(output.stdout, 4000)},
+                  {"stderr", clean(output.stderr, 4000)}});
+        });
+
     emit({{"ev", "ready"},
           {"agent", name},
           {"version", GIT_VERSION},
@@ -1572,6 +1599,7 @@ int main(int argc, char** argv) {
             }
             g_thread_id = t.thread_id;
             g_task_id = t.id;
+            background_processes.set_current_origin(t.id, t.thread_id);
             sink->begin_task(t.id);
             std::string err;
             try {
@@ -1719,6 +1747,7 @@ int main(int argc, char** argv) {
     stopping = true;
     q_cv.notify_all();
     if (turn_thread.joinable()) turn_thread.join();
+    background_processes.shutdown();
     try { agent.shutdown(); }           // persists history + memory
     catch (const std::exception& e) { log_err(std::string("shutdown: ") + e.what()); }
     return 0;

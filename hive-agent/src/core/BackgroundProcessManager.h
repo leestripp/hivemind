@@ -23,6 +23,10 @@
 #include <filesystem>
 #include <ctime>
 #include <cstdint>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <thread>
 
 /**
  * Information about a running background process
@@ -40,6 +44,9 @@ struct BackgroundProcessInfo {
     std::string fifo_path;            // Path to FIFO for stdin
     std::string stdout_path;          // Path to stdout capture file
     std::string stderr_path;          // Path to stderr capture file
+    std::string origin_task_id;       // Turn that started the process
+    std::string origin_thread_id;     // Thread to notify on completion
+    bool completion_notified = false; // Exactly-once automatic notification
 };
 
 /**
@@ -73,8 +80,8 @@ struct ProcessOutput {
  * 4. Read output from the server
  * 5. Stop the server when done
  *
- * Thread safety: This class is NOT thread-safe. All calls should be made
- * from the same thread (main agent loop).
+ * Thread safety: public methods are serialized internally. A single watcher
+ * detects natural exits and invokes the optional completion callback.
  */
 class BackgroundProcessManager {
 public:
@@ -91,6 +98,21 @@ public:
      * @return Process ID on success, empty string on failure
      */
     std::string start_background(const std::string& command, const std::string& cwd = "");
+
+    /// Set the turn/thread associated with subsequently started processes.
+    void set_current_origin(std::string task_id, std::string thread_id);
+
+    using CompletionCallback = std::function<void(
+        const BackgroundProcessInfo&, const ProcessOutput&)>;
+
+    /// Called once when a background process exits naturally. Explicit
+    /// stop_process()/cleanup_all() do not notify; polling an exited process
+    /// consumes its completion without an automatic callback.
+    void set_completion_callback(CompletionCallback callback);
+
+    /// Stop the watcher and all processes. Idempotent; safe before static
+    /// destruction so callbacks never outlive their host's queue/state.
+    void shutdown();
 
     /**
      * Send input to a background process's stdin
@@ -175,6 +197,8 @@ private:
     void clear_file(const std::string& path);
     bool is_process_running(pid_t pid) const;
     bool kill_process_group(pid_t pid);
+    bool refresh_process_status(BackgroundProcessInfo& info);
+    void watch_processes(std::stop_token stop_token);
 
     // Configuration
     static constexpr size_t MAX_OUTPUT_SIZE = 100000;  // 100KB max output buffer
@@ -184,6 +208,12 @@ private:
     std::filesystem::path temp_base_;
     std::unordered_map<std::string, BackgroundProcessInfo> processes_;
     int process_counter_ = 0;
+    std::string current_task_id_;
+    std::string current_thread_id_;
+    CompletionCallback completion_callback_;
+    mutable std::mutex mutex_;
+    std::condition_variable_any watcher_cv_;
+    std::jthread watcher_;
 };
 
 #endif // BACKGROUND_PROCESS_MANAGER_H

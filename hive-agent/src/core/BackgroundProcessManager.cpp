@@ -36,10 +36,11 @@
 BackgroundProcessManager::BackgroundProcessManager()
     : temp_base_(std::filesystem::temp_directory_path() / TEMP_DIR_PREFIX) {
     ensure_temp_dir();
+    watcher_ = std::jthread([this](std::stop_token st) { watch_processes(st); });
 }
 
 BackgroundProcessManager::~BackgroundProcessManager() {
-    cleanup_all();
+    shutdown();
 }
 
 BackgroundProcessManager& BackgroundProcessManager::get_instance() {
@@ -265,6 +266,7 @@ bool BackgroundProcessManager::kill_process_group(pid_t pid) {
 
 std::string BackgroundProcessManager::start_background(const std::string& command,
                                                        const std::string& cwd) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (command.empty()) {
         return "";
     }
@@ -297,18 +299,21 @@ std::string BackgroundProcessManager::start_background(const std::string& comman
     info.working_dir = cwd.empty() ? "." : cwd;
     info.started_at = std::chrono::system_clock::now();
     info.exited = false;
+    info.origin_task_id = current_task_id_;
+    info.origin_thread_id = current_thread_id_;
     info.fifo_path = fifo_path;
     info.stdout_path = stdout_path;
     info.stderr_path = stderr_path;
     
     processes_[process_id] = info;
-    
+    watcher_cv_.notify_all();
     return process_id;
 }
 
 SendResult BackgroundProcessManager::send_to_process(
     const std::string& process_id,
     const std::string& input) {
+    std::lock_guard<std::mutex> lock(mutex_);
     
     SendResult result;
     
@@ -346,6 +351,7 @@ SendResult BackgroundProcessManager::send_to_process(
 ProcessOutput BackgroundProcessManager::poll_output(
     const std::string& process_id,
     bool clear_after_read) {
+    std::lock_guard<std::mutex> lock(mutex_);
     
     ProcessOutput output;
     
@@ -384,6 +390,8 @@ ProcessOutput BackgroundProcessManager::poll_output(
     output.signaled = info.signaled;
     output.signal_num = info.signal_num;
     
+    if (output.exited) info.completion_notified = true;
+
     // Clear output files if requested
     if (clear_after_read) {
         clear_file(info.stdout_path);
@@ -394,6 +402,7 @@ ProcessOutput BackgroundProcessManager::poll_output(
 }
 
 bool BackgroundProcessManager::stop_process(const std::string& process_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = processes_.find(process_id);
     if (it == processes_.end()) {
         return false;
@@ -422,6 +431,7 @@ bool BackgroundProcessManager::stop_process(const std::string& process_id) {
 }
 
 std::vector<BackgroundProcessInfo> BackgroundProcessManager::list_active_processes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<BackgroundProcessInfo> active;
     
     for (const auto& pair : processes_) {
@@ -436,6 +446,7 @@ std::vector<BackgroundProcessInfo> BackgroundProcessManager::list_active_process
 
 std::optional<BackgroundProcessInfo> BackgroundProcessManager::get_process_info(
     const std::string& process_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     
     auto it = processes_.find(process_id);
     if (it == processes_.end()) {
@@ -467,6 +478,7 @@ std::optional<BackgroundProcessInfo> BackgroundProcessManager::get_process_info(
 }
 
 bool BackgroundProcessManager::has_exited(const std::string& process_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = processes_.find(process_id);
     if (it == processes_.end()) {
         return true;  // Not found = considered exited
@@ -528,6 +540,7 @@ void BackgroundProcessManager::cleanup_process(const std::string& process_id) {
 }
 
 void BackgroundProcessManager::cleanup_all() {
+    std::lock_guard<std::mutex> lock(mutex_);
     // Stop all running processes
     for (auto& pair : processes_) {
         auto& info = pair.second;
@@ -558,4 +571,94 @@ void BackgroundProcessManager::cleanup_all() {
             // Ignore errors during cleanup
         }
     }
+}
+
+void BackgroundProcessManager::set_current_origin(
+    std::string task_id, std::string thread_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    current_task_id_ = std::move(task_id);
+    current_thread_id_ = std::move(thread_id);
+}
+
+void BackgroundProcessManager::set_completion_callback(
+    CompletionCallback callback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    completion_callback_ = std::move(callback);
+    watcher_cv_.notify_all();
+}
+
+bool BackgroundProcessManager::refresh_process_status(
+    BackgroundProcessInfo& info) {
+    if (info.exited) return false;
+    int status = 0;
+    const pid_t ret = waitpid(info.pid, &status, WNOHANG);
+    if (ret == info.pid) {
+        info.exited = true;
+        if (WIFEXITED(status)) {
+            info.exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            info.signaled = true;
+            info.signal_num = WTERMSIG(status);
+        }
+    } else if (ret < 0 && errno == ECHILD) {
+        info.exited = true;
+    }
+    return info.exited;
+}
+
+void BackgroundProcessManager::watch_processes(std::stop_token stop_token) {
+    struct Completion {
+        BackgroundProcessInfo info;
+        ProcessOutput output;
+        CompletionCallback callback;
+    };
+    while (!stop_token.stop_requested()) {
+        std::vector<Completion> completed;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            watcher_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                [&] { return stop_token.stop_requested(); });
+            if (stop_token.stop_requested()) break;
+            for (auto& [_, info] : processes_) {
+                if (info.completion_notified) continue;
+                refresh_process_status(info);
+                if (!info.exited) continue;
+                info.completion_notified = true;
+                ProcessOutput output;
+                output.stdout = read_file(info.stdout_path);
+                output.stderr = read_file(info.stderr_path);
+                output.exited = true;
+                output.exit_code = info.exit_code;
+                output.signaled = info.signaled;
+                output.signal_num = info.signal_num;
+                if (completion_callback_) {
+                    completed.push_back(
+                        {info, std::move(output), completion_callback_});
+                }
+            }
+        }
+        for (const auto& completion : completed) {
+            try {
+                completion.callback(completion.info, completion.output);
+            } catch (const std::exception& e) {
+                LOG_CERR(ERROR, "background completion callback failed: "
+                                << e.what());
+            } catch (...) {
+                LOG_CERR(ERROR, "background completion callback failed");
+            }
+        }
+    }
+}
+
+void BackgroundProcessManager::shutdown() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        completion_callback_ = {};
+    }
+    if (watcher_.joinable()) {
+        watcher_.request_stop();
+        watcher_cv_.notify_all();
+        watcher_.join();
+    }
+    cleanup_all();
 }

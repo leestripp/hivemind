@@ -364,6 +364,14 @@ int main(int argc, char* argv[]) {
             else if (kind == "send_user_message")
                 f = {{"op","user_msg"},{"agent",agent_id},
                      {"text",ev.value("text","")}};
+            // Natural background-process exit -> targeted hub nudge in
+            // the thread that started it. The hub creates a normal turn.
+            else if (kind == "background_done") {
+                f = ev;
+                f["op"] = "background_done";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
             // Phase 53: routine tools -> hub RoutineStore (request/response;
             // the hub replies with routine_resp which rides the forward
             // list below back to this agent's stdin).

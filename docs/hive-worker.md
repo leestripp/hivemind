@@ -196,6 +196,7 @@ hive-agent stdout events and the channel op the worker maps them to:
 | `ready` | `agent_status` state=ready |
 | `delta` {task,text} | `task_delta` |
 | `message` {task,thread_id,body,error} | `task_result` |
+| `background_done` {process_id,task,thread_id,command,exit_code,stdout,stderr} | `background_done` → targeted system nudge and normal agent turn in the originating thread |
 | `send_agent_message` {target,text} | `agent_msg` |
 | `status` {state,error} | `agent_status` |
 | anything else | `agent_log` |

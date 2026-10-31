@@ -14,10 +14,12 @@
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/AgentTools.h"
 #include "hivemind/ShareStore.h"
+#include "hivemind/Utf8.h"
 
 #include <filesystem>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <thread>
 
 using nlohmann::json;
@@ -33,6 +35,39 @@ namespace {
 /// Phase 50: the agent's disabled-skill set — hub-known skills
 /// (dirs under the server skills root) minus its enabled global-skills.
 /// Rides the task frame so enable/disable goes live without a restart.
+std::string background_field(const json& frame, const char* key,
+                             size_t max_bytes) {
+    std::string out = hivemind::sanitize_utf8(frame.value(key, ""));
+    if (out.size() > max_bytes) {
+        size_t cut = max_bytes;
+        while (cut > 0 &&
+               (static_cast<unsigned char>(out[cut]) & 0xC0) == 0x80)
+            --cut;
+        out.resize(cut);
+        out += "\n...[truncated]";
+    }
+    return out;
+}
+
+std::string background_nudge_text(const json& frame) {
+    std::ostringstream out;
+    out << "[Background process " << background_field(frame, "process_id", 80);
+    if (frame.value("signaled", false)) {
+        out << " terminated by signal " << frame.value("signal", 0);
+    } else {
+        out << " finished with exit code " << frame.value("exit_code", 0);
+    }
+    out << "]\nCommand: " << background_field(frame, "command", 1000)
+        << "\nThis is an automatic completion notice. Review the result "
+           "and report completion or any failure to the user; continue "
+           "any work that was waiting on this process.";
+    const std::string stdout_text = background_field(frame, "stdout", 4000);
+    const std::string stderr_text = background_field(frame, "stderr", 4000);
+    if (!stdout_text.empty()) out << "\n\nstdout:\n" << stdout_text;
+    if (!stderr_text.empty()) out << "\n\nstderr:\n" << stderr_text;
+    return out.str();
+}
+
 json disabled_skills_for(const std::string& agent_id) {
     json out = json::array();
     const auto enabled = agent_tools::list_enabled_skills(agent_id);
@@ -576,6 +611,17 @@ void HubRouter::on_worker_frame(const std::string& worker,
         // idle. Flushing before meant the agent still looked mid-turn
         // and the deferred spawn waited for the next 15s heartbeat.
         flush_pending_spawns();
+        return;
+    }
+    if (op == "background_done") {
+        if (!chat_) return;
+        try {
+            chat_->post_agent_nudge(frame.value("thread_id", ""), agent_id,
+                                    background_nudge_text(frame));
+        } catch (const std::exception& e) {
+            std::cerr << "[hub] background_done nudge failed for "
+                      << agent_id << ": " << e.what() << "\n";
+        }
         return;
     }
     if (op == "agent_status") {

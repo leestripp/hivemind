@@ -694,6 +694,29 @@ std::string ChatService::post_nudge(const std::string& thread_id,
     return msg_id;
 }
 
+std::string ChatService::post_agent_nudge(const std::string& thread_id,
+                                          const std::string& agent_id,
+                                          const std::string& body) {
+    if (stopping_)
+        throw std::invalid_argument("server is shutting down");
+    auto thread = threads_.get_thread(thread_id);
+    if (!thread)
+        throw std::invalid_argument("thread not found: " + thread_id);
+    if (std::find(thread->agent_ids.begin(), thread->agent_ids.end(),
+                  agent_id) == thread->agent_ids.end()) {
+        throw std::invalid_argument("agent is not a thread participant");
+    }
+    auto agent = agents_.get_agent(agent_id);
+    if (!agent) throw std::invalid_argument("agent not found: " + agent_id);
+
+    std::string msg_id =
+        threads_.add_message(thread_id, "system", "hivemind", body);
+    fan_in(thread_id, *agent, "HiveMind",
+           std::string(hivemind::msg_source::kSystem), body,
+           /*generation=*/0, "", msg_id, "wake");
+    return msg_id;
+}
+
 // -- HubRouter callbacks -------------------------------------------------
 
 void ChatService::append_delta(const std::string& task_id,

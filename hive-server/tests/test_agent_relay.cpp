@@ -468,6 +468,42 @@ int main() {
     }
     settle(chat);
 
+    // Background-process completion is a TARGETED system nudge. It must
+    // wake only the agent that started the process, preserve its command
+    // and result, and use the normal tracked-turn path through the hub.
+    auto bg_pair = threads.create_thread("background completion", "group",
+                                         {chief.id, honey.id});
+    const size_t honey_dispatches_before = static_cast<size_t>(
+        std::count_if(hub.dispatches.begin(), hub.dispatches.end(),
+            [&](const Dispatch& d) { return d.agent_id == honey.id; }));
+    hub.on_worker_frame("testrig",
+        {{"op", "background_done"},
+         {"agent", chief.id},
+         {"thread_id", bg_pair.id},
+         {"process_id", "bg_17"},
+         {"command", "curl -L -o model.bin https://example.invalid/model"},
+         {"exit_code", 0},
+         {"signaled", false},
+         {"stdout", "download complete: 42 bytes"},
+         {"stderr", "resumed once"}});
+    {
+        const auto* bg = hub.find_last(chief.id, bg_pair.id);
+        assert(bg != nullptr);
+        assert(bg->prompt.rfind("[system @ ", 0) == 0);
+        assert(bg->prompt.find("Background process bg_17 finished with exit code 0") !=
+               std::string::npos);
+        assert(bg->prompt.find("download complete: 42 bytes") !=
+               std::string::npos);
+        assert(bg->prompt.find("resumed once") != std::string::npos);
+        const size_t honey_dispatches_after = static_cast<size_t>(
+            std::count_if(hub.dispatches.begin(), hub.dispatches.end(),
+                [&](const Dispatch& d) { return d.agent_id == honey.id; }));
+        assert(honey_dispatches_after == honey_dispatches_before &&
+               "a background completion must not wake the other participant");
+        chat.complete_turn(bg->task_id, "The download is complete.", "");
+    }
+    settle(chat);
+
     // ── 2026-10-04 queue-join (Plan.md) ──────────────────────────────
     // Burst 3 gen-0 messages while Chief is busy → they queue; when the
     // live turn completes they must drain as ONE joined prompt (one
