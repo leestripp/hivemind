@@ -49,6 +49,9 @@ class VoiceView : public Gtk::Box {
     std::string debugAgentName() const { return agentName_; }
     std::string debugPhaseName() const;
     std::string debugStatusText() const;
+    bool debugTurnDone() const { return turnDone_; }
+    int debugTtsOutstanding() const;
+    bool debugTtsSpeaking() const;
     void debugSay(const std::string& text);  // as if STT produced it
 
     // What the TALK button does — same debounce + phase switch. Used by
@@ -95,6 +98,8 @@ class VoiceView : public Gtk::Box {
     // -- ticks ---------------------------------------------------------
     void scheduleInboxWatch(int ms);
     void schedulePollTick(int ms);
+    void scheduleAudioDrainWatch();
+    void audioDrainWatchTick();
     void inboxWatchTick();
     void pollTick();
     void handleTick(bool threadBusy, bool agentBusy,
@@ -160,6 +165,8 @@ class VoiceView : public Gtk::Box {
     sigc::connection speakAnim_;
     sigc::connection inboxConn_;
     sigc::connection pollConn_;
+    sigc::connection audioDrainConn_;
+    long drainSilentSince_ = 0;
 
     // io worker: a queue of closures drained by one thread; results come
     // back through a Glib::Dispatcher.

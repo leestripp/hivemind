@@ -200,7 +200,12 @@ std::string DebugShell::handle(const std::string& line) {
             out += "{\"agent\":\"" + jsonEscape(g_voice->debugAgentName()) +
                    "\",\"phase\":\"" + g_voice->debugPhaseName() +
                    "\",\"status\":\"" + jsonEscape(g_voice->debugStatusText()) +
-                   "\"}";
+                   "\",\"turn_done\":" +
+                   (g_voice->debugTurnDone() ? "true" : "false") +
+                   ",\"tts_outstanding\":" +
+                   std::to_string(g_voice->debugTtsOutstanding()) +
+                   ",\"tts_speaking\":" +
+                   (g_voice->debugTtsSpeaking() ? "true" : "false") + "}";
         } else {
             out += "null";
         }

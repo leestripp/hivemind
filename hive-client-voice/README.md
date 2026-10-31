@@ -59,7 +59,7 @@ and API key live in Settings; they're persisted to
 ## Tests
 
 `test_speech_text`, `test_announcer`, `test_voice_turn_logic`,
-`test_prefs`, `test_avatars`,
+`test_tts_tag_ledger`, `test_prefs`, `test_avatars`,
 `test_wav_codec` (pure-logic units; run via ctest from the top-level
 build).
 
@@ -72,3 +72,10 @@ During agent-to-agent relays the DM can be idle while the agent is still
 working in another thread. In that state the app keeps listening and speaks
 new DM messages, then returns to idle only when the agent is idle across all
 threads. `test_voice_turn_logic` covers the scope transitions.
+
+TTS completion is tracked by exact utterance tag, so late playback callbacks
+from a stopped turn cannot consume a newer turn's outstanding count. Once
+the hub is idle, a silent audio drain is bounded to 75 seconds (longer than
+the 60-second TTS request timeout); an orphaned drain logs and returns to
+idle instead of leaving the Stop control up forever. The debug shell's
+`status` includes `turn_done`, `tts_outstanding`, and `tts_speaking`.

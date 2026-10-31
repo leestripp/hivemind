@@ -30,3 +30,11 @@ TEST_CASE("agent-wide idle wins over a stale thread snapshot",
     REQUIRE_FALSE(inFlight(activity));
     REQUIRE_FALSE(workingOffThread(activity));
 }
+
+
+TEST_CASE("audio drain only expires while silent past its bound") {
+    using hv::voice_turn::audioDrainExpired;
+    REQUIRE_FALSE(audioDrainExpired(true, 90000, 75000));
+    REQUIRE_FALSE(audioDrainExpired(false, 74999, 75000));
+    REQUIRE(audioDrainExpired(false, 75000, 75000));
+}

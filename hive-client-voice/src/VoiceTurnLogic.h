@@ -21,3 +21,14 @@ struct ActivityScope {
 }
 
 }  // namespace hv::voice_turn
+
+namespace hv::voice_turn {
+
+// Post-turn audio drain may wait for synthesis (which has its own HTTP
+// timeout) or playback, but never forever. `speaking` remains true through
+// queued playback, so only a silent, orphaned completion can expire.
+inline bool audioDrainExpired(bool speaking, long silentMs, long limitMs) {
+    return !speaking && silentMs >= limitMs;
+}
+
+}  // namespace hv::voice_turn

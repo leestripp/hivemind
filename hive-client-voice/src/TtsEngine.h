@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioCommon.h"
+#include "TtsTagLedger.h"
 #include "WavCodec.h"
 
 #include <atomic>
@@ -80,6 +81,7 @@ class TtsEngine {
     std::unique_ptr<ChimpFlowClient> chimp_;
     mutable std::mutex m_;
     std::deque<Utterance> queue_;
+    TtsTagLedger pending_;
     std::condition_variable cv_;
     bool running_ = false;
     std::thread worker_;

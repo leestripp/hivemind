@@ -23,6 +23,9 @@ constexpr int kIdlePollMs = 2500;
 constexpr long kStallTimeoutMs = 240000;
 constexpr long kNetFailTimeoutMs = 45000;
 constexpr long kStopConfirmMs = 12000;
+// TTS HTTP requests time out at 60s. A silent post-turn drain longer than
+// this is orphaned completion state, not a normal synthesis gap.
+constexpr long kAudioDrainSilentTimeoutMs = 75000;
 constexpr std::size_t kMaxUtterChars = 2000;
 
 std::string trimStr(std::string_view s) {
@@ -131,6 +134,7 @@ VoiceView::~VoiceView() {
     stopSpeakAnimator();
     inboxConn_.disconnect();
     pollConn_.disconnect();
+    audioDrainConn_.disconnect();
     ioRunning_ = false;
     {
         std::lock_guard<std::mutex> lk(ioMutex_);
@@ -619,6 +623,46 @@ void VoiceView::schedulePollTick(int ms) {
         ms);
 }
 
+void VoiceView::scheduleAudioDrainWatch() {
+    audioDrainConn_.disconnect();
+    audioDrainConn_ = Glib::signal_timeout().connect(
+        [this] {
+            audioDrainWatchTick();
+            return false;
+        },
+        1000);
+}
+
+void VoiceView::audioDrainWatchTick() {
+    if (phase_ != Phase::Streaming || !turnDone_) {
+        drainSilentSince_ = 0;
+        return;
+    }
+    const int outstanding = tts_->outstanding();
+    if (outstanding == 0) {
+        toIdle("");
+        return;
+    }
+    const long now = nowMs();
+    if (tts_->speaking()) {
+        drainSilentSince_ = 0;
+    } else if (drainSilentSince_ == 0) {
+        drainSilentSince_ = now;
+    }
+    const long silentMs = drainSilentSince_ == 0 ? 0 : now - drainSilentSince_;
+    if (hv::voice_turn::audioDrainExpired(
+            tts_->speaking(), silentMs, kAudioDrainSilentTimeoutMs)) {
+        fprintf(stderr,
+                "hive-voice: audio drain stalled silently for %ld ms "
+                "with %d utterance(s) outstanding; recovering to idle\n",
+                silentMs, outstanding);
+        tts_->stop();
+        toIdle("Speech playback stopped unexpectedly");
+        return;
+    }
+    scheduleAudioDrainWatch();
+}
+
 void VoiceView::inboxWatchTick() {
     if (phase_ != Phase::Idle) {
         scheduleInboxWatch(kIdlePollMs);
@@ -841,7 +885,12 @@ void VoiceView::handleTick(bool threadBusy, bool agentBusy,
         schedulePollTick(kPollMs);
     } else {
         turnDone_ = true;
-        if (tts_->outstanding() == 0) toIdle("");
+        if (tts_->outstanding() == 0) {
+            toIdle("");
+        } else {
+            drainSilentSince_ = 0;
+            scheduleAudioDrainWatch();
+        }
     }
 }
 
@@ -902,6 +951,10 @@ void VoiceView::queueSpeechChunk(const std::string& text) {
     fprintf(stderr, "hive-voice: tts << %s\n", text.c_str());
     tts_->speakQueued(text);
     if (phase_ == Phase::Thinking || phase_ == Phase::Idle) enterStreaming();
+    if (turnDone_) {
+        drainSilentSince_ = 0;
+        scheduleAudioDrainWatch();
+    }
 }
 
 // -- sphere level while speaking ------------------------------------------------
@@ -938,6 +991,14 @@ std::string VoiceView::debugPhaseName() const {
 
 std::string VoiceView::debugStatusText() const {
     return status_ ? std::string(status_->get_text()) : std::string();
+}
+
+int VoiceView::debugTtsOutstanding() const {
+    return tts_ ? tts_->outstanding() : 0;
+}
+
+bool VoiceView::debugTtsSpeaking() const {
+    return tts_ && tts_->speaking();
 }
 
 void VoiceView::debugSay(const std::string& text) {

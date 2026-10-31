@@ -46,9 +46,11 @@ void TtsEngine::speakQueued(const std::string& text) {
     {
         std::lock_guard<std::mutex> lk(m_);
         if (queue_.size() >= 40) return;  // never-ready cap, as Android
-        queue_.push_back({epoch_, nextTag_++, text, voice_});
+        const std::uint64_t tag = nextTag_++;
+        queue_.push_back({epoch_, tag, text, voice_});
+        pending_.add(tag);
+        outstanding_ = static_cast<int>(pending_.size());
     }
-    outstanding_++;
     cv_.notify_one();
 }
 
@@ -57,9 +59,10 @@ void TtsEngine::stop() {
         std::lock_guard<std::mutex> lk(m_);
         epoch_++;  // in-flight tags from before are now stale
         queue_.clear();
+        pending_.clear();
+        outstanding_ = 0;
+        speaking_ = false;
     }
-    outstanding_ = 0;
-    speaking_ = false;
     playback_.clear();
 }
 
@@ -120,14 +123,18 @@ void TtsEngine::workerLoop() {
 }
 
 void TtsEngine::onTagDone(std::uint64_t tag) {
-    // Late callbacks from a stop()ed epoch are harmless: stop() already
-    // zeroed outstanding_, so this decrement never fires below zero.
-    (void)tag;
-    if (outstanding_ > 0) --outstanding_;
-    if (outstanding_ == 0) {
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        // Stop() clears the ledger. Late device callbacks from that epoch,
+        // duplicate notifications, and untracked voice-preview tags are
+        // ignored instead of consuming a newer turn's outstanding count.
+        if (!pending_.contains(tag)) return;
+        const bool empty = pending_.complete(tag);
+        outstanding_ = static_cast<int>(pending_.size());
+        if (!empty) return;
         speaking_ = false;
-        if (onQueueEmpty) onQueueEmpty();
     }
+    if (onQueueEmpty) onQueueEmpty();
 }
 
 DecodedWav TtsEngine::synthesize(const std::string& text,
