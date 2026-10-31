@@ -79,3 +79,10 @@ the hub is idle, a silent audio drain is bounded to 75 seconds (longer than
 the 60-second TTS request timeout); an orphaned drain logs and returns to
 idle instead of leaving the Stop control up forever. The debug shell's
 `status` includes `turn_done`, `tts_outstanding`, and `tts_speaking`.
+
+PipeWire playback uses each WAV's native sample rate. When the next
+utterance has a different rate, old-rate audio now drains before the stream
+is reopened; closing early used to discard queued PCM and its completion
+tags. Queued items also carry a stop/clear generation so cancelled audio
+cannot reappear while a rate change waits. A 24 kHz to 16 kHz null-sink
+regression test verifies that both utterance-completion tags arrive.

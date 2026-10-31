@@ -1,4 +1,5 @@
 #include "../src/AudioCommon.h"
+#include "../src/PlaybackRateLogic.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -80,4 +81,12 @@ TEST_CASE("degenerate extreme input is bounded by the gain clamp", "[audio]") {
     normalizeLoudness(pcm);
     REQUIRE(rmsOf(pcm) >= 0.15f);  // min-gain 0.25 → RMS ≈ 0.16, not 0.106
     REQUIRE(peakOf(pcm) <= 0.95f);
+}
+
+
+TEST_CASE("native-rate playback drains old audio before reopening") {
+    using hv::playback::rateSwitchBlocked;
+    REQUIRE(rateSwitchBlocked(24000, 16000, true));
+    REQUIRE_FALSE(rateSwitchBlocked(24000, 16000, false));
+    REQUIRE_FALSE(rateSwitchBlocked(24000, 24000, true));
 }

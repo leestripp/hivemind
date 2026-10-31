@@ -1,5 +1,7 @@
 #include "AudioPlayback.h"
 
+#include "PlaybackRateLogic.h"
+
 #include <chrono>
 #include <cstdio>
 #include <utility>
@@ -60,7 +62,7 @@ void AudioPlayback::itemDone(std::uint64_t tag) {
 void AudioPlayback::submit(std::uint64_t tag, Pcm16 samples, int rate) {
     {
         std::lock_guard<std::mutex> lk(m_);
-        queue_.push_back({tag, std::move(samples), rate});
+        queue_.push_back({tag, std::move(samples), rate, generation_});
     }
     cv_.notify_one();
 }
@@ -218,6 +220,11 @@ struct PwSink {
         ringTags_.push_back({tag, samples.size()});
     }
 
+    bool empty() {
+        std::lock_guard<std::mutex> lk(ringM_);
+        return ringPos_ == ring_.size() && ringTags_.empty();
+    }
+
     // Stop/clear: drop everything queued + playing. The dropped tags
     // never fire — that is clear()'s contract ("pending tags never
     // fire"); the caller has already zeroed its own accounting.
@@ -346,7 +353,7 @@ void AudioPlayback::workerLoop() {
     int openedRate = 0;
 #endif
     for (;;) {
-        Item item;
+        Item item{};
         std::vector<std::uint64_t> doneTags;
         std::function<void(std::uint64_t)> cb;
         {
@@ -379,15 +386,33 @@ void AudioPlayback::workerLoop() {
         if (item.samples.empty()) continue;
         applyEdgeFades(item.samples, item.rate);
 #ifdef HIVEMIND_VOICE_PIPEWIRE
-        // The TTS WAV's native rate can change (engine swap): reopen
-        // the sink so we never resample in software.
+        // The TTS WAV's native rate can change (engine swap). Never close
+        // an old-rate sink with speech still queued: close() discards that
+        // PCM and its completion tags. Requeue the new-rate item briefly,
+        // drain the old stream, then reopen without losing audio.
+        if (sink.ok && hv::playback::rateSwitchBlocked(
+                           openedRate, item.rate, !sink.empty())) {
+            std::unique_lock<std::mutex> lk(m_);
+            if (item.generation == generation_)
+                queue_.push_front(std::move(item));
+            cv_.wait_for(lk, std::chrono::milliseconds(20));
+            continue;
+        }
         if (sink.ok && openedRate != item.rate) {
+            fprintf(stderr, "hive-voice: playback rate change %d -> %d Hz "
+                            "after old-rate audio drained\n",
+                    openedRate, item.rate);
             sink.close();
             sink.ok = false;
             openedRate = 0;
         }
         if (!sink.ok && sink.open(item.rate)) openedRate = item.rate;
         if (sink.ok) {
+            // clear()/stop() may have landed while the sink was opening.
+            // Hold m_ through feed so a cleared generation cannot be
+            // resurrected into the ring after dropRing().
+            std::lock_guard<std::mutex> lk(m_);
+            if (item.generation != generation_) continue;
             sink.feed(std::move(item.samples), item.tag);
             continue;
         }
@@ -395,6 +420,10 @@ void AudioPlayback::workerLoop() {
         // No usable stream: advance by wall-clock instead.
         std::size_t written = 0;
         while (running_ && written < item.samples.size()) {
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                if (item.generation != generation_) break;
+            }
             if (held()) {  // push-to-talk: freeze, don't lose it
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 continue;
@@ -404,7 +433,12 @@ void AudioPlayback::workerLoop() {
             written += step;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        if (cb) cb(item.tag);
+        bool current = false;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            current = item.generation == generation_;
+        }
+        if (current && cb) cb(item.tag);
     }
 #ifdef HIVEMIND_VOICE_PIPEWIRE
     if (sink.ok) sink.close();

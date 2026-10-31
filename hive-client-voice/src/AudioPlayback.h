@@ -56,6 +56,7 @@ class AudioPlayback {
         std::uint64_t tag;
         Pcm16 samples;
         int rate;
+        std::uint64_t generation;
     };
 
     void workerLoop();
