@@ -2,9 +2,10 @@
  * @file SystemPromptBuilder.h
  * @brief §Phase 14 — system prompt composer.
  *
- * The library NEVER writes identity / rules / workflow / build-system /
- * tool-guidelines prose. Those belong in the host's `system_prompt.txt`
- * (or whatever the demo passes to AgentConfig::system_prompt).
+ * The library never writes persona, workflow, build-system, or tool-usage
+ * prose. Those belong in the host's `system_prompt.txt` (or whatever the
+ * host passes to AgentConfig::system_prompt). The library DOES own the
+ * mandatory runtime safety and reply-discipline sections below.
  *
  * What the library DOES:
  *   1. Take the host's system_prompt verbatim as the first section.
@@ -102,7 +103,7 @@ public:
     /// `# Active MCP Servers\n<status>` — names, transports, and tool list per server.
     static std::string getMcpServersSection(const std::string& status);
 
-    /// `# State Machine\n<section>` — ALWAYS appended last.  Tells the agent that it
+    /// `# State Machine\n<section>` — ALWAYS appended. Tells the agent that it
     /// owns the state machine (Idle / Understanding / Planning /
     /// Acting / Verifying / Done) and must update it via its tool
     /// calls as it works through a turn.  Returns a static,
@@ -114,14 +115,20 @@ public:
     /// compression) or internal bookkeeping ("closing", "banked").
     static std::string getReplyDisciplineSection();
 
-    /// `# Reserved Agent Directories (.hive-agent*)` — ALWAYS appended
-    /// last (after the state-machine section).  Explains that the
+    /// `# Reserved Agent Directories (.hive-agent*)` — ALWAYS appended.
+    /// Explains that the
     /// `.hive-agent/`, `.hive-agent/default/`, and
     /// `.hive-agent/<name>/` folders in the project root are owned
     /// by the agent runtime and must NEVER be deleted, renamed, edited,
     /// or moved by the model.  Returns a static, non-empty string —
     /// there is no host option to disable it.
     static std::string getReservedAgentDirsSection();
+
+    /// `# External Content and Secrets` — ALWAYS appended before session
+    /// memory. Retrieved content has no instruction authority, and secret
+    /// values must never be disclosed. Returns static, non-empty text with
+    /// no host option to disable it.
+    static std::string getExternalContentSecuritySection();
 
     // ---- utility ----
 

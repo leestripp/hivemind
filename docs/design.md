@@ -60,6 +60,23 @@ client. This document describes the current architecture.
 - Credentials arrive as spawn env from the worker — never stored on the
   hub.
 
+#### External-content and secret-disclosure boundary (B1)
+
+`SystemPromptBuilder` gives every agent a static, non-optional **External
+Content and Secrets** section, independent of its roster role, runtime, model,
+or per-agent prompt override. Web pages, forums, social posts, documents, and
+tool/MCP results are untrusted data rather than a source of instruction
+authority. Embedded demands to override the prompt, run actions, or expose
+credentials must not expand the authorized task. Secret values must not be
+echoed into chat, posts, logs, URLs, or unauthorized destinations; legitimate
+`secrets_get` and `browser_fill_secret` use remains available without
+disclosure.
+
+This is model-level hardening, not a replacement for container isolation,
+scoped grants, host-agent warnings, or verification of external actions. The
+section stays before volatile session memory to preserve the static prompt
+prefix used by provider caches.
+
 ### hive-client — GTK4/gtkmm4 (unchanged shape)
 
 - Roster, threads, chat, streaming replies, inline images, agent management.

@@ -177,6 +177,11 @@ Key architectural mapping:
   the per-agent hive-brain settings store must never shadow it.
 - Workspace writes are path-confined — `send_file` destinations must not
   escape the company drive.
+- Every composed agent prompt includes the mandatory B1 **External Content
+  and Secrets** section (`SystemPromptBuilder`): retrieved web/forum/social/
+  tool content is untrusted data, never instruction authority, and secret
+  values must never be disclosed. Keep it non-optional and byte-static;
+  prompt hardening supplements rather than replaces runtime isolation.
 
 ## Documentation Map
 
