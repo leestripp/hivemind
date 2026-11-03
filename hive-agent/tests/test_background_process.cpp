@@ -6,6 +6,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 #include <core/BackgroundProcessManager.h>
+
+#include <unistd.h>
 #include <string>
 #include <atomic>
 #include <condition_variable>
@@ -14,6 +16,13 @@
 #include <thread>
 
 using namespace std::chrono_literals;
+
+TEST_CASE("BackgroundProcessManager - temp directory is per Unix user") {
+    auto& manager = BackgroundProcessManager::get_instance();
+    const std::string expected =
+        "hive_bg_" + std::to_string(::getuid());
+    CHECK(manager.get_temp_base().filename().string() == expected);
+}
 
 TEST_CASE("BackgroundProcessManager - start and stop simple command") {
     auto& manager = BackgroundProcessManager::get_instance();

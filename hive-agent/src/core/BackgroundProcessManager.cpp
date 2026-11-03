@@ -34,7 +34,8 @@
 // static void set_close_on_exec(int fd) { ... }
 
 BackgroundProcessManager::BackgroundProcessManager()
-    : temp_base_(std::filesystem::temp_directory_path() / TEMP_DIR_PREFIX) {
+    : temp_base_(std::filesystem::temp_directory_path() /
+                 (std::string{TEMP_DIR_PREFIX} + std::to_string(::getuid()))) {
     ensure_temp_dir();
     watcher_ = std::jthread([this](std::stop_token st) { watch_processes(st); });
 }

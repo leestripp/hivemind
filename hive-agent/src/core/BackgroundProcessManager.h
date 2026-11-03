@@ -211,6 +211,7 @@ private:
 
     // Configuration
     static constexpr size_t MAX_OUTPUT_SIZE = 100000;  // 100KB max output buffer
+    // Host agents run as different Unix users; never share a writable dir.
     static constexpr const char* TEMP_DIR_PREFIX = "hive_bg_";
 
     // State
