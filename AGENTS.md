@@ -261,8 +261,8 @@ agent-prompt edge (`try_dispatch`) and in the hub journal
 (`complete_turn` reply trail). Stored thread bodies stay raw; no
 user-facing surface (GTK, web, Android TTS) renders headers. Vocabulary:
 `user`, `voice-app`, `routine:<label>`, `agent:<name>`, `phone`,
-`system` — clients may only claim `user`/`voice` on POST messages;
-routine/agent/phone/system are hub-internal. The voice TTS directive
+`system`, `trigger:agent_idle` — clients may only claim `user`/`voice` on
+POST messages; routine/agent/phone/system/trigger are hub-internal. The voice TTS directive
 (`kVoiceChannelHint`) is appended server-side to voice-app wakes — never
 client-side (the old Android OUTGOING_PREFIX is gone).
 
@@ -287,6 +287,23 @@ message) idempotency. `message_agent` returns a `delivery_id`;
 `GET /api/deliveries?agent=&state=` before touching code. When changing
 fan-in/relay logic, run test_agent_relay + test_delivery_store — the
 single wake path (relay suppresses pair fan-in) is load-bearing.
+
+## One-Shot Event Triggers (2026-11-02)
+
+`create_trigger` / `list_triggers` / `delete_trigger` manage durable
+agent-owned subscriptions in `triggers.db`. Only `agent_idle` is supported:
+it means no live turn, no queued wake, AND no active managed background
+process, evaluated after queue draining and again at registration. Never move
+this check ahead of `try_dispatch` or fire directly from `task_result` before
+joined/queued work drains. `BackgroundProcessManager` reports active counts via
+`background_state`; the hub persists them in `triggers.db`. `background_done`
+carries the remaining count and posts its normal nudge—do not fire on process
+exit before that nudge turn completes. Delivery uses
+the ordinary generation-0 wake path with `trigger:agent_idle`; do not inject
+fake tool results. Registrations are claimed before posting, deleted after
+acceptance, released on failure, and recovered after interrupted claims.
+Regression gate: `test_trigger_store` + `test_event_triggers` (plus
+`test_agent_relay` for queue/header changes).
 
 ## Agent File Sharing (2026-10-11)
 

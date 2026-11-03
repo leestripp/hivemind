@@ -29,6 +29,7 @@ set(CORE_SOURCES
     src/FanInPolicy.cpp
     src/HubRouter.cpp
     src/RoutineStore.cpp
+    src/TriggerStore.cpp
     src/AuthStore.cpp
     src/SecretStore.cpp
     src/ServerConfig.cpp

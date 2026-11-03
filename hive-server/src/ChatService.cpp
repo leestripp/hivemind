@@ -10,6 +10,7 @@
 #include "hivemind/ExecAuditStore.h"
 #include "hivemind/FanInPolicy.h"
 #include "hivemind/DeliveryStore.h"
+#include "hivemind/TriggerStore.h"
 #include "hivemind/MessageHeader.h"
 #include "hivemind/DbUtil.h"
 
@@ -277,7 +278,70 @@ bool ChatService::agent_busy_locked(const std::string& agent_id) const {
 
 void ChatService::on_agent_ready(const std::string& agent_id) {
     // Agent reported "ready" (spawn/reconnect): drain its durable queue.
+    drain_agent(agent_id);
+}
+
+void ChatService::drain_agent(const std::string& agent_id) {
     try_dispatch(agent_id);
+    evaluate_agent_idle(agent_id);
+}
+
+void ChatService::evaluate_agent_idle(const std::string& agent_id) {
+    if (!triggers_ || stopping_) return;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (agent_busy_locked(agent_id)) return;
+    }
+    // Idle means all work is finished, not merely the gap between two
+    // queued turns. try_dispatch() runs immediately before this hook.
+    if (deliveries_.oldest_queued(agent_id)) return;
+
+    std::vector<EventTrigger> pending;
+    try {
+        // Background completion creates its own normal wake/turn. Waiting
+        // for both the process count and that turn prevents premature idle.
+        if (triggers_->background_active(agent_id) > 0) return;
+        pending = triggers_->claim("agent_idle", agent_id);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[trigger] claim failed for %.8s: %s\n",
+                     agent_id.c_str(), e.what());
+        return;
+    }
+    for (const auto& trigger : pending) {
+        auto watcher = agents_.get_agent(trigger.agent_id);
+        auto watched = agents_.get_agent(trigger.target_agent_id);
+        if (!watcher || !watched ||
+            !threads_.get_thread(trigger.thread_id)) {
+            // The roster/thread was deleted concurrently with the event.
+            // There is no valid recipient; retire the claimed row.
+            triggers_->complete(trigger.id);
+            continue;
+        }
+        std::string body =
+            "Event trigger fired.\n"
+            "Trigger: " + trigger.id + "\n"
+            "Event: agent_idle\n"
+            "Watched agent: " + watched->name +
+                " (" + watched->id + ")\n"
+            "State: idle\n"
+            "The watched agent has no live turn, queued wake, or active "
+            "background process.";
+        if (!trigger.prompt.empty())
+            body += "\n\nInstructions:\n" + trigger.prompt;
+        try {
+            post_user_message(trigger.thread_id, body, "[]",
+                std::string(hivemind::msg_source::kAgentIdleTrigger));
+            triggers_->complete(trigger.id);
+            std::fprintf(stderr,
+                "[trigger] agent_idle %.8s -> watcher %.8s (trigger %.8s)\n",
+                agent_id.c_str(), watcher->id.c_str(), trigger.id.c_str());
+        } catch (const std::exception& e) {
+            triggers_->release(trigger.id);
+            std::fprintf(stderr,
+                "[trigger] delivery failed for %.8s: %s; subscription retained\n",
+                trigger.id.c_str(), e.what());
+        }
+    }
 }
 
 std::string ChatService::post_user_inbox_message(const std::string& sender_id,
@@ -806,7 +870,7 @@ void ChatService::complete_turn(const std::string& task_id,
             deliveries_.mark_dropped(d.id, "cancelled");
         // Phase 67.2 still holds: Stop releases the durable queue even
         // when the cancelled turn's own result is what freed the agent.
-        try_dispatch(live->agent_id);
+        drain_agent(live->agent_id);
         return;
     }
     if (!live) {
@@ -999,8 +1063,8 @@ void ChatService::complete_turn(const std::string& task_id,
                 deliveries_.mark_read(thread_id, agent_id,
                                       d.source_message_id, m->created_at);
     }
-    // Agent idle: dispatch the next queued wake, if any (durable queue).
-    try_dispatch(agent_id);
+    // Drain the next queued wake before evaluating agent_idle.
+    drain_agent(agent_id);
 }
 
 // -- polling / control ---------------------------------------------------
@@ -1174,7 +1238,7 @@ void ChatService::watchdog_loop() {
                 deliveries_.mark_error(d.id,
                     v.was_cancelling ? "cancel unconfirmed (watchdog)"
                                      : "turn timeout (watchdog)");
-            try_dispatch(v.agent_id);
+            drain_agent(v.agent_id);
         }
         // TTL sweeps: old queued wakes and relay links become visible
         // terminal states instead of silently vanishing.

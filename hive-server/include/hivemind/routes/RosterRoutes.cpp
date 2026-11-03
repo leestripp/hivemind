@@ -14,6 +14,7 @@
 
 #include <iostream>
 #include "hivemind/RoutineStore.h"
+#include "hivemind/TriggerStore.h"
 #include "hivemind/ServerConfig.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/WorkerStore.h"
@@ -169,7 +170,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                             HubRouter& hub,
                             ChatService& chat,
                             RoutineStore& routines,
-                            WorkerStore& workers) {
+                            WorkerStore& workers,
+                            TriggerStore* triggers) {
 
     // v2: an agent MUST be placed on an ENROLLED hive-worker. There is no
     // hub-local execution anymore -- "local" (or any never-enrolled name)
@@ -505,7 +507,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.delete_("/api/agents/:id",
-        [&agents, &threads, &hub, &routines](const OmniNet::HTTP::Request& req,
+        [&agents, &threads, &hub, &routines, triggers](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -533,6 +535,14 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 }
             }
             const int routines_deleted = routines.remove_for_agent(id);
+            if (triggers) {
+                // Trigger threads are solo threads; remove their history along
+                // with subscriptions owned by or watching the deleted agent.
+                for (const auto& trigger : triggers->list())
+                    if (trigger.agent_id == id || trigger.target_agent_id == id)
+                        threads.delete_thread(trigger.thread_id);
+                triggers->remove_for_agent(id);
+            }
 
             // 2. Threads: solo threads die with the agent; group threads lose
             //    the participant (with a system note for the humans reading).

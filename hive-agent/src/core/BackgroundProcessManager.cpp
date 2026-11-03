@@ -306,6 +306,7 @@ std::string BackgroundProcessManager::start_background(const std::string& comman
     info.stderr_path = stderr_path;
     
     processes_[process_id] = info;
+    notify_activity_locked();
     watcher_cv_.notify_all();
     return process_id;
 }
@@ -413,6 +414,7 @@ bool BackgroundProcessManager::stop_process(const std::string& process_id) {
     if (info.exited) {
         // Already dead, just cleanup
         cleanup_process(process_id);
+        notify_activity_locked();
         return true;
     }
     
@@ -426,6 +428,7 @@ bool BackgroundProcessManager::stop_process(const std::string& process_id) {
     
     // Cleanup resources
     cleanup_process(process_id);
+    notify_activity_locked();
     
     return result;
 }
@@ -559,6 +562,8 @@ void BackgroundProcessManager::cleanup_all() {
         cleanup_process(id);
     }
     
+    notify_activity_locked();
+
     // Remove temp directory if empty
     if (std::filesystem::exists(temp_base_)) {
         try {
@@ -585,6 +590,30 @@ void BackgroundProcessManager::set_completion_callback(
     std::lock_guard<std::mutex> lock(mutex_);
     completion_callback_ = std::move(callback);
     watcher_cv_.notify_all();
+}
+
+void BackgroundProcessManager::set_activity_callback(
+    ActivityCallback callback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    activity_callback_ = std::move(callback);
+}
+
+std::size_t BackgroundProcessManager::active_count_locked() const {
+    return static_cast<std::size_t>(std::count_if(
+        processes_.begin(), processes_.end(), [](const auto& entry) {
+            return !entry.second.exited;
+        }));
+}
+
+void BackgroundProcessManager::notify_activity_locked() {
+    if (!activity_callback_) return;
+    try {
+        activity_callback_(active_count_locked());
+    } catch (const std::exception& e) {
+        LOG_CERR(ERROR, "background activity callback failed: " << e.what());
+    } catch (...) {
+        LOG_CERR(ERROR, "background activity callback failed");
+    }
 }
 
 bool BackgroundProcessManager::refresh_process_status(
@@ -614,6 +643,7 @@ void BackgroundProcessManager::watch_processes(std::stop_token stop_token) {
     };
     while (!stop_token.stop_requested()) {
         std::vector<Completion> completed;
+        bool activity_changed = false;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             watcher_cv_.wait_for(lock, std::chrono::milliseconds(100),
@@ -623,6 +653,7 @@ void BackgroundProcessManager::watch_processes(std::stop_token stop_token) {
                 if (info.completion_notified) continue;
                 refresh_process_status(info);
                 if (!info.exited) continue;
+                activity_changed = true;
                 info.completion_notified = true;
                 ProcessOutput output;
                 output.stdout = read_file(info.stdout_path);
@@ -636,6 +667,7 @@ void BackgroundProcessManager::watch_processes(std::stop_token stop_token) {
                         {info, std::move(output), completion_callback_});
                 }
             }
+            if (activity_changed) notify_activity_locked();
         }
         for (const auto& completion : completed) {
             try {
@@ -654,6 +686,7 @@ void BackgroundProcessManager::shutdown() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         completion_callback_ = {};
+        activity_callback_ = {};
     }
     if (watcher_.joinable()) {
         watcher_.request_stop();

@@ -27,6 +27,7 @@
 
 class AgentStore;
 class RoutineStore;
+class TriggerStore;
 class ThreadStore;
 namespace hivemind { class SecretStore; class ShareStore; }
 class WorkerChannel;
@@ -65,6 +66,16 @@ nlohmann::json secret_delete_apply(hivemind::SecretStore& secrets,
                                    const std::string& name,
                                    const std::string& agent_id);
 
+/// Agent trigger bridge core, factored out for integration tests. Actions:
+/// add {event,target,prompt?}, list, delete {trigger_id}. Ownership and
+/// roster identity are enforced here; responses mirror the routine bridge.
+nlohmann::json trigger_request_apply(TriggerStore& triggers,
+                                     AgentStore& agents,
+                                     ThreadStore& threads,
+                                     ChatService* chat,
+                                     const std::string& agent_id,
+                                     const nlohmann::json& frame);
+
 class HubRouter {
 public:
     HubRouter(AgentStore& agents, ThreadStore& threads,
@@ -73,6 +84,7 @@ public:
     virtual ~HubRouter() = default;
 
     void set_chat_service(ChatService* cs) { chat_ = cs; }
+    void set_trigger_store(TriggerStore* store) { triggers_ = store; }
 
     /// Phase 43: hub-owned LLM registry — dispatch resolves the agent's
     /// model here and injects the full provider config into the frame.
@@ -100,6 +112,9 @@ public:
     /// Phase 53: agent routine tools — apply a routine_req against
     /// RoutineStore (mirroring RoutineRoutes semantics, ownership-checked
     /// to the requesting agent) and reply routine_resp to the worker.
+    void handle_trigger_req(const std::string& worker,
+                            const std::string& agent_id,
+                            const nlohmann::json& frame);
     void handle_routine_req(const std::string& worker,
                             const std::string& agent_id,
                             const nlohmann::json& frame);
@@ -178,6 +193,7 @@ private:
     RoutineStore& routines_;
     hivemind::SecretStore& secrets_;
     ChatService* chat_ = nullptr;
+    TriggerStore* triggers_ = nullptr;
     LlmStore* llm_ = nullptr;
     hivemind::ShareStore* shares_ = nullptr;
 

@@ -355,6 +355,8 @@ int main(int argc, char* argv[]) {
                 // pass through untouched when the agent sent them.
                 if (ev.contains("stats") && ev["stats"].is_object())
                     f["stats"] = ev["stats"];
+                if (ev.contains("background_active"))
+                    f["background_active"] = ev["background_active"];
             }
             else if (kind == "send_agent_message")
                 f = {{"op","agent_msg"},{"agent",agent_id},
@@ -364,11 +366,11 @@ int main(int argc, char* argv[]) {
             else if (kind == "send_user_message")
                 f = {{"op","user_msg"},{"agent",agent_id},
                      {"text",ev.value("text","")}};
-            // Natural background-process exit -> targeted hub nudge in
-            // the thread that started it. The hub creates a normal turn.
-            else if (kind == "background_done") {
+            // Background activity gates agent_idle event triggers. Natural
+            // exit additionally nudges the thread that started the process.
+            else if (kind == "background_state" || kind == "background_done") {
                 f = ev;
-                f["op"] = "background_done";
+                f["op"] = kind;
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
@@ -378,6 +380,12 @@ int main(int argc, char* argv[]) {
             else if (kind == "routine_req") {
                 f = ev;
                 f["op"] = "routine_req";
+                f["agent"] = agent_id;
+                f.erase("ev");
+            }
+            else if (kind == "trigger_req") {
+                f = ev;
+                f["op"] = "trigger_req";
                 f["agent"] = agent_id;
                 f.erase("ev");
             }
@@ -842,7 +850,8 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 if (op == "task" || op == "cancel" ||
-                    op == "routine_resp" || op == "secret_resp" ||
+                    op == "routine_resp" || op == "trigger_resp" ||
+                    op == "secret_resp" ||
                     op == "msg_send_resp" || op == "msg_status_resp" ||
                     op == "msg_mark_resp" ||
                     op == "share_create_resp" || op == "share_list_resp" ||

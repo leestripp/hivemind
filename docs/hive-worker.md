@@ -109,6 +109,8 @@ Worker -> hub:
 | `task_delta` | streamed reply text while a turn runs |
 | `task_result` | final reply body (or error) + any attachment records for a task |
 | `agent_msg` | agent->agent message (fan-in at the hub) |
+| `background_state` / `background_done` | managed background active count (durable idle gating); natural exit also wakes the originating thread |
+| `trigger_req` / `trigger_resp` | durable one-shot event-trigger tool bridge (`create_trigger`/`list_triggers`/`delete_trigger`); the hub owns validation and `triggers.db` |
 | `agent_log` | anything else the agent emits |
 | `exec_chunk` / `exec_done` | exec output / completion |
 | `file_chunk` / `file_done` / `file_error` / `file_list_result` / `file_push_ack` | file transfer results |

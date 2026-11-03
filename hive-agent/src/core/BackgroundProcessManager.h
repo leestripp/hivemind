@@ -110,6 +110,13 @@ public:
     /// consumes its completion without an automatic callback.
     void set_completion_callback(CompletionCallback callback);
 
+    using ActivityCallback = std::function<void(std::size_t active_count)>;
+
+    /// Called after every start, natural exit, explicit stop, or cleanup that
+    /// changes the active set. The callback is serialized with manager state
+    /// changes and must be non-blocking and must not re-enter the manager.
+    void set_activity_callback(ActivityCallback callback);
+
     /// Stop the watcher and all processes. Idempotent; safe before static
     /// destruction so callbacks never outlive their host's queue/state.
     void shutdown();
@@ -198,6 +205,8 @@ private:
     bool is_process_running(pid_t pid) const;
     bool kill_process_group(pid_t pid);
     bool refresh_process_status(BackgroundProcessInfo& info);
+    std::size_t active_count_locked() const;
+    void notify_activity_locked();
     void watch_processes(std::stop_token stop_token);
 
     // Configuration
@@ -211,6 +220,7 @@ private:
     std::string current_task_id_;
     std::string current_thread_id_;
     CompletionCallback completion_callback_;
+    ActivityCallback activity_callback_;
     mutable std::mutex mutex_;
     std::condition_variable_any watcher_cv_;
     std::jthread watcher_;

@@ -50,6 +50,7 @@
 #include "hivemind/LlmStore.h"
 #include "hivemind/SecretStore.h"
 #include "hivemind/RoutineStore.h"
+#include "hivemind/TriggerStore.h"
 #include "hivemind/AgentStore.h"
 #include "hivemind/ThreadStore.h"
 #include "hivemind/ChatService.h"
@@ -135,6 +136,7 @@ int main(int argc, char* argv[]) {
     ThreadStore thread_store;
     thread_store.ensure_user_thread();   // Phase 44: User Inbox always exists
     RoutineStore routine_store;
+    TriggerStore trigger_store;
     // 2026-09-23 migration: routine threads were created as kind "dm",
     // which made find_dm() resolve an agent's user DM to the LAST-created
     // routine thread (the Android voice app and desktop roster clicks
@@ -158,6 +160,7 @@ int main(int argc, char* argv[]) {
     HubRouter hub{agent_store, thread_store, worker_channel,
                   routine_store, secret_store};
     hub.set_llm_store(&llm_store);
+    hub.set_trigger_store(&trigger_store);
     // Phase 66b: durable delivery queue. Boot recovery — wakes left
     // 'dispatched' by the previous process go back to 'queued' and drain
     // as agents report ready; terminal rows prune after 7 days.
@@ -176,6 +179,7 @@ int main(int argc, char* argv[]) {
     ChatService chat_service{agent_store, thread_store, hub,
                              delivery_store};
     hub.set_chat_service(&chat_service);
+    chat_service.set_trigger_store(&trigger_store);
     // Phase 73 (Plan.md "Agent Migration"): durable migration jobs + the
     // orchestrator driving worker export/transfer/import/cleanup frames.
     hivemind::MigrationStore migration_store;
@@ -314,7 +318,8 @@ int main(int argc, char* argv[]) {
     // Phase 12: graph/workflow/trigger/run routes REMOVED — workflow engine
     // retired; /api/graphs/* and /api/hooks/* no longer exist.
     register_roster_routes(server, agent_store, thread_store,
-                           hub, chat_service, routine_store, worker_store);
+                           hub, chat_service, routine_store, worker_store,
+                           &trigger_store);
     register_file_routes(server, thread_store, agent_store,
                          &worker_channel);
     register_connector_routes(server, connector_store, secret_store);

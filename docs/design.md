@@ -154,6 +154,43 @@ delivery, with live state and read receipts. Admin observability:
    message; the client's poll picks it up and renders (images download
    through the hub's file endpoint).
 
+## One-shot agent event triggers
+
+`TriggerStore` (`triggers.db`) holds agent-owned event subscriptions. The
+initial event is `agent_idle`: the watched agent has no live turn, **no
+queued wake, and no active managed background process**. This is deliberately
+stricter than a single `task_result`, so a trigger cannot fire between queued
+turns or while the agent is waiting for `execute_bash` background work.
+Creating a trigger also evaluates the target immediately, closing the
+just-finished race.
+
+`BackgroundProcessManager` reports its active count on start, natural exit,
+explicit stop, cleanup, and initial agent startup. The worker forwards these
+as `background_state`; the hub persists non-zero counts in `triggers.db` so a
+hub restart cannot forget background work. A real agent restart reports its
+fresh count, while worker reconciliation does not spuriously clear it.
+`background_done` also carries the remaining count. Natural process exit still
+posts its ordinary completion nudge: the idle trigger waits for that wake and
+its resulting turn to finish rather than racing the process-exit event.
+
+Agents use `create_trigger`, `list_triggers`, and `delete_trigger`. These ride
+the authenticated `trigger_req`/`trigger_resp` worker bridge; there is no
+public REST write surface. The hub resolves the target from the roster,
+rejects self-watches, and enforces owner-only list/delete. Deleting an agent
+removes both its own triggers and triggers watching it.
+
+Each registration owns a solo `trigger` thread. On idle, the hub atomically
+claims matching rows, posts a normal generation-0 user-style wake with
+`source="trigger:agent_idle"`, then deletes the registration. The body names
+the trigger, event, watched agent name/id, and `State: idle`, followed by any
+creator instructions. The existing prompt edge renders
+`[trigger:agent_idle @ <UTC ISO>]`; the stored body remains header-free.
+Failed posting releases the claim, and opening the store recovers interrupted
+claims. A process crash after posting but before completion can therefore
+re-deliver after restart (at-least-once recovery rather than silent loss);
+normal firing is one-shot. Firing preserves the thread's history; explicit
+cancellation removes it.
+
 ## Chat fan-in storm gates (Phase 65)
 
 Agent-to-agent fan-in is what makes threads collaborative — and what can

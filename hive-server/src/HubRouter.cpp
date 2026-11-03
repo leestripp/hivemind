@@ -3,6 +3,7 @@
 
 #include "hivemind/HubRouter.h"
 #include "hivemind/RoutineStore.h"
+#include "hivemind/TriggerStore.h"
 #include "hivemind/Schedule.h"
 #include "hivemind/LlmStore.h"
 #include "hivemind/AgentStore.h"
@@ -16,6 +17,7 @@
 #include "hivemind/ShareStore.h"
 #include "hivemind/Utf8.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -192,6 +194,103 @@ std::string HubRouter::dispatch(const RosterAgent& agent,
     std::lock_guard<std::mutex> lk(m_);
     tasks_[task_id] = {agent.id, agent.worker};
     return task_id;
+}
+
+nlohmann::json trigger_request_apply(TriggerStore& triggers,
+                                     AgentStore& agents,
+                                     ThreadStore& threads,
+                                     ChatService* chat,
+                                     const std::string& agent_id,
+                                     const json& frame) {
+    const std::string action = frame.value("action", "");
+    if (action == "list") {
+        json rows = json::array();
+        for (const auto& trigger : triggers.list(agent_id)) {
+            auto row = trigger_json(trigger);
+            row.erase("prompt"); // keep list results below the tool-result cap
+            row["prompt_chars"] = trigger.prompt.size();
+            if (auto target = agents.get_agent(trigger.target_agent_id))
+                row["target_agent_name"] = target->name;
+            rows.push_back(std::move(row));
+        }
+        return {{"ok", true}, {"result", {{"triggers", rows}}}};
+    }
+    if (action == "add") {
+        if (!chat) return {{"ok", false}, {"error", "chat service unavailable"}};
+        if (!agents.get_agent(agent_id))
+            return {{"ok", false}, {"error", "unknown requesting agent"}};
+        const std::string event = frame.value("event", "");
+        if (event != "agent_idle")
+            return {{"ok", false},
+                    {"error", "unsupported event; currently only agent_idle"}};
+        std::string target_id = frame.value("target", "");
+        auto target = agents.get_agent(target_id);
+        if (!target) {
+            if (auto by_name = agents.get_agent_by_name(target_id)) {
+                target = by_name;
+                target_id = by_name->id;
+            }
+        }
+        if (!target) return {{"ok", false}, {"error", "target agent not found"}};
+        if (target_id == agent_id)
+            return {{"ok", false}, {"error", "an agent cannot watch itself"}};
+        const std::string prompt =
+            hivemind::sanitize_utf8(frame.value("prompt", ""));
+        if (prompt.size() > 4000)
+            return {{"ok", false}, {"error", "prompt too long (4000 bytes max)"}};
+
+        auto thread = threads.create_thread(
+            "trigger: agent_idle on " + target->name, "trigger", {agent_id});
+        EventTrigger created;
+        try {
+            created = triggers.create(agent_id, thread.id, event, target_id,
+                                      prompt);
+        } catch (...) {
+            threads.delete_thread(thread.id);
+            throw;
+        }
+        // The target may have finished immediately before registration.
+        chat->evaluate_agent_idle(target_id);
+        auto result = trigger_json(created);
+        result["target_agent_name"] = target->name;
+        const bool fired = !triggers.get(created.id).has_value();
+        result["fired_immediately"] = fired;
+        if (fired) result["state"] = "fired";
+        return {{"ok", true}, {"result", std::move(result)}};
+    }
+    if (action == "delete") {
+        const std::string id = frame.value("trigger_id", "");
+        auto trigger = triggers.get(id);
+        if (!trigger) return {{"ok", false}, {"error", "trigger not found"}};
+        if (trigger->agent_id != agent_id)
+            return {{"ok", false}, {"error", "trigger belongs to another agent"}};
+        if (!triggers.remove(id))
+            return {{"ok", false}, {"error", "trigger already fired or removed"}};
+        threads.delete_thread(trigger->thread_id);
+        return {{"ok", true},
+                {"result", {{"deleted", id}, {"thread_id", trigger->thread_id}}}};
+    }
+    return {{"ok", false}, {"error", "unknown trigger action"}};
+}
+
+void HubRouter::handle_trigger_req(const std::string& worker,
+                                   const std::string& agent_id,
+                                   const json& frame) {
+    json resp = {{"op", "trigger_resp"}, {"agent_id", agent_id},
+                 {"id", frame.value("id", "")}};
+    if (!triggers_) {
+        resp["ok"] = false;
+        resp["error"] = "trigger store unavailable";
+    } else {
+        try {
+            resp.update(trigger_request_apply(*triggers_, agents_, threads_,
+                                              chat_, agent_id, frame));
+        } catch (const std::exception& e) {
+            resp["ok"] = false;
+            resp["error"] = e.what();
+        }
+    }
+    channel_.send(worker, resp);
 }
 
 void HubRouter::handle_routine_req(const std::string& worker,
@@ -528,6 +627,10 @@ void HubRouter::on_worker_frame(const std::string& worker,
                                        frame.value("text", ""));
         return;
     }
+    if (op == "trigger_req") {
+        handle_trigger_req(worker, agent_id, frame);
+        return;
+    }
     if (op == "routine_req") {   // Phase 53
         handle_routine_req(worker, agent_id, frame);
         return;
@@ -602,6 +705,11 @@ void HubRouter::on_worker_frame(const std::string& worker,
         std::string stats;
         if (frame.contains("stats") && frame["stats"].is_object())
             stats = frame["stats"].dump();
+        // Turn results carry an authoritative manager snapshot too, so a
+        // dropped background_state during reconnect cannot open the idle gate.
+        if (triggers_ && frame.contains("background_active"))
+            triggers_->set_background_active(agent_id,
+                std::max(0, frame.value("background_active", 0)));
         if (chat_) chat_->complete_turn(task, frame.value("body", ""),
                                         frame.value("error", ""), atts,
                                         frame.value("thread_id", ""),
@@ -613,7 +721,16 @@ void HubRouter::on_worker_frame(const std::string& worker,
         flush_pending_spawns();
         return;
     }
+    if (op == "background_state") {
+        if (triggers_)
+            triggers_->set_background_active(
+                agent_id, std::max(0, frame.value("active", 0)));
+        return;
+    }
     if (op == "background_done") {
+        if (triggers_)
+            triggers_->set_background_active(
+                agent_id, std::max(0, frame.value("active", 0)));
         if (!chat_) return;
         try {
             chat_->post_agent_nudge(frame.value("thread_id", ""), agent_id,
@@ -621,6 +738,7 @@ void HubRouter::on_worker_frame(const std::string& worker,
         } catch (const std::exception& e) {
             std::cerr << "[hub] background_done nudge failed for "
                       << agent_id << ": " << e.what() << "\n";
+            chat_->evaluate_agent_idle(agent_id);
         }
         return;
     }
@@ -630,10 +748,16 @@ void HubRouter::on_worker_frame(const std::string& worker,
             std::lock_guard<std::mutex> lk(m_);
             states_[agent_id] = st;
         }
+        // A stopped brain cannot still be waiting for its managed children.
+        // Do not clear on "ready": workers can reconcile an existing agent
+        // whose background processes are still alive.
+        if (triggers_ && st == "down")
+            triggers_->set_background_active(agent_id, 0);
         // 2026-09-25 busy-receiver hold queue: a spawn/reconnect "ready"
         // is the recovery drain hook for wakes held across a restart.
         // Called OUTSIDE m_ — draining re-enters dispatch (lock order).
         if (chat_ && st == "ready") chat_->on_agent_ready(agent_id);
+        else if (chat_ && st == "down") chat_->evaluate_agent_idle(agent_id);
         return;
     }
     if (op == "msg_send_req") {   // Phase 66d: confirmed message_agent

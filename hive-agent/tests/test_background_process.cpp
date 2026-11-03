@@ -166,9 +166,13 @@ TEST_CASE("BackgroundProcessManager - cleanup all") {
 }
 TEST_CASE("BackgroundProcessManager - natural exit notifies exactly once") {
     auto& manager = BackgroundProcessManager::get_instance();
+    manager.set_activity_callback({});
     manager.cleanup_all();
     manager.set_completion_callback({});
     manager.set_current_origin("task-123", "thread-456");
+    std::atomic<int> active_count{-1};
+    manager.set_activity_callback(
+        [&](std::size_t count) { active_count = static_cast<int>(count); });
 
     std::mutex mutex;
     std::condition_variable cv;
@@ -196,6 +200,7 @@ TEST_CASE("BackgroundProcessManager - natural exit notifies exactly once") {
 
     std::lock_guard<std::mutex> lock(mutex);
     CHECK(calls == 1);
+    CHECK(active_count == 0);
     CHECK(completed_info.process_id == id);
     CHECK(completed_info.origin_task_id == "task-123");
     CHECK(completed_info.origin_thread_id == "thread-456");
@@ -205,20 +210,28 @@ TEST_CASE("BackgroundProcessManager - natural exit notifies exactly once") {
     CHECK(completed_output.stderr == "warning");
 
     manager.set_completion_callback({});
+    manager.set_activity_callback({});
     manager.cleanup_all();
 }
 
 TEST_CASE("BackgroundProcessManager - explicit stop does not notify") {
     auto& manager = BackgroundProcessManager::get_instance();
+    manager.set_activity_callback({});
     manager.cleanup_all();
+    std::vector<std::size_t> activity;
+    manager.set_activity_callback(
+        [&](std::size_t count) { activity.push_back(count); });
     std::atomic<int> calls{0};
     manager.set_completion_callback(
         [&](const BackgroundProcessInfo&, const ProcessOutput&) { ++calls; });
     const std::string id = manager.start_background("sleep 30");
     REQUIRE(!id.empty());
+    REQUIRE(activity == std::vector<std::size_t>{1});
     CHECK(manager.stop_process(id));
+    REQUIRE(activity == std::vector<std::size_t>{1, 0});
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     CHECK(calls.load() == 0);
     manager.set_completion_callback({});
+    manager.set_activity_callback({});
     manager.cleanup_all();
 }

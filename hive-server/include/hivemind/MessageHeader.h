@@ -27,17 +27,20 @@ inline constexpr std::string_view kPhone       = "phone";
 inline constexpr std::string_view kSystem      = "system";
 inline constexpr std::string_view kRoutinePrefix = "routine:";  // + label
 inline constexpr std::string_view kAgentPrefix   = "agent:";    // + name
+/// Hub-generated one-shot event notification (never caller-authored).
+inline constexpr std::string_view kAgentIdleTrigger = "trigger:agent_idle";
 /// Rows written before this column existed (migration default).
 inline constexpr std::string_view kUnknown     = "unknown";
 }  // namespace msg_source
 
 /// True when `source` is a member of the controlled vocabulary:
-/// user | voice-app | phone | system | routine:<label> | agent:<name>.
+/// user | voice-app | phone | system | trigger:agent_idle |
+/// routine:<label> | agent:<name>.
 /// The two prefix forms accept any non-empty suffix (the label/name).
 inline bool is_valid_message_source(std::string_view source) {
     using namespace msg_source;
     if (source == kUser || source == kVoiceApp || source == kPhone ||
-        source == kSystem)
+        source == kSystem || source == kAgentIdleTrigger)
         return true;
     for (const std::string_view prefix : {kRoutinePrefix, kAgentPrefix}) {
         if (source.substr(0, prefix.size()) == prefix &&

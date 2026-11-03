@@ -14,6 +14,7 @@
 //   {"ev":"ready","agent":"Name","version":"...","pid":123}
 //   {"ev":"delta","task":"t1","text":"..."}
 //   {"ev":"message","task":"t1","body":"...","error":""}
+//   {"ev":"background_state","active":1}
 //   {"ev":"background_done","process_id":"bg_1","thread_id":"...",...}
 //   {"ev":"error","text":"..."}           (fatal/startup errors)
 //
@@ -91,20 +92,19 @@ void log_err(const std::string& msg) {
     std::fflush(stderr);
 }
 
-// Routine bridge (Phase 53): request/response to the hub for scheduled
-// tasks. Tools emit {"ev":"routine_req",...}; the worker forwards it as
-// an op frame; the hub applies it against RoutineStore and replies with
-// {"op":"routine_resp","id":...,"ok":bool,"result"|"error"} on stdin.
-// Request/response bridge with a 30s timeout.
+// Request/response bridge for durable hub services (routines and event
+// triggers). The worker forwards the request op and returns its matching
+// response on stdin. Calls time out after 30s.
 class RoutineBridge {
 public:
-    json call(const std::string& action, const json& payload) {
+    json call(const std::string& action, const json& payload,
+              const std::string& event = "routine_req") {
         const std::string id = "r" + std::to_string(++seq_);
         {
             std::lock_guard<std::mutex> lk(m_);
             pending_[id] = std::nullopt;
         }
-        json ev = {{"ev", "routine_req"}, {"id", id}, {"action", action}};
+        json ev = {{"ev", event}, {"id", id}, {"action", action}};
         for (auto& [k, v] : payload.items()) ev[k] = v;
         emit(ev);
         std::unique_lock<std::mutex> lk(m_);
@@ -135,6 +135,7 @@ private:
     int seq_ = 0;
 };
 RoutineBridge g_routines;
+RoutineBridge g_triggers;
 
 // Message bridge (Phase 66d): request/response to the hub for confirmed
 // agent messaging. message_agent emits {"ev":"msg_send_req",...} and the
@@ -1389,6 +1390,103 @@ int main(int argc, char** argv) {
     };
     agent.register_tool(std::make_unique<DeleteScheduleTool>());
 
+    // Durable one-shot event triggers. These complement time-based routines:
+    // the hub owns the subscription and wakes this agent on a real state
+    // transition, so no polling loop or fabricated tool result is involved.
+    class CreateTriggerTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "create_trigger"; }
+        std::string get_description() const {
+            return "Create a durable ONE-SHOT event trigger owned by you. "
+                   "Currently event must be agent_idle: wake you when the "
+                   "target agent has no live turn and no queued wake. target "
+                   "accepts an agent id or exact roster name. The trigger is "
+                   "removed automatically after it fires. If the target is "
+                   "already idle it fires immediately. Use list_triggers to "
+                   "see pending triggers and delete_trigger to cancel one.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"event",{{"type","string"},
+                      {"description","Event type; currently only agent_idle"}}},
+                    {"target",{{"type","string"},
+                      {"description","Watched agent's id or exact name"}}},
+                    {"prompt",{{"type","string"},
+                      {"description","Optional instructions to include in the wake"}}}}},
+                {"required",{"event","target"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json resp = g_triggers.call("add", {
+                {"event", args.value("event", "")},
+                {"target", args.value("target", "")},
+                {"prompt", args.value("prompt", "")}}, "trigger_req");
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<CreateTriggerTool>());
+
+    class ListTriggersTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "list_triggers"; }
+        std::string get_description() const {
+            return "List your pending one-shot event triggers: id, event, "
+                   "watched agent, state, and prompt size. Fired or deleted "
+                   "triggers no longer appear.";
+        }
+        json get_definition() const override {
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",{{"type","object"},
+                                                {"properties",json::object()}}}}}};
+        }
+        json execute(const json&, hive::HostToolContext&) override {
+            json resp = g_triggers.call("list", json::object(), "trigger_req");
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<ListTriggersTool>());
+
+    class DeleteTriggerTool final : public hive::BaseTool {
+    public:
+        std::string get_name() const override { return "delete_trigger"; }
+        std::string get_description() const {
+            return "Cancel a pending one-shot event trigger you own, by id. "
+                   "Its trigger thread is removed too.";
+        }
+        json get_definition() const override {
+            json params = {{"type","object"},
+                {"properties",{
+                    {"id",{{"type","string"},
+                      {"description","Trigger id from create/list_triggers"}}}}},
+                {"required",{"id"}}};
+            return {{"type","function"},
+                    {"function",{{"name",get_name()},
+                                 {"description",get_description()},
+                                 {"parameters",params}}}};
+        }
+        json execute(const json& args, hive::HostToolContext&) override {
+            json resp = g_triggers.call("delete",
+                {{"trigger_id", args.value("id", "")}}, "trigger_req");
+            if (!resp.value("ok", false))
+                return {{"status","error"},
+                        {"error",resp.value("error","hub rejected the request")}};
+            return resp.value("result", json::object());
+        }
+    };
+    agent.register_tool(std::make_unique<DeleteTriggerTool>());
+
     // browser_* (Phase 47): computer use — recreation of the original
     // hub-side tools lost in the Phase C refactor. Backed by browser_driver.py
     // in-container (CDP :9222, the same Chromium the user sees in the
@@ -1552,8 +1650,17 @@ int main(int argc, char** argv) {
         return 2;
     }
     auto& background_processes = BackgroundProcessManager::get_instance();
+    background_processes.set_activity_callback([](std::size_t active) {
+        emit({{"ev", "background_state"}, {"active", active}});
+    });
+    // A real process start/restart begins with a fresh manager. This initial
+    // report clears any durable count left by a crashed predecessor; worker
+    // reconciliation of an already-running agent emits no such reset.
+    emit({{"ev", "background_state"},
+          {"active", background_processes.list_active_processes().size()}});
     background_processes.set_completion_callback(
-        [](const BackgroundProcessInfo& info, const ProcessOutput& output) {
+        [&background_processes](const BackgroundProcessInfo& info,
+                                const ProcessOutput& output) {
             const auto clean = [](const std::string& text, size_t max_bytes) {
                 std::string out = utf8_sanitize_replace_invalid(text);
                 if (out.size() > max_bytes) {
@@ -1571,6 +1678,7 @@ int main(int argc, char** argv) {
                   {"exit_code", output.exit_code},
                   {"signaled", output.signaled},
                   {"signal", output.signal_num},
+                  {"active", background_processes.list_active_processes().size()},
                   {"stdout", clean(output.stdout, 4000)},
                   {"stderr", clean(output.stderr, 4000)}});
         });
@@ -1626,6 +1734,8 @@ int main(int argc, char** argv) {
                   {"thread_id", t.thread_id},
                   {"body", body},
                   {"error", err},
+                  {"background_active",
+                   background_processes.list_active_processes().size()},
                   {"stats",
                    {{"prompt_tokens", st.prompt_tokens},
                     {"completion_tokens", st.completion_tokens},
@@ -1728,6 +1838,8 @@ int main(int argc, char** argv) {
             q_cv.notify_one();
         } else if (kind == "routine_resp") {
             g_routines.resolve(op.value("id", ""), op);
+        } else if (kind == "trigger_resp") {
+            g_triggers.resolve(op.value("id", ""), op);
         } else if (kind == "secret_resp") {
             g_secrets.resolve(op.value("id", ""), op);
         } else if (kind == "msg_send_resp" || kind == "msg_status_resp" ||

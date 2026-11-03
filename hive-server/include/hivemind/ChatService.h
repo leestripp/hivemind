@@ -22,6 +22,8 @@
 class AgentStore;
 class ThreadStore;
 class HubRouter;
+class TriggerStore;
+class TriggerStore;
 struct RosterAgent;
 namespace hivemind { class DeliveryStore; struct Delivery; }
 
@@ -32,6 +34,8 @@ public:
         : agents_(agents), threads_(threads), hub_(hub),
           deliveries_(deliveries) { start_watchdog(); }
     ~ChatService();
+
+    void set_trigger_store(TriggerStore* store) { triggers_ = store; }
 
     struct LiveTurn {
         std::string task_id;
@@ -151,6 +155,9 @@ public:
     /// Agent reported "ready" (spawn/reconnect): release one held wake.
     /// Recovery hook for wakes held across a worker restart.
     void on_agent_ready(const std::string& agent_id);
+    /// Evaluate agent_idle subscriptions. Called after queue draining and
+    /// immediately after trigger creation (closes the just-finished race).
+    void evaluate_agent_idle(const std::string& agent_id);
     /// Phase 52: post a dying turn's streamed partial into its thread so
     /// user-facing text survives cancel/timeout. No-op when empty or
     /// already flushed. Sets partial_flushed.
@@ -247,6 +254,7 @@ private:
     /// True while the agent has any live (not done, not cancelling)
     /// turn in any thread. Caller holds m_.
     bool agent_busy_locked(const std::string& agent_id) const;
+    void drain_agent(const std::string& agent_id);
     static int wake_ttl_s();   // env HIVEMIND_WAKE_TTL_S, def 86400
 
     // ── agent_msg content dedup (2026-09-25) ─────────────────────────
@@ -269,6 +277,7 @@ private:
     ThreadStore& threads_;
     HubRouter& hub_;
     hivemind::DeliveryStore& deliveries_;   // Phase 66b durable queue
+    TriggerStore* triggers_ = nullptr;       // durable one-shot events
 
     std::mutex m_;
     // 2026-10-22 (improvements sweep): serializes the claim->dispatch

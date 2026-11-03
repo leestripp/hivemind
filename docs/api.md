@@ -127,6 +127,22 @@ fixed temperature 1.0). Re-discovery preserves each model's
 | `POST /api/skills/install` | install from registry → syncs to all workers |
 | per-agent enable | roster PATCH; applied to containers at next spawn |
 
+## Agent event triggers (worker bridge)
+
+These are agent tools, not public REST endpoints. `create_trigger`,
+`list_triggers`, and `delete_trigger` use authenticated
+`trigger_req`/`trigger_resp` frames over the agent's worker channel. The only
+supported event is currently `agent_idle`.
+
+Create payload: `{action:"add", event:"agent_idle", target:<id-or-name>,
+prompt?:<text>}`. The optional prompt is capped at 4000 bytes. List and delete
+are owner-scoped; delete takes `{action:"delete", trigger_id:<id>}`.
+Registrations live in `triggers.db`, fire once, and are removed after their
+normal durable wake is accepted. Idle excludes live turns, queued wakes, and
+active managed background processes. An already-idle target fires immediately;
+a background completion fires only after its nudge turn also finishes.
+See `docs/design.md` for the exact idle and crash-recovery semantics.
+
 ## Autonomous execution
 
 Agents execute valid tool calls directly under their configured runtime

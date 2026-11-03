@@ -56,8 +56,10 @@ and complete their work autonomously.
   `HIVEMIND_SCREEN_IDLE_MIN` (default 15) viewer-less minutes, reclaiming
   ~350–700 MB of RAM per idle agent. Works for local *and* worker-hosted
   agents (tunneled through the worker channel).
-- **Routines & skills** — scheduled prompts ("watch this, ping me daily")
-  fired by a 30 s scheduler tick, and a **global skill library**
+- **Routines, event triggers & skills** — scheduled prompts ("watch this,
+  ping me daily") fired by a 30 s scheduler tick; durable one-shot
+  `agent_idle` triggers that wake a watcher when another agent has finished
+  all live, queued, and managed background work; and a **global skill library**
   (Anthropic SKILL.md format) shared across agents via per-agent enable
   toggles — plus per-agent learned skills that stay agent-owned.
 - **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
