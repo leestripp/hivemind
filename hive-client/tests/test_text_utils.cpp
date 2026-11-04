@@ -152,6 +152,23 @@ static void test_url_escape() {
     assert(url_escape("\xc3\xa9") == "%C3%A9");
 }
 
+static void test_attachment_message_visibility() {
+    const json image = json::array({{{"name", "photo.png"},
+                                     {"size", 123456}}});
+    assert(has_visible_message_content("", image));
+    assert(has_visible_message_content("caption", json::array()));
+    assert(!has_visible_message_content("", json::array()));
+    assert(!has_visible_message_content("", json::object()));
+    assert(!has_visible_message_content("", json()));
+}
+
+static void test_format_file_size() {
+    assert(format_file_size(0) == "0 B");
+    assert(format_file_size(999) == "999 B");
+    assert(format_file_size(1536) == "1.5 KB");
+    assert(format_file_size(5 * 1024 * 1024) == "5.0 MB");
+}
+
 int main() {
     test_strip_tool_transcript();
     test_split_segments();
@@ -161,6 +178,8 @@ int main() {
     test_palette_index();
     test_agent_name_of();
     test_url_escape();
+    test_attachment_message_visibility();
+    test_format_file_size();
     std::cout << "test_text_utils: OK\n";
     return 0;
 }

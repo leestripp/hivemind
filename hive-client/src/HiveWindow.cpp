@@ -1,4 +1,5 @@
 #include "HiveWindow.h"
+#include "AttachmentUpload.h"
 #include "MediaPlayer.h"
 #include "text_utils.h"
 
@@ -704,6 +705,7 @@ HiveWindow::HiveWindow() {
     attach_label_.set_hexpand(true);
     attach_label_.set_ellipsize(Pango::EllipsizeMode::END);
     attach_row_.set_margin_start(6);
+    attach_row_.append(attach_spinner_);
     attach_row_.append(attach_label_);
     attach_row_.append(attach_clear_btn_);
     attach_row_.set_visible(false);
@@ -1870,10 +1872,12 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         // Older thread history still holds raw hive-brain transcripts (pre-fix
         // server posted those); new messages arrive clean. Filter defensively.
         const std::string clean = sender_kind == "agent" ? strip_tool_transcript(body) : body;
-        if (clean.empty()) return nullptr;   // pure tool-call transcript — nothing to show
+        if (!has_visible_message_content(clean, attachments))
+        return nullptr;   // pure tool-call transcript — nothing to show
 
         // System messages stay minimal: centered dim line, no avatar.
         if (sender_kind != "user" && sender_kind != "agent") {
+        if (clean.empty()) return nullptr;
         auto* sys = Gtk::make_managed<Gtk::Label>(clean);
         sys->add_css_class("hv-msg-system");
         sys->set_wrap(true);
@@ -2016,7 +2020,12 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         // WORKER's path, meaningless on this machine, and empty for
         // agent-originated records (no click handler at all → dead
         // button). Download via the hub API instead, same as images.
-        auto* chip = Gtk::make_managed<Gtk::Button>("📎 " + name);
+        std::string chip_label = "📎 " + name;
+        const int attachment_size = a.value("size", 0);
+        if (attachment_size > 0)
+        chip_label += " · " + format_file_size(
+        static_cast<std::uint64_t>(attachment_size));
+        auto* chip = Gtk::make_managed<Gtk::Button>(chip_label);
         chip->add_css_class("flat");
         chip->set_tooltip_text("Download " + name);
         const std::string tid = current_thread_;
@@ -2871,7 +2880,7 @@ void HiveWindow::load_audio_attachment(Gtk::Box* holder,
 void HiveWindow::set_composer_enabled(bool enabled) {
     entry_.set_sensitive(enabled);
     send_btn_.set_sensitive(enabled);
-    attach_btn_.set_sensitive(enabled);
+    attach_btn_.set_sensitive(enabled && !upload_in_flight_);
 }
 
 void HiveWindow::select_thread_row(const std::string& id) {
@@ -3014,9 +3023,26 @@ void HiveWindow::on_send() {
 
 void HiveWindow::update_attach_row() {
     const auto n = pending_attachments_.size();
-    if (n == 0) { attach_row_.set_visible(false); return; }
-    std::string s = "📎 " + pending_attachments_[0].value("name", "file");
-    if (n > 1) s += "  (+" + std::to_string(n - 1) + " more)";
+    if (n == 0 && !upload_in_flight_) {
+        attach_spinner_.stop();
+        attach_spinner_.set_visible(false);
+        attach_row_.set_visible(false);
+        return;
+    }
+    std::string s;
+    if (upload_in_flight_) {
+        s = std::string(upload_preparing_ ? "Preparing " : "Uploading ") +
+        upload_name_ + "…";
+        if (n > 0)
+        s += "  ·  " + std::to_string(n) + " attached";
+        attach_spinner_.start();
+    } else {
+        attach_spinner_.stop();
+        s = "📎 " + pending_attachments_[0].value("name", "file");
+        if (n > 1) s += "  (+" + std::to_string(n - 1) + " more)";
+    }
+    attach_spinner_.set_visible(upload_in_flight_);
+    attach_clear_btn_.set_visible(n > 0);
     attach_label_.set_label(s);
     attach_row_.set_visible(true);
 }
@@ -3050,31 +3076,63 @@ void HiveWindow::on_attach() {
 void HiveWindow::attach_picked_file(const std::string& path) {
     const std::string tid = current_thread_;
     if (path.empty() || tid.empty()) return;
-    set_status("Uploading " + path.substr(path.find_last_of("/\\") + 1) +
-               "\u2026");
-    {
-        run_async([this, tid, path] {
-            std::ifstream in(path, std::ios::binary);
-            std::string bytes{std::istreambuf_iterator<char>(in),
-                              std::istreambuf_iterator<char>()};
-            if (bytes.empty())
-                throw std::runtime_error("cannot read (or empty): " + path);
-            namespace fs = std::filesystem;
-            auto meta = api_.upload_attachment(
-                tid, fs::path(path).filename().string(), bytes);
+    if (upload_in_flight_) {
+        set_status("Wait for the current attachment upload to finish.");
+        return;
+    }
+    namespace fs = std::filesystem;
+    const std::string name = fs::path(path).filename().string();
+    upload_in_flight_ = true;
+    upload_preparing_ = true;
+    upload_name_ = name;
+    attach_btn_.set_sensitive(false);
+    update_attach_row();
+    set_status("Preparing " + name + "…");
+    run_async([this, tid, path, name] {
+        json meta;
+        std::string err;
+        try {
+            auto prepared = attachment_upload::prepare(path);
             {
                 std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, meta] {
-                    if (!alive_) return;
-                    pending_attachments_.push_back(meta);
+                done_queue_.push_back([this, name, resized = prepared.resized] {
+                    if (!alive_ || !upload_in_flight_) return;
+                    upload_preparing_ = false;
                     update_attach_row();
-                    set_status("Attached " + meta.value("name", "file") +
-                               " — send a message to deliver it");
+                    set_status(std::string(resized
+                        ? "Image resized to 1024 px — uploading "
+                        : "Uploading ") + name + "…");
                 });
             }
             dispatcher_.emit();
-        });
-    }
+            meta = api_.upload_attachment(tid, prepared.filename,
+                                          prepared.bytes);
+        } catch (const std::exception& e) {
+            err = e.what();
+        } catch (...) {
+            err = "unexpected upload failure: " + path;
+        }
+        {
+            std::lock_guard<std::mutex> lk(queue_m_);
+            done_queue_.push_back([this, meta, err] {
+                if (!alive_) return;
+                upload_in_flight_ = false;
+                upload_preparing_ = false;
+                upload_name_.clear();
+                set_composer_enabled(!current_thread_.empty() &&
+                                     current_thread_ != "user");
+                if (err.empty()) {
+                    pending_attachments_.push_back(meta);
+                    set_status("Attached " + meta.value("name", "file") +
+                               " — send a message to deliver it");
+                } else {
+                    set_status("Upload failed: " + err);
+                }
+                update_attach_row();
+            });
+        }
+        dispatcher_.emit();
+    });
 }
 
 void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
@@ -4986,6 +5044,10 @@ nlohmann::json HiveWindow::ui_state() {
             {"entry_sensitive", entry_.get_sensitive()},
             {"attach_sensitive", attach_btn_.get_sensitive()},
             {"pending_attachments", pending_attachments_.size()},
+            {"upload_in_flight", upload_in_flight_},
+            {"upload_preparing", upload_preparing_},
+            {"attach_row_visible", attach_row_.get_visible()},
+            {"attach_label", std::string{attach_label_.get_text()}},
             {"connected", !api_.api_key().empty()},
             // Rendered roster rows in visual order: worker group headers
             // (with online/collapsed flags) interleaved with agent rows.

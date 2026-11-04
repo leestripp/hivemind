@@ -39,3 +39,9 @@ if(EXISTS "/usr/bin/python3")
         USES_TERMINAL
         COMMENT "Checking Scheduled Tasks grouping, sizing, selection, and delete confirmation")
 endif()
+
+# 4K image resizing and byte-preserving small/non-image uploads.
+add_executable(test_attachment_upload test_attachment_upload.cpp)
+target_link_libraries(test_attachment_upload PRIVATE hive_client_attachments)
+target_compile_options(test_attachment_upload PRIVATE -UNDEBUG)
+add_test(NAME test_attachment_upload COMMAND test_attachment_upload)

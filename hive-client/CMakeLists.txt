@@ -27,6 +27,13 @@ target_link_libraries(hive_client_core PUBLIC
     nlohmann_json::nlohmann_json
 )
 
+# Binary upload preparation (including GdkPixbuf image resizing). No GTK
+# main loop is required, so the same module is covered by a native test.
+add_library(hive_client_attachments STATIC src/AttachmentUpload.cpp)
+target_include_directories(hive_client_attachments PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hive_client_attachments PUBLIC PkgConfig::GTKMM)
+
 # Bundle the SVG icon/avatar set into the binary so the client is
 # self-contained (no runtime data-dir lookup). CurrentColor icons are
 # re-tinted at load time to match the active dark/light theme.
@@ -58,6 +65,7 @@ add_executable(hive-client
 target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
     hive_client_core
+    hive_client_attachments
     PkgConfig::GTKMM
     PkgConfig::GSTREAMER
     nlohmann_json::nlohmann_json

@@ -4,6 +4,7 @@
 // they can be unit-tested without a GTK main loop (Phase: client tests).
 // Only glibmm (Markup::escape_text) and nlohmann_json are required.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -41,5 +42,13 @@ std::string agent_name_of(const nlohmann::json& agents, const std::string& id);
 
 // RFC 3986 percent-encoder for query values.
 std::string url_escape(const std::string& s);
+
+// Attachment-only messages still need a chat row; only a genuinely empty
+// message (no text and no attachments) is suppressed.
+bool has_visible_message_content(const std::string& clean_body,
+                                 const nlohmann::json& attachments);
+
+// Compact binary size for attachment labels (B, KB, or MB).
+std::string format_file_size(std::uint64_t bytes);
 
 } // namespace hive::text

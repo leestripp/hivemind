@@ -3,6 +3,7 @@
 #include <glibmm/markup.h>
 
 #include <cctype>
+#include <cstdio>
 #include <ctime>
 #include <sstream>
 
@@ -159,6 +160,25 @@ std::string url_escape(const std::string& s) {
         else { out += '%'; out += hex[ch >> 4]; out += hex[ch & 15]; }
     }
     return out;
+}
+
+bool has_visible_message_content(const std::string& clean_body,
+                                 const nlohmann::json& attachments) {
+    return !clean_body.empty() ||
+           (attachments.is_array() && !attachments.empty());
+}
+
+std::string format_file_size(std::uint64_t bytes) {
+    char buf[32];
+    if (bytes >= 1024 * 1024) {
+        std::snprintf(buf, sizeof buf, "%.1f MB", bytes / 1048576.0);
+    } else if (bytes >= 1024) {
+        std::snprintf(buf, sizeof buf, "%.1f KB", bytes / 1024.0);
+    } else {
+        std::snprintf(buf, sizeof buf, "%llu B",
+                      static_cast<unsigned long long>(bytes));
+    }
+    return buf;
 }
 
 } // namespace hive::text

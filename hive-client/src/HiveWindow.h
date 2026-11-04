@@ -324,9 +324,13 @@ private:
     Gtk::Entry entry_;
     Gtk::Button send_btn_;
     Gtk::Box attach_row_{Gtk::Orientation::HORIZONTAL, 6};
+    Gtk::Spinner attach_spinner_;        // visible while an upload is active
     Gtk::Label attach_label_;            // pending-attachment summary line
     Gtk::Button attach_clear_btn_;       // drops pending attachments
     nlohmann::json pending_attachments_ = nlohmann::json::array();
+    bool upload_in_flight_ = false;
+    bool upload_preparing_ = false;
+    std::string upload_name_;
     void update_attach_row();
 
     sigc::connection poll_timer_;
