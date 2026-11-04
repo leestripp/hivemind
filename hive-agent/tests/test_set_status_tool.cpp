@@ -10,12 +10,9 @@
  *   5. The success status string is "set_state" so LLMClient can
  *      branch on it and fire the public state-change event.
  *   6. agent_state_from() (the inverse of to_string()) round-trips.
- *   7. §IdleLoopFix (2026-08-20): runtime-owned states (Idle,
- *      Compressing) are REJECTED with an actionable
- *      error.  A model used to call set_status("Idle") expecting the
- *      agent loop to exit ("Idle = no work in flight"), got
- *      status=success, and looped forever.  The loop ends only via the
- *      `stop` tool — the error message for Idle says exactly that.
+ *   7. Runtime-owned states (Idle, Compressing) are rejected with an
+ *      actionable error. Done is model-driven and terminal like stop;
+ *      nonterminal states only report UI progress.
  */
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
@@ -55,6 +52,19 @@ TEST_SUITE("SetStatusTool — JSON schema") {
         CHECK(params["required"].is_array());
         CHECK(params["required"].size() == 1);
         CHECK(params["required"][0] == "state");
+    }
+
+    TEST_CASE("Definition describes terminal Done and nonterminal UI states") {
+        SetStatusTool tool;
+        const std::string general = tool.get_description();
+        const std::string state = tool.get_definition()["function"]
+            ["parameters"]["properties"]["state"]["description"];
+        for (const auto* text : {general.c_str(), state.c_str()}) {
+            const std::string description(text);
+            CHECK(description.find("Done exits") != std::string::npos);
+            CHECK(description.find("final assistant response") != std::string::npos);
+            CHECK(description.find("NEVER exits") == std::string::npos);
+        }
     }
 }
 
@@ -122,18 +132,17 @@ TEST_SUITE("SetStatusTool — valid input") {
 
 TEST_SUITE("SetStatusTool — runtime-owned states rejected") {
 
-    TEST_CASE("Idle returns an error that points at the stop tool") {
+    TEST_CASE("Idle returns an error that points at terminal tools") {
         SetStatusTool tool;
         FileIO io(std::filesystem::temp_directory_path());
         json r = tool.execute({{"state", "Idle"}}, io);
         CHECK(r["status"] == "error");
         REQUIRE(r.contains("message"));
         std::string msg = r["message"].get<std::string>();
-        // The model must learn: runtime-owned + set_status never exits
-        // the loop + stop is the exit hatch.
         CHECK(msg.find("runtime-owned") != std::string::npos);
-        CHECK(msg.find("does NOT exit the agent loop") != std::string::npos);
         CHECK(msg.find("stop") != std::string::npos);
+        CHECK(msg.find("set_status('Done')") != std::string::npos);
+        CHECK(msg.find("final assistant response") != std::string::npos);
         // …and it must list the states it CAN use so it can self-correct.
         CHECK(msg.find("Planning") != std::string::npos);
         CHECK(msg.find("Done")     != std::string::npos);

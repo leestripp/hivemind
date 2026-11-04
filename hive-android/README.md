@@ -6,15 +6,18 @@ the reply.
 
 - **STT**: on-device whisper.cpp (ggml q8_0, NEON+dotprod): tiny.en
   for live partials (5s sliding window, ~0.5s), base.en for the final
-  pass on SEND (~1s/9s audio). Replaces the old sherpa-onnx zipformer —
-  dramatically better accuracy.
+  pass on SEND (~1s/9s audio). Both models are bundled for fully
+  offline dictation.
   int8, ~70 MB bundled model) fed by our own AudioRecord capture —
   NO endpointer, so silence never stops a recording: the user is the
   only stop signal. No sessions, no throttling, no audio cues, works
   fully offline. Kotlin API + native libs vendored from
   [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) v1.9.4
   (Apache-2.0), fetched by `./fetch-deps.sh`.
-- **TTS**: Android platform `TextToSpeech`.
+- **TTS**: on-device pocket-tts (audio.cpp through JNI) is primary,
+  synthesizing streamed sentence chunks to PCM/AudioTrack with per-agent
+  voices. Android platform `TextToSpeech` remains the fallback when the
+  pocket model cannot load or an individual synthesis fails.
 - **Sphere**: OpenGL ES 2.0 point-cloud renderer in C++ (NDK,
   `app/src/main/cpp/sphere_renderer.cpp`) — Fibonacci lattice displaced
   by simplex noise; amplitude follows mic RMS while listening and a
@@ -29,6 +32,14 @@ the reply.
   `POST/GET …/messages`, `GET …/activity`, `POST …/cancel`.
   Auth: `Authorization: Bearer <key>` (mint one via the hub's
   `/api/keys` — `agent` scope is enough).
+
+## Notification relay
+
+After notification access is granted, supported SMS/MMS and missed-call
+notifications are relayed to the configured agent. Persisted notification
+instance/content dedupe prevents repeated announcements across listener
+restarts. Delivery is at-most-once: a failed hub POST is dropped rather
+than retried, so this is not an exactly-once delivery guarantee.
 
 ## Per-agent voices
 
@@ -98,7 +109,7 @@ On this rig both live in `~/Android/Sdk`; JDK 21 at
 `/usr/lib/jvm/java-21-openjdk-amd64`.
 
 ```bash
-./fetch-deps.sh   # one-time: whisper.cpp source + ggml models (~125 MB)
+./fetch-deps.sh   # one-time: whisper.cpp/audio.cpp sources + on-device models
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export ANDROID_HOME=~/Android/Sdk
 ./gradlew assembleDebug
@@ -119,13 +130,12 @@ permission when prompted.
 
 ## Notes / caveats
 
-- **Waydroid**: STT is self-contained (whisper.cpp, x86_64 libs
-  included) so dictation works without GMS; TTS still needs a system
-  TTS engine, which stock LineageOS images lack — replies would be
-  text-status only there unless you install one.
+- **Waydroid**: STT and primary pocket-tts are self-contained for the
+  bundled x86_64 ABI, so neither requires GMS or a system speech service.
+  Only the platform-TTS fallback needs an installed system TTS engine.
 - cleartext HTTP is permitted in the manifest for LAN hubs; the default
   URL is TLS.
-- Third-party code: whisper.cpp (MIT,
-  (c) k2-fsa) vendored under app/src/main/java/com/k2fsa/ and
-  app/src/main/jniLibs/; everything else is framework Views + org.json
-  + kotlin-stdlib.
+- Third-party code: whisper.cpp and audio.cpp/pocket-tts native sources
+  and models are fetched/vendored for the app; retain their respective
+  upstream licenses. The app shell otherwise uses framework Views,
+  org.json, and kotlin-stdlib.

@@ -114,38 +114,6 @@ public:
                                            const std::string& resolution,
                                            int timeout_s = 60);
 
-    /// v2 models: the worker's default model name as reported in hello
-    /// ("" when unknown / worker has no usable models.json entries).
-    std::string default_model(const std::string& worker) const;
-
-    /// Ask a worker to set its default model (writes its models.json).
-    /// nullopt when the worker is offline; error field set on failure.
-    struct ModelResult { bool ok = false; std::string error;
-                         nlohmann::json data; };
-    std::optional<ModelResult> set_default_model(const std::string& worker,
-                                                 const std::string& model,
-                                                 int timeout_s = 30);
-
-    /// Model-registry unification (Phase 2): relayed management ops.
-    /// The hub NEVER persists these — models.json/secrets.json stay
-    /// worker-local; frames transit the (TLS) channel in memory only.
-    /// nullopt when the worker is offline; error field on worker-side
-    /// failure. list_models_detail fills data = {"models":{...},
-    /// "default":"..."}. set_secret is write-only (key never returned).
-    std::optional<ModelResult> list_models_detail(const std::string& worker,
-                                                  int timeout_s = 30);
-    std::optional<ModelResult> upsert_model(const std::string& worker,
-                                            const std::string& model,
-                                            const nlohmann::json& entry,
-                                            int timeout_s = 30);
-    std::optional<ModelResult> delete_model(const std::string& worker,
-                                            const std::string& model,
-                                            int timeout_s = 30);
-    std::optional<ModelResult> set_secret(const std::string& worker,
-                                          const std::string& provider,
-                                          const std::string& key,
-                                          int timeout_s = 30);
-
     /// Phase 30.4: TCP stream over the channel. open_stream blocks until
     /// the worker acknowledges (stream_opened) or fails (stream_error /
     /// offline → ""). stream_send/stream_close drive it; inbound bytes
@@ -199,10 +167,6 @@ public:
     /// main.cpp uses it to re-push enabled skills after worker downtime).
     std::function<void(const std::string& worker)> on_worker_online;
 
-    /// Aggregated model catalog across connected workers:
-    /// [{"name","provider","worker"}] deduped by name.
-    nlohmann::json models_catalog() const;
-
     /// Phase C: heartbeat frames carry per-agent states (v2 fleet). Fired
     /// with the worker name + the agents object {agent_id: state}.
     std::function<void(const std::string& worker,
@@ -224,8 +188,6 @@ private:
 
     mutable std::mutex m_;
     std::unordered_map<std::string, std::shared_ptr<WorkerConn>> conns_;
-    /// worker name -> hello models catalog (json string), erased on disconnect.
-    std::unordered_map<std::string, std::string> models_;
 
     // In-flight remote execs, keyed by job id (filled by exec_chunk /
     // exec_done frames in the receive loop).
@@ -268,23 +230,6 @@ private:
         WsSkillsResult result;
     };
     std::unordered_map<std::string, std::shared_ptr<WsSkillsJob>> ws_skills_jobs_;
-
-    // worker → default model name (from hello "default_model")
-    std::unordered_map<std::string, std::string> defaults_;
-
-    /// Shared model_ctl request/reply (id-registered waiter, sync).
-    std::optional<ModelResult> model_request(const std::string& worker,
-                                             nlohmann::json frame,
-                                             int timeout_s);
-
-    // in-flight model_ctl requests (id → result slot)
-    struct ModelJob {
-        std::mutex m;
-        std::condition_variable cv;
-        bool done = false;
-        ModelResult result;
-    };
-    std::unordered_map<std::string, std::shared_ptr<ModelJob>> model_jobs_;
 
     // 31: file_fetch jobs (id → waiter)
     struct FileJob {

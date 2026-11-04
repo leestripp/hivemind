@@ -1195,15 +1195,11 @@ bool LLMClient::fatal_breaker_should_end_turn(const std::string& signature) {
     return false;
 }
 
-// §IdleExitBreaker (2026-08-20): circuit breaker for set_status-only
-// iterations. A finished model used to call set_status("Idle"/"Done")
-// expecting the agent loop to exit — it doesn't; only the `stop` tool
-// ends a turn. The model then answers each re-invocation with yet
-// another set_status and the turn loops forever (observed in the wild:
-// the host re-sending only the auto context-status block, the model
-// replying set_status("Done") every iteration). Threshold 2 mirrors the
-// fatal breaker: one status-only iteration is a legitimate UI update,
-// two in a row means the model is done and forgot how to say so.
+// §IdleExitBreaker: circuit breaker for NONTERMINAL set_status-only
+// iterations. Done now exits directly like stop, but a model repeating
+// Working/Planning/etc. is stuck reporting stage rather than finishing.
+// Threshold 2 mirrors the fatal breaker: one status-only iteration is a
+// legitimate UI update, two in a row end the turn with output preserved.
 bool LLMClient::status_only_breaker_should_end_turn(bool exit_requested) {
     static constexpr int kMaxConsecutiveStatusOnly = 2;
     ++consecutive_status_only_count_;
@@ -1221,8 +1217,9 @@ bool LLMClient::status_only_breaker_should_end_turn(bool exit_requested) {
                         std::to_string(consecutive_status_only_count_) +
                         " times consecutively without reaching Done - "
                         "model may be stuck exiting the loop; ending "
-                        "turn. (To end a turn explicitly, call the stop "
-                        "tool.) Turn output is kept and posts normally.");
+                        "turn. (To end a turn explicitly, call stop or "
+                        "set_status(Done).) Turn output is kept and posts "
+                        "normally.");
         }
         // Phase 65g REVERTED (65i, same day): wiping the accumulated turn
         // output destroyed legitimate replies — an iteration carrying

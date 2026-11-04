@@ -70,7 +70,7 @@ struct AgentConfig {
     // settings store's model entries are NEVER consulted for resolution
     // (even when model_name matches a settings key) and the store's
     // default_model_name is never auto-adopted. For hosts that own the
-    // model registry themselves (e.g. HiveMind's worker models.json) and
+    // model registry themselves (e.g. HiveMind's hub llm.db task injection) and
     // inject credentials per spawn — prevents a per-agent settings store
     // from becoming a shadow registry that silently diverges.
     bool explicit_model_wins = false;

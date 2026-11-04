@@ -12,14 +12,10 @@ namespace {
 // include/hive-brain/types/AgentState.h and
 // demos/daedalus-webui/web_sse_sink.h.
 //
-// §IdleLoopFix (2026-08-20): the list is split into model-driven and
-// runtime-owned states.  A model that had just finished its work used
-// to read "Idle = no work in flight" and call set_status("Idle")
-// expecting the agent loop to exit — but set_status only *reports*
-// state to the host; the loop ends exclusively via the `stop` tool
-// (or host cancel).  The tool returned status=success, so the model
-// looped forever.  Idle / Compressing are now
-// rejected with an actionable error instead of being accepted.
+// The list is split into model-driven and runtime-owned states. Idle and
+// Compressing belong to the runtime and are rejected with actionable
+// errors. Done is model-driven and turn-terminal (like stop); all other
+// accepted states report UI progress without ending the turn.
 constexpr std::array<std::string_view, 10> kValidStates = {
     "Idle",
     "Understanding",
@@ -106,9 +102,9 @@ json SetStatusTool::get_definition() const {
                          "Acting, Verifying, Documenting, Done, Cancelled, Error. "
                          "(Idle and Compressing are runtime-managed — the "
                          "library sets them itself; passing them is an error.) "
-                         "NOTE: set_status only updates the host UI stage — it NEVER exits "
-                         "the agent loop, not even 'Done'. To end your turn, call the 'stop' "
-                         "tool. "
+                         "Nonterminal states only update the host UI stage. Done exits the "
+                         "agent loop like 'stop', so use it only after your final assistant "
+                         "response; never call Done before that response. "
                          "Case-insensitive; normalised to title-case in the response."}
                     })}
                 })},
@@ -178,19 +174,18 @@ json SetStatusTool::execute(const json& args, FileIO& /*file_io*/) {
             });
         }
 
-        // §IdleLoopFix: runtime-owned states are recognised above (so we
-        // can give a precise message) but never accepted.  Most important
-        // is "Idle": the model must learn that no set_status call — not
-        // even "Done" — exits the agent loop; only the `stop` tool does.
+        // Runtime-owned states are recognised above (so we can give a
+        // precise message) but never accepted. Point Idle callers at the
+        // two explicit terminal tools: stop or set_status(Done).
         if (is_runtime_owned(normalised)) {
             std::string msg =
                 "'" + normalised + "' is runtime-owned — the library sets it "
                 "itself; never pass it to set_status. ";
             if (normalised == "Idle") {
                 msg +=
-                    "Note: set_status only reports your stage to the host UI; "
-                    "it does NOT exit the agent loop (no state does — not even "
-                    "'Done'). To end your turn, call the 'stop' tool. ";
+                    "To finish a turn, emit your final assistant response and "
+                    "then call 'stop' or set_status('Done'). Other set_status "
+                    "states only report progress to the host UI. ";
             }
             msg += "Model-driven states: " + valid_states_list() + ".";
             return json::object({

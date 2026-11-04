@@ -41,13 +41,20 @@ What the window currently shows/knows (GTK-thread snapshot).
   "status": "Connected — 1 agents, 2 threads",
   "agents":  [ { "id": "…", "name": "Bob", … } ],
   "threads": [ { "id": "…", "title": "…", "kind": "dm", … } ],
-  "rendered_count": 4
+  "rendered_count": 4,
+  "upload_in_flight": false,
+  "upload_preparing": false,
+  "attach_row_visible": true,
+  "attach_label": "📎 upload.bin"
 }
 ```
 
 - `status` — the literal status-bar text (poll errors surface here).
 - `rendered_count` — number of chat bubbles actually on screen. This is
   the key assertion for "did the UI render it" tests.
+- `upload_in_flight`, `upload_preparing`, `attach_row_visible`, and
+  `attach_label` expose the composer’s upload activity for image-preparation
+  and delayed-transfer UI regression tests.
 
 ### GET /ui/messages
 The bubbles actually rendered in the chat view, in order.

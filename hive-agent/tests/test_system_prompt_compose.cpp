@@ -288,6 +288,10 @@ TEST_SUITE("State machine section") {
         CHECK(section.find("Acting") != std::string::npos);
         CHECK(section.find("Verifying") != std::string::npos);
         CHECK(section.find("Done") != std::string::npos);
+        CHECK(section.find("plain final assistant response ends a turn") != std::string::npos);
+        CHECK(section.find("`set_status(Done)` is terminal like `stop`") != std::string::npos);
+        CHECK(section.find("set_status` never exits") == std::string::npos);
+        CHECK(section.find("without `stop` the turn never terminates") == std::string::npos);
     }
 
     TEST_CASE("Section is appended with empty host options") {

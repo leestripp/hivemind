@@ -32,8 +32,13 @@ static const std::string kUrl =
     std::string("ws://127.0.0.1:") + kPort + "/api/workers/channel";
 
 static json hello(const std::string& key) {
+    // Legacy catalog fields remain harmless compatibility input. Current
+    // model configuration is hub-owned and never negotiated per worker.
     return json{{"op", "hello"},   {"worker", "rig1"}, {"key", key},
-                {"caps", json::object()}, {"proto", 1}, {"models", json::array()}};
+                {"caps", json::object()}, {"proto", 1},
+                {"models", json::array({json{{"name", "legacy-model"},
+                                             {"provider", "legacy"}}})},
+                {"default_model", "legacy-model"}};
 }
 
 int main() {

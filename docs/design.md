@@ -9,9 +9,10 @@ client. This document describes the current architecture.
 1. **The brain lives where the work is.** Agents (hive-brain) run inside
    their containers on workers — skills, MCP servers, shell access and
    files are all local to the agent. Nothing is tunneled.
-2. **The server is a comms hub, not a host.** It routes messages between
-   clients, workers and agents. It holds no LLM credentials and runs no
-   workloads.
+2. **The server is a comms hub and control plane, not an agent host.**
+   It routes messages, owns the provider/model registry, and stores
+   provider credentials used to configure tasks. Agent workloads run on
+   workers, not in the hub process.
 3. **Outbound-only workers.** Workers dial the hub over one WebSocket;
    rigs need no inbound ports, no DNS, no TLS setup.
 4. **File locality.** Work artifacts stay on the machine that produced
@@ -24,10 +25,12 @@ client. This document describes the current architecture.
 ### hive-server — the comms hub
 
 - Owns: threads, messages, attachments, roster, skills library
-  (canonical copy), worker registry.
+  (canonical copy), worker registry, and the Phase-43 provider/model
+  registry (`llm.db`).
 - Routes: client→agent tasks, agent→client replies, agent↔agent messages
   (pair threads, generation-capped).
-- Does NOT: run agents, hold LLM keys, spawn containers, proxy shells.
+- Does NOT: run agents, spawn containers, or proxy shells. Provider API
+  keys do live in `llm.db`; protect the hub home and backups accordingly.
 
 ### hive-worker — fleet manager + router
 
@@ -57,8 +60,10 @@ client. This document describes the current architecture.
 - Full hive-brain feature set: skills with scripts, MCP servers spawned as
   local child processes, persistent memory + conversation history on the
   home volume.
-- Credentials arrive as spawn env from the worker — never stored on the
-  hub.
+- Provider/model configuration arrives in each task's `llm` block. The
+  hub resolves it from `llm.db`; the worker relays it without persisting
+  it, and hive-agent applies it before the turn. Environment-based model
+  configuration is only a legacy/standalone fallback.
 
 #### External-content and secret-disclosure boundary (B1)
 
@@ -110,7 +115,9 @@ keepAliveTimeout=0, per-connection writer queues) are in
 
 1. Client POSTs the message to the hub's thread API.
 2. Hub stores it and looks up each agent participant's worker placement.
-3. Hub sends a `task` op down that worker's WebSocket.
+3. Hub resolves the agent's provider/model from `llm.db` and sends a
+   `task` op, including the resolved `llm` configuration, down that
+   worker's authenticated WebSocket.
 4. Worker writes the task to the agent container's hive-agent stdin.
 5. hive-agent runs the turn (skills/MCP/shell all local to the container),
    streaming `delta` events; the final `message` event carries the reply
@@ -119,6 +126,17 @@ keepAliveTimeout=0, per-connection writer queues) are in
    `/workspace/attachments/<thread>/outgoing/`) are swept up by the
    worker at turn end and arrive as attachment records on `task_result`
    (the hub injects the worker name so clients can route downloads).
+## Hub transcripts versus agent brain context
+
+The hub's `threads.db` is the durable, per-thread user-visible transcript
+used by GTK, Android, voice, and other REST clients. It is not the exact
+prompt history sent to a model. Each hive-agent also maintains one
+hive-brain conversation at `/workspace/.hive-agent/<Name>/messages.json`
+on its worker. That conversation is shared across the agent's hub threads,
+routines, and triggers, with source/timestamp labels added to wakes. A
+per-thread hub view therefore does not imply per-thread model-context
+isolation; use separate agents where that isolation is required.
+
 ## Durable agent messaging (Phase 66)
 
 Messages persist in ThreadStore; the **delivery intents** (wakes that tell

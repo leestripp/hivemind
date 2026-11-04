@@ -84,110 +84,6 @@ static void worker_writer(std::shared_ptr<WorkerConn> wc) {
     }
 }
 
-json WorkerChannel::models_catalog() const {
-    // Per-worker catalogs — models live in each worker's models.json, so
-    // the UI groups by worker (the old deduped union hid which workers
-    // offered a model and attributed shared names to one worker only).
-    json out = json::array();
-    std::lock_guard lk(m_);
-    for (auto& [wname, cat] : models_) {
-        json arr;
-        try { arr = json::parse(cat); } catch (...) { continue; }
-        json models = json::array();
-        for (auto& e : arr) {
-            const std::string n = e.value("name", "");
-            if (n.empty()) continue;
-            models.push_back({{"name", n},
-                              {"provider", e.value("provider", "")}});
-        }
-        auto it = defaults_.find(wname);
-        out.push_back({{"worker", wname},
-                       {"default_model",
-                        it != defaults_.end() ? it->second : ""},
-                       {"models", models}});
-    }
-    return out;
-}
-
-std::string WorkerChannel::default_model(const std::string& worker) const {
-    std::lock_guard lk(m_);
-    auto it = defaults_.find(worker);
-    return it != defaults_.end() ? it->second : "";
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::model_request(const std::string& worker, nlohmann::json frame,
-                             int timeout_s) {
-    if (!is_online(worker)) return std::nullopt;
-    const std::string id = "mc-" + std::to_string(next_job_++);
-    auto mj = std::make_shared<ModelJob>();
-    {
-        std::lock_guard lk(m_);
-        model_jobs_[id] = mj;
-    }
-    frame["op"] = "model_ctl";
-    frame["id"] = id;
-    if (!send(worker, frame)) {
-        std::lock_guard lk(m_);
-        model_jobs_.erase(id);
-        return std::nullopt;
-    }
-    std::unique_lock lk(mj->m);
-    if (!mj->cv.wait_for(lk, std::chrono::seconds(timeout_s),
-                         [&]{ return mj->done; })) {
-        std::lock_guard g(m_);
-        model_jobs_.erase(id);
-        throw std::runtime_error("worker model_ctl timed out");
-    }
-    auto result = mj->result;
-    {
-        std::lock_guard g(m_);
-        model_jobs_.erase(id);
-    }
-    return result;
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::set_default_model(const std::string& worker,
-                                 const std::string& model, int timeout_s) {
-    auto r = model_request(worker, {{"action","set_default"},
-                                    {"model",model}}, timeout_s);
-    if (r && r->ok) {
-        std::lock_guard g(m_);
-        defaults_[worker] = model;
-    }
-    return r;
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::list_models_detail(const std::string& worker, int timeout_s) {
-    return model_request(worker, {{"action","list"}}, timeout_s);
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::upsert_model(const std::string& worker,
-                            const std::string& model,
-                            const nlohmann::json& entry, int timeout_s) {
-    return model_request(worker, {{"action","upsert"},{"model",model},
-                                  {"entry",entry}}, timeout_s);
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::delete_model(const std::string& worker,
-                            const std::string& model, int timeout_s) {
-    return model_request(worker, {{"action","delete"},{"model",model}},
-                         timeout_s);
-}
-
-std::optional<WorkerChannel::ModelResult>
-WorkerChannel::set_secret(const std::string& worker,
-                          const std::string& provider,
-                          const std::string& key, int timeout_s) {
-    return model_request(worker, {{"action","set_secret"},
-                                  {"provider",provider},{"key",key}},
-                         timeout_s);
-}
-
 void WorkerChannel::stop() {
     if (ws_ && ws_->isRunning()) ws_->stop();
 }
@@ -278,7 +174,6 @@ void WorkerChannel::handle(Connection& ws) {
         bool authed = false;
         std::string name;
         std::string key;
-        std::string models;   // hello catalog: [{name, provider}]
         std::shared_ptr<WorkerConn> conn;
     };
     auto st = std::make_shared<State>();
@@ -303,13 +198,8 @@ void WorkerChannel::handle(Connection& ws) {
             }
             st->name = frame.value("worker", "");
             st->key  = frame.value("key", "");
-            st->models = frame.contains("models") ? frame["models"].dump()
-                                                  : "[]";
-            {
-                std::lock_guard lk(m_);
-                models_[st->name] = st->models;
-                defaults_[st->name] = frame.value("default_model", "");
-            }
+            // Legacy hello "models"/"default_model" fields are accepted
+            // and ignored: the hub's llm.db is authoritative for all workers.
             const std::string caps =
                 frame.contains("caps") ? frame["caps"].dump() : "{}";
             auto worker = store_.validate(st->key, caps, kProto);
@@ -446,22 +336,7 @@ void WorkerChannel::handle(Connection& ws) {
                 wj->done = true;
                 wj->cv.notify_all();
             }
-        } else if (op == "model_result") {
-            std::shared_ptr<ModelJob> mj;
-            {
-                std::lock_guard lk(m_);
-                auto it = model_jobs_.find(frame.value("id", ""));
-                if (it != model_jobs_.end()) mj = it->second;
-            }
-            if (mj) {
-                std::lock_guard jl(mj->m);
-                mj->result.ok = frame.value("error", "").empty();
-                mj->result.error = frame.value("error", "");
-                mj->result.data = frame.value("data", nlohmann::json::object());
-                mj->done = true;
-                mj->cv.notify_all();
-            }
-        } else if (op == "stream_opened" || op == "stream_error") {
+        } else if (op == "stream_opened" || op == "stream_error") {        } else if (op == "stream_opened" || op == "stream_error") {
             // open_stream waits on this via a ScreenJob-shaped slot? no —
             // streams have their own ack slot:
             std::shared_ptr<StreamAck> ack;
@@ -523,8 +398,6 @@ void WorkerChannel::handle(Connection& ws) {
         auto it = conns_.find(st->name);
         if (it != conns_.end() && it->second == st->conn) {
             conns_.erase(it);
-            models_.erase(st->name);
-            defaults_.erase(st->name);
         }
         // Fail every in-flight job for this worker — exec() callers wake
         // with an error instead of hanging until the outer timeout.

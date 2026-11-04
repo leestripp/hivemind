@@ -13,8 +13,9 @@
 //   worker online       -> reconcile: agent_spawn for roster agents homed
 //                          there (idempotent - worker dedups by agent id)
 //
-// Credentials never live here: agent_spawn carries model/provider NAMES;
-// the worker resolves them from its own models.json + secrets.json.
+// The hub owns provider/model configuration in llm.db. Each dispatched
+// task carries its resolved llm block through the authenticated worker
+// channel; workers relay it to the agent without a local model registry.
 
 #include <functional>
 #include <mutex>

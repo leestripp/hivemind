@@ -21,9 +21,9 @@ configured runtime identity.
 - **The brain lives where the work is** — agents (hive-brain) run *inside*
   containers on worker machines; skills, MCP servers, shell access and
   files are local to the agent.
-- **The server is a comms hub, not a host** — it routes messages between
-  clients, workers and agents. It holds **no LLM credentials** and runs
-  no workloads.
+- **The server is a comms hub and control plane, not an agent host** —
+  it routes messages, owns the roster/provider/model registry, and stores
+  provider credentials for dispatch. Agent workloads still run on workers.
 - **Outbound-only workers** — workers dial the hub over a single
   WebSocket; no inbound ports/DNS/TLS needed on rigs.
 - **File locality** — artifacts stay on the machine that produced them.
@@ -167,14 +167,16 @@ Key architectural mapping:
 - Server binds localhost-only; TLS is terminated by nginx/Caddy in front.
 - Worker keys (`hmwk_…`) are shown once at enrollment, hashed in
   `workers.db`; workers authenticate over `wss://`.
-- LLM credentials are **worker-owned** (`models.json` + `secrets.json`
-  mode 0600) and injected into agents as spawn env. **Never** store keys
-  on the hub. Model/secret management routes
-  (`/api/workers/:name/models|secrets`) are **relay-only**: they forward
-  over the worker channel and persist nothing hub-side; keep them
-  admin-scoped in the auth middleware. Agents run hive-brain with
-  `explicit_model_wins` — models.json is the single registry of record;
-  the per-agent hive-brain settings store must never shadow it.
+- LLM providers/models and provider API keys are **hub-owned** in
+  `~/.local/share/hivemind/llm.db` (Phase 43). Keep the hub home and its
+  backups protected. At dispatch the hub resolves the effective model and
+  sends provider configuration, including `llm.api_key`, through the
+  authenticated worker channel in the task frame. Workers relay it to the
+  agent for that turn and must redact it from diagnostics; agents use
+  `explicit_model_wins` so per-agent settings cannot shadow the injected
+  config. Never log task frames without credential redaction. The old
+  worker-scoped model/secret relay is removed; legacy hello catalog fields
+  are ignored rather than treated as a dispatch registry.
 - Workspace writes are path-confined — `send_file` destinations must not
   escape the company drive.
 - Every composed agent prompt includes the mandatory B1 **External Content

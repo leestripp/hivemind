@@ -328,6 +328,37 @@ int main() {
     r = request("PATCH", port, "/api/agents/" + a2, {{"host_agent", "yes"}});
     assert(r.statusCode() == 400);
 
+    // ── Notification route: malformed JSON types are client errors, not
+    // uncaught json::value() exceptions. Exercise the real HTTP boundary.
+    r = request("POST", port, "/api/notifications", json::array({1, 2, 3}));
+    assert(r.statusCode() == 400);
+    r = request("POST", port, "/api/notifications",
+                {{"agent_id", 7}, {"text", "wrong id type"}});
+    assert(r.statusCode() == 400);
+    r = request("POST", port, "/api/notifications",
+                {{"agent_id", a1}, {"app", json::object()}, {"text", "x"}});
+    assert(r.statusCode() == 400);
+    r = request("POST", port, "/api/notifications",
+                {{"agent_id", a1}, {"title", false}, {"text", "x"}});
+    assert(r.statusCode() == 400);
+    r = request("POST", port, "/api/notifications",
+                {{"agent_id", a1}, {"text", json::array({"x"})}});
+    assert(r.statusCode() == 400);
+
+    // The valid path persists one system message and the 500-byte cap
+    // remains on a UTF-8 character boundary (the old poison-wake vector).
+    r = request("POST", port, "/api/notifications",
+                {{"agent_id", a1}, {"app", "sms"},
+                 {"text", std::string(499, 'a') + "😀"}});
+    assert(r.statusCode() == 201);
+    const std::string notice_dm = json::parse(r.bodyAsString())["thread_id"];
+    const auto notice_messages =
+        jget(port, "/api/threads/" + notice_dm + "/messages")["messages"];
+    assert(notice_messages.size() == 1);
+    const std::string notice_body = notice_messages[0]["body"];
+    assert(notice_messages[0].value("sender_kind", "") == "system");
+    assert(notice_body == "[phone · sms] " + std::string(499, 'a'));
+
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
 

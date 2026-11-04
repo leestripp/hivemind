@@ -1111,15 +1111,22 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             json body;
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
+            if (!body.is_object()) {
+                send_error(resp, 400, "JSON body must be an object"); return;
+            }
+            // nlohmann::json::value() throws on a type mismatch. Malformed
+            // client input is a 400, never an uncaught route exception.
+            for (const char* field : {"agent_id", "app", "title", "text"}) {
+                if (body.contains(field) && !body[field].is_string()) {
+                    send_error(resp, 400,
+                               std::string(field) + " must be a string");
+                    return;
+                }
+            }
             const std::string agent_id = body.value("agent_id", "");
             if (agent_id.empty() || !agents.get_agent(agent_id)) {
                 send_error(resp, 400, "unknown agent id"); return;
             }
-            // Atomic find-or-create (2026-10-22, improvements sweep):
-            // the old find_dm + create_thread pair raced — two
-            // concurrent notifications could both miss and insert a
-            // duplicate DM.
-            const Thread dm = threads.find_or_create_dm(agent_id);
             const std::string app = body.value("app", "phone");
             const std::string title = body.value("title", "");
             const std::string text = body.value("text", "");
@@ -1129,6 +1136,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             if (pretty.empty()) {
                 send_error(resp, 400, "empty notification"); return;
             }
+            // Atomic find-or-create (2026-10-22, improvements sweep):
+            // the old find_dm + create_thread pair raced — two
+            // concurrent notifications could both miss and insert a
+            // duplicate DM. Validate first so rejected input has no
+            // thread-creation side effect.
+            const Thread dm = threads.find_or_create_dm(agent_id);
             // 2026-10-04: byte-truncate on a UTF-8 CHARACTER boundary —
             // the old resize(500) cut mid-character and produced poison
             // rows that killed dispatch with nlohmann type_error.316

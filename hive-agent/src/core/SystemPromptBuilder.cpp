@@ -110,7 +110,7 @@ std::string SystemPromptBuilder::getStateMachineSection() {
         "| `Acting` | Running tools (file edits, bash, MCP, etc.). |\n"
         "| `Verifying` | Compiling, testing, inspecting output — this is a decision gate. |\n"
         "| `Documenting` | Updating README, CHANGELOG, comments, docs after verification. |\n"
-        "| `Done` | Turn complete — emit your final assistant message, then call the `stop` tool. |\n"
+        "| `Done` | Final response complete — terminal state, like `stop`. |\n"
         "| `Cancelled` | Host cancelled the turn; stop work and ack. |\n"
         "| `Error` | Unrecoverable error; report to host and stop. |\n"
         "\n"
@@ -122,10 +122,11 @@ std::string SystemPromptBuilder::getStateMachineSection() {
         "| `Idle` | Constructed / resting between turns — no work in flight. |\n"
         "| `Compressing` | Context compaction in flight. |\n"
         "\n"
-        "**`set_status` never exits the agent loop** — no state does, not\n"
-        "even `Done`. The turn only ends when you call the `stop` tool\n"
-        "(or the host cancels). `set_status` exists purely to keep the\n"
-        "host UI stage chip in sync.\n"
+        "**Turn termination:** a plain final assistant response ends a turn.\n"
+        "Calling `stop` after the final response also ends it.\n"
+        "`set_status(Done)` is terminal like `stop`; every other accepted\n"
+        "`set_status` state only updates the host UI stage chip. The host\n"
+        "can also cancel a turn.\n"
         "\n"
         "Workflow:\n"
         "\n"
@@ -155,10 +156,10 @@ std::string SystemPromptBuilder::getStateMachineSection() {
         "5. **Never stay in `Acting` forever.** If you have no more tools to\n"
         "   call, transition to `Verifying` (and then `Done` or `Documenting`)\n"
         "   or back to `Planning` if more work is needed.\n"
-        "6. **Always end with `Done`, then `stop`.** Call `set_status` with\n"
-        "   `Done` immediately before your final assistant message, then call\n"
-        "   the `stop` tool — `set_status` alone does not end the loop, and\n"
-        "   without `stop` the turn never terminates.\n";
+        "6. **Finish before declaring `Done`.** Emit your final assistant\n"
+        "   response first. Then call `stop`, or use `set_status(Done)` as the\n"
+        "   terminal signal — both end the turn immediately. Never declare\n"
+        "   `Done` before the final response.\n";
 }
 
 std::string SystemPromptBuilder::getReplyDisciplineSection() {

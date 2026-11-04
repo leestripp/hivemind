@@ -567,8 +567,8 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"agent_id", agent.id},
             {"name", agent.name},
             {"secret_env", secret_env},
-            {"model", agent.model},          // NAME - worker resolves
-            {"provider", ""},                // worker's models.json knows
+            {"model", agent.model},          // roster name; task llm wins
+            {"provider", ""},                // legacy spawn shape only
             {"system_prompt", agent.role},
             {"mcp_servers", mcp},
             {"image", ""},                  // "" = worker default (v2)

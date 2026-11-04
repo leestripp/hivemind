@@ -177,16 +177,12 @@ private:
     bool ended_on_fatal_breaker_ = false;
     std::string fatal_breaker_error_;
 
-    // §IdleExitBreaker (2026-08-20): consecutive agent-loop iterations
-    // whose ONLY tool call is set_status. set_status only reports state
-    // to the host UI — it NEVER exits the loop (§IdleLoopFix made the
-    // tool reject runtime-owned states and spell this out), yet models
-    // still end turns with set_status("Done") instead of the stop tool
-    // and then answer every re-invocation with another set_status,
-    // looping forever. Two in a row = the model is clearly trying to
-    // exit, so the breaker ends the turn for it (same as stop).
-    // Reset at turn start, on any non-set_status tool call, and on
-    // plain-text responses.
+    // §IdleExitBreaker: consecutive agent-loop iterations whose ONLY tool
+    // call is a NONTERMINAL set_status. Done exits directly like stop;
+    // repeated nonterminal states indicate a model stuck reporting stage
+    // instead of finishing. Two in a row end the turn while preserving
+    // output. Reset at turn start, on any non-set_status tool call, and
+    // on plain-text responses.
     int consecutive_status_only_count_ = 0;
     // Phase 65e: voluntary compress_context rate limit — Honey habitually
     // self-compressed at 49% mid-storm (2026-09-16), wiping working memory

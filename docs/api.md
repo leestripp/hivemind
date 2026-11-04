@@ -62,15 +62,10 @@ at container create AND reconciles live containers in place via
 |----------|-------|
 | `GET /api/workers` | list with online status + last_seen |
 | `DELETE /api/workers/:name` | decommission |
-| `POST /api/workers/:name/default-model` | set worker's default model (`{model}`) |
-| `GET /api/workers/:name/models` | full model registry of that worker (**admin**) |
-| `POST /api/workers/:name/models` | upsert a model entry `{name, provider, host, …}` (**admin**) |
-| `DELETE /api/workers/:name/models/:model` | remove an entry (refuses the default) (**admin**) |
-| `POST /api/workers/:name/secrets` | write-only `{provider, key}` → worker's secrets.json (**admin**) |
-
-Model-registry management routes are **relay-only**: the hub forwards
-them over the worker channel and persists nothing — models.json /
-secrets.json stay worker-local (credentials never live on the hub).
+Worker-scoped model/secret management routes and their `model_ctl` relay
+were removed after the Phase-43 hub registry became authoritative. They
+were not part of task dispatch in the final implementation. Use the hub
+provider/model routes below. Old worker-local files are not deleted.
 
 Worker enrollment is **CLI-only** (admin runs it on the hub host):
 `hive-server enroll-worker <name>` prints the raw `hmwk_` key ONCE
@@ -86,14 +81,22 @@ full op inventory.
 
 ## Models & credentials
 
-The hub holds NO LLM config. Each worker owns its local store
-(`~/.local/share/hive-worker/models.json` + `secrets.json`, 0600);
-credentials are env-injected into agents at spawn (`HIVEMIND_*`).
-`GET /api/models` returns the union of connected workers' catalogs
-(advertised in their `hello` frames) -- used by the client's New Agent
-dialog.
+The hub owns the current LLM configuration in
+`~/.local/share/hivemind/llm.db`, including provider API keys. Protect
+the hub home and backups, and use authenticated TLS worker channels when
+workers are off-host. At dispatch the resolved provider configuration is
+injected into each task's `llm` object and relayed by the worker to
+hive-agent. `GET /api/models` reads this hub registry and supplies model
+choices to clients. Blank agent model selects the hub default.
 
 ### Hub model registry (Phase 43 — the authoritative path)
+
+These are hub control-plane endpoints for configuration clients. They are
+not tools exposed to a running hive-agent: the hub resolves provider/model
+configuration into each task's `llm` block, and the agent cannot change its
+own provider/model through these routes. Bearer-scope labels such as
+`agent` belong to API credentials, not to the runtime agent's capabilities.
+
 
 `GET/POST /api/providers`, `GET/POST/DELETE /api/models`,
 `POST /api/models/default` manage the hub-owned registry (llm.db); the

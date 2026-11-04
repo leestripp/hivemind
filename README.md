@@ -127,12 +127,14 @@ automatically.
 
 ### Models
 
-LLM config is **worker-owned**: each hive-worker keeps its own
-`~/.local/share/hive-worker/models.json` (catalog) + `secrets.json`
-(credentials, 0600) and injects them into agents as spawn env. The hub
-holds no keys; `GET /api/models` returns the union of connected workers'
-catalogs, which is what the client's New Agent dialog offers. Blank model
-= the worker's default.
+LLM providers, models, and provider credentials are **hub-owned** in
+`~/.local/share/hivemind/llm.db`. Manage them through `/api/providers`
+and `/api/models`; blank agent model means the hub default. At dispatch,
+the hub resolves the effective provider/model and injects an `llm` block
+into the task frame. The worker relays that configuration to hive-agent,
+which applies it before the turn with `explicit_model_wins`. Protect the
+hub database/backups and keep worker transport authenticated and encrypted
+off-host: resolved task configuration includes the provider API key.
 
 ## Layout
 

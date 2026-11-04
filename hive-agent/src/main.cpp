@@ -18,8 +18,9 @@
 //   {"ev":"background_done","process_id":"bg_1","thread_id":"...",...}
 //   {"ev":"error","text":"..."}           (fatal/startup errors)
 //
-// Config via environment (injected by the worker at spawn; credentials
-// live on the worker host, never on the server):
+// Legacy/standalone config via environment (current hub tasks instead
+// carry the resolved provider/model config, including credentials, in
+// their llm block):
 //   HIVEMIND_AGENT_NAME          (required)
 //   HIVEMIND_AGENT_ID
 //   HIVEMIND_API_HOST / HIVEMIND_API_KEY / HIVEMIND_CHAT_ENDPOINT
@@ -36,6 +37,7 @@
 
 #include "library/Agent.h"
 #include "core/settings.h"
+#include "core/ReplyAccumulator.h"
 #include "types/ProviderConfig.h"
 #include "library/AgentSink.h"
 #include "types/AgentConfig.h"
@@ -283,83 +285,27 @@ public:
     void begin_task(const std::string& id) {
         std::lock_guard<std::mutex> lk(m_);
         task_id_ = id;
-        pending_.clear();
-        committed_.clear();
-        stop_summary_.clear();
-        last_intermediate_.clear();
+        replies_.begin();
         errored_ = false;
     }
 
-    // The posted reply: deliberate tell_user messages (in call order)
-    // plus the FINAL assistant message's prose. Fallbacks, in order:
-    // stop.summary (answer put there instead of in text), then the last
-    // intermediate prose — a turn must never post an empty body, but a
-    // closing summary is never APPENDED to an already-complete reply
-    // (2026-10-22 reply-pipeline fix: kills the "... Closing." tail).
-    std::string user_output() const {
-        std::lock_guard<std::mutex> lk(m_);
-        std::string out = committed_;
-        append_paragraph(out, pending_);
-        if (out.empty()) out = stop_summary_;
-        if (out.empty()) out = last_intermediate_;
-        return out;
-    }
+    std::string user_output() const { return replies_.user_output(); }
     bool errored() const { return errored_.load(); }
 
     void on_assistant_delta(std::string_view text) noexcept override {
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            pending_ += text;   // current assistant message only
-        }
+        replies_.append_assistant(text);
         emit({{"ev", "delta"}, {"task", current_task()}, {"text", std::string(text)}});
     }
 
-    // Iteration boundary (2026-10-22 reply-pipeline fix): a tool call
-    // means the assistant message that preceded it was INTERMEDIATE
-    // (working out loud), not the reply — stash it as a fallback and
-    // start a fresh pending buffer. Before this, every iteration's
-    // prose was concatenated into the posted reply ("works.The route
-    // test is fully closed" doubling). "stop" is the exception: the
-    // loop ends there, so prose immediately before stop IS the reply.
     void on_tool_call(std::string_view name,
                       const nlohmann::json& args) noexcept override {
-        if (name == "stop") return;
-        // 2026-10-22: set_status({"state":"Done"}) is turn-terminal (see
-        // LLMClient) — prose immediately before it IS the reply, same as
-        // before stop; do not stash it as intermediate.
-        if (name == "set_status") {
-            const std::string st = args.value("state", "");
-            if (st == "Done" || st == "done") return;
-        }
-        std::lock_guard<std::mutex> lk(m_);
-        if (!pending_.empty()) {
-            last_intermediate_ = pending_;
-            pending_.clear();
-        }
+        replies_.on_tool_call(name, args);
     }
 
     void on_tool_result(std::string_view name,
                         std::string_view /*call_id*/,
                         const nlohmann::json& result) noexcept override {
-        // tell_user carries a complete user-facing message: capture it
-        // UNTRUNCATED - exactly what the chat should show.
-        if (name == "tell_user") {
-            const std::string content = result.value("content", "");
-            if (!content.empty()) {
-                std::lock_guard<std::mutex> lk(m_);
-                append_paragraph(committed_, content);
-            }
-        }
-        // 2026-10-22: stop.summary is now a RESCUE path, never an
-        // append. Phase 52 concatenated it onto every reply, which
-        // forced a posted closing summary each turn ("... Closing.").
-        if (name == "stop") {
-            const std::string summary = result.value("summary", "");
-            if (!summary.empty()) {
-                std::lock_guard<std::mutex> lk(m_);
-                stop_summary_ = summary;
-            }
-        }
+        replies_.on_tool_result(name, result);
     }
 
     // Brain state machine -> roster presence. hive-brain notifies every
@@ -395,22 +341,9 @@ private:
         return task_id_;
     }
 
-    // Joins blocks with a blank line (no leading blank on the first).
-    static void append_paragraph(std::string& dst, const std::string& src) {
-        if (src.empty()) return;
-        if (!dst.empty()) {
-            if (dst.back() != '\n') dst += '\n';
-            dst += '\n';
-        }
-        dst += src;
-    }
-
     mutable std::mutex m_;
     std::string task_id_;
-    std::string pending_;            // current assistant message's prose
-    std::string committed_;          // tell_user messages, call order
-    std::string stop_summary_;       // rescue only — see user_output()
-    std::string last_intermediate_;  // last stashed pre-tool prose
+    ReplyAccumulator replies_;
     std::atomic<bool> errored_{false};
 };
 
@@ -586,6 +519,26 @@ int main(int argc, char** argv) {
                                  std::istreambuf_iterator<char>());
     }
 
+    // HiveMind runtime boundary (2026-11-04 review): keep autonomous work
+    // autonomous, but make host-owned model configuration and shell safety
+    // explicit. These are instructions, not an interactive approval flow.
+    cfg.system_prompt +=
+        "\n\n## Runtime configuration and autonomy\n"
+        "- The hub owns provider/model selection and credentials. It injects "
+        "the resolved configuration for each task. Never try to change your "
+        "provider or model through hub APIs, local settings/databases, or "
+        "task-frame data, and do not look for a workaround. If a task "
+        "requires such a change, explain that it is host-owned instead.\n"
+        "- Work autonomously within the user's instructions, active skills, "
+        "and this system prompt. Do not invent permission checks, human "
+        "approval pop-ups, or confirmation rituals for ordinary allowed "
+        "work; there is no such interactive agent approval flow.\n"
+        "- Never run destructive or system-damaging shell commands (for "
+        "example, erasing a filesystem/root tree, formatting a disk, or a "
+        "fork bomb). Do not disguise a dangerous command or bypass a safety "
+        "block through another command or tool. Choose a safe alternative, "
+        "or report why the task cannot proceed safely.\n";
+
     // Phase 35: every agent learns attach_file regardless of role prompt
     // (SystemPromptBuilder composes the remaining sections regardless).
     cfg.system_prompt +=
@@ -630,12 +583,12 @@ int main(int argc, char** argv) {
         "peer, state only the decision or deliverable, not the play-by-"
         "play.\n"
         "- Address the peer directly (you/them), not in third person.\n"
-        "- If a message is addressed to you, close visibly: reply with "
-        "one short line ('Noted - closing the item', 'Confirmed, "
-        "thanks'). Brief acknowledgments POST to the thread but are "
-        "never fanned back to the peer (the hub guarantees this), so "
-        "they are free - and they stop the peer from wondering whether "
-        "you received the message at all.\n"
+        "- If a message is addressed to you and no substantive answer is "
+        "needed, one short specific acknowledgment ('Confirmed, thanks') "
+        "is enough. Do not post closing or housekeeping narration such as "
+        "'Noted - closing the item' or 'Closing'. Brief acknowledgments "
+        "POST to the thread but are never fanned back to the peer (the hub "
+        "guarantees this), so they do not create another peer wake.\n"
         "- Silence is for undirected traffic only: pure FYI/heartbeat "
         "messages not addressed to you warrant NO output. Empty turns "
         "are never posted and do not wake the peer.";

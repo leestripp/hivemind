@@ -73,8 +73,9 @@ hive-worker --server wss://<server> --key hmwk_... --name <name>
 - No inbound ports, no DNS, no TLS setup on the rig -- it dials out.
 - Auth: first frame must be `{"op":"hello","worker","key","caps","proto",
   "models"}`; the hub validates the key and replies `welcome` (or `error`
-  + close). `models` is the worker's local LLM catalog (from its
-  models.json) and feeds the hub's aggregated `GET /api/models`.
+  + close). Legacy `models`/`default_model` hello fields are accepted
+  and ignored: `/api/models` is backed by the hub-owned Phase-43 `llm.db`
+  registry, not negotiated per worker.
 - Reconnects with backoff (1s, 2s, 5s, ... capped). On every (re)connect
   the hub re-syncs the skills library and replays `agent_spawn` for every
   roster agent placed on this worker -- a rig can be wiped and rebuilt
@@ -216,32 +217,48 @@ being dropped. Net rule: a dispatched task ALWAYS gets exactly one
 `task_result` — from the agent, or from the worker standing in for a
 dead one.
 
-## LLM config (worker-owned)
+## LLM configuration (hub-owned, injected per task)
 
-`~/.local/share/hive-worker/models.json` (catalog) + `secrets.json`
-(provider credentials), both 0600. At spawn the worker renders an env
-file (`env/<agent-id>.env`) with HIVEMIND_API_HOST / HIVEMIND_API_KEY /
-HIVEMIND_CHAT_ENDPOINT / HIVEMIND_MODEL / HIVEMIND_MAX_CONTEXT /
-HIVEMIND_TEMPERATURE and passes it to `podman exec --env-file`. The hub
-never sees credentials at rest; hive-agent sets hive-brain'
-`explicit_model_wins` so the per-agent settings store can never override
-this injection (model-registry unification Phase 1 — models.json is the
-single source of truth).
+The authoritative provider/model registry is the hub's
+`~/.local/share/hivemind/llm.db`. For every dispatch the hub resolves the
+agent's model (blank means hub default) and adds an `llm` object to the
+`task` frame. It contains provider, host, API key, chat endpoint, plugin,
+model/model_id, context and temperature metadata, plus the effective
+thinking level. The worker forwards the task to hive-agent over stdio;
+hive-agent upserts/applies the configuration before running the turn with
+`explicit_model_wins`, so local settings cannot shadow it.
 
-### Registry management over the channel (`model_ctl`)
+This is a credential-bearing control-plane path. Use authenticated `wss://`
+for off-host workers, preserve the worker's `llm.api_key` diagnostic
+redaction, and never dump unredacted task frames. The worker does not need
+to persist the current registry. Legacy `models.json`/`secrets.json` files
+may remain on old rigs as inert historical data; do not print their secret
+values or treat them as authoritative.
 
-The hub relays registry management to the worker (it persists nothing):
+### Removed legacy registry relay
 
-| `action` | frame fields | effect |
-|---|---|---|
-| `set_default` (default) | `model` | writes the models.json `"default"` key |
-| `list` | — | replies `data` = `{"models": {name: entry}, "default": name}` (secret-free) |
-| `upsert` | `model`, `entry` | create/replace an entry; requires provider + host |
-| `delete` | `model` | removes an entry; refuses the current default |
-| `set_secret` | `provider`, `key` | write-only into secrets.json (0600 enforced); never echoed |
+Older hub/worker pairs exposed worker-local registry management through
+`model_ctl`/`model_result` and `/api/workers/:name/models|secrets`. The
+current worker has no such handler, and the dead hub waiter/catalog code
+has been removed. Legacy hello catalog fields remain harmless ignored
+input for older peers. Current model administration uses `/api/providers`,
+`/api/models`, and `/api/models/default`; existing on-disk files are not
+deleted automatically.
 
-All reply synchronously as `model_result` (`error` set on failure).
-Frames omitting `action` behave as `set_default` (older hubs).
+## Agent system-prompt boundaries
+
+The HiveMind host appends a runtime-configuration and autonomy section to
+every agent role. Provider/model selection and credentials are hub-owned:
+the agent must not try to alter them through hub APIs, local settings or
+task data. Ordinary assigned work remains autonomous; agents must not
+invent human approval pop-ups or confirmation rituals. The prompt also
+prohibits destructive/system-damaging shell commands and bypass attempts.
+These are behavioral instructions, not a claim that `BashTool` currently
+implements a dangerous-command denylist.
+
+Thread etiquette permits a short specific acknowledgment when useful, but
+not closing/housekeeping narration. This matches the library's mandatory
+reply-discipline section and avoids courtesy-ack loops.
 
 ## MCP
 

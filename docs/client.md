@@ -18,6 +18,14 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   tool; user uploads with image extensions render too. Phase 35 added
   `attach_file`: any workspace artifact (videos included) arrives as a
   chat attachment — worker-routed downloads pass `?worker=<name>`.
+  Attachment-only messages (no caption) render their attachments normally.
+- **Files and uploads** — non-media attachments show a filename/size chip
+  with open and Save-to-Downloads actions. Images larger than 1024 px on
+  their longest edge are downscaled proportionally before upload; smaller
+  images and non-image files keep their original bytes. Picking a file
+  displays an animated prepare/upload row until the transfer succeeds or
+  reports an error; the blocking transport does not expose byte-level
+  percentage progress.
 - **Theming** — no in-app Dark/Light switch: the client follows the
   GNOME system style live (Phase 37). Ubuntu drives dark via
   `gtk-theme='Yaru-dark'` while `color-scheme` stays 'default', so BOTH

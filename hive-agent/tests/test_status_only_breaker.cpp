@@ -3,14 +3,9 @@
  * @brief Regression tests for the set_status idle-loop bug (§IdleExitBreaker,
  *        2026-08-20).
  *
- * A finished model kept calling set_status("Done") expecting the agent loop
- * to exit — but set_status only *reports* state to the host; a turn ends
- * exclusively via the `stop` tool (or host cancel). The host re-invoked the
- * model with only the auto context-status block, the model replied with
- * another set_status, and the turn looped forever.
- *
- * The fix counts consecutive iterations whose ONLY tool call is set_status
- * and ends the turn (like stop) once the count reaches 2. These tests drive
+ * Done is now directly turn-terminal like stop. The remaining breaker
+ * counts consecutive iterations whose ONLY tool call is a NONTERMINAL
+ * set_status and ends the turn once the count reaches 2. These tests drive
  * LLMClient against an in-process HTTP server that answers chat completions
  * with a set_status tool call — mirroring test_fatal_breaker.cpp.
  *
@@ -31,6 +26,7 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -59,7 +55,8 @@ class StatusOnlyServer {
 public:
     enum Mode { ALL_STATUS, STATUS_THEN_TEXT, ALL_DONE };
 
-    explicit StatusOnlyServer(Mode mode) : mode_(mode) {
+    explicit StatusOnlyServer(Mode mode, std::string done_state = "Done")
+        : mode_(mode), done_state_(std::move(done_state)) {
         listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
         if (listen_fd_ < 0) throw std::runtime_error("socket() failed");
         int yes = 1;
@@ -152,13 +149,15 @@ private:
         ::send(cfd, resp.data(), resp.size(), 0);
     }
 
-    static std::string status_done_response(int seq) {
+    std::string status_done_response(int seq) const {
+        const std::string args = json{{"state", done_state_}}.dump();
         return std::string(
             R"({"id":"chatcmpl-test","object":"chat.completion","choices":[)"
             R"({"index":0,"message":{"role":"assistant","content":null,)"
             R"("tool_calls":[{"id":"call_)" + std::to_string(seq) +
             R"(","type":"function","function":{"name":"set_status",)"
-            R"("arguments":"{\"state\": \"Done\"}"}}]},)"
+            R"("arguments":)" + json(args).dump() +
+            R"(}}]},)"
             R"("finish_reason":"tool_calls"}],)"
             R"("usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}})");
     }
@@ -183,6 +182,7 @@ private:
     }
 
     Mode mode_;
+    std::string done_state_;
     int listen_fd_ = -1;
     int port_ = 0;
     std::atomic<bool> running_{false};
@@ -291,4 +291,17 @@ TEST_SUITE("set_status-only circuit breaker (§IdleExitBreaker)") {
         CHECK(final == AgentState::DONE);
         CHECK(server.request_count() == 1);
     }
+    TEST_CASE("Done terminal matching trims and ignores case") {
+        int index = 0;
+        for (const char* state : {"done", "DONE", " DoNe ", "\tDone\n"}) {
+            CAPTURE(state);
+            StatusOnlyServer server(StatusOnlyServer::ALL_DONE, state);
+            ScratchDir scratch("status-done-normalized-" + std::to_string(index++));
+            LLMClient client(make_config(server.base_url(), scratch.path));
+            client.initialize();
+            CHECK(client.run_one_turn("hello") == AgentState::DONE);
+            CHECK(server.request_count() == 1);
+        }
+    }
+
 }

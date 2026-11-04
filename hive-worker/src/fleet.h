@@ -10,10 +10,10 @@
 // (ready/delta/message/error) and are forwarded to the
 // server over the worker channel.
 //
-// Credentials never transit the server: agent_spawn carries everything
-// EXCEPT api keys; the worker resolves keys from its own local
-// secrets file (~/.local/share/hive-worker/secrets.json, 0600,
-// {"<provider>": "<key>"}) keyed by the spec's provider name.
+// Current hub tasks carry resolved provider/model configuration in their
+// llm block, including the provider API key. The worker relays that block
+// to hive-agent and redacts it from diagnostics; no worker-local registry
+// participates in dispatch.
 
 #include <nlohmann/json.hpp>
 
@@ -42,7 +42,7 @@ struct AgentSpec {
     std::string model;         // remote model id
     std::string api_host;
     std::string chat_endpoint;
-    std::string provider;      // key into secrets.json
+    std::string provider;      // legacy spawn/env fallback; task llm wins
     long    max_context = 0;
     double  temperature = -1;
     std::string system_prompt; // written to the shared volume, passed by path
@@ -215,17 +215,6 @@ private:
     mutable std::mutex m_;
     std::unordered_map<std::string, std::unique_ptr<AgentProcess>> agents_;
 };
-
-
-
-
-
-
-/// Resolve a model NAME to its full config from the worker-local
-/// ── Model-registry management (unification Phase 2) ──────────────
-/// The hub RELAYS these over the worker channel; models.json and
-/// secrets.json stay worker-local (the hub never holds credentials).
-/// All return an error string ("" = success) except list_models_detail.
 
 
 

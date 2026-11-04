@@ -1,9 +1,10 @@
-# hive-android — voice-only Android client
+# hive-android — voice-first Android client
 
-Voice-only Android client for the hub: pick an agent, talk, hear the
-answer. Three screens — roster, voice session, settings. It talks ONLY
-to hive-server over HTTPS (Bearer key), the same REST surface as
-hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
+Voice-first Android client for the hub: pick an agent, talk, hear the
+answer, with roster, voice, text-chat/media, User Inbox, voice-picker,
+and settings surfaces. It talks ONLY to hive-server over HTTPS (Bearer
+key), the same REST surface as hive-client (`docs/api.md`). Source lives
+top-level in `hive-android/`.
 
 ## What it does
 
@@ -21,16 +22,20 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   button is an interrupt — cut it off and drop straight back to
   recording. ✕ discards the take or cancels the turn
   (`POST /api/threads/:id/cancel`).
-- **Continuous recording** — STT is an on-device streaming Zipformer2
-  transducer (sherpa-onnx, int8) fed by our own AudioRecord pipeline
-  with NO endpointer: silence never stops a take — only SEND or ✕ does.
-  No platform SpeechRecognizer anywhere (its silence auto-end, restart
+- **Continuous recording** — STT is on-device whisper.cpp fed by our own
+  AudioRecord pipeline: quantized tiny.en supplies live sliding-window
+  partials and base.en performs the final pass on SEND. There is NO
+  endpointer: silence never stops a take — only SEND or ✕ does. No
+  platform SpeechRecognizer is used (its silence auto-end, restart
   throttling, and start/stop cues are why the app went on-device).
 - **Streaming TTS** — the hub's live turn partial (the same task_delta
   stream the desktop client's chunks come from, via
   `GET /api/threads/:id/activity`) is sentence-chunked every 700 ms and
-  fed to TextToSpeech `QUEUE_ADD`, so the agent starts speaking from
-  its first sentence instead of after the full reply. Chunks are cut
+  synthesized on-device by pocket-tts/audio.cpp through JNI, with PCM
+  playback through AudioTrack. Android platform TextToSpeech `QUEUE_ADD`
+  is the fallback if pocket-tts cannot initialize or a chunk fails. The
+  agent therefore starts speaking from its first sentence instead of
+  after the full reply. Chunks are cut
   only at safe sentence boundaries (the still-growing tail is never
   read mid-word); the remainder flushes at turn end. Every outgoing
   message carries a voice-style prefix (plain flowing prose, no
@@ -73,14 +78,27 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   Visualizer (pseudo-wave fallback). Audio autoplays; BACK closes any
   viewer and releases its player.
 
+## Notification relay
+
+With Android notification access enabled, `NotifyListenerService` relays
+supported SMS/MMS and missed-call notifications to the configured agent's
+DM through `POST /api/notifications`. Ongoing/low-priority/group-summary
+notifications and the app's own notifications are filtered out. Dedupe
+uses the Android notification instance plus a content fingerprint and
+survives service restarts.
+
+Delivery is deliberately **at-most-once**: a failed hub POST is dropped
+and is not automatically retried, avoiding repeated announcements. The
+persisted dedupe policy is not an end-to-end exactly-once guarantee.
+
 ## Build & install
 
 - Toolchain: JDK 21 (AGP requirement), Android SDK platform 35 + NDK
   side-by-side; the Gradle wrapper is committed. One-time
-  `./fetch-deps.sh` pulls the sherpa-onnx natives + STT model
-  (~130 MB, gitignored).
+  `./fetch-deps.sh` pulls the whisper.cpp/audio.cpp native dependencies
+  and on-device STT/TTS models (large, gitignored).
 - `./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
-  (~114 MB — model + onnxruntime for arm64-v8a and x86_64).
+  (includes native libraries and models for arm64-v8a and x86_64).
 - `adb install -r …`; first launch opens Settings: hub URL (default
   `https://leestrippai.com`, LAN `http://<ip>:8421` works too) + API
   key (mint via `/api/keys`; `agent` scope suffices). RECORD_AUDIO is
@@ -97,10 +115,10 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
 - **Attachment cache** — cacheDir/attachments/<thread>/<pathhash>-<name>;
   downloads buffer fully in memory before write (no partial files).
 
-- **Kotlin shell only** — framework Views, org.json, kotlin-stdlib, no
+- **Kotlin shell** — framework Views, org.json, kotlin-stdlib, no
   AndroidX. Native code does the interesting work: `libsphere.so` (GL
-  renderer) and the vendored sherpa-onnx JNI libs
-  (`app/src/main/jniLibs/`, Apache-2.0 k2-fsa v1.13.8).
+  renderer), whisper.cpp STT, and audio.cpp/pocket-tts synthesis through
+  JNI. Native libraries/models are bundled for arm64-v8a and x86_64.
 - **SttEngine contract** — start/stop/discard/destroy + transcript +
   listening, with level/transcript/stopped callbacks. A session
   generation counter kills the zombie-capture class: a capture start
@@ -117,8 +135,9 @@ hive-client (`docs/api.md`). Source lives top-level in `hive-android/`.
   `reuse_dm:true`; the turn loop advances a `lastMessageId` cursor over
   `messages?after=`; the idle watch resumes from the same cursor, so a
   message is never spoken twice.
-- **Waydroid** — STT works (x86_64 libs vendored, no GMS needed); TTS
-  needs a system engine, which stock LineageOS images lack.
+- **Waydroid** — STT and primary pocket-tts work with the bundled x86_64
+  libraries and need no GMS/system speech service. Only the platform-TTS
+  fallback needs a system engine, which stock LineageOS images may lack.
 - **Accessibility services** — TalkBack (or anything grabbing transient
   audio focus) fights the mic and makes single taps focus-only. adb
   `input tap` bypasses it, so automated taps pass while physical taps

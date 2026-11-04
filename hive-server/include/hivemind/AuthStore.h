@@ -15,7 +15,10 @@
  *
  * Scopes (comma-separated in the row):
  *   admin — everything, incl. key management + container/exec debug
- *   agent — all roster/chat/routine/skill/graph APIs (no keys, no exec)
+ *   agent — API-client scope for ordinary hub operations (no key admin or
+ *           container/exec debug). This label is NOT a hive-agent runtime
+ *           permission set: agents receive hub-resolved model config and
+ *           have no provider/model-management tools.
  *   read  — GET only
  *
  * On first run (empty table) a master key is bootstrapped: printed to

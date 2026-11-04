@@ -90,17 +90,8 @@ std::string MigrationService::begin(const std::string& agent_id,
         throw std::invalid_argument(
             "agent is mid-turn; retry when idle or pass force");
 
-    // Warn-by-default when the target worker does not advertise the
-    // agent's model (worker-owned models.json — Plan.md §6.2).
-    std::string progress;
-    if (!a->model.empty()) {
-        bool served = false;
-        for (const auto& e : channel_.models_catalog()) {
-            if (e.value("name", "") == a->model) { served = true; break; }
-        }
-        if (!served) progress = "warning: no worker advertises model '" +
-                                 a->model + "'; agent may fail to call LLMs";
-    }
+    // Provider/model selection is hub-global and follows the roster agent.
+    // Worker-local model availability is not a migration precondition.
 
     Migration m;
     m.agent_id = a->id;
@@ -111,7 +102,6 @@ std::string MigrationService::begin(const std::string& agent_id,
     m.target_type = target_type;
     m.force = force;
     m.no_rollback = no_rollback;
-    m.progress = progress;
     const std::string id = store_.create(m);
     drive(*store_.get(id));
     return id;

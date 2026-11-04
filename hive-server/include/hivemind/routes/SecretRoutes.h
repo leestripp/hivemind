@@ -10,7 +10,8 @@
 //   DELETE /api/secrets/:name          remove secret + all grants
 //   GET    /api/agents/:id/secrets     granted secret names
 //   POST   /api/agents/:id/secrets     {name, granted}  (toggle grant)
-// All routes are admin-scoped (main.cpp middleware).
+// Scope checks live in main.cpp middleware. API-client scopes are distinct
+// from the tools/capabilities exposed to a running hive-agent.
 // -----------------------------------------------------------------------------
 #pragma once
 

@@ -280,12 +280,6 @@ int main(int argc, char* argv[]) {
         if (path.rfind("/api/keys", 0) == 0 ||
             path.rfind("/api/secrets", 0) == 0 ||
             path.rfind("/api/shares", 0) == 0 ||
-            // Model-registry management is credential-adjacent
-            // (relay to worker models.json/secrets.json) — admin only.
-            (path.rfind("/api/workers/", 0) == 0 &&
-             (path.find("/models") != std::string::npos ||
-              path.find("/secrets") != std::string::npos)) ||
-            // Phase 73: migration moves live agents — admin only.
             path.rfind("/api/migrations", 0) == 0 ||
             (path.rfind("/api/agents/", 0) == 0 &&
              path.find("/migrate") != std::string::npos) ||

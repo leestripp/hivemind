@@ -27,8 +27,9 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
 - Config `server.json`: port, worker channel port, auth keys.
 - TLS: terminate at the reverse proxy in front (the client speaks HTTPS
   to the proxy; the hub itself is plain HTTP on localhost).
-- The hub runs no hive-brain, holds no LLM keys, needs no podman (unless it
-  also runs a worker).
+- The hub runs no hive-brain and needs no podman unless it also runs a
+  worker. It does hold provider/model configuration and provider API keys
+  in `llm.db`; include that file in the hub's storage/backup threat model.
 
 ## hive-worker
 
@@ -40,8 +41,9 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
   repo-root build context. The chain copies the host-built hive-agent
   binary, so build it before the images.
 - Data under `~/.local/share/hive-worker/`: workspace, skills library,
-  per-agent home volumes, model/provider credentials (local LLM store —
-  credentials never live on the hub).
+  and per-agent home volumes. Current task model/provider configuration
+  comes from the hub in each task frame; workers relay it without using a
+  worker-local registry as the dispatch source of truth.
 - The worker dials OUT to the hub; rigs behind NAT need nothing else.
   Preferred URL is TLS through the hub's reverse proxy:
   `--server wss://<server>` (nginx proxies `/api/workers/channel` →
