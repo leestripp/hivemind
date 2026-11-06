@@ -177,6 +177,19 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
   gap: 16px; margin-bottom: 18px;
 }
 .page-head h2 { margin: 0 0 6px; }
+.skills-guide {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  border: 1px solid #3b5f70;
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: #17232b;
+}
+.skills-guide h3 { margin: 0 0 8px; color: #a8d5e2; font-size: 15px; }
+.skills-guide p { margin: 6px 0 0; line-height: 1.55; }
+.skills-starters { margin: 0 0 14px; }
+.skills-starters h3 { margin: 0 0 6px; font-size: 15px; }
+.skills-starters p { line-height: 1.5; }
 
 .kv-table {
   width: 100%; border-collapse: collapse; font-size: 13px;

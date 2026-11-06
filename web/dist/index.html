@@ -290,20 +290,30 @@
   <div id="page-skills" class="page hidden">
     <div class="page-body page-wide">
       <div class="page-head">
+        <div><h2>🧩 Skills</h2></div>
+      </div>
+      <section class="skills-guide" aria-labelledby="skills-guide-title">
+        <h3 id="skills-guide-title">The preferred way: just ask an agent</h3>
+        <p>
+          Ask any agent to install, create, fix, or remove a skill. They can put
+          a shared skill in <code>/workspace/.agents/skills/</code> for everyone,
+          or a private skill in their own <code>~/.agents/skills/</code>—and
+          they'll manage it for you.
+        </p>
+        <p>
+          Want a shared skill to belong to particular agents? Just say so. Agents
+          can record the owner or intended users in <code>SKILL.md</code>; the
+          others read that guidance and respect it.
+        </p>
+      </section>
+      <div class="page-head skills-starters">
         <div>
-          <h2>🧩 Starter Skills</h2>
+          <h3>Starter skills — just to get you started</h3>
           <p class="muted">
-            Install a curated skill once and every agent can use it. The hub
-            places a writable copy in each worker's shared
-            <code>/workspace/.agents/skills/</code> directory. Offline workers
-            receive missing starters automatically when they reconnect.
-          </p>
-          <p class="muted">
-            These are starting copies, not a read-only library: ask an agent to
-            correct or improve one and it can edit its shared workspace copy.
-            Reconnects preserve those edits. Agents can also create shared
-            workspace skills or private skills themselves; this page intentionally
-            shows only the curated starters installed here, not agents' own skills.
+            These optional curated skills are only here to get you started.
+            Install for all agents places a writable copy in each worker's shared
+            workspace. Reconnects fill in missing copies without overwriting edits;
+            uninstall removes only that starter, never agents' own skills.
           </p>
         </div>
       </div>
