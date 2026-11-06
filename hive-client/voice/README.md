@@ -41,7 +41,13 @@ Selecting an agent opens or reuses its DM and, when ChimpFlow is healthy,
 opens `VoiceView` in the left panel while keeping the DM visible. Back
 restores Agents/Threads without losing the DM. Hub connection settings come
 from the main client. Voice inherits the main GNOME dark/light/high-contrast
-appearance.
+appearance. The page shows the scoped shortcut and live ChimpFlow health.
+
+Readable agent chat bubbles also have a Play button. It uses an independent
+narration engine owned by `HiveWindow`, reads the exact stored message with
+the sender's configured voice, and interrupts previous bubble narration when
+another Play button is clicked. This works in ordinary threads and Inbox;
+it does not create another voice application or steal `VoiceView`'s sink.
 
 **Super+Alt+Backspace** invokes the exact Talk button action through the XDG
 GlobalShortcuts portal. The session exists only while voice is open: Back,
@@ -62,14 +68,15 @@ owns this global shortcut.
 | `src/ApiClient.*` | hub REST (`/api/agents`, threads, activity, cancel) |
 | `src/SpeechText.*` | TTS hygiene (clause split, fillers, CJK punctuation) |
 | `src/AgentStateAnnouncer.*` | roster edge announcements ("Scout is online") |
-| `data/voice.ui` | GTK builder UI for the session window (gresource) |
+| `data/voice.ui` | GTK builder UI for the embedded voice page (gresource) |
 
 ## Tests
 
-`test_speech_text`, `test_announcer`, `test_voice_turn_logic`,
-`test_tts_tag_ledger`, `test_prefs`, `test_avatars`,
-`test_wav_codec` (pure-logic units; run via ctest from the top-level
-build).
+`test_speech_text`, `test_transcript_text`, `test_announcer`,
+`test_voice_turn_logic`, `test_api_client_activity`, `test_tts_tag_ledger`,
+`test_prefs`, `test_avatars`, `test_wav_codec`, and `test_audio_common`
+(run via ctest from the top-level build). `test_speech_text` also covers
+full-message chunking and UTF-8-safe splitting for bubble narration.
 
 
 ## Turn activity scopes
@@ -89,8 +96,9 @@ TTS completion is tracked by exact utterance tag, so late playback callbacks
 from a stopped turn cannot consume a newer turn's outstanding count. Once
 the hub is idle, a silent audio drain is bounded to 75 seconds (longer than
 the 60-second TTS request timeout); an orphaned drain logs and returns to
-idle instead of leaving the Stop control up forever. The debug shell's
-`status` includes `turn_done`, `tts_outstanding`, and `tts_speaking`.
+idle instead of leaving the Stop control up forever. The main client's UiApi
+(`GET /ui/state`) exposes the current `voice_phase`, `voice_status` and
+related voice-page state for diagnostics; there is no separate debug shell.
 
 PipeWire playback uses each WAV's native sample rate. When the next
 utterance has a different rate, old-rate audio now drains before the stream

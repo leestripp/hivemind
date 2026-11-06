@@ -82,16 +82,21 @@ scoped grants, host-agent warnings, or verification of external actions. The
 section stays before volatile session memory to preserve the static prompt
 prefix used by provider caches.
 
-### hive-client — GTK4/gtkmm4 (unchanged shape)
+### hive-client — single voice-enabled GTK4/gtkmm4 app
 
-- Roster, threads, chat, streaming replies, inline images, agent management.
-- Connects to the hub only; knows nothing about containers or workers
-  beyond presence display.
+- Roster, threads, chat, streaming replies, rich media, agent management.
+- `hive-client/voice/` is linked into this same process as `VoiceView`:
+  ChimpFlow STT/TTS, PipeWire audio, per-agent voices, message narration and
+  a page-scoped XDG Talk shortcut. There is no standalone voice executable.
+- Hub conversations use the hub REST API; local voice I/O uses ChimpFlow.
+  The client knows nothing about containers or workers beyond presence and
+  worker-routed attachment downloads.
 
 ## Comms flow at a glance
 
 ```
-hive-client --REST :8421 (Bearer)--> hive-server
+hive-client (chat + embedded voice) --REST :8421 (Bearer)--> hive-server
+hive-client/voice --local HTTP :8090--> ChimpFlow (STT/TTS)
                                       |  threads, roster, routines,
                                       |  routines, files; no LLM keys
 hive-worker --WS :8423 /api/workers/channel--> hive-server
@@ -129,7 +134,7 @@ keepAliveTimeout=0, per-connection writer queues) are in
 ## Hub transcripts versus agent brain context
 
 The hub's `threads.db` is the durable, per-thread user-visible transcript
-used by GTK, Android, voice, and other REST clients. It is not the exact
+used by the voice-enabled GTK client, Android, and other REST clients. It is not the exact
 prompt history sent to a model. Each hive-agent also maintains one
 hive-brain conversation at `/workspace/.hive-agent/<Name>/messages.json`
 on its worker. That conversation is shared across the agent's hub threads,

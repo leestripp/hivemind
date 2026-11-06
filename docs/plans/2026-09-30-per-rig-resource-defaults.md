@@ -1,5 +1,11 @@
 # Plan — Per-Rig Resource Defaults (Phase 70: kill the global 4g/2 constants)
 
+> **Historical implementation log.** Desktop voice references below describe
+> the retired standalone `hive-client-voice` executable as it existed when
+> these incidents were investigated. Current desktop voice is integrated in
+> the single `hive-client` app (`hive-client/voice/`); do not build, install
+> or launch a separate voice executable.
+
 Status: **PROPOSED 2026-09-30** — awaiting Lee's sign-off before code.
 Triggered by Lee's (correct) criticism: defaults sized for the weakest
 rig silently apply to the strongest. Phase 69 made memory/cpus
@@ -167,7 +173,7 @@ Date: 2026-10-07 · Requested by: lee · Status: COMPLETE (except splice, blocke
 
 ## Background
 
-Long STT recordings (>~31 s) in hive-client-voice died silently: ChimpFlow's
+Long STT recordings (>~31 s) in the then-standalone desktop voice app died silently: ChimpFlow's
 OmniNet HTTP server capped request handling at ~1 MB (`Buffer too large,
 returning false` in the journal at totalReceived=1,016,121). Whisper direct
 handles the same 60 s file in 4 s — the gateway was the wall.
@@ -187,7 +193,7 @@ configurable at every layer, default unchanged (16 MB):
 | Project | OmniNet source | Needs code change? |
 |---|---|---|
 | Services/ChimpFlow | Fetch main + force-ff at configure | **Already done** in src/main.cpp (`maxRequestSize=24MB`, `maxBufferSize=32MB`) |
-| AI/Hive-Mind (hive-server, hive-worker, hive-agent, hive-client, hive-client-voice) | Fetch main + ff at configure (OMNINET_AUTO_UPDATE) | No — defaults are correct (hub bodies small; voice client sends ≤3.8 MB, receives ≤16 MB) |
+| AI/Hive-Mind (hive-server, hive-worker, hive-agent, voice-enabled hive-client) | Fetch main + ff at configure (OMNINET_AUTO_UPDATE) | No — defaults are correct (hub bodies small; voice client sends ≤3.8 MB, receives ≤16 MB) |
 | AI/ApolloCore | Fetch main (shallow) | No — build-check only |
 | AI/daedalus | daedalus/cmake/FetchOmniNet.cmake | No — build-check only (live agent runtime: build, do NOT install/restart) |
 | Apps-GTK4/splice | Fetch main (shallow) | No — build-check only |
@@ -215,7 +221,7 @@ at ~1MB). Service active on the new binary.
       "[hivemind] OmniNet updated" status line)
 - [x] Build all targets warning-clean
 - [x] Full ctest suite green
-- [x] Install hive-client-voice to ~/.local/bin
+- [x] Install the voice-enabled hive-client to ~/.local/bin (current target name)
 - [x] Commit (Plan.md + any changes)
 - [x] Deploy hive-server to the droplet via the deploy-hivemind runbook
       (per-rig rebuild, in-container proof, image cleanup)
@@ -260,7 +266,7 @@ containers' networking healthy, worker on the new binary.
 
 ## Addendum: post-reboot voice outage — SttEngine retry + prime (2026-10-08)
 
-**Symptom:** after a reboot, hive-client-voice gave no voice. All three
+**Symptom:** after a reboot, the then-standalone desktop voice app gave no voice. All three
 ChimpFlow services (gateway :8090, TTS :8080, whisper :8081) were active
 and healthy; a direct WAV round-trip through the gateway succeeded. The
 running app had been up ~13 min with zero hub/voice traffic — it had

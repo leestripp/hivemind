@@ -11,8 +11,10 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   start collapsed, and render greyed out — click the group header to
   expand/collapse. Agents on an offline worker are dimmed.
 - **Threads** — DM and group threads; chat with streaming replies.
-- **Integrated voice** — selecting an agent opens or reuses its DM. When the
-  configured ChimpFlow gateway and API key are available, the left sidebar
+- **Integrated voice** — this is part of the same `hive-client` process and
+  binary; no standalone desktop voice application remains. Selecting an agent
+  opens or reuses its DM. When the configured ChimpFlow gateway and API key
+  are available, the left sidebar
   switches to the voice session while the DM remains visible on the right.
   **Back** restores Agents/Threads without losing the DM; selecting the same
   agent again re-enters voice. If ChimpFlow is unavailable, agent selection

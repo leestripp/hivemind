@@ -28,8 +28,13 @@ configured runtime identity.
   WebSocket; no inbound ports/DNS/TLS needed on rigs.
 - **File locality** — artifacts stay on the machine that produced them.
 - **Linux-only** — podman (rootless), systemd --user, GTK4/gtkmm4.
+- **One native desktop app** — `hive-client` owns chat, media and the
+  embedded ChimpFlow voice page from `hive-client/voice/`; there is no
+  separate voice process, launcher, application ID or debug shell.
 
-Current release line: **0.9.x** (latest tag `0.9.9`; distributed workers milestone was 0.5.0).
+Current release line: **1.2.x** (latest tag `1.2.12`). The desktop client
+is the single voice-enabled `hive-client` app; the old standalone voice
+executable no longer exists.
 
 ## Tech Stack
 
@@ -41,7 +46,7 @@ Current release line: **0.9.x** (latest tag `0.9.9`; distributed workers milesto
 | Agent engine | **hive-agent** (in-tree at `hive-agent/src/` — merged into this repo 2026-09-07; builds as part of the main build) |
 | Persistence | **SQLite3** (raw C API via `DbUtil.h` helpers) |
 | JSON | **nlohmann_json** |
-| Native client | **GTK4 / gtkmm-4.0** (+ optional WebKitGTK 6.0 for embedded noVNC) |
+| Native client | **GTK4 / gtkmm-4.0**, integrated PipeWire/ChimpFlow voice (+ optional WebKitGTK 6.0 for embedded noVNC) |
 | Web dashboard | Vanilla JS + CSS in `web/dist/` (no framework, no bundler) |
 | Agent sandbox | Rootless **podman**; on-demand desktop (Xvfb + x11vnc + noVNC + Chromium) per container — starts on demand, auto-sleeps when viewerless |
 | Crypto/misc | OpenSSL, libpng, poppler-cpp (hive-brain deps) |
@@ -70,7 +75,7 @@ Useful configure options:
 - `-DOMNINET_AUTO_UPDATE=OFF` — stop configure-time `git fetch + reset --hard origin/main` of the vendored OmniNet
 - Clang toolchain: `cmake -S . -B build-clang -DCMAKE_TOOLCHAIN_FILE=cmake/clang.cmake`
 
-Tests (server-side only; skipped when `HIVEMIND_BUILD_SERVER=OFF`):
+Tests (server and client suites; server tests skip when `HIVEMIND_BUILD_SERVER=OFF`):
 
 ```bash
 cmake --build build        # tests link hivemind_core
@@ -114,9 +119,11 @@ hive-worker/          Remote executor daemon (fleet manager). Links OmniNet
                       ONLY — no hive-brain, no LLM keys, no roster DB.
 hive-agent/           In-container brain: thin hive-brain::Agent host speaking
                       stdio NDJSON with hive-worker. No HTTP.
-hive-client/          GTK4/gtkmm4 native client (roster, threads, chat,
-                      screen view). Icons/avatars bundled via GResource.
-*/tests/              per-app ctest suites — one binary per area, assert()-based
+hive-client/          Single GTK4/gtkmm4 desktop app: roster, threads,
+                      chat, media, screen view and integrated voice.
+  voice/              Embedded ChimpFlow STT/TTS, PipeWire audio, VoiceView,
+                      speech cleanup, portal shortcut and pure-logic tests.
+*/tests/              per-app ctest suites — one binary per area (assert/Catch2)
 web/dist/             Web dashboard (vanilla JS pages under js/pages/)
 docs/                 design.md, api.md, hive-worker.md, deploy.md, …
 resources/            banner/icon images
@@ -155,9 +162,11 @@ Key architectural mapping:
 - Register API routes **before** the static catch-all (first-match-wins);
   the web UI static handler must be last (see `src/main.cpp`).
 - JSON via `using json = nlohmann::json;` in route files.
-- Tests: plain `main()` + `assert()` (no framework), temp dirs under
-  `fs::temp_directory_path()`, cleaned on start. Tests are compiled with
-  `-UNDEBUG` so asserts stay live in Release — do not rely on NDEBUG.
+- Server/worker/agent tests use plain `main()` + `assert()`, temp dirs under
+  `fs::temp_directory_path()`, cleaned on start. Those tests are compiled with
+  `-UNDEBUG` so asserts stay live in Release — do not rely on NDEBUG. The
+  client's pure voice/text helpers use Catch2 through the existing test
+  targets; run the whole suite with ctest rather than assuming one framework.
 - New tests: add `hivemind_test(test_name)` to `hive-server/tests/CMakeLists.txt`
   (worker/agent apps use `hive_worker_test` / `hive_agent_test` in their own tests/ dirs).
 

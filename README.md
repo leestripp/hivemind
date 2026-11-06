@@ -62,9 +62,13 @@ and complete their work autonomously.
   all live, queued, and managed background work; and a **global skill library**
   (Anthropic SKILL.md format) shared across agents via per-agent enable
   toggles — plus per-agent learned skills that stay agent-owned.
-- **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
-  live chat, integrated ChimpFlow voice sessions with Back navigation,
-  scheduled-task dialog, and right-click agent management. Plus the **web
+- **Voice-enabled native GTK4 client** (`hive-client`) — ONE desktop app
+  for roster/avatars, threads, live chat, rich media, agent management and
+  integrated ChimpFlow voice. Selecting an agent opens its voice page beside
+  the existing DM; **Back** returns to Agents/Threads. It supports per-agent
+  voices, Play-button narration on agent bubbles (including Inbox), a
+  page-scoped **Super+Alt+Backspace** Talk shortcut and live ChimpFlow health.
+  There is no separate desktop voice executable or launcher. Plus the **web
   dashboard**:
   Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
@@ -119,7 +123,7 @@ cmake --build build -j$(nproc)
 
 # 3. Run
 ./build/hive-server/hive-server    # hub on :8421
-./build/hive-client/hive-client    # native GTK client
+./build/hive-client/hive-client    # native chat + integrated voice client
 # or the web UI: xdg-open http://localhost:8421/
 ```
 
@@ -144,7 +148,8 @@ off-host: resolved task configuration includes the provider API key.
 hive-server/   C++23 + OmniNet server: roster, threads, messaging,
                routines, containers, worker channel, web UI (web/dist)
 hive-agent/    the agent runtime itself (runs in worker containers)
-hive-client/   GTK4/gtkmm4 native client
+hive-client/   Single GTK4/gtkmm4 desktop client — chat, rich media and
+               integrated ChimpFlow voice (hive-client/voice/)
 hive-android/  Android client — NDK GL sphere, on-device STT, streaming
                TTS, inbox watch, text chat with media viewers + GL audio
                player (docs/android.md)
@@ -192,7 +197,8 @@ GET                   /api/models           union of connected workers' catalogs
 | `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, Caddy TLS, lockdown |
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Global skill library design — symlinks, local/global split |
-| `docs/client.md` | GTK4 native client — dialogs, menus, theming |
+| `docs/client.md` | Voice-enabled GTK4 client — chat, narration, dialogs, menus, theming |
+| `hive-client/voice/README.md` | Embedded voice module — ChimpFlow, PipeWire, build/runtime and tests |
 | `docs/voice-global-shortcuts.md` | XDG/GNOME voice key contract, giomm callback trap, safety and diagnosis |
 | `docs/android.md` | Android app — sphere, on-device STT, streaming TTS, inbox watch, chat + media |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
