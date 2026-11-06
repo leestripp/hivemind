@@ -239,6 +239,14 @@ void WorkerChannel::handle(Connection& ws) {
                                         nlohmann::json::object())); }
                 catch (...) {}
             }
+            if (on_telemetry && frame.contains("host") &&
+                frame.contains("now")) {
+                try { on_telemetry(st->name, frame["host"], frame["now"]); }
+                catch (const std::exception& e) {
+                    std::cerr << "[workers] telemetry callback failed for "
+                              << st->name << ": " << e.what() << "\n";
+                }
+            }
             // 2026-10-28 silent-outage lesson: a successful local send is
             // not proof of a usable hub connection. Acknowledge through the
             // existing per-connection writer so the worker can detect a

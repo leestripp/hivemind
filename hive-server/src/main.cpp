@@ -25,6 +25,7 @@
 #include "hivemind/routes/StaticRoutes.h"
 #include "hivemind/routes/SystemRoutes.h"
 #include "hivemind/SystemMonitor.h"
+#include "hivemind/WorkerTelemetry.h"
 #include "hivemind/routes/RosterRoutes.h"
 #include "hivemind/MigrationService.h"
 #include "hivemind/routes/MigrationRoutes.h"
@@ -146,6 +147,7 @@ int main(int argc, char* argv[]) {
         thread_store.set_kind(r.thread_id, "routine");
     AuthStore auth_store;
     WorkerStore worker_store;
+    WorkerTelemetry worker_telemetry;
     LlmStore llm_store;
     WorkerChannel worker_channel{worker_store,
                                  ServerConfig::instance().worker_ws_port(),
@@ -195,6 +197,11 @@ int main(int argc, char* argv[]) {
     worker_channel.on_heartbeat =
         [&hub](const std::string& w, const nlohmann::json& agents) {
             hub.on_heartbeat(w, agents);
+        };
+    worker_channel.on_telemetry =
+        [&worker_telemetry](const std::string& w, const nlohmann::json& host,
+                            const nlohmann::json& now) {
+            (void)worker_telemetry.record(w, host, now);
         };
     // Phase 33: on worker (re)connect, re-push every enabled global skill
     // for each agent homed on that rig (self-heals after worker downtime).
@@ -356,7 +363,9 @@ int main(int argc, char* argv[]) {
     // 3. Static / web UI catch-all (must be LAST per OmniNet docs).
     static SystemMonitor system_monitor;
     system_monitor.start();
-    register_system_routes(server, system_monitor, agent_store, thread_store);
+    register_system_routes(server, system_monitor, worker_telemetry,
+                           worker_store, worker_channel,
+                           agent_store, thread_store);
     register_static_routes(server);
 
     // 4. Admin endpoints (dashboard at /omninet/*).

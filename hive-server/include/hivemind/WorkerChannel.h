@@ -172,6 +172,12 @@ public:
     std::function<void(const std::string& worker,
                        const nlohmann::json& agents)> on_heartbeat;
 
+    // Optional host telemetry attached to the same heartbeat. Older workers
+    // omit host/now and remain fully compatible.
+    std::function<void(const std::string& worker,
+                       const nlohmann::json& host,
+                       const nlohmann::json& now)> on_telemetry;
+
     /// Hook for frames that are not channel bookkeeping (30.3: exec_chunk,
     /// exec_done, status). Called with the worker name + parsed frame.
     std::function<void(const std::string& worker,

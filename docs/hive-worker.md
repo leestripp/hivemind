@@ -104,7 +104,7 @@ Worker -> hub:
 
 | op | purpose |
 |----|---------|
-| `hello`, `heartbeat` | handshake; liveness + per-agent state |
+| `hello`, `heartbeat` | handshake; liveness + per-agent state; heartbeat also carries `host` facts and `now` host telemetry (CPU, memory, disk, worker RSS, container count) every 15 s |
 | `agent_status` | ready / error / down per agent |
 | `spawn_req` | ask the hub to re-push `agent_spawn` (sent after a crash-respawn, which reuses the worker's cached spec — keeps secret grants/model/prompt fresh across restarts) |
 | `task_delta` | streamed reply text while a turn runs |
@@ -135,6 +135,11 @@ Transport rules that are LOAD-BEARING (both ends):
   heartbeat intervals); otherwise it closes and reconnects. Successful
   local sends alone are not liveness proof: the 2026-10-28 ubuntu-pc
   outage stayed silent for hours while the transport was black-holed.
+- Heartbeat telemetry is additive and optional at the protocol boundary:
+  older workers omit `host`/`now` without affecting heartbeat acks or agent
+  state. The hub validates each sample, keeps a separate 24 h in-memory
+  history per worker, and exposes it through `/api/system` and
+  `/api/system/history?worker=<name>`.
 
 ## Fleet management
 

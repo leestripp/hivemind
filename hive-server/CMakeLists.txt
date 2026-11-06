@@ -11,6 +11,7 @@ set(CORE_SOURCES
     src/Vault.cpp
     src/ConnectorStore.cpp
     src/WorkerStore.cpp
+    src/WorkerTelemetry.cpp
     src/LlmStore.cpp
     src/ModelCatalog.cpp
     src/WorkerChannel.cpp
@@ -70,6 +71,7 @@ target_include_directories(hivemind_core PUBLIC
 )
 
 target_link_libraries(hivemind_core PUBLIC
+    hive_host_stats
     OmniNet
     nlohmann_json::nlohmann_json
     ${SQLite3_LIBRARIES}

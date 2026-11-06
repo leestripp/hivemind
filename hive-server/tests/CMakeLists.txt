@@ -40,6 +40,8 @@ hivemind_test(test_message_stats)
 hivemind_test(test_exec_audit)
 hivemind_test(test_server_config)
 hivemind_test(test_worker_channel)
+hivemind_test(test_worker_telemetry)
+hivemind_test(test_system_routes)
 
 # Phase 65: loop-storm fan-in policy + mute/breaker
 hivemind_test(test_fanin_policy)

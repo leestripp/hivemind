@@ -79,6 +79,21 @@ Worker channel: **dedicated WebSocket port** (`worker_ws_port`, default
 8423), path `/api/workers/channel`. See `docs/hive-worker.md` for the
 full op inventory.
 
+## System telemetry
+
+| Endpoint | Notes |
+|----------|-------|
+| `GET /api/system` | original hub `host`/`now` fallback plus a `workers` array: name, online/last_seen, telemetry availability, and each reporting worker's own `host`/`now` CPU, memory, disk, RSS and container count |
+| `GET /api/system/history?minutes=N&worker=name` | one worker's in-memory samples, oldest first; omit `worker` for the original hub series. `minutes` defaults to 60 and is capped at 1440 |
+| `GET /api/system/agents` | per-agent exec/message usage for the last 24 h |
+
+Every current worker samples its own Linux host every 15 seconds and sends
+`host` + `now` on its existing authenticated heartbeat. The hub retains 24
+hours per worker in memory; history resets on hub restart and no extra
+connections are opened. Older workers stay online and appear with
+`telemetry: false` until upgraded. The System page uses worker sections when
+workers are enrolled and the original hub view only as a no-worker fallback.
+
 ## Models & credentials
 
 The hub owns the current LLM configuration in

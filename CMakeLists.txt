@@ -120,6 +120,13 @@ endif()
 
 enable_testing()
 
+# Linux host telemetry shared by the hub sampler and remote workers. Keeping
+# one implementation makes hub and worker CPU/memory/disk values comparable.
+add_library(hive_host_stats STATIC hive-common/src/HostStats.cpp)
+target_include_directories(hive_host_stats PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/hive-common/include)
+target_link_libraries(hive_host_stats PUBLIC nlohmann_json::nlohmann_json)
+
 # ============================================================================
 # Subprojects
 # ============================================================================

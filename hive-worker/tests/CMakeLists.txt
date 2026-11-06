@@ -26,3 +26,6 @@ hive_worker_test(test_migration_ops)
 
 # Hub heartbeat acknowledgements must reset the silent-connection watchdog.
 hive_worker_test(test_heartbeat_watchdog)
+
+# Shared Linux host sampler and heartbeat JSON normalization.
+hive_worker_test(test_host_stats)

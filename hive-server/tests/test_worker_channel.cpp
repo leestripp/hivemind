@@ -12,6 +12,7 @@
 // sent via send() arrives at the new connection).
 
 #include "hivemind/WorkerChannel.h"
+#include "hivemind/HostStats.h"
 #include "hivemind/WorkerStore.h"
 #include "websocket/WebSocket.h"
 
@@ -77,6 +78,16 @@ int main() {
     std::atomic<bool> got_ping{false};
     std::atomic<bool> got_welcome{false};
     std::atomic<bool> got_heartbeat_ack{false};
+    std::atomic<bool> got_telemetry{false};
+    json telemetry_host;
+    json telemetry_now;
+    ch.on_telemetry = [&](const std::string& worker, const json& host,
+                          const json& now) {
+        assert(worker == "rig1");
+        telemetry_host = host;
+        telemetry_now = now;
+        got_telemetry = true;
+    };
     {
         Connection b{kUrl};
         b.onText([&](std::string msg) {
@@ -100,11 +111,19 @@ int main() {
         // Every heartbeat must receive an application-level reply. The
         // worker uses this to detect a black-holed connection whose local
         // sends still succeed (2026-10-28 ubuntu-pc outage).
+        hivemind::HostStatsSampler sampler;
         b.sendText(json{{"op", "heartbeat"},
-                        {"agents", json::object()}}.dump());
+                        {"agents", json::object()},
+                        {"host", hivemind::host_facts_json()},
+                        {"now", hivemind::host_now_json(sampler.sample())}}.dump());
         for (int i = 0; i < 30 && !got_heartbeat_ack; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         assert(got_heartbeat_ack && "heartbeat was not acknowledged");
+        for (int i = 0; i < 30 && !got_telemetry; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        assert(got_telemetry && "heartbeat telemetry was not delivered");
+        assert(telemetry_host["hostname"].is_string());
+        assert(telemetry_now["mem_total_mb"].get<int64_t>() > 0);
 
         // Channel must accept + deliver work via the writer thread.
         assert(ch.send("rig1", json{{"op", "ping"}, {"n", 1}}));

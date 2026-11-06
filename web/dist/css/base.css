@@ -484,6 +484,13 @@ select.btn:focus { outline: none; border-color: #88c0d0; }
 }
 .sys-graphtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
 .sys-graph { width: 100%; height: 140px; display: block; }
+.sys-worker { margin-bottom: 26px; }
+.sys-worker-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+.sys-worker-head h3 { margin: 0; }
+.sys-worker-state { font-size: 0.72rem; font-weight: 500; margin-left: 8px; }
+.sys-worker-state.online { color: var(--ok, #a3be8c); }
+.sys-worker-state.offline { color: var(--muted); }
+.sys-history-error { color: var(--danger, #e01b24); font-size: 0.8rem; }
 
 /* ── Full agent editor + migration dialogs (2026-10-26) ───────────── */
 .agent-editor-panel {

@@ -5,6 +5,9 @@
 #include "hivemind/ContainerManager.h"
 #include "hivemind/ExecAuditStore.h"
 #include "hivemind/SystemMonitor.h"
+#include "hivemind/WorkerChannel.h"
+#include "hivemind/WorkerStore.h"
+#include "hivemind/WorkerTelemetry.h"
 #include "hivemind/ThreadStore.h"
 
 #include <chrono>
@@ -29,19 +32,45 @@ std::string iso_hours_ago(int hours) {
 
 void register_system_routes(OmniNet::HTTP::Server& server,
                             SystemMonitor& monitor,
+                            WorkerTelemetry& telemetry,
+                            WorkerStore& workers,
+                            WorkerChannel& channel,
                             AgentStore& agents,
                             ThreadStore& threads) {
 
     server.get("/api/system",
-        [&monitor](const Request&, Response& resp) {
-            routes::send_json(resp, monitor.snapshot());
+        [&monitor, &telemetry, &workers, &channel](const Request&, Response& resp) {
+            auto out = monitor.snapshot();
+            json worker_rows = json::array();
+            for (const auto& worker : workers.list()) {
+                json row{{"name", worker.name},
+                         {"online", channel.is_online(worker.name)},
+                         {"last_seen", worker.last_seen},
+                         {"telemetry", false}};
+                auto sample = telemetry.snapshot(worker.name);
+                if (!sample.is_null()) {
+                    row["telemetry"] = true;
+                    row["host"] = std::move(sample["host"]);
+                    row["now"] = std::move(sample["now"]);
+                    row["history_samples"] = sample["history_samples"];
+                    row["interval_s"] = sample["interval_s"];
+                }
+                worker_rows.push_back(std::move(row));
+            }
+            out["workers"] = std::move(worker_rows);
+            routes::send_json(resp, std::move(out));
         });
 
     server.get("/api/system/history",
-        [&monitor](const Request& req, Response& resp) {
+        [&monitor, &telemetry](const Request& req, Response& resp) {
             int minutes = 60;
             if (auto m = req.queryParameter("minutes"))
                 minutes = std::atoi(std::string(*m).c_str());
+            if (auto worker = req.queryParameter("worker"); worker && !worker->empty()) {
+                routes::send_json(resp, telemetry.history(
+                    std::string(*worker), minutes));
+                return;
+            }
             routes::send_json(resp, monitor.history(minutes));
         });
 

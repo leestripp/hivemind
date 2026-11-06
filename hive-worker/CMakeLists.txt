@@ -5,7 +5,7 @@
 # the binary ships — same convention as hive-agent/hive_agent_core.
 add_library(hive_worker_core STATIC src/runner.cpp src/fleet.cpp src/hostagent.cpp src/migration_ops.cpp src/heartbeat_watchdog.cpp)
 target_include_directories(hive_worker_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(hive_worker_core PUBLIC OmniNet nlohmann_json::nlohmann_json)
+target_link_libraries(hive_worker_core PUBLIC hive_host_stats OmniNet nlohmann_json::nlohmann_json)
 
 add_executable(hive-worker src/main.cpp)
 target_link_libraries(hive-worker PRIVATE hive_worker_core)

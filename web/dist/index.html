@@ -496,8 +496,9 @@
         <div>
           <h2>📈 System</h2>
           <p class="muted">
-            Host health sampled every 15&nbsp;s by hive-server (24&nbsp;h
-            in-memory history) — this page only polls while it is open.
+            Machine health sampled every 15&nbsp;s by each hive-worker
+            (24&nbsp;h in-memory history on the hub). The hub is the fallback
+            when no workers are enrolled; this page polls only while open.
           </p>
         </div>
         <div class="sys-rangebar">
@@ -507,19 +508,8 @@
         </div>
       </div>
 
-      <div class="sys-cards" id="sys-cards">
+      <div id="sys-workers">
         <div class="sys-card"><div class="sys-value">loading…</div></div>
-      </div>
-
-      <div class="sys-graphs">
-        <div class="sys-graphbox">
-          <div class="sys-graphtitle">Memory %</div>
-          <canvas id="sys-mem-graph" class="sys-graph"></canvas>
-        </div>
-        <div class="sys-graphbox">
-          <div class="sys-graphtitle">CPU %</div>
-          <canvas id="sys-cpu-graph" class="sys-graph"></canvas>
-        </div>
       </div>
 
       <h3 style="margin:22px 0 6px">Agent usage <span class="muted" id="sys-agents-sub" style="font-weight:normal"></span></h3>

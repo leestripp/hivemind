@@ -47,7 +47,8 @@ and complete their work autonomously.
   on the remote host (TLS via the nginx proxy; `ws://<server>:8423`
   direct also works on a trusted LAN), then set the agent's `worker`
   field. Live status on
-  the web **Workers** page. Agents on the same rig share one `/workspace`
+  the web **Workers** page, and per-machine CPU/memory/disk graphs on
+  **System**. Agents on the same rig share one `/workspace`
   (per-rig company drive), so they can collaborate on the same project
   files; `send_file` moves files between rigs and the server.
 - **On-demand desktops** — click the client's **Computer** button and the

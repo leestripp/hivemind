@@ -16,6 +16,7 @@
 #include "fleet.h"
 #include "migration_ops.h"
 #include "heartbeat_watchdog.h"
+#include "hivemind/HostStats.h"
 
 #include <nlohmann/json.hpp>
 
@@ -636,6 +637,8 @@ int main(int argc, char* argv[]) {
     }).detach();
 
     int backoff = 1;
+    hivemind::HostStatsSampler host_stats;
+    (void)host_stats.sample();  // warm the CPU delta before the first heartbeat
     while (!g_stop) {
         try {
             Connection ws{url};
@@ -1615,7 +1618,10 @@ int main(int argc, char* argv[]) {
                         send_frame({{"op","heartbeat"},{"uptime_s",up},
                                     {"agents", g_fleet
                                         ? g_fleet->statuses()
-                                        : json::object()}});
+                                        : json::object()},
+                                    {"host", hivemind::host_facts_json()},
+                                    {"now", hivemind::host_now_json(
+                                        host_stats.sample())}});
                     } catch (...) {
                         // 2026-10-24 wedge: actively close so a blocked
                         // readLoop gets a chance to unwind; the watchdog
