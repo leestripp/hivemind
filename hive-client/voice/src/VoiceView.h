@@ -75,6 +75,10 @@ class VoiceView : public Gtk::Box {
     void toUi(std::function<void()> fn);    // back onto the UI thread
     void ioLoop();
 
+    // -- ChimpFlow health (I/O worker -> UI status pill) --------------
+    void queueChimpflowHealthCheck();
+    void updateChimpflowHealth(bool online);
+
     // -- setup / phases (UI thread) -----------------------------------
     void openThread();
     void toIdle(const std::string& message);
@@ -123,6 +127,7 @@ class VoiceView : public Gtk::Box {
     Gtk::Image* avatar_ = nullptr;
     Gtk::Label* name_ = nullptr;
     Gtk::Label* status_ = nullptr;
+    Gtk::Label* chimpflowStatus_ = nullptr;
     Gtk::Button* talk_ = nullptr;
     Gtk::Button* cancel_ = nullptr;
     Gtk::Button* back_ = nullptr;
@@ -166,6 +171,8 @@ class VoiceView : public Gtk::Box {
     sigc::connection inboxConn_;
     sigc::connection pollConn_;
     sigc::connection audioDrainConn_;
+    sigc::connection healthConn_;
+    std::atomic<bool> healthQueued_{false};
     long drainSilentSince_ = 0;
 
     // io worker: a queue of closures drained by one thread; results come

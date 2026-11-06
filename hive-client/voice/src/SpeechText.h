@@ -4,6 +4,7 @@
 // Pure functions only — everything here is unit-tested.
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,12 @@ std::vector<std::string> toSpeechSentences(std::string_view raw);
 // Convenience: raw text -> one speakable string (markdown stripped,
 // fillers dropped). Used for full-note playback.
 std::string forSpeech(std::string_view raw);
+
+// Full-message playback: preserve sentence-sized queueing, splitting only
+// oversized sentences. Splits prefer whitespace and never cut a UTF-8
+// sequence. maxBytes is a byte budget, not a Unicode character count.
+std::vector<std::string> toSpeechChunks(std::string_view raw,
+                                        std::size_t maxBytes = 2000);
 
 // Length of the common prefix of a and b (used to avoid re-speaking
 // already-spoken streamed text).

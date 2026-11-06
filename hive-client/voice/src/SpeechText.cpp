@@ -244,6 +244,36 @@ std::string forSpeech(std::string_view raw) {
     return out;
 }
 
+std::vector<std::string> toSpeechChunks(const std::string_view raw,
+                                        const std::size_t maxBytes) {
+    std::vector<std::string> out;
+    if (maxBytes == 0) return out;
+    const auto continuation = [](const char c) {
+        return (static_cast<unsigned char>(c) & 0xc0) == 0x80;
+    };
+    for (const auto& sentence : toSpeechSentences(raw)) {
+        std::string rest = sentence;
+        while (rest.size() > maxBytes) {
+            std::size_t cut = rest.rfind(' ', maxBytes);
+            if (cut == std::string::npos || cut < maxBytes / 2) {
+                // No useful word boundary: move left to the start of the
+                // UTF-8 sequence containing the byte budget's endpoint.
+                cut = maxBytes;
+                while (cut > 0 && continuation(rest[cut])) --cut;
+                if (cut == 0) {
+                    // A code point wider than the budget must remain whole.
+                    cut = maxBytes;
+                    while (cut < rest.size() && continuation(rest[cut])) ++cut;
+                }
+            }
+            out.push_back(rest.substr(0, cut));
+            rest = collapseWs(rest.substr(cut));
+        }
+        if (!rest.empty()) out.push_back(std::move(rest));
+    }
+    return out;
+}
+
 std::size_t commonPrefixLen(std::string_view a, std::string_view b) {
     const std::size_t n = std::min(a.size(), b.size());
     std::size_t i = 0;

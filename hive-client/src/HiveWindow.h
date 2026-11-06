@@ -19,7 +19,12 @@
 #include "GstVideoPlayer.h"
 #include "Prefs.h"
 
-namespace hv { class VoiceView; class GlobalShortcuts; }
+namespace hv {
+class AudioPlayback;
+class GlobalShortcuts;
+class TtsEngine;
+class VoiceView;
+}
 
 namespace hive {
 
@@ -154,7 +159,11 @@ private:
     /// activity poll's turns[] (partial text of the first active turn).
     void update_live_bubble(const nlohmann::json& turns);
     // Phase 55: bounded history — page-back through older messages.
+    void speak_agent_message(const std::string& sender_id,
+                             const std::string& sender_label,
+                             const std::string& body);
     Gtk::Widget* build_message_row(const std::string& sender_kind,
+                                   const std::string& sender_id,
                                    const std::string& sender_label,
                                    const std::string& body,
                                    const std::string& created_at,
@@ -164,6 +173,7 @@ private:
     void update_load_earlier_row();
     void load_earlier();
     void append_message_bubble(const std::string& sender_kind,
+                               const std::string& sender_id,
                                const std::string& sender_label,
                                const std::string& body,
                                const std::string& created_at = "",
@@ -329,6 +339,10 @@ private:
     Gtk::ListBox threads_list_;
 
     Prefs voice_prefs_;
+    // Independent from VoiceView's playback: chat narration is lazy and
+    // persists across thread switches, never steals the voice-page sink.
+    std::unique_ptr<hv::AudioPlayback> chat_audio_;
+    std::unique_ptr<hv::TtsEngine> chat_tts_;
     Glib::RefPtr<Gtk::Builder> voice_builder_;
     hv::VoiceView* voice_ = nullptr;  // owned by left_stack_/voice_builder_
     std::unique_ptr<hv::GlobalShortcuts> voice_shortcuts_;

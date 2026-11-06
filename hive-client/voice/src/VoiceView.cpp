@@ -3,6 +3,7 @@
 #include "AudioCapture.h"
 #include "Avatars.h"
 #include "AudioPlayback.h"
+#include "ChimpFlowClient.h"
 #include "SoundFx.h"
 #include "SpeechText.h"
 #include "TranscriptText.h"
@@ -50,6 +51,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     avatar_ = builder->get_widget<Gtk::Image>("agentAvatar");
     name_ = builder->get_widget<Gtk::Label>("agentName");
     status_ = builder->get_widget<Gtk::Label>("statusText");
+    chimpflowStatus_ = builder->get_widget<Gtk::Label>("chimpflowStatus");
     talk_ = builder->get_widget<Gtk::Button>("talkButton");
     cancel_ = builder->get_widget<Gtk::Button>("cancelButton");
     back_ = builder->get_widget<Gtk::Button>("backButton");
@@ -125,6 +127,13 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     if (sphere_) sphere_->setState(SphereState::Idle);
 
     openThread();
+    queueChimpflowHealthCheck();
+    healthConn_ = Glib::signal_timeout().connect(
+        [this] {
+            queueChimpflowHealthCheck();
+            return true;
+        },
+        10000);
 }
 
 VoiceView::~VoiceView() {
@@ -132,6 +141,7 @@ VoiceView::~VoiceView() {
     inboxConn_.disconnect();
     pollConn_.disconnect();
     audioDrainConn_.disconnect();
+    healthConn_.disconnect();
     ioRunning_ = false;
     {
         std::lock_guard<std::mutex> lk(ioMutex_);
@@ -179,6 +189,37 @@ void VoiceView::ioLoop() {
             // io thread (mirrors Kotlin runCatching at the call sites).
         }
     }
+}
+
+// -- ChimpFlow health ------------------------------------------------------
+
+void VoiceView::queueChimpflowHealthCheck() {
+    bool expected = false;
+    if (!healthQueued_.compare_exchange_strong(expected, true)) return;
+    post([this] {
+        bool online = false;
+        try {
+            ChimpFlowClient chimpflow{prefs_.chimpflowUrl(),
+                                      prefs_.chimpflowKey()};
+            online = chimpflow.healthy();
+        } catch (...) {
+            // Any transport/configuration failure means the pill is offline;
+            // the existing STT/TTS paths still report their detailed errors.
+        }
+        healthQueued_ = false;
+        toUi([this, online] { updateChimpflowHealth(online); });
+    });
+}
+
+void VoiceView::updateChimpflowHealth(const bool online) {
+    if (!chimpflowStatus_) return;
+    chimpflowStatus_->remove_css_class("hv-checking");
+    chimpflowStatus_->remove_css_class("hv-online");
+    chimpflowStatus_->remove_css_class("hv-offline");
+    chimpflowStatus_->set_label(online ? "Online" : "Offline");
+    chimpflowStatus_->add_css_class(online ? "hv-online" : "hv-offline");
+    chimpflowStatus_->set_tooltip_text(
+        online ? "ChimpFlow is responding" : "ChimpFlow is not responding");
 }
 
 // -- setup -----------------------------------------------------------------
@@ -237,7 +278,7 @@ void VoiceView::toIdle(const std::string& message) {
     }
     stopSpeakAnimator();
     if (talk_) {
-        talk_->remove_css_class("talk-active");
+        talk_->remove_css_class("hv-active");
         talk_->set_label("TALK");
         talk_->set_sensitive(true);
     }
@@ -252,7 +293,7 @@ void VoiceView::maybeStartListening() {
     if (sphere_) sphere_->setState(SphereState::Listening);
     if (talk_) {
         talk_->set_label("SEND");
-        talk_->add_css_class("talk-active");
+        talk_->add_css_class("hv-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_)
@@ -276,7 +317,7 @@ void VoiceView::sendTranscript() {
     if (talk_) {
         talk_->set_label("···");
         talk_->set_sensitive(false);
-        talk_->remove_css_class("talk-active");
+        talk_->remove_css_class("hv-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_) status_->set_label("Transcribing…");
@@ -388,7 +429,7 @@ void VoiceView::startIdleNarration() {
     if (talk_) {
         talk_->set_label("···");
         talk_->set_sensitive(false);
-        talk_->remove_css_class("talk-active");
+        talk_->remove_css_class("hv-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_) status_->set_label("Replying…");
@@ -418,7 +459,7 @@ void VoiceView::enterStreaming() {
     phase_ = Phase::Streaming;
     if (sphere_) sphere_->setState(SphereState::Speaking);
     if (talk_) {
-        talk_->remove_css_class("talk-active");
+        talk_->remove_css_class("hv-active");
         talk_->set_label("TALK");  // interrupt-into-recording
         talk_->set_sensitive(true);
     }
@@ -443,6 +484,7 @@ void VoiceView::toggleTalk() {
     const long now = nowMs();
     if (now - lastTalkClick_ < 500) return;  // debounce
     lastTalkClick_ = now;
+    queueChimpflowHealthCheck();
     switch (phase_) {
         case Phase::Idle:
             if (!stopping_) maybeStartListening();
@@ -1014,7 +1056,7 @@ void VoiceView::debugSay(const std::string& text) {
     if (talk_) {
         talk_->set_label("···");
         talk_->set_sensitive(false);
-        talk_->remove_css_class("talk-active");
+        talk_->remove_css_class("hv-active");
     }
     if (cancel_) cancel_->set_visible(true);
     if (status_) status_->set_label("Sending…");

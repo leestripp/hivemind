@@ -1,7 +1,10 @@
 #include "HiveWindow.h"
 #include "AttachmentUpload.h"
+#include "AudioPlayback.h"
 #include "ChimpFlowClient.h"
 #include "GlobalShortcuts.h"
+#include "SpeechText.h"
+#include "TtsEngine.h"
 #include "VoiceView.h"
 #include "MediaPlayer.h"
 #include "text_utils.h"
@@ -49,6 +52,11 @@ const char* kCss = R"(
                  padding: 8px; margin: 4px 48px 4px 12px; }
 .hv-msg-agent  { background: alpha(@window_fg_color, 0.07); border-radius: 10px;
                  padding: 8px; margin: 4px 12px 4px 48px; }
+.hv-msg-agent button.hv-msg-speak {
+  min-width: 0; min-height: 0; padding: 2px 7px; border-radius: 999px;
+  opacity: 0.65; font-size: 0.85em;
+}
+.hv-msg-agent button.hv-msg-speak:hover { opacity: 1.0; }
 .hv-msg-system { color: alpha(@window_fg_color, 0.6); font-style: italic;
                  margin: 4px 12px; }
 .hv-msg-live   { opacity: 0.75; font-style: italic;
@@ -921,6 +929,8 @@ HiveWindow::~HiveWindow() {
     }
     ++voice_request_;
     show_sidebar();  // joins the voice worker/audio engines before members die
+    chat_tts_.reset();
+    chat_audio_.reset();
     stop_active_video();
     video_player_.set_paintable(Glib::RefPtr<Gdk::Paintable>{});
     active_video_media_.reset();
@@ -1256,6 +1266,7 @@ void HiveWindow::poll_chat() {
                         continue;
                     append_message_bubble(
                         m.value("sender_kind", ""),
+                        m.value("sender_id", ""),
                         m.value("sender_kind", "") == "agent"
                             ? agent_name_of(agents_, m.value("sender_id", ""))
                             : (m.value("sender_kind", "") == "user" ? user_label() : "system"),
@@ -1941,11 +1952,40 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         live_label_->set_text(partial + " \u258C");
         }
 
+void HiveWindow::speak_agent_message(const std::string& sender_id,
+                                     const std::string& sender_label,
+                                     const std::string& body) {
+    const auto chunks = speech::toSpeechChunks(body);
+    if (chunks.empty()) return;
+
+    if (!chat_audio_) {
+        chat_audio_ = std::make_unique<hv::AudioPlayback>();
+        chat_audio_->start();
+    }
+    if (!chat_tts_) {
+        chat_tts_ = std::make_unique<hv::TtsEngine>(
+            *chat_audio_, voice_prefs_.chimpflowUrl(),
+            voice_prefs_.chimpflowKey());
+    }
+
+    // Match Android Inbox: a new tap interrupts the previous message and
+    // starts this one immediately, using the SENDER's configured voice.
+    chat_tts_->stop();
+    const std::string voice = voice_prefs_.voiceFor(sender_id);
+    chat_tts_->applyVoice(voice);
+    std::fprintf(stderr,
+                 "hive-client: chat tts sender=%s voice=%s chunks=%zu\n",
+                 sender_label.c_str(),
+                 voice.empty() ? "<default>" : voice.c_str(), chunks.size());
+    for (const auto& chunk : chunks) chat_tts_->speakQueued(chunk);
+}
+
         // Phase 55: row construction extracted so history page-back can PREPEND
         // older bubbles as well as append new ones. Returns nullptr when there
         // is nothing to show (pure tool transcript). Caller owns placement and
         // rendered_ bookkeeping.
         Gtk::Widget* HiveWindow::build_message_row(const std::string& sender_kind,
+        const std::string& sender_id,
         const std::string& sender_label,
         const std::string& body,
         const std::string& created_at,
@@ -2133,6 +2173,27 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         }
         if (any_chip) box->append(*chips);
         }
+
+        // Full-message narration for agent bubbles only (including Inbox).
+        // Capture the exact stored body + sender id: later live bubbles or
+        // thread switches cannot change what this button reads or whose
+        // configured ChimpFlow voice it uses.
+        if (sender_kind == "agent" && !speech::forSpeech(clean).empty()) {
+        auto* play = Gtk::make_managed<Gtk::Button>("\u25B6");
+        play->set_halign(Gtk::Align::END);
+        play->set_margin_top(2);
+        play->add_css_class("flat");
+        play->add_css_class("hv-msg-speak");
+        play->set_tooltip_text("Read " + sender_label +
+                               "'s message with ChimpFlow");
+        set_accessible_button_label(*play, "Read " + sender_label +
+                                    "'s message aloud");
+        play->signal_clicked().connect(
+            [this, sender_id, sender_label, clean] {
+                speak_agent_message(sender_id, sender_label, clean);
+            });
+        box->append(*play);
+        }
         row->append(*box);
         return row;
         }
@@ -2205,6 +2266,7 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
                     const std::string sk = m.value("sender_kind", "");
                     if (auto* w = build_message_row(
                             sk,
+                            m.value("sender_id", ""),
                             sk == "agent"
                                 ? agent_name_of(agents_,
                                                 m.value("sender_id", ""))
@@ -2231,6 +2293,7 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
 }
 
 void HiveWindow::append_message_bubble(const std::string& sender_kind,
+                                       const std::string& sender_id,
                                        const std::string& sender_label,
                                        const std::string& body,
                                        const std::string& created_at,
@@ -2242,7 +2305,7 @@ void HiveWindow::append_message_bubble(const std::string& sender_kind,
                          {"created_at", created_at},
                          {"attachments", attachments},
                          {"stats", stats}});
-    if (auto* w = build_message_row(sender_kind, sender_label, body,
+    if (auto* w = build_message_row(sender_kind, sender_id, sender_label, body,
                                     created_at, attachments, stats))
         messages_box_.append(*w);
 }

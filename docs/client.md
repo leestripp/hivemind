@@ -25,7 +25,13 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   binding. The portal may request permission on first use. See
   [Voice global shortcuts on GNOME/Wayland](voice-global-shortcuts.md) for the
   portal contract, giomm callback-order warning, accessibility rules, and
-  diagnostic runbook.
+  diagnostic runbook. The voice page also shows the shortcut and a live
+  ChimpFlow Online/Offline status card.
+- **Message narration** — readable agent bubbles have a small Play button.
+  It reads that exact message through ChimpFlow with the sender's configured
+  voice, including messages in the Inbox. Clicking another bubble interrupts
+  the previous narration; long messages are queued in UTF-8-safe speech
+  chunks, and markup, links and code are cleaned for speech.
 - **Chat images** — image attachments (png/jpg/jpeg/gif/webp) render
   inline, scaled to 480px, click for full-size; downloaded via the hub
   into `~/.cache/hivemind-client/attachments/<thread_id>/` (cached — a

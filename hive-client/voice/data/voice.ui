@@ -10,16 +10,19 @@
           <object class="GtkGLArea" id="sphere">
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
+            <!-- Reserve the bottom card's space so the sphere moves up. -->
+            <property name="margin-bottom">100</property>
           </object>
         </child>
         <child type="overlay">
           <object class="GtkButton" id="backButton">
             <property name="label">&#8249; Back</property>
+            <property name="tooltip-text">Back to conversations</property>
             <property name="halign">start</property>
             <property name="valign">start</property>
-            <property name="margin-start">12</property>
-            <property name="margin-top">12</property>
-            <style><class name="flat"/></style>
+            <property name="margin-start">16</property>
+            <property name="margin-top">16</property>
+            <style><class name="flat"/><class name="hv-back"/></style>
           </object>
         </child>
         <child type="overlay">
@@ -27,8 +30,9 @@
             <property name="orientation">vertical</property>
             <property name="halign">center</property>
             <property name="valign">start</property>
-            <property name="margin-top">24</property>
-            <property name="spacing">6</property>
+            <property name="margin-top">18</property>
+            <property name="spacing">4</property>
+            <style><class name="hv-header"/></style>
             <child>
               <object class="GtkBox">
                 <property name="orientation">horizontal</property>
@@ -64,11 +68,13 @@
             <property name="orientation">horizontal</property>
             <property name="halign">center</property>
             <property name="valign">end</property>
-            <property name="margin-bottom">48</property>
-            <property name="spacing">28</property>
+            <property name="margin-bottom">116</property>
+            <property name="spacing">24</property>
+            <style><class name="hv-controls"/></style>
             <child>
               <object class="GtkButton" id="cancelButton">
                 <property name="label">✕</property>
+                <property name="tooltip-text">Cancel current turn</property>
                 <property name="valign">center</property>
                 <style><class name="hv-cancel"/></style>
               </object>
@@ -76,8 +82,50 @@
             <child>
               <object class="GtkButton" id="talkButton">
                 <property name="label">TALK</property>
+                <property name="tooltip-text">Push to talk</property>
                 <property name="valign">center</property>
                 <style><class name="hv-talk"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="halign">fill</property>
+            <property name="valign">end</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-bottom">12</property>
+            <property name="spacing">8</property>
+            <style><class name="hv-status-card"/></style>
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Super + Alt + Backspace</property>
+                <property name="halign">center</property>
+                <style><class name="hv-shortcut-keys"/></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label">ChimpFlow</property>
+                    <property name="halign">start</property>
+                    <property name="hexpand">True</property>
+                    <style><class name="hv-service-name"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="chimpflowStatus">
+                    <property name="label">Checking…</property>
+                    <property name="halign">end</property>
+                    <property name="tooltip-text">Checking ChimpFlow</property>
+                    <style><class name="hv-health-pill"/><class name="hv-checking"/></style>
+                  </object>
+                </child>
               </object>
             </child>
           </object>

@@ -11,7 +11,7 @@ and complete their work autonomously.
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2026.04)-orange)
-![Version](https://img.shields.io/badge/version-1.2.11-green)
+![Version](https://img.shields.io/badge/version-1.2.12-green)
 
 ---
 
@@ -203,6 +203,6 @@ GET                   /api/models           union of connected workers' catalogs
 
 See `docs/api.md` for the endpoint reference.
 
-Current release line: **1.2.x** (latest tag `1.2.11`) — distributed GPU
+Current release line: **1.2.x** (latest tag `1.2.12`) — distributed GPU
 workers, hub-owned model registry, secrets broker, User Inbox, integrated
 desktop/Android voice, and native rich-media clients.
