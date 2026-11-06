@@ -1,44 +1,52 @@
-# hive-client-voice
+# Integrated voice module
 
-GTK4 (gtkmm-4.0) voice client for the HiveMind hub — a 1:1 port of the
-Android voice app (`hive-android`). Talk to an agent hands-free: tap
-TALK, speak, tap SEND; the reply streams back sentence-by-sentence as
-speech while the Jarvis swarm sphere reacts to mic level and agent state.
-The complete STT transcript is posted as exactly one user message;
-sentence splitting is used only for outbound TTS narration.
+ChimpFlow voice for the single native `hive-client` desktop app. The
+`hive_voice_ui` library lives here and is linked directly into the main
+client; there is no separate voice executable, application ID, desktop
+launcher, roster, or debug shell.
+
+Tap **TALK**, speak, then tap **SEND**. The reply streams back
+sentence-by-sentence as speech while the sphere reacts to mic level and
+agent state. The complete STT transcript is posted as exactly one user
+message; sentence splitting is used only for outbound TTS narration.
 
 ## Build
 
-Built as part of the top-level Hive-Mind CMake tree
-(`-DHIVEMIND_BUILD_CLIENT=ON`). Standalone:
+Built as part of the top-level HiveMind CMake tree with
+`-DHIVEMIND_BUILD_CLIENT=ON`:
 
 ```sh
-cmake -B build -S . && cmake --build build -j$(nproc)
+cmake -S . -B build
+cmake --build build --target hive-client -j$(nproc)
 ```
 
 ## Runtime dependencies
 
-The binary **builds without** these and says so at runtime, but for a
-functional client you need:
-
 1. **Audio I/O** — `libpipewire-0.3-dev` (Debian/Ubuntu). Without it the
-   app compiles a null backend: playback completes by wall-clock (TTS
-   flow works silently) and the mic reports unavailable.
+   module compiles a null backend and reports unavailable mic/speaker I/O.
 2. **ChimpFlow voice service** — local TTS+STT gateway at
-   `http://127.0.0.1:8090` (audio.cpp pocket-tts + whisper.cpp behind
-   an OpenAI-compatible API; nothing leaves the machine). All models
-   live inside the service — the app downloads and loads nothing.
+   `http://127.0.0.1:8090` (audio.cpp pocket-tts + whisper.cpp behind an
+   OpenAI-compatible API; nothing leaves the machine).
    - URL: `CHIMPFLOW_URL` env var (default `http://127.0.0.1:8090`)
-   - API key: `CHIMPFLOW_KEY` env var, or a
+   - API key: `CHIMPFLOW_KEY` env var, or the existing
      `~/.config/hive-client-voice/chimpflow.key` file (mode 600)
-   - Voices: whatever `GET /v1/voices` reports; picked per-agent in the
-     voice picker
+   - Voices: whatever `GET /v1/voices` reports
 
-## First run
+The old configuration directory name is retained deliberately so existing
+voice preferences and per-agent speaker choices continue to work.
 
-Start on the roster: pick an agent (saved as the default). The hub URL
-and API key live in Settings; they're persisted to
-`~/.config/hive-client-voice/prefs.json`.
+## Integrated behavior
+
+Selecting an agent opens or reuses its DM and, when ChimpFlow is healthy,
+opens `VoiceView` in the left panel while keeping the DM visible. Back
+restores Agents/Threads without losing the DM. Hub connection settings come
+from the main client. Voice inherits the main GNOME dark/light/high-contrast
+appearance.
+
+**Super+Alt+Backspace** invokes the exact Talk button action through the XDG
+GlobalShortcuts portal. The session exists only while voice is open: Back,
+thread changes, and window close explicitly unbind it. Ordinary chat never
+owns this global shortcut.
 
 ## Layout
 

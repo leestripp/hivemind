@@ -11,7 +11,7 @@ and complete their work autonomously.
 ![MIT license](https://img.shields.io/badge/license-MIT-blue)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2026.04)-orange)
-![Version](https://img.shields.io/badge/version-0.9.5-green)
+![Version](https://img.shields.io/badge/version-1.2.11-green)
 
 ---
 
@@ -63,8 +63,10 @@ and complete their work autonomously.
   (Anthropic SKILL.md format) shared across agents via per-agent enable
   toggles — plus per-agent learned skills that stay agent-owned.
 - **Native GTK4 client** (`hive-client`) — roster with avatars, threads,
-  live chat, scheduled-task dialog, right-click agent
-  management. Plus the **web dashboard**: Agents, Tasks, Files, Skills,
+  live chat, integrated ChimpFlow voice sessions with Back navigation,
+  scheduled-task dialog, and right-click agent management. Plus the **web
+  dashboard**:
+  Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
 - **Android app** (`hive-android`) — pick an agent from the info-card
   roster and just talk: Jarvis-style voice-reactive sphere, hands-free
@@ -191,6 +193,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Global skill library design — symlinks, local/global split |
 | `docs/client.md` | GTK4 native client — dialogs, menus, theming |
+| `docs/voice-global-shortcuts.md` | XDG/GNOME voice key contract, giomm callback trap, safety and diagnosis |
 | `docs/android.md` | Android app — sphere, on-device STT, streaming TTS, inbox watch, chat + media |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
 | `docs/containers.md` | Podman sandboxing |
@@ -200,6 +203,6 @@ GET                   /api/models           union of connected workers' catalogs
 
 See `docs/api.md` for the endpoint reference.
 
-Current release line: **0.9.x** (latest tag `0.9.6`) — distributed GPU
-workers, hub-owned model registry, secrets broker, User Inbox, Android
-voice app.
+Current release line: **1.2.x** (latest tag `1.2.11`) — distributed GPU
+workers, hub-owned model registry, secrets broker, User Inbox, integrated
+desktop/Android voice, and native rich-media clients.

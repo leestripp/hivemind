@@ -119,7 +119,7 @@ void UiApi::start() {
             std::mutex m; std::condition_variable cv; bool done_flag = false;
             std::string err_out = "no callback";
             w.connect_with_credentials(b.value("server", ""), b.value("key", ""),
-                [&](std::string err) {
+                [&](const std::string& err) {
                     { std::lock_guard<std::mutex> lk(m); err_out = err; done_flag = true; }
                     cv.notify_one();
                 });
@@ -160,9 +160,20 @@ void UiApi::start() {
             else send_json(resp, r);
         });
 
+    server_->post("/ui/action/voice-back",
+        [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            send_json(resp, w.ui_voice_back());
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());
+        });
+
+    // Cleanly exercise the real GTK close/destructor path in UI tests.
+    server_->post("/ui/action/close",
+        [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
+            send_json(resp, w.ui_close());
         });
 
     server_->post("/ui/action/delete-thread",

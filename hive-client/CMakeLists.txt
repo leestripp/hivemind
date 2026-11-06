@@ -18,6 +18,9 @@ if(WEBKIT_FOUND)
 endif()
 find_package(nlohmann_json REQUIRED)
 
+# ChimpFlow voice session, audio engines, portal shortcut and tests.
+add_subdirectory(voice)
+
 # Pure, GTK-loop-free helpers shared by the app and the unit tests.
 pkg_check_modules(GLIBMM REQUIRED IMPORTED_TARGET glibmm-2.68)
 add_library(hive_client_core STATIC src/text_utils.cpp)
@@ -66,6 +69,7 @@ target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
     hive_client_core
     hive_client_attachments
+    hive_voice_ui
     PkgConfig::GTKMM
     PkgConfig::GSTREAMER
     nlohmann_json::nlohmann_json
@@ -90,5 +94,5 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.hivemind.Client.desktop
 install(FILES data/icons/org.hivemind.Client.svg
         DESTINATION "share/icons/hicolor/scalable/apps")
 
-# Unit tests — ./tests/ (scaffold; no test targets yet).
+# Main-client unit tests. Integrated voice tests live under voice/tests.
 add_subdirectory(tests)

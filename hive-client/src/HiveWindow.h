@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -16,6 +17,9 @@
 
 #include "ApiClient.h"
 #include "GstVideoPlayer.h"
+#include "Prefs.h"
+
+namespace hv { class VoiceView; class GlobalShortcuts; }
 
 namespace hive {
 
@@ -49,6 +53,8 @@ public:
                                   std::function<void(std::string)> done);
     nlohmann::json ui_open_dialog(const std::string& name);  // test hook                // POST /ui/action/theme
     nlohmann::json ui_stop();
+    nlohmann::json ui_close();
+    nlohmann::json ui_voice_back();
     nlohmann::json ui_delete_thread(const std::string& id);
 
 private:
@@ -62,6 +68,9 @@ private:
     // org.gnome.desktop.interface color-scheme and tracks it live.
     void follow_system_theme();
     Glib::RefPtr<Gio::Settings> iface_settings_;   // kept alive for watch
+    Glib::RefPtr<Gio::Settings> a11y_settings_;
+    Glib::RefPtr<Gtk::CssProvider> appearance_css_;
+    bool high_contrast_ = false;
     void apply_font_scale();   // font_scale_ → gtk-xft-dpi (1.0 = system auto)
     void scroll_chat_to_bottom();  // sticky-bottom auto-scroll
     void on_settings();         // user profile: display name + avatar
@@ -92,6 +101,11 @@ private:
     // ── UI callbacks ──────────────────────────────────────────────────────
     void on_agent_selected();
     void on_thread_selected();
+    // Embedded voice session: ChimpFlow is probed off the GTK thread;
+    // the existing DM/chat flow proceeds regardless of the result.
+    void maybe_show_voice(const nlohmann::json& agent);
+    void show_voice(const nlohmann::json& agent);
+    void show_sidebar();
     void on_attach();   // Phase 18: pick + upload files
     /// Post-dialog half of on_attach (upload + pending row). The UiApi
     /// test hook drives this directly so the flow is headlessly testable.
@@ -200,7 +214,19 @@ private:
                            const std::string& name);
     void set_status(const std::string& text);
 
-    ApiClient api_;
+    // Workers retain this state after the window closes. The dispatcher is
+    // disconnected and queued UI jobs are dropped by ~HiveWindow, so an
+    // in-flight request can finish without touching destroyed widgets.
+    struct AsyncState {
+        ApiClient api;
+        Glib::Dispatcher dispatcher;
+        std::mutex queue_m;
+        std::vector<std::function<void()>> done_queue;
+    };
+    std::shared_ptr<AsyncState> async_ = std::make_shared<AsyncState>();
+    ApiClient& api_ = async_->api;
+    Glib::Dispatcher& dispatcher_ = async_->dispatcher;
+    sigc::connection dispatcher_connection_;
 
     /// The single live audio pipeline (2026-10-19). Gtk::MediaFile spins
     /// up a GStreamer decodebin3 per instance; several preparing at once
@@ -263,10 +289,10 @@ private:
     bool alive_ = true;
     std::vector<nlohmann::json> rendered_;   // bubbles actually on screen
 
-    // async marshalling
-    Glib::Dispatcher dispatcher_;
-    std::mutex queue_m_;
-    std::vector<std::function<void()>> done_queue_;
+    // GUI-side aliases; worker lambdas capture `async` instead of accessing
+    // these through a potentially destroyed HiveWindow.
+    std::mutex& queue_m_ = async_->queue_m;
+    std::vector<std::function<void()>>& done_queue_ = async_->done_queue;
 
     // Phase 34: attachment image downloads in flight (cache-path keyed —
     // one download per file, no duplicates across re-renders).
@@ -293,6 +319,7 @@ private:
     std::string user_label() const { return display_name_.empty() ? "You" : display_name_; }
 
     Gtk::Paned paned_{Gtk::Orientation::HORIZONTAL};
+    Gtk::Stack left_stack_;
     Gtk::Box sidebar_{Gtk::Orientation::VERTICAL};
     Gtk::Label roster_label_{"Agents"};
     Gtk::ScrolledWindow roster_scroll_;
@@ -300,6 +327,17 @@ private:
     Gtk::Label threads_label_{"Threads"};
     Gtk::ScrolledWindow threads_scroll_;
     Gtk::ListBox threads_list_;
+
+    Prefs voice_prefs_;
+    Glib::RefPtr<Gtk::Builder> voice_builder_;
+    hv::VoiceView* voice_ = nullptr;  // owned by left_stack_/voice_builder_
+    std::unique_ptr<hv::GlobalShortcuts> voice_shortcuts_;
+    std::uint64_t voice_shortcut_activations_ = 0;
+    // Portal Activated may already be queued on the GTK loop when Back or
+    // window close unbinds. A weak token keeps that late callback safe.
+    std::shared_ptr<int> ui_lifetime_token_ = std::make_shared<int>(0);
+    std::uint64_t voice_request_ = 0; // discards stale async health probes
+    bool voice_available_ = false;
 
     Gtk::Box chat_box_{Gtk::Orientation::VERTICAL};
     Gtk::Label status_label_{""};

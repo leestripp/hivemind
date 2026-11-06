@@ -4,6 +4,8 @@
 // lookup and URL escaping.
 #include "text_utils.h"
 
+#include <glib.h>
+
 #include <cassert>
 #include <ctime>
 #include <iostream>
@@ -82,6 +84,16 @@ static void test_inline_markup() {
 
     // Italic does not fire on the first half of a bold marker.
     assert(inline_markup("**b** then *i*") == "<b>b</b> then <i>i</i>");
+
+    // std::string is UTF-8 bytes: formatting must preserve multibyte code
+    // points, combining marks and joined emoji outside and inside spans.
+    const std::string unicode = "héllo — 世界 👩🏽\u200d💻 cafe\u0301";
+    const auto plain = inline_markup(unicode);
+    assert(plain == unicode);
+    assert(g_utf8_validate(plain.c_str(), -1, nullptr) != 0);
+    const auto marked = inline_markup("**héllo 👩🏽\u200d💻** & 世界");
+    assert(marked == "<b>héllo 👩🏽\u200d💻</b> &amp; 世界");
+    assert(g_utf8_validate(marked.c_str(), -1, nullptr) != 0);
 }
 
 static void test_prose_to_markup() {

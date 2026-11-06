@@ -1,5 +1,8 @@
 #include "HiveWindow.h"
 #include "AttachmentUpload.h"
+#include "ChimpFlowClient.h"
+#include "GlobalShortcuts.h"
+#include "VoiceView.h"
 #include "MediaPlayer.h"
 #include "text_utils.h"
 
@@ -261,6 +264,21 @@ Gtk::Widget* make_avatar(const std::string& name, bool is_user,
 // Install a HeaderBar as a dialog's titlebar (CSD) so the compositor doesn't
 // draw a second server-side title bar above it — same fix as the main
 // window's set_titlebar(). Close button only, matching GNOME dialog style.
+void set_accessible_label(Gtk::Widget& widget, const Glib::ustring& label) {
+    gtk_accessible_update_property(GTK_ACCESSIBLE(widget.gobj()),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                   label.c_str(), -1);
+}
+
+void set_accessible_button_label(Gtk::Button& button,
+                                 const Glib::ustring& label) {
+    set_accessible_label(button, label);
+    // GtkButton derives its accessible name from a textual child before the
+    // button's own LABEL property. Name that child as well for emoji-only
+    // buttons; image-only header buttons already use the parent property.
+    if (auto* child = button.get_child()) set_accessible_label(*child, label);
+}
+
 static void install_dialog_titlebar(Gtk::Dialog& dialog,
                                     const std::string& title) {
     auto* hb = Gtk::make_managed<Gtk::HeaderBar>();
@@ -281,6 +299,7 @@ void HiveWindow::setup_icons() {
         img->set(themed_icon_pixbuf(icon, 16, dark_mode_));
         btn.set_child(*img);
         btn.set_tooltip_text(tip);
+        set_accessible_label(btn, tip);
         icon_slots_.push_back({&btn, img, icon});
     };
     slot(new_agent_btn_,     "agent-add",  "Create a new agent");
@@ -318,6 +337,21 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
 // Non-GNOME desktops without the schema keep GTK's default.
 void HiveWindow::follow_system_theme() {
     auto src = Gio::SettingsSchemaSource::get_default();
+    const std::string kA11ySchema = "org.gnome.desktop.a11y.interface";
+    if (src && src->lookup(kA11ySchema, true)) {
+        a11y_settings_ = Gio::Settings::create(kA11ySchema);
+        auto apply_contrast = [this] {
+            const bool enabled = a11y_settings_->get_boolean("high-contrast");
+            if (enabled == high_contrast_) return;
+            high_contrast_ = enabled;
+            apply_theme();
+        };
+        a11y_settings_->signal_changed("high-contrast")
+            .connect([apply_contrast](const Glib::ustring&) {
+                apply_contrast();
+            });
+        high_contrast_ = a11y_settings_->get_boolean("high-contrast");
+    }
     const std::string kIfaceSchema = "org.gnome.desktop.interface";
     if (!src || !src->lookup(kIfaceSchema, true)) return;
     iface_settings_ = Gio::Settings::create(kIfaceSchema);
@@ -347,24 +381,45 @@ void HiveWindow::follow_system_theme() {
 
 void HiveWindow::apply_theme() {
     auto settings = Gtk::Settings::get_default();
+#if GTK_CHECK_VERSION(4, 20, 0)
+    // GTK 4.20 replaced gtk-application-prefer-dark-theme with an explicit
+    // interface color scheme. The old property is deprecated and no longer
+    // drives Adwaita's CSS on current GNOME/GTK4 desktops.
+    // Ubuntu's Yaru/Yaru-dark settings are GTK3 themes; this installation
+    // has no Yaru gtk-4.0/gtk.css. Leaving GTK4 pointed at Yaru-dark makes
+    // theme import fail and loses the normal window styling entirely.
+    settings->property_gtk_theme_name().set_value("Adwaita");
+    // GtkSettings is process-local: this selects Adwaita's variant for the
+    // application without writing the user's desktop preference. The
+    // provider properties independently govern our own CSS media queries.
+    settings->property_gtk_interface_color_scheme().set_value(
+        dark_mode_ ? Gtk::InterfaceColorScheme::DARK
+                   : Gtk::InterfaceColorScheme::LIGHT);
+    settings->property_gtk_interface_contrast().set_value(
+        high_contrast_ ? Gtk::InterfaceContrast::MORE
+                       : Gtk::InterfaceContrast::NO_PREFERENCE);
+    g_object_set(appearance_css_->gobj(),
+                 "prefers-color-scheme",
+                 dark_mode_ ? GTK_INTERFACE_COLOR_SCHEME_DARK
+                            : GTK_INTERFACE_COLOR_SCHEME_LIGHT,
+                 "prefers-contrast",
+                 high_contrast_ ? GTK_INTERFACE_CONTRAST_MORE
+                                : GTK_INTERFACE_CONTRAST_NO_PREFERENCE,
+                 nullptr);
+#else
     settings->property_gtk_application_prefer_dark_theme()
         .set_value(dark_mode_);
-    // Ubuntu's Yaru ships dark as a SEPARATE theme name (gtk-theme-name =
-    // "Yaru-dark" when GNOME Appearance = Dark). prefer-dark=false alone
-    // cannot reach light from there — the dark theme has no light variant.
-    // Going light: strip a "-dark" suffix so the base theme loads.
-    // GtkSettings is process-local; no other app is affected.
+    // Legacy Yaru GTK3 installations expose dark as a separate theme name.
     std::string theme = settings->property_gtk_theme_name().get_value();
     const bool has_dark_suffix =
         theme.size() > 5 && theme.compare(theme.size() - 5, 5, "-dark") == 0;
     if (!dark_mode_ && has_dark_suffix) {
-        // Going light: strip "-dark" so the base (light-capable) theme loads.
         theme.resize(theme.size() - 5);
         settings->property_gtk_theme_name().set_value(theme);
     } else if (dark_mode_ && !has_dark_suffix && theme == "Yaru") {
-        // Going dark: Yaru ships dark as a separate theme name.
         settings->property_gtk_theme_name().set_value("Yaru-dark");
     }
+#endif
     refresh_themed_icons();
 }
 
@@ -504,6 +559,7 @@ void HiveWindow::on_settings() {
         b->set_child(*content);
         b->add_css_class("avatar-pick");
         b->set_tooltip_text(tip);
+        set_accessible_label(*b, tip);
         tiles->push_back({val, b});
         if (!leader) { leader = b; if (chosen->empty()) b->set_active(true); }
         else { b->set_group(*leader); if (val == *chosen) b->set_active(true); }
@@ -572,6 +628,7 @@ void HiveWindow::on_settings() {
 }
 
 HiveWindow::HiveWindow() {
+    voice_prefs_.load();
     set_title("HiveMind");
     set_default_size(1100, 760);
 
@@ -582,6 +639,10 @@ HiveWindow::HiveWindow() {
             p->load_from_string(kCss);
             return p;
         }(),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    appearance_css_ = Gtk::CssProvider::create();
+    Gtk::StyleContext::add_provider_for_display(
+        Gdk::Display::get_default(), appearance_css_,
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     // ── header ────────────────────────────────────────────────────────────
@@ -693,9 +754,11 @@ HiveWindow::HiveWindow() {
     attach_btn_.set_label("📎");
     attach_btn_.set_tooltip_text(
         "Attach a file — saved into the shared workspace where agents can read it");
+    set_accessible_button_label(attach_btn_, "Attach a file");
     attach_btn_.signal_clicked().connect([this] { on_attach(); });
     attach_clear_btn_.set_label("✕");
     attach_clear_btn_.set_tooltip_text("Drop pending attachments");
+    set_accessible_button_label(attach_clear_btn_, "Drop pending attachments");
     attach_clear_btn_.add_css_class("flat");
     attach_clear_btn_.signal_clicked().connect([this] {
         pending_attachments_ = nlohmann::json::array();
@@ -725,7 +788,10 @@ HiveWindow::HiveWindow() {
     chat_box_.append(attach_row_);
     chat_box_.append(composer_);
 
-    paned_.set_start_child(sidebar_);
+    // The chat stays mounted on the right. Only the left child switches
+    // between the existing Agents/Threads sidebar and an embedded VoiceView.
+    left_stack_.add(sidebar_, "sidebar");
+    paned_.set_start_child(left_stack_);
     paned_.set_end_child(chat_box_);
     paned_.set_position(main_split_);
     paned_.set_vexpand(true);
@@ -744,7 +810,7 @@ HiveWindow::HiveWindow() {
     set_child(root_);
 
     // ── async plumbing ────────────────────────────────────────────────────
-    dispatcher_.connect([this] {
+    dispatcher_connection_ = dispatcher_.connect([this] {
         std::vector<std::function<void()>> jobs;
         {
             std::lock_guard<std::mutex> lk(queue_m_);
@@ -822,6 +888,16 @@ HiveWindow::HiveWindow() {
             window_h_ = get_height();
         }
         main_split_ = paned_.get_position();
+        // GtkApplication may quit after the last window closes without
+        // running this window's C++ destructor first. Close the global
+        // portal session NOW, rather than relying on process-exit D-Bus
+        // disconnection. Do NOT destroy VoiceView inside close-request:
+        // GTK is still unwinding its window/widget tree; normal teardown
+        // remains in the destructor (or process exit). alive_ also rejects
+        // any portal activation that was already queued before unbind.
+        alive_ = false;
+        ++voice_request_;
+        voice_shortcuts_.reset();
         save_config();
         return false;   // let the close proceed
     }, false);
@@ -838,6 +914,13 @@ HiveWindow::HiveWindow() {
 
 HiveWindow::~HiveWindow() {
     alive_ = false;
+    dispatcher_connection_.disconnect();
+    {
+        std::lock_guard<std::mutex> lk(async_->queue_m);
+        async_->done_queue.clear();
+    }
+    ++voice_request_;
+    show_sidebar();  // joins the voice worker/audio engines before members die
     stop_active_video();
     video_player_.set_paintable(Glib::RefPtr<Gdk::Paintable>{});
     active_video_media_.reset();
@@ -856,8 +939,7 @@ void HiveWindow::load_config() {
     try {
         auto j = json::parse(f);
         server_url_ = j.value("server", server_url_);
-        api_.set_base_url(server_url_);
-        api_.set_api_key(j.value("api_key", ""));
+        api_.set_connection(server_url_, j.value("api_key", ""));
         display_name_ = j.value("display_name", "");
         user_avatar_  = j.value("user_avatar", "");
         font_scale_   = j.value("font_scale", 1.0);
@@ -963,7 +1045,7 @@ void HiveWindow::maybe_show_connect_dialog() {
             key->set_sensitive(false);
             connect_with_credentials(url, k,
                 [this, dialog, error, cancel_btn, ok_btn,
-                 server, key](std::string err) {
+                 server, key](const std::string& err) {
                     if (!alive_ || connect_dialog_ != dialog) return;
                     if (!err.empty()) {
                         error->set_text("Connection failed: " + err);
@@ -984,7 +1066,7 @@ void HiveWindow::maybe_show_connect_dialog() {
 void HiveWindow::connect_with_credentials(const std::string& url,
                                           const std::string& key,
                                           std::function<void(std::string)> done) {
-    std::thread([this, url, key, done = std::move(done)]() mutable {
+    run_async([this, async = async_, url, key, done = std::move(done)]() mutable {
         std::string err;
         try {
             ApiClient probe{url};
@@ -994,32 +1076,36 @@ void HiveWindow::connect_with_credentials(const std::string& url,
             err = e.what();
         }
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, url, key, err, done = std::move(done)] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, url, key, err, done = std::move(done)] {
                 if (!alive_) return;
                 if (err.empty()) {
+                    show_sidebar();
                     server_url_ = url;
-                    api_.set_base_url(server_url_);
-                    api_.set_api_key(key);
+                    async->api.set_connection(server_url_, key);
                     save_config();
                     refresh_all();
                 }
                 done(err);
             });
         }
-        dispatcher_.emit();
-    }).detach();
+        async->dispatcher.emit();
+    });
 }
 
 // ── async plumbing ──────────────────────────────────────────────────────────
 
 void HiveWindow::run_async(std::function<void()> work) {
-    std::thread([this, work = std::move(work)]() mutable {
-        try { work(); } catch (const std::exception& e) {
+    auto async = async_;
+    std::thread([this, async = std::move(async),
+                 work = std::move(work)]() mutable {
+        try {
+            work();
+        } catch (const std::exception& e) {
             std::string msg = e.what();
             {
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, msg] {
+                std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back([this, msg] {
                     if (!alive_) return;
                     set_status("Error: " + msg);
                     if (msg.find("401") != std::string::npos ||
@@ -1028,8 +1114,17 @@ void HiveWindow::run_async(std::function<void()> work) {
                         maybe_show_connect_dialog();
                 });
             }
-            dispatcher_.emit();
+        } catch (...) {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this] {
+                if (alive_) set_status("Error: unknown background failure");
+            });
         }
+        // Every worker gets exactly one guaranteed final wake. Some older
+        // paths also emit before returning; Glib::Dispatcher coalesces those
+        // redundant notifications, while paths that forgot cannot strand
+        // their completed UI work in the queue.
+        async->dispatcher.emit();
     }).detach();
 }
 
@@ -1040,16 +1135,16 @@ void HiveWindow::set_status(const std::string& text) {
 // ── data loading ────────────────────────────────────────────────────────────
 
 void HiveWindow::refresh_all() {
-    run_async([this] {
-        json agents = api_.list_agents();
-        json threads = api_.list_threads();
+    run_async([this, async = async_] {
+        json agents = async->api.list_agents();
+        json threads = async->api.list_threads();
         json workers = json::object();
-        try { workers = api_.list_workers(); } catch (...) {}
+        try { workers = async->api.list_workers(); } catch (...) {}
         json groups = json::object();
-        try { groups = api_.list_thread_groups(); } catch (...) {}
+        try { groups = async->api.list_thread_groups(); } catch (...) {}
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, agents, threads, workers, groups] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, agents, threads, workers, groups] {
                 if (!alive_) return;
                 agents_ = agents.value("agents", json::array());
                 threads_ = threads.value("threads", json::array());
@@ -1072,16 +1167,16 @@ void HiveWindow::refresh_all() {
                            std::to_string(threads_.size()) + " threads");
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
 void HiveWindow::refresh_threads() {
-    run_async([this] {
-        json threads = api_.list_threads();
+    run_async([this, async = async_] {
+        json threads = async->api.list_threads();
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, threads] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, threads] {
                 if (!alive_) return;
                 auto arr = threads.value("threads", json::array());
                 // Change signature: id + title + last_activity per row.
@@ -1121,7 +1216,7 @@ void HiveWindow::refresh_threads() {
                 rebuild_thread_list();
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -1133,8 +1228,8 @@ void HiveWindow::maybe_post_user_read(const std::string& tid) {
     last_read_post_ = now;
     last_read_post_thread_ = tid;
     // Fire-and-forget: a failed read-mark must never surface in the UI.
-    run_async([this, tid] {
-        try { api_.mark_thread_read(tid); } catch (...) {}
+    run_async([this, async = async_, tid] {
+        try { async->api.mark_thread_read(tid); } catch (...) {}
     });
 }
 
@@ -1142,12 +1237,12 @@ void HiveWindow::poll_chat() {
     if (current_thread_.empty()) return;
     std::string tid = current_thread_;
     std::string after = last_message_id_;
-    run_async([this, tid, after] {
-        json msgs = api_.list_messages(tid, after);
-        json act = api_.activity(tid);
+    run_async([this, async = async_, tid, after] {
+        json msgs = async->api.list_messages(tid, after);
+        json act = async->api.activity(tid);
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, tid, msgs, act, after] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, tid, msgs, act, after] {
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
                 bool any_new = false;
@@ -1197,7 +1292,7 @@ void HiveWindow::poll_chat() {
                 update_live_bubble(act.value("turns", json::array()));
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -1206,15 +1301,15 @@ void HiveWindow::poll_chat() {
 // the busy/state signature changes — rebuilding rows every tick would
 // fight the user's selection/scroll.
 void HiveWindow::poll_roster() {
-    run_async([this] {
-        json agents = api_.list_agents();
+    run_async([this, async = async_] {
+        json agents = async->api.list_agents();
         // Worker online flags drive the roster grouping — a worker going
         // up/down must rebuild the list even when no agent state changed.
         json workers = json::object();
-        try { workers = api_.list_workers(); } catch (...) {}
+        try { workers = async->api.list_workers(); } catch (...) {}
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, agents, workers] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, agents, workers] {
                 if (!alive_) return;
                 auto arr = agents.value("agents", json::array());
                 auto warr = workers.value("workers", json::array());
@@ -1237,7 +1332,7 @@ void HiveWindow::poll_roster() {
                 rebuild_roster();
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -1674,12 +1769,12 @@ void HiveWindow::move_thread_to(const std::string& thread_id,
         thread_bucket_overrides_.erase(thread_id);
     save_group_ui_state();
     rebuild_thread_list();   // immediate feedback, no poll wait
-    run_async([this, thread_id, smart, group_id] {
+    run_async([this, async = async_, thread_id, smart, group_id] {
         try {
-            api_.set_thread_group(thread_id, smart ? "" : group_id);
+            async->api.set_thread_group(thread_id, smart ? "" : group_id);
         } catch (...) {}
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this] { if (alive_) refresh_all(); });
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });
     });
 }
 
@@ -1707,18 +1802,18 @@ void HiveWindow::show_group_name_dialog(const std::string& title,
             const std::string name = entry->get_text();
             dialog->destroy();
             if (r != Gtk::ResponseType::OK || name.empty()) return;
-            run_async([this, name, group_id, move_thread_id] {
+            run_async([this, async = async_, name, group_id, move_thread_id] {
                 try {
                     if (group_id.empty()) {
-                        const std::string gid = api_.create_thread_group(name);
+                        const std::string gid = async->api.create_thread_group(name);
                         if (!move_thread_id.empty())
-                            api_.set_thread_group(move_thread_id, gid);
+                            async->api.set_thread_group(move_thread_id, gid);
                     } else {
-                        api_.rename_thread_group(group_id, name);
+                        async->api.rename_thread_group(group_id, name);
                     }
                 } catch (...) {}
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this] { if (alive_) refresh_all(); });
+                std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });
             });
         });
     dialog->present();
@@ -1752,10 +1847,10 @@ void HiveWindow::show_group_menu(Gtk::Widget& anchor,
     // Members revert to their smart groups hub-side.
     mk("\U0001F5D1 Delete group", "destructive-action",
        [this, group_id] {
-           run_async([this, group_id] {
-               try { api_.delete_thread_group(group_id); } catch (...) {}
-               std::lock_guard<std::mutex> lk(queue_m_);
-               done_queue_.push_back([this] { if (alive_) refresh_all(); });
+           run_async([this, async = async_, group_id] {
+               try { async->api.delete_thread_group(group_id); } catch (...) {}
+               std::lock_guard<std::mutex> lk(async->queue_m);
+               async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });
            });
        });
     pop->set_child(*box);
@@ -2071,11 +2166,11 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
         if (load_earlier_btn_) load_earlier_btn_->set_sensitive(false);
         const std::string tid = current_thread_;
         const std::string before = oldest_message_id_;
-        run_async([this, tid, before] {
-        json msgs = api_.list_messages_before(tid, before);
+        run_async([this, async = async_, tid, before] {
+        json msgs = async->api.list_messages_before(tid, before);
         {
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, tid, msgs] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, tid, msgs] {
         loading_earlier_ = false;
                 if (!alive_ || tid != current_thread_) return;
                 auto arr = msgs.value("messages", json::array());
@@ -2131,7 +2226,7 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
                 update_load_earlier_row();
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -2181,6 +2276,9 @@ void HiveWindow::show_image_picture(Gtk::Box* holder,
     btn->add_css_class("flat");
     btn->set_halign(Gtk::Align::START);
     btn->set_tooltip_text(file);
+    set_accessible_label(*btn, "Open image " +
+        (caption.empty() ? std::filesystem::path(file).filename().string()
+                         : caption));
     btn->signal_clicked().connect([file] {
         Gio::AppInfo::launch_default_for_uri("file://" + file);
     });
@@ -2236,11 +2334,11 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
     holder->signal_destroy().connect([weak] { *weak = nullptr; });
 
     const std::string tid = current_thread_;
-    run_async([this, rel, worker, key, tid, caption, weak] {
+    run_async([this, async = async_, rel, worker, key, tid, caption, weak] {
         std::string err;
         try {
             std::string bytes =
-                api_.download("/api/files/download?path=" +
+                async->api.download("/api/files/download?path=" +
                               ApiClient::url_encode(rel) +
                               (worker.empty() ? "" :
                                "&worker=" + ApiClient::url_encode(worker)));
@@ -2265,8 +2363,8 @@ void HiveWindow::load_image_attachment(Gtk::Box* holder,
         } catch (const std::exception& e) {
             err = e.what();
         }
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, key, tid, caption, weak, err] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, key, tid, caption, weak, err] {
             image_downloads_.erase(key);
             if (!alive_ || !*weak || tid != current_thread_) return;
             // Swap the placeholder for the picture (or an error note).
@@ -2363,10 +2461,10 @@ void HiveWindow::open_file_attachment(Gtk::Button* chip,
     auto weak = std::make_shared<Gtk::Button*>(chip);
     chip->signal_destroy().connect([weak] { *weak = nullptr; });
     const std::string cache_s = cache.string();
-    run_async([this, rel, worker, cache, cache_s, name, weak] {
+    run_async([this, async = async_, rel, worker, cache, cache_s, name, weak] {
         const std::string err = download_to_cache(api_, rel, worker, cache);
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, cache_s, name, weak, err] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, cache_s, name, weak, err] {
             if (!alive_) return;
             if (*weak) {
                 (*weak)->set_sensitive(true);
@@ -2379,7 +2477,7 @@ void HiveWindow::open_file_attachment(Gtk::Button* chip,
                 set_status("Download failed: " + err);
             }
         });
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -2396,6 +2494,7 @@ void HiveWindow::add_download_button(Gtk::Box* parent,
     btn->add_css_class("hv-dl");
     btn->set_halign(Gtk::Align::START);
     btn->set_tooltip_text("Save " + name + " to Downloads");
+    set_accessible_label(*btn, "Save " + name + " to Downloads");
     btn->signal_clicked().connect([this, att, tid, btn] {
         download_attachment(btn, att, tid);
     });
@@ -2429,7 +2528,7 @@ void HiveWindow::download_attachment(Gtk::Button* btn,
     auto weak = std::make_shared<Gtk::Button*>(btn);
     btn->signal_destroy().connect([weak] { *weak = nullptr; });
     const std::string dest_s = dest.string();
-    run_async([this, rel, worker, cache, dest, dest_s, name, weak] {
+    run_async([this, async = async_, rel, worker, cache, dest, dest_s, name, weak] {
         std::string err;
         std::error_code ec;
         if (!(fs::is_regular_file(cache, ec) &&
@@ -2439,14 +2538,14 @@ void HiveWindow::download_attachment(Gtk::Button* btn,
             fs::copy_file(cache, dest, ec);
             if (ec) err = ec.message();
         }
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, dest_s, name, weak, err] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, dest_s, name, weak, err] {
             if (!alive_) return;
             if (*weak) (*weak)->set_sensitive(true);
             set_status(err.empty() ? "Saved " + dest_s
                                    : "Download failed: " + err);
         });
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -2643,14 +2742,14 @@ void HiveWindow::show_video_widget(Gtk::Box* holder, const std::string& file,
         auto weak = std::make_shared<Gtk::Stack*>(stack);
         stack->signal_destroy().connect([weak] { *weak = nullptr; });
         const std::string tid = current_thread_;
-        run_async([this, file, poster, weak, tid, show_poster] {
+        run_async([this, async = async_, file, poster, weak, tid, show_poster] {
             const bool ok = media_player::make_poster(file, poster);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, poster, weak, tid, ok, show_poster] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, poster, weak, tid, ok, show_poster] {
                 if (!alive_ || !*weak || tid != current_thread_) return;
                 if (ok) show_poster(poster);
             });
-            dispatcher_.emit();
+            async->dispatcher.emit();
         });
     }
 }
@@ -2721,11 +2820,11 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
         return;
     }
 
-    run_async([this, rel, worker, key, tid, name, weak] {
+    run_async([this, async = async_, rel, worker, key, tid, name, weak] {
         std::string err;
         try {
             std::string bytes =
-                api_.download("/api/files/download?path=" +
+                async->api.download("/api/files/download?path=" +
                               ApiClient::url_encode(rel) +
                               (worker.empty() ? "" :
                                "&worker=" + ApiClient::url_encode(worker)));
@@ -2750,8 +2849,8 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
         } catch (const std::exception& e) {
             err = e.what();
         }
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, key, tid, name, weak, err] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, key, tid, name, weak, err] {
             image_downloads_.erase(key);
             if (!alive_ || !*weak || tid != current_thread_) return;
             while (auto* child = (*weak)->get_first_child())
@@ -2766,7 +2865,7 @@ void HiveWindow::load_video_attachment(Gtk::Box* holder,
                 (*weak)->append(*el);
             }
         });
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -2792,6 +2891,7 @@ void HiveWindow::show_audio_widget(Gtk::Box* holder, const std::string& file,
     auto* play = Gtk::make_managed<Gtk::Button>("\u25b6");
     play->add_css_class("hv-audio-play");
     play->set_tooltip_text("Play " + name);
+    set_accessible_button_label(*play, "Play " + name + " in default media player");
     card->append(*play);
 
     auto* text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
@@ -2853,10 +2953,10 @@ void HiveWindow::load_audio_attachment(Gtk::Box* holder,
     holder->signal_destroy().connect([weak] { *weak = nullptr; });
 
     const std::string tid = current_thread_;
-    run_async([this, rel, worker, cache, key, tid, name, weak] {
+    run_async([this, async = async_, rel, worker, cache, key, tid, name, weak] {
         const std::string err = download_to_cache(api_, rel, worker, cache);
-        std::lock_guard<std::mutex> lk(queue_m_);
-        done_queue_.push_back([this, key, tid, name, weak, err] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+        async->done_queue.push_back([this, async, key, tid, name, weak, err] {
             image_downloads_.erase(key);
             if (!alive_ || !*weak || tid != current_thread_) return;
             while (auto* child = (*weak)->get_first_child())
@@ -2871,7 +2971,7 @@ void HiveWindow::load_audio_attachment(Gtk::Box* holder,
                 (*weak)->append(*el);
             }
         });
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -2902,17 +3002,25 @@ void HiveWindow::on_agent_selected() {
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("agent_id"));
     if (!id) return;
-    // Already in this agent's DM — don't churn threads on re-selection.
     std::string aid = *id;
-    if (aid == current_dm_agent_) return;
+    auto agent = std::find_if(agents_.begin(), agents_.end(),
+        [&aid](const json& a) { return a.value("id", "") == aid; });
+    if (agent == agents_.end()) return;
+    // Re-selecting the current agent re-enters voice (if available) without
+    // recreating its DM. This is also the path Back -> same agent takes.
+    if (aid == current_dm_agent_) {
+        maybe_show_voice(*agent);
+        return;
+    }
     current_dm_agent_ = aid;
+    maybe_show_voice(*agent);
     // Start (or focus) a DM with this agent.
-    run_async([this, aid] {
-        json t = api_.create_thread("", {aid}, /*reuse_dm=*/true);
+    run_async([this, async = async_, aid] {
+        json t = async->api.create_thread("", {aid}, /*reuse_dm=*/true);
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, t] {
-                if (!alive_) return;
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, t, aid] {
+                if (!alive_ || current_dm_agent_ != aid) return;
                 current_thread_ = t.value("id", "");
                 // 2026-09-16: only on_thread_selected() set composer
                 // sensitivity, and it early-returns once current_thread_
@@ -2944,8 +3052,89 @@ void HiveWindow::on_agent_selected() {
                 poll_chat();
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
+}
+
+void HiveWindow::maybe_show_voice(const nlohmann::json& agent) {
+    const std::string agent_id = agent.value("id", "");
+    if (agent_id.empty()) return;
+    const auto request = ++voice_request_;
+    run_async([this, async = async_, agent, agent_id, request] {
+        // A healthy gateway without its locally configured key cannot drive
+        // either STT or TTS. In that case preserve the ordinary agent-click
+        // behavior rather than opening a voice page that cannot work.
+        const std::string key = Prefs::chimpflowKey();
+        hv::ChimpFlowClient chimpflow{Prefs::chimpflowUrl(), key};
+        const bool available = !key.empty() && chimpflow.healthy();
+        {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, agent, agent_id, request, available] {
+                if (!alive_ || request != voice_request_) return;
+                voice_available_ = available;
+                // The user may have opened another thread while localhost
+                // health was being checked. Never switch back unexpectedly.
+                if (available && current_dm_agent_ == agent_id)
+                    show_voice(agent);
+            });
+        }
+        async->dispatcher.emit();
+    });
+}
+
+void HiveWindow::show_voice(const nlohmann::json& agent) {
+    if (voice_) show_sidebar();
+
+    // Hive Client owns hub credentials. Reuse voice-only preferences such
+    // as per-agent speaker assignments, but never fork connection settings.
+    voice_prefs_.setBase(server_url_);
+    voice_prefs_.setApiKey(api_.api_key());
+
+    hv::AgentInfo info;
+    info.id = agent.value("id", "");
+    info.name = agent.value("name", "");
+    info.role = agent.value("role", "");
+    info.avatar = agent.value("avatar", "");
+    info.state = agent.value("state", "");
+    info.worker = agent.value("worker", "");
+    info.busy = agent.value("busy", false);
+    info.online = agent.value("online", info.state != "offline");
+
+    voice_builder_ = Gtk::Builder::create_from_resource(
+        "/org/hivemind/voice/ui/voice.ui");
+    voice_ = Gtk::Builder::get_widget_derived<hv::VoiceView>(
+        voice_builder_, "voiceRoot", voice_prefs_, std::move(info));
+    voice_->signal_back().connect([this] { show_sidebar(); });
+    left_stack_.add(*voice_, "voice");
+    left_stack_.set_visible_child("voice");
+
+    // System-wide push-to-talk, scoped strictly to this embedded voice page.
+    // Back/thread changes/window close destroy the portal session. The weak
+    // UI token and view identity also reject an Activated already queued
+    // before teardown; it must never retarget a later agent's voice page.
+    auto* const shortcut_view = voice_;
+    voice_shortcut_activations_ = 0;
+    voice_shortcuts_ = std::make_unique<hv::GlobalShortcuts>(
+        [this, shortcut_view, weak_ui = std::weak_ptr<int>(ui_lifetime_token_)] {
+            if (weak_ui.expired()) return;
+            if (!alive_ || voice_ != shortcut_view || !shortcut_view) return;
+            ++voice_shortcut_activations_;
+            shortcut_view->toggleTalk();
+        });
+    voice_shortcuts_->bind("LOGO+ALT+BackSpace");
+}
+
+void HiveWindow::show_sidebar() {
+    ++voice_request_;
+    voice_shortcuts_.reset();  // closes the portal session before voice dies
+    left_stack_.set_visible_child("sidebar");
+    if (!voice_) return;
+    left_stack_.remove(*voice_);
+    voice_ = nullptr;
+    voice_builder_.reset();
+    // Leave the same DM open on the right, but allow its agent row to be
+    // clicked again to re-enter voice without selecting another agent first.
+    roster_list_.unselect_all();
 }
 
 void HiveWindow::on_thread_selected() {
@@ -2953,6 +3142,7 @@ void HiveWindow::on_thread_selected() {
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("thread_id"));
     if (!id || *id == current_thread_) return;
+    show_sidebar();
     current_thread_ = *id;
     current_dm_agent_.clear();   // user picked a thread explicitly
     last_message_id_.clear();
@@ -3011,13 +3201,13 @@ void HiveWindow::on_send() {
     pending_attachments_ = json::array();
     update_attach_row();
     std::string tid = current_thread_;
-    run_async([this, tid, text, atts] {
-        api_.post_message(tid, text, atts);
+    run_async([this, async = async_, tid, text, atts] {
+        async->api.post_message(tid, text, atts);
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this] { if (alive_) poll_chat(); });
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async] { if (alive_) poll_chat(); });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -3088,14 +3278,14 @@ void HiveWindow::attach_picked_file(const std::string& path) {
     attach_btn_.set_sensitive(false);
     update_attach_row();
     set_status("Preparing " + name + "…");
-    run_async([this, tid, path, name] {
+    run_async([this, async = async_, tid, path, name] {
         json meta;
         std::string err;
         try {
             auto prepared = attachment_upload::prepare(path);
             {
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, name, resized = prepared.resized] {
+                std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back([this, async, name, resized = prepared.resized] {
                     if (!alive_ || !upload_in_flight_) return;
                     upload_preparing_ = false;
                     update_attach_row();
@@ -3104,8 +3294,8 @@ void HiveWindow::attach_picked_file(const std::string& path) {
                         : "Uploading ") + name + "…");
                 });
             }
-            dispatcher_.emit();
-            meta = api_.upload_attachment(tid, prepared.filename,
+            async->dispatcher.emit();
+            meta = async->api.upload_attachment(tid, prepared.filename,
                                           prepared.bytes);
         } catch (const std::exception& e) {
             err = e.what();
@@ -3113,8 +3303,8 @@ void HiveWindow::attach_picked_file(const std::string& path) {
             err = "unexpected upload failure: " + path;
         }
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, meta, err] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, meta, err] {
                 if (!alive_) return;
                 upload_in_flight_ = false;
                 upload_preparing_ = false;
@@ -3131,7 +3321,7 @@ void HiveWindow::attach_picked_file(const std::string& path) {
                 update_attach_row();
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -3211,12 +3401,12 @@ void HiveWindow::show_agent_screen(const nlohmann::json& agent, bool view_only) 
     // mid-poll (detached thread outliving the widgets).
     auto alive = std::make_shared<bool>(true);
     win->signal_destroy().connect([alive] { *alive = false; });
-    std::thread([this, id, url, wv, win, name, alive] {
-        try { api_.screen_start(id); } catch (...) {}
+    run_async([this, async = async_, id, url, wv, win, name, alive] {
+        try { async->api.screen_start(id); } catch (...) {}
         bool up = false;
         for (int i = 0; i < 48 && !up; ++i) {   // ~4 min cap, 5s ticks
             try {
-                up = api_.screen_status(id).value("running", false);
+                up = async->api.screen_status(id).value("running", false);
             } catch (...) {}
             if (!up) std::this_thread::sleep_for(std::chrono::seconds(5));
         }
@@ -3230,22 +3420,22 @@ void HiveWindow::show_agent_screen(const nlohmann::json& agent, bool view_only) 
                                " (screen failed to start — close and retry)");
             }
         });
-    }).detach();
+    });
 #else
     // System-browser fallback: same poll, then open.
-    std::thread([this, id, url] {
-        try { api_.screen_start(id); } catch (...) {}
+    run_async([this, async = async_, id, url] {
+        try { async->api.screen_start(id); } catch (...) {}
         bool up = false;
         for (int i = 0; i < 48 && !up; ++i) {
             try {
-                up = api_.screen_status(id).value("running", false);
+                up = async->api.screen_status(id).value("running", false);
             } catch (...) {}
             if (!up) std::this_thread::sleep_for(std::chrono::seconds(5));
         }
         if (up)
             Glib::signal_idle().connect_once(
                 [url] { Gio::AppInfo::launch_default_for_uri(url); });
-    }).detach();
+    });
 #endif
 }
 
@@ -3291,14 +3481,14 @@ void HiveWindow::show_exec_log(const nlohmann::json& agent) {
     auto tag_dim = buf->create_tag("dim");
     tag_dim->property_foreground() = dm ? "#6e738d" : "#6c6f85";
 
-    run_async([this, id, name, buf, status, tag_ok, tag_bad, tag_to, tag_dim] {
+    run_async([this, async = async_, id, name, buf, status, tag_ok, tag_bad, tag_to, tag_dim] {
         std::string err;
         json data;
-        try { data = api_.exec_log(id); }
+        try { data = async->api.exec_log(id); }
         catch (const std::exception& e) { err = e.what(); }
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, id, name, buf, status, tag_ok, tag_bad,
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, id, name, buf, status, tag_ok, tag_bad,
                                      tag_to, tag_dim, data, err] {
                 if (!alive_) return;
                 if (!err.empty()) { status->set_text("Error: " + err); return; }
@@ -3318,7 +3508,7 @@ void HiveWindow::show_exec_log(const nlohmann::json& agent) {
                                  " entries — newest first");
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -3361,17 +3551,17 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
     });
     dialog->present();
 
-    run_async([this, dialog, outer, loading, agent_id, aname] {
+    run_async([this, async = async_, dialog, outer, loading, agent_id, aname] {
         json global, enabled, local;
         std::string err;
         try {
-            global  = api_.list_global_skills();
-            enabled = api_.agent_global_skills(agent_id);
-            local   = api_.list_agent_skills(agent_id);
+            global  = async->api.list_global_skills();
+            enabled = async->api.agent_global_skills(agent_id);
+            local   = async->api.list_agent_skills(agent_id);
         } catch (const std::exception& e) { err = e.what(); }
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, dialog, outer, loading, agent_id, aname,
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, dialog, outer, loading, agent_id, aname,
                                    global, enabled, local, err] {
                 if (!alive_) return;
                 outer->remove(*loading);
@@ -3433,15 +3623,15 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                     del->add_css_class("destructive-action");
                     del->set_valign(Gtk::Align::CENTER);
                     del->set_tooltip_text("Delete from shared library");
-                    del->signal_clicked().connect([this, dialog, sname] {
-                        run_async([this, dialog, sname] {
-                            try { api_.delete_skill(sname); }
+                    del->signal_clicked().connect([this, async, dialog, sname] {
+                        run_async([this, async, dialog, sname] {
+                            try { async->api.delete_skill(sname); }
                             catch (...) {}
-                            std::lock_guard<std::mutex> lk(queue_m_);
-                            done_queue_.push_back([this, dialog] {
+                            std::lock_guard<std::mutex> lk(async->queue_m);
+                            async->done_queue.push_back([this, async, dialog] {
                                 if (alive_ && dialog->get_root()) dialog->destroy();
                             });
-                            dispatcher_.emit();
+                            async->dispatcher.emit();
                         });
                     });
                     row->append(*del);
@@ -3452,17 +3642,17 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                     // failure (guard suppresses the recursive signal_changed).
                     auto guard = std::make_shared<bool>(false);
                     sw->property_active().signal_changed().connect(
-                        [this, sw, agent_id, sname, guard] {
+                        [this, async, sw, agent_id, sname, guard] {
                             if (*guard) return;
                             const bool on = sw->get_active();
                             sw->set_sensitive(false);
-                            run_async([this, sw, agent_id, sname, on, guard] {
+                            run_async([this, async, sw, agent_id, sname, on, guard] {
                                 std::string err;
-                                try { api_.set_global_skill(agent_id, sname, on); }
+                                try { async->api.set_global_skill(agent_id, sname, on); }
                                 catch (const std::exception& e) { err = e.what(); }
                                 {
-                                    std::lock_guard<std::mutex> lk(queue_m_);
-                                    done_queue_.push_back([this, sw, on, guard, err] {
+                                    std::lock_guard<std::mutex> lk(async->queue_m);
+                                    async->done_queue.push_back([this, async, sw, on, guard, err] {
                                         if (!alive_) return;
                                         sw->set_sensitive(true);
                                         if (!err.empty()) {
@@ -3473,7 +3663,7 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                                         }
                                     });
                                 }
-                                dispatcher_.emit();
+                                async->dispatcher.emit();
                             });
                         });
                     row->append(*sw);
@@ -3506,7 +3696,7 @@ void HiveWindow::show_skills_dialog(const nlohmann::json& agent) {
                 outer->append(*scroll);
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -3565,14 +3755,43 @@ void HiveWindow::show_new_skill_dialog(Gtk::Window* parent) {
     dialog->signal_response().connect(
         [this, dialog, parent, name, desc, content, err](int r) {
             if (r != (int)Gtk::ResponseType::OK) { dialog->destroy(); return; }
-            try {
-                api_.create_skill(name->get_text(), desc->get_text(),
-                                  content->get_buffer()->get_text());
-                dialog->destroy();
-                if (parent && parent->get_root()) parent->destroy();
-            } catch (const std::exception& e) {
-                err->set_text(e.what());   // keep the dialog open
-            }
+            const std::string skill_name = name->get_text();
+            const std::string skill_desc = desc->get_text();
+            const std::string skill_content = content->get_buffer()->get_text();
+            auto weak_dialog = std::make_shared<Gtk::Dialog*>(dialog);
+            auto weak_parent = std::make_shared<Gtk::Window*>(parent);
+            dialog->signal_destroy().connect([weak_dialog] {
+                *weak_dialog = nullptr;
+            });
+            if (parent) parent->signal_destroy().connect([weak_parent] {
+                *weak_parent = nullptr;
+            });
+            dialog->set_sensitive(false);
+            run_async([this, async = async_, dialog, parent, weak_dialog,
+                       weak_parent, err, skill_name, skill_desc, skill_content] {
+                std::string error;
+                try {
+                    async->api.create_skill(skill_name, skill_desc, skill_content);
+                } catch (const std::exception& e) {
+                    error = e.what();
+                }
+                {
+                    std::lock_guard<std::mutex> lk(async->queue_m);
+                    async->done_queue.push_back(
+                        [this, dialog, parent, weak_dialog, weak_parent,
+                         err, error] {
+                            if (!alive_ || !*weak_dialog) return;
+                            dialog->set_sensitive(true);
+                            if (!error.empty()) {
+                                err->set_text(error);
+                                return;
+                            }
+                            dialog->destroy();
+                            if (*weak_parent && parent->get_root())
+                                parent->destroy();
+                        });
+                }
+            });
         });
     dialog->present();
 }
@@ -3639,18 +3858,18 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
     loading->add_css_class("dim-label");
     loading->set_halign(Gtk::Align::START);
     box->append(*loading);
-    run_async([this, box, dialog, loading, agent_id] {
+    run_async([this, async = async_, box, dialog, loading, agent_id] {
         json st; std::string err;
             // v2: container lifecycle lives on the worker; the roster row
             // carries the live brain state (heartbeat-fed).
             try {
-                for (auto& a : api_.list_agents().value("agents", json::array()))
+                for (auto& a : async->api.list_agents().value("agents", json::array()))
                     if (a.value("id", "") == agent_id) { st = a; break; }
                 if (st.is_null()) err = "agent not found";
             } catch (const std::exception& e) { err = e.what(); }
         {
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, box, dialog, loading, agent_id, st, err] {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, box, dialog, loading, agent_id, st, err] {
                 if (!alive_) return;
                 box->remove(*loading);
                 if (!err.empty()) {
@@ -3681,25 +3900,25 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                 auto act = [&](const char* label, bool sensitive, bool start) {
                     auto* b = Gtk::make_managed<Gtk::Button>(label);
                     b->set_sensitive(sensitive);
-                    b->signal_clicked().connect([this, box, dialog, agent_id, start] {
+                    b->signal_clicked().connect([this, async, box, dialog, agent_id, start] {
                         while (auto* c = box->get_first_child()) box->remove(*c);
-                        run_async([this, agent_id, start] {
+                        run_async([this, async, agent_id, start] {
                             std::string err;
-                            try { start ? (void)api_.agent_start(agent_id)
-                                        : (void)api_.agent_stop(agent_id); }
+                            try { start ? (void)async->api.agent_start(agent_id)
+                                        : (void)async->api.agent_stop(agent_id); }
                             catch (const std::exception& e) { err = e.what(); }
                             {
-                                std::lock_guard<std::mutex> lk(queue_m_);
-                                done_queue_.push_back([this, err] {
+                                std::lock_guard<std::mutex> lk(async->queue_m);
+                                async->done_queue.push_back([this, async, err] {
                                     if (!alive_) return;
                                     if (!err.empty()) set_status("Container: " + err);
                                 });
                             }
-                            dispatcher_.emit();
+                            async->dispatcher.emit();
                         });
                         // re-poll status shortly after (start/stop can take a moment)
                         Glib::signal_timeout().connect_once(
-                            [this, box, dialog, agent_id] {
+                            [this, async, box, dialog, agent_id] {
                                 if (alive_) load_inspector_container(box, dialog, agent_id);
                             }, 1500);
                     });
@@ -3710,17 +3929,25 @@ void HiveWindow::load_inspector_container(Gtk::Box* box, Gtk::Window* dialog,
                 box->append(*btns);
             });
         }
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
 void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
-    const std::string id   = agent.value("id", "");
-    const std::string name = agent.value("name", "?");
-
+    const std::string id = agent.value("id", "");
+    set_status("Checking agent ownership…");
+    run_async([this, async = async_, agent] {
+        nlohmann::json routines_data = nlohmann::json::object();
+        try { routines_data = async->api.list_routines(); } catch (...) {}
+        {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, agent, routines_data] {
+                if (!alive_) return;
+                set_status("");
+                const std::string id = agent.value("id", "");
+                const std::string name = agent.value("name", "?");
     // What does this agent own? Threads come from the cached roster state;
-    // routines are fetched fresh (blocking call, same pattern as the
-    // provider/model dropdowns in the agent dialog).
+    // routines are fetched fresh before this dialog opens.
     int n_threads_solo = 0, n_threads_group = 0;
     for (auto& t : threads_) {
         auto ids = t.value("agent_ids", nlohmann::json::array());
@@ -3730,10 +3957,8 @@ void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
         if (ids.size() <= 1) ++n_threads_solo; else ++n_threads_group;
     }
     nlohmann::json owned_routines = nlohmann::json::array();
-    try {
-        for (auto& r : api_.list_routines().value("routines", nlohmann::json::array()))
-            if (r.value("agent_id", "") == id) owned_routines.push_back(r);
-    } catch (...) { /* server unreachable — treat as none */ }
+    for (auto& r : routines_data.value("routines", nlohmann::json::array()))
+        if (r.value("agent_id", "") == id) owned_routines.push_back(r);
     const int n_routines = (int)owned_routines.size();
 
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
@@ -3806,19 +4031,23 @@ void HiveWindow::on_delete_agent(const nlohmann::json& agent) {
                     if (sel > 0 && sel < reassign_ids->size())
                         reassign = (*reassign_ids)[sel];
                 }
-                run_async([this, id, reassign] {
-                    api_.delete_agent(id, reassign);
+                run_async([this, async = async_, id, reassign] {
+                    async->api.delete_agent(id, reassign);
                     {
-                        std::lock_guard<std::mutex> lk(queue_m_);
-                        done_queue_.push_back([this] { if (alive_) refresh_all(); });
+                        std::lock_guard<std::mutex> lk(async->queue_m);
+                        async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });
                     }
-                    dispatcher_.emit();
+                    async->dispatcher.emit();
                 });
             }
             delete reassign_ids;
             dialog->destroy();
         });
     dialog->present();
+
+            });
+        }
+    });
 }
 
 void HiveWindow::on_new_task() {
@@ -3857,7 +4086,7 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
 
     // Agent dropdown (preselected when opened from an agent's menu)
     std::vector<Glib::ustring> agent_names;
-    auto* agent_ids = new std::vector<std::string>();  // freed on response
+    auto agent_ids = std::make_shared<std::vector<std::string>>();  // freed on response
     guint preselect = 0;
     for (auto& a : agents_) {
         agent_names.push_back(a.value("name", "?"));
@@ -3994,7 +4223,6 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
          once_date, once_time, every, daily_time, weekly_time, day_checks, err,
          editing, er, on_saved](int r) {
             if (r != (int)Gtk::ResponseType::OK) {
-                delete agent_ids;
                 dialog->destroy();
                 return;
             }
@@ -4020,26 +4248,44 @@ void HiveWindow::show_task_dialog(const std::string& preselect_agent_id,
                 sched = {{"type", "weekly"}, {"time", weekly_time->get_text().raw()},
                          {"days", days}};
             }
-            try {
-                if (n.empty() || p.empty() || aid.empty())
-                    throw std::runtime_error("name, agent and prompt are required");
-                if (editing)
-                    api_.update_routine(er.value("id", ""), n, p, sched);
-                else
-                    api_.create_routine(aid, n, p, sched);   // blocking — shows errors inline
-                delete agent_ids;
-                dialog->destroy();
-                // Phase 58: let the caller refresh (the Scheduled Tasks
-                // list reloads itself after Add/Edit via this hook).
-                if (on_saved) on_saved();
-                run_async([this] {   // nothing visual to refresh; keep queue pattern
-                    std::lock_guard<std::mutex> lk(queue_m_);
-                    done_queue_.push_back([this] { if (alive_) refresh_all(); });
-                    dispatcher_.emit();
-                });
-            } catch (const std::exception& e) {
-                err->set_text(e.what());   // keep the dialog open
+            if (n.empty() || p.empty() || aid.empty()) {
+                err->set_text("name, agent and prompt are required");
+                return;
             }
+            auto weak_dialog = std::make_shared<Gtk::Dialog*>(dialog);
+            dialog->signal_destroy().connect([weak_dialog] {
+                *weak_dialog = nullptr;
+            });
+            dialog->set_sensitive(false);
+            run_async([this, async = async_, dialog, weak_dialog, err,
+                       editing, er, aid, n, p, sched, on_saved] {
+                std::string error;
+                try {
+                    if (editing)
+                        async->api.update_routine(er.value("id", ""), n, p, sched);
+                    else
+                        async->api.create_routine(aid, n, p, sched);
+                } catch (const std::exception& e) {
+                    error = e.what();
+                }
+                {
+                    std::lock_guard<std::mutex> lk(async->queue_m);
+                    async->done_queue.push_back(
+                        [this, dialog, weak_dialog, err, error, on_saved] {
+                            if (!alive_ || !*weak_dialog) return;
+                            dialog->set_sensitive(true);
+                            if (!error.empty()) {
+                                err->set_text(error);
+                                return;
+                            }
+                            dialog->destroy();
+                            // Phase 58: let the caller refresh (the Scheduled
+                            // Tasks list reloads itself after Add/Edit).
+                            if (on_saved) on_saved();
+                            refresh_all();
+                        });
+                }
+            });
         });
     dialog->present();
 }
@@ -4081,14 +4327,14 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                              [reload] { if (*reload) (*reload)(); });
         });
     *reload = [this, list, status, reload, collapsed] {
-        run_async([this, list, status, reload, collapsed] {
+        run_async([this, async = async_, list, status, reload, collapsed] {
             std::string err; json data;
-            try { data = api_.list_routines(); }
+            try { data = async->api.list_routines(); }
             catch (const std::exception& e) { err = e.what(); }
             {
-                std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back(
-                    [this, list, status, err, data, reload, collapsed] {
+                std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back(
+                    [this, async, list, status, err, data, reload, collapsed] {
                     if (!alive_ || !list->get_root()) return;
                     while (auto* row = list->get_row_at_index(0))
                         list->remove(*row);
@@ -4182,24 +4428,24 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                                 ? "Enabled — click to pause this task"
                                 : "Paused — click to resume this task");
                             sw->property_active().signal_changed().connect(
-                                [this, rid, sw] {
-                                    run_async([this, rid, on = sw->get_active()] {
-                                        try { api_.set_routine_enabled(rid, on); }
+                                [this, async, rid, sw] {
+                                    run_async([this, async, rid, on = sw->get_active()] {
+                                        try { async->api.set_routine_enabled(rid, on); }
                                         catch (...) {}
                                     });
                                 });
                             auto* run = Gtk::make_managed<Gtk::Button>("\u25B6");
                             run->set_tooltip_text("Run now");
                             run->set_valign(Gtk::Align::CENTER);
-                            run->signal_clicked().connect([this, rid] {
-                                run_async([this, rid] {
-                                    try { api_.run_routine(rid); } catch (...) {}
+                            run->signal_clicked().connect([this, async, rid] {
+                                run_async([this, async, rid] {
+                                    try { async->api.run_routine(rid); } catch (...) {}
                                 });
                             });
                             auto* edit = Gtk::make_managed<Gtk::Button>("Edit");
                             edit->set_valign(Gtk::Align::CENTER);
                             const json rcopy = r;
-                            edit->signal_clicked().connect([this, rcopy, reload] {
+                            edit->signal_clicked().connect([this, async, rcopy, reload] {
                                 show_task_dialog("", &rcopy,
                                     [reload] { if (*reload) (*reload)(); });
                             });
@@ -4208,7 +4454,7 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                             del->set_valign(Gtk::Align::CENTER);
                             del->set_tooltip_text("Delete task");
                             del->signal_clicked().connect(
-                                [this, rid, task_name, reload] {
+                                [this, async, rid, task_name, reload] {
                                 auto* confirm = Gtk::make_managed<Gtk::Dialog>();
                                 confirm->set_title("Delete scheduled task?");
                                 confirm->set_transient_for(*this);
@@ -4225,17 +4471,17 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                                 message->set_max_width_chars(48);
                                 confirm->get_content_area()->append(*message);
                                 confirm->signal_response().connect(
-                                    [this, confirm, rid, reload](int response) {
+                                    [this, async, confirm, rid, reload](int response) {
                                     if (response == static_cast<int>(
                                             Gtk::ResponseType::OK)) {
-                                        run_async([this, rid, reload] {
-                                            try { api_.delete_routine(rid); }
+                                        run_async([this, async, rid, reload] {
+                                            try { async->api.delete_routine(rid); }
                                             catch (...) {}
-                                            std::lock_guard<std::mutex> lk(queue_m_);
-                                            done_queue_.push_back([reload] {
+                                            std::lock_guard<std::mutex> lk(async->queue_m);
+                                            async->done_queue.push_back([reload] {
                                                 if (*reload) (*reload)();
                                             });
-                                            dispatcher_.emit();
+                                            async->dispatcher.emit();
                                         });
                                     }
                                     confirm->destroy();
@@ -4260,7 +4506,7 @@ void HiveWindow::show_routines_dialog(const std::string& preselect_agent_id) {
                                      std::to_string(ordered.size()) + " agents");
                 });
             }
-            dispatcher_.emit();
+            async->dispatcher.emit();
         });
     };
     (*reload)();
@@ -4275,6 +4521,24 @@ void HiveWindow::on_new_agent() {
 // dialog is prefilled from the roster agent and OK PATCHes /api/agents/:id.
 void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     const bool editing = existing != nullptr;
+    const nlohmann::json existing_copy = editing ? *existing : nlohmann::json();
+    set_status("Loading agent options…");
+    run_async([this, async = async_, editing, existing_copy] {
+        nlohmann::json models_data = nlohmann::json::object();
+        nlohmann::json workers_data = nlohmann::json::object();
+        nlohmann::json templates_data = nlohmann::json::object();
+        try { models_data = async->api.models(); } catch (...) {}
+        try { workers_data = async->api.list_workers(); } catch (...) {}
+        try { templates_data = async->api.templates(); } catch (...) {}
+        {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back(
+                [this, editing, existing_copy, models_data,
+                 workers_data, templates_data] {
+                    if (!alive_) return;
+                    set_status("");
+                    const nlohmann::json* existing =
+                        editing ? &existing_copy : nullptr;
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     const char* title = editing ? "Edit agent" : "New agent";
     dialog->set_title(title);
@@ -4310,14 +4574,14 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         // injects the provider config at dispatch, so any model runs on
         // any machine; machine choice is pure placement.
         std::set<std::string> provs;
-        for (auto& m : api_.models().value("models", nlohmann::json::array())) {
+        for (auto& m : models_data.value("models", nlohmann::json::array())) {
             const std::string n = m.value("name", "");
             if (n.empty()) continue;
             const std::string p = m.value("provider", "");
             model_entries.push_back({n, p, n + "  (" + p + ")"});
             provs.insert(p);
         }
-        default_model = api_.models().value("default_model", "");
+        default_model = models_data.value("default_model", "");
         provider_names.assign(provs.begin(), provs.end());
     } catch (...) { /* server unreachable - dropdowns stay empty */ }
 
@@ -4388,7 +4652,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     struct WorkerEntry { std::string name; bool online; std::string caps; };
     std::vector<WorkerEntry> all_workers;
     try {
-        for (auto& w : api_.list_workers().value("workers", nlohmann::json::array())) {
+        for (auto& w : workers_data.value("workers", nlohmann::json::array())) {
             // /api/workers returns "caps" as a JSON OBJECT (the hub parses the
             // stored string before serialising). value("caps", "{}") THROWS
             // type_error on that — and the catch below then silently hid the
@@ -4573,7 +4837,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     auto* templates_json = new nlohmann::json(nlohmann::json::array());
     if (!editing) {
         try { *templates_json =
-                  api_.templates().value("templates", nlohmann::json::array()); }
+                  templates_data.value("templates", nlohmann::json::array()); }
         catch (...) { /* offline — dropdown stays "(blank)" */ }
     }
     std::vector<Glib::ustring> tpl_items{"(blank)"};
@@ -4712,20 +4976,20 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete templates_json;
                 delete avatar_tiles;
                 delete type_vals;
-                run_async([this, n, r2 = role->get_text().raw(),
+                run_async([this, async = async_, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
                            mem, cp, think, host] {
                     if (edit_id.empty())
-                        api_.create_agent(n, r2, m, ws, av, wk, ty, mem, cp, think,
+                        async->api.create_agent(n, r2, m, ws, av, wk, ty, mem, cp, think,
                                           host);
                     else
-                        api_.update_agent(edit_id, n, r2, m, ws, av, wk, ty, mem, cp, think,
+                        async->api.update_agent(edit_id, n, r2, m, ws, av, wk, ty, mem, cp, think,
                                           host);
                     {
-                        std::lock_guard<std::mutex> lk(queue_m_);
-                        done_queue_.push_back([this] { if (alive_) refresh_all(); });
+                        std::lock_guard<std::mutex> lk(async->queue_m);
+                        async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });
                     }
-                    dispatcher_.emit();
+                    async->dispatcher.emit();
                 });
             }
         }
@@ -4740,6 +5004,10 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         dialog->destroy();
     });
     dialog->present();
+
+                });
+        }
+    });
 }
 
 void HiveWindow::on_new_thread() {
@@ -4791,11 +5059,11 @@ void HiveWindow::on_new_thread() {
             for (auto& [cb, id] : picks)
                 if (cb->get_active()) ids.push_back(id);
             if (!ids.empty()) {
-                run_async([this, t = title->get_text().raw(), ids] {
-                    json nt = api_.create_thread(t, ids);
+                run_async([this, async = async_, t = title->get_text().raw(), ids] {
+                    json nt = async->api.create_thread(t, ids);
                     {
-                        std::lock_guard<std::mutex> lk(queue_m_);
-                        done_queue_.push_back([this, nt] {
+                        std::lock_guard<std::mutex> lk(async->queue_m);
+                        async->done_queue.push_back([this, async, nt] {
                             if (!alive_) return;
                             current_thread_ = nt.value("id", "");
                             last_message_id_.clear();
@@ -4813,7 +5081,7 @@ void HiveWindow::on_new_thread() {
                             refresh_threads();
                         });
                     }
-                    dispatcher_.emit();
+                    async->dispatcher.emit();
                 });
             }
         }
@@ -4830,19 +5098,19 @@ void HiveWindow::on_stop_agent(const nlohmann::json& agent) {
     const std::string name = agent.value("name", id);
     if (id.empty()) return;
     set_status("Cancelling " + name + "\u2026");
-    run_async([this, id, name] {
+    run_async([this, async = async_, id, name] {
         int cancelled = 0;
         try {
-            cancelled = api_.cancel_agent(id).value("cancelled", 0);
+            cancelled = async->api.cancel_agent(id).value("cancelled", 0);
         } catch (...) {}
-        std::lock_guard<std::mutex> lk(queue_m_);
-                done_queue_.push_back([this, name, cancelled] {
+        std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back([this, async, name, cancelled] {
             if (!alive_) return;
             set_status(cancelled > 0
                 ? "Cancel sent to " + name
                 : name + " wasn\u2019t working");
         });
-        dispatcher_.emit();
+        async->dispatcher.emit();
     });
 }
 
@@ -4939,10 +5207,10 @@ void HiveWindow::on_clear_thread(const std::string& thread_id,
     dialog->signal_response().connect([this, dialog, tid](int r) {
         dialog->destroy();
         if (r != Gtk::ResponseType::OK) return;
-        run_async([this, tid] {
-            api_.clear_thread(tid);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, tid] {
+        run_async([this, async = async_, tid] {
+            async->api.clear_thread(tid);
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, tid] {
                 if (!alive_) return;
                 // No activity left — any unread dot for it dies too.
                 last_seen_activity_.erase(tid);
@@ -4962,7 +5230,7 @@ void HiveWindow::on_clear_thread(const std::string& thread_id,
                 }
                 refresh_threads();
             });
-            dispatcher_.emit();
+            async->dispatcher.emit();
         });
     });
     dialog->present();
@@ -4988,10 +5256,10 @@ void HiveWindow::on_delete_thread(const std::string& thread_id) {
     dialog->signal_response().connect([this, dialog, tid](int r) {
         dialog->destroy();
         if (r != Gtk::ResponseType::OK) return;
-        run_async([this, tid] {
-            api_.delete_thread(tid);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this, tid] {
+        run_async([this, async = async_, tid] {
+            async->api.delete_thread(tid);
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async, tid] {
                 if (!alive_) return;
                 if (current_thread_ == tid) {
                     current_thread_.clear();
@@ -5005,7 +5273,7 @@ void HiveWindow::on_delete_thread(const std::string& thread_id) {
                 }
                 refresh_threads();
             });
-            dispatcher_.emit();
+            async->dispatcher.emit();
         });
     });
     dialog->present();
@@ -5049,6 +5317,34 @@ nlohmann::json HiveWindow::ui_state() {
             {"attach_row_visible", attach_row_.get_visible()},
             {"attach_label", std::string{attach_label_.get_text()}},
             {"connected", !api_.api_key().empty()},
+            {"voice_mode", voice_ != nullptr},
+            {"voice_available", voice_available_},
+            {"voice_shortcut_active", voice_shortcuts_ &&
+                                           voice_shortcuts_->bound()},
+            {"voice_shortcut", voice_shortcuts_
+                ? "<Super><Alt>BackSpace" : ""},
+            {"voice_agent", voice_ ? voice_->debugAgentName() : ""},
+            {"voice_phase", voice_ ? voice_->debugPhaseName() : ""},
+            {"voice_status", voice_ ? voice_->debugStatusText() : ""},
+            {"voice_shortcut_activations", voice_shortcut_activations_},
+            {"sidebar_visible", left_stack_.get_visible_child_name() == "sidebar"},
+            {"chat_visible", chat_box_.get_visible()},
+            {"dark_mode", dark_mode_},
+            {"high_contrast", high_contrast_},
+            {"app_color_scheme", dark_mode_ ? "dark" : "light"},
+            {"gtk_theme", Gtk::Settings::get_default()
+                ->property_gtk_theme_name().get_value()},
+            {"interface_color_scheme", static_cast<int>(
+                Gtk::Settings::get_default()
+                    ->property_gtk_interface_color_scheme().get_value())},
+            {"window_fg", [this] {
+                return std::string{chat_box_.get_color().to_string().c_str()};
+            }()},
+            {"voice_fg", [this] {
+                return voice_
+                    ? std::string{voice_->get_color().to_string().c_str()}
+                    : std::string{};
+            }()},
             // Rendered roster rows in visual order: worker group headers
             // (with online/collapsed flags) interleaved with agent rows.
             {"roster_rows", [this] {
@@ -5088,6 +5384,8 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
     json nt = api_.create_thread(title, ids, /*reuse_dm=*/false);
     std::string new_id = nt.value("id", "");
     return invoke_on_ui([this, nt, new_id] {
+        show_sidebar();
+        current_dm_agent_.clear();
         current_thread_ = new_id;
         last_message_id_.clear();
         rendered_msg_ids_.clear();
@@ -5110,6 +5408,8 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
     return invoke_on_ui([this, id] {
         for (auto& t : threads_) {
             if (t.value("id", "") == id) {
+                show_sidebar();
+                current_dm_agent_.clear();
                 current_thread_ = id;
                 last_message_id_.clear();
                 rendered_msg_ids_.clear();
@@ -5150,11 +5450,24 @@ nlohmann::json HiveWindow::ui_select_agent(const std::string& name_or_id) {
             if (!row) continue;
             auto* aid = static_cast<std::string*>(row->get_data("agent_id"));
             if (aid && *aid == id) {
-                roster_list_.select_row(*row);
+                if (roster_list_.get_selected_row() == row)
+                    on_agent_selected();
+                else
+                    roster_list_.select_row(*row);
                 return nlohmann::json{{"selected", id}};
             }
         }
         return nlohmann::json{{"error", "agent not found: " + name_or_id}};
+    });
+}
+
+nlohmann::json HiveWindow::ui_voice_back() {
+    return invoke_on_ui([this] {
+        const bool was_open = voice_ != nullptr;
+        show_sidebar();
+        return nlohmann::json{{"voice_mode", false},
+                              {"was_open", was_open},
+                              {"current_thread", current_thread_}};
     });
 }
 
@@ -5191,15 +5504,22 @@ nlohmann::json HiveWindow::ui_stop() {
         // roster context menu (Phase 57).
         std::string tid = current_thread_;
         set_status("Cancelling…");
-        run_async([this, tid] {
-            api_.cancel_thread(tid);
-            std::lock_guard<std::mutex> lk(queue_m_);
-            done_queue_.push_back([this] {
+        run_async([this, async = async_, tid] {
+            async->api.cancel_thread(tid);
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back([this, async] {
                 if (alive_) set_status("Cancelled");
             });
-            dispatcher_.emit();
+            async->dispatcher.emit();
         });
         return nlohmann::json{{"cancel_requested", true}};
+    });
+}
+
+nlohmann::json HiveWindow::ui_close() {
+    return invoke_on_ui([this] {
+        close();
+        return nlohmann::json{{"closing", true}};
     });
 }
 

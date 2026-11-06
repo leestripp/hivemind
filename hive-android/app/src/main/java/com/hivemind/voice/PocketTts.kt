@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * On-device pocket-tts via audio.cpp (same engine + voices as desktop
- * hive-client-voice). Loads the 122MB q8_0 model ONCE per process;
+ * integrated voice). Loads the 122MB q8_0 model ONCE per process;
  * [synthesize] runs offline per text chunk and returns 24 kHz mono
  * float PCM. Everything native is serialized inside the JNI layer.
  *
@@ -19,7 +19,7 @@ object PocketTts {
     private const val MODEL = "pocket-tts-english-q8_0.gguf"
 
     /** Voices bundled in assets/models/tts/embeddings — the desktop
-     *  voice names, so per-agent mappings match hive-client-voice. */
+     *  voice names, so per-agent mappings match desktop integrated voice. */
     val VOICES = listOf("alba", "anna", "bill_boerst", "charles", "eponine",
                         "jean", "mary", "paul", "peter_yearsley", "vera")
 

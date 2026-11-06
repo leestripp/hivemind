@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <functional>
+#include <mutex>
 #include <string>
 
 namespace hive {
@@ -19,10 +20,29 @@ public:
 
     /// Phase 9: bearer key sent on every request; base URL configurable
     /// for remote servers.
-    void set_api_key(std::string key) { api_key_ = std::move(key); }
-    void set_base_url(std::string url) { base_ = std::move(url); }
-    const std::string& api_key() const { return api_key_; }
-    const std::string& base_url() const { return base_; }
+    void set_connection(std::string url, std::string key) {
+        std::lock_guard<std::mutex> lock(config_m_);
+        base_ = std::move(url);
+        api_key_ = std::move(key);
+    }
+    void set_api_key(std::string key) {
+        std::lock_guard<std::mutex> lock(config_m_);
+        api_key_ = std::move(key);
+    }
+    void set_base_url(std::string url) {
+        std::lock_guard<std::mutex> lock(config_m_);
+        base_ = std::move(url);
+    }
+    // Value returns are intentional: requests run concurrently with the
+    // GTK thread, and a reference could race a connection-setting update.
+    std::string api_key() const {
+        std::lock_guard<std::mutex> lock(config_m_);
+        return api_key_;
+    }
+    std::string base_url() const {
+        std::lock_guard<std::mutex> lock(config_m_);
+        return base_;
+    }
 
     // ── roster ────────────────────────────────────────────────────────────
     nlohmann::json list_agents();                                    // GET /api/agents
@@ -128,8 +148,17 @@ public:
                           const std::string& group_id);
 
 private:
+    struct ConnectionConfig {
+        std::string base;
+        std::string api_key;
+    };
+    ConnectionConfig connection_config() const {
+        std::lock_guard<std::mutex> lock(config_m_);
+        return {base_, api_key_};
+    }
     nlohmann::json request(const std::string& method, const std::string& path,
                            const nlohmann::json* body = nullptr);
+    mutable std::mutex config_m_;
     std::string base_;
     std::string api_key_;
 };

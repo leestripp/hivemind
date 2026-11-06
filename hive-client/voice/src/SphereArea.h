@@ -26,10 +26,10 @@ class SphereArea : public Gtk::GLArea {
     void setState(SphereState state);  // eased toward in the render loop
 
     // GL renderer/version captured at initGL ("" until first render) —
-    // surfaced through the DebugShell for headless diagnosis.
+    // surfaced through diagnostic hooks for headless diagnosis.
     static std::string glInfo() { return glInfo_; }
 
-    // Headless render diagnosis (DebugShell): frame count + periodic
+    // Headless render diagnosis: frame count + periodic
     // framebuffer readback proving whether the GPU drew anything.
     // Probe runs only when HIVE_VOICE_GL_PROBE is set.
     std::string debugStats() const;

@@ -78,6 +78,22 @@ Body: `{"id": "<thread-id>"}` → `{"selected": "<id>"}` or `404`.
 Same as clicking a thread row: switches the view, clears the transcript,
 kicks a poll. Errors if the id is not in the loaded thread list.
 
+### POST /ui/action/select-agent
+Body: `{"agent": "<name-or-id>"}` → `{"selected": "<agent-id>"}`.
+Selects/reuses the agent DM and runs the same ChimpFlow health probe as a
+roster click. `GET /ui/state` exposes `voice_mode`, `voice_available`,
+`voice_agent`, `voice_phase`, `voice_status`, `voice_shortcut_active`,
+`voice_shortcut`, `voice_shortcut_activations`, `sidebar_visible`,
+`chat_visible`, `app_color_scheme` and `high_contrast` for integration
+assertions. The activation counter increments after a real portal Activated
+signal reaches the live voice callback. Shortcut fields report the mode-scoped
+portal lifecycle; they do not synthesize key presses. The physical-delivery
+runbook is in [voice-global-shortcuts.md](voice-global-shortcuts.md).
+
+### POST /ui/action/voice-back
+→ `{"voice_mode": false, "was_open": true|false, "current_thread": "…"}`.
+Runs the embedded voice page's Back path, preserving the current DM.
+
 ### POST /ui/action/send
 Body: `{"body": "…"}` → `202 {"sent": true, "thread": "<id>"}`.
 
@@ -95,6 +111,11 @@ activating another card moves the single persistent player to that card.
 → `{"cancel_requested": true}`. Same as the Stop button: `POST
 /api/threads/:id/cancel` on the selected thread (cancels live agent turns
 server-side). `400` if no thread selected.
+
+### POST /ui/action/close
+→ `{"closing": true}`. Closes the main window through GTK's real close path,
+including configuration persistence and window/voice teardown. Intended for
+clean UI-test shutdown.
 
 ### POST /ui/action/delete-thread
 Body: `{"id": "<thread-id>"}` → `{"deleted": true}`.

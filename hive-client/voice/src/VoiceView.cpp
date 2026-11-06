@@ -1,7 +1,5 @@
 #include "VoiceView.h"
 
-#include "DebugShell.h"
-
 #include "AudioCapture.h"
 #include "Avatars.h"
 #include "AudioPlayback.h"
@@ -46,7 +44,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
                          const Glib::RefPtr<Gtk::Builder>& builder,
                          Prefs& prefs, AgentInfo agent)
     : Gtk::Box(cobject), prefs_(prefs), agent_(std::move(agent)) {
-    DebugShell::registerVoice(this);
+    add_css_class("hv-voice-page");
     agentName_ = agent_.name.empty() ? "Agent" : agent_.name;
 
     avatar_ = builder->get_widget<Gtk::Image>("agentAvatar");
@@ -130,7 +128,6 @@ VoiceView::VoiceView(BaseObjectType* cobject,
 }
 
 VoiceView::~VoiceView() {
-    DebugShell::registerVoice(nullptr);
     stopSpeakAnimator();
     inboxConn_.disconnect();
     pollConn_.disconnect();
@@ -976,7 +973,7 @@ void VoiceView::startSpeakAnimator() {
 
 void VoiceView::stopSpeakAnimator() { speakAnim_.disconnect(); }
 
-// -- DebugShell hooks -----------------------------------------------------
+// -- diagnostic hooks ----------------------------------------------------
 
 std::string VoiceView::debugPhaseName() const {
     switch (phase_) {

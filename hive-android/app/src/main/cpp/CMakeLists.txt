@@ -44,7 +44,7 @@ target_compile_options(whisper_jni PRIVATE -O2)
 target_link_libraries(whisper_jni PRIVATE whisper ${lib_log})
 
 # ── audio.cpp pocket-TTS (vendored by fetch-deps.sh → audio-cpp/) ────
-# Same engine + voices as desktop hive-client-voice (ChimpFlow). Pinned
+# Same engine + voices as desktop integrated voice (ChimpFlow). Pinned
 # to the ChimpFlow commit; CPU-only, pocket_tts family only (custom model
 # set skips the other 110+ families' objects). Measured on the edge 30:
 # RTF 0.78 (~1.3x faster than real-time), 490MB peak RSS.

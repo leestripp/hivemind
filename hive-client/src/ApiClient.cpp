@@ -15,10 +15,11 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
     cfg.connect_timeout = std::chrono::seconds(5);
     cfg.request_timeout = std::chrono::seconds(30);
 
+    const auto connection = connection_config();
     ClientRequest req;
-    req.method(method).url(base_ + path);
-    if (!api_key_.empty())
-        req.header("Authorization", "Bearer " + api_key_);
+    req.method(method).url(connection.base + path);
+    if (!connection.api_key.empty())
+        req.header("Authorization", "Bearer " + connection.api_key);
     if (body) {
         req.header("Content-Type", "application/json");
         req.body(body->dump());
@@ -305,12 +306,13 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
     cfg.connect_timeout = std::chrono::seconds(5);
     cfg.request_timeout = std::chrono::seconds(60);
 
+    const auto connection = connection_config();
     ClientRequest req;
     req.method("POST")
-       .url(base_ + "/api/threads/" + thread_id +
+       .url(connection.base + "/api/threads/" + thread_id +
             "/attachments?name=" + text::url_escape(filename));
-    if (!api_key_.empty())
-        req.header("Authorization", "Bearer " + api_key_);
+    if (!connection.api_key.empty())
+        req.header("Authorization", "Bearer " + connection.api_key);
     req.header("Content-Type", "application/octet-stream");
     req.body(bytes);
 
@@ -412,10 +414,11 @@ std::string ApiClient::download(const std::string& path) {
     // body still arrives short.
     cfg.request_timeout = std::chrono::seconds(300);
 
+    const auto connection = connection_config();
     ClientRequest req;
-    req.method("GET").url(base_ + path);
-    if (!api_key_.empty())
-        req.header("Authorization", "Bearer " + api_key_);
+    req.method("GET").url(connection.base + path);
+    if (!connection.api_key.empty())
+        req.header("Authorization", "Bearer " + connection.api_key);
 
     // Attachment metadata can arrive while the worker/hub path is briefly
     // unable to serve the file. A single transient 400 used to leave the

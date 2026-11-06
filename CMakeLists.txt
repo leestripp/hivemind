@@ -134,8 +134,8 @@ option(HIVEMIND_BUILD_CLIENT "Build the GTK4/gtkmm4 native client" ON)
 if(HIVEMIND_BUILD_CLIENT)
     pkg_check_modules(GTKMM gtkmm-4.0)
     if(GTKMM_FOUND)
+        # Integrated voice is built as part of the single desktop client.
         add_subdirectory(hive-client)
-        add_subdirectory(hive-client-voice)
     else()
         message(WARNING
             "gtkmm-4.0 not found — skipping hive-client. "
@@ -150,31 +150,36 @@ endif()
 # guards above already skip tests for apps that aren't being built.
 
 # ============================================================================
-# Clang-Tidy — requires compile_commands.json
-#   cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-#   cmake --build build --target lint | lint-fix
+# Cppcheck + GCC — static analysis without style enforcement.
+#   cmake --build build --target lint
+# Style checks are deliberately omitted: project formatting is not dictated
+# by an external linter. Builds use the native GCC toolchain.
 # ============================================================================
 file(GLOB_RECURSE _LINT_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/hive-server/src/*.cpp"
     "${CMAKE_SOURCE_DIR}/hive-server/include/hivemind/*.cpp"
     "${CMAKE_SOURCE_DIR}/hive-client/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/hive-client/voice/src/*.cpp"
 )
 
-find_program(_CLANG_TIDY clang-tidy)
-if(_CLANG_TIDY)
+find_program(_CPPCHECK cppcheck)
+if(_CPPCHECK)
     add_custom_target(lint
-        COMMAND clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
-            -p ${CMAKE_BINARY_DIR} --export-fixes=lint-results.yaml
+        COMMAND ${_CPPCHECK}
+            --enable=warning,performance,portability
+            --std=c++23
+            --suppress=missingIncludeSystem
+            # Preference/debug getters intentionally return owned strings.
+            --suppress=returnByReference
+            --error-exitcode=2
+            "-DGTK_CHECK_VERSION(a,b,c)=1"
+            -I${CMAKE_SOURCE_DIR}/hive-client/src
+            -I${CMAKE_SOURCE_DIR}/hive-client/voice/src
             ${_LINT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        COMMENT "Running clang-tidy (dry run)..." VERBATIM)
-    add_custom_target(lint-fix
-        COMMAND clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
-            -p ${CMAKE_BINARY_DIR} --fix --fix-errors
-            ${_LINT_SOURCES}
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        COMMENT "Running clang-tidy with auto-fix..." VERBATIM)
+        COMMENT "Running cppcheck (warning/performance/portability; no style checks)..."
+        VERBATIM)
 else()
-    message(WARNING "clang-tidy not found — install it with: apt install clang-tidy")
+    message(WARNING "cppcheck not found — install it with: apt install cppcheck")
 endif()
 

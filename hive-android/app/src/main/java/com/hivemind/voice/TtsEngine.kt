@@ -52,7 +52,7 @@ class TtsEngine(
     private val pending = mutableListOf<String>()
 
     /** On-device pocket-tts backend (audio.cpp — the SAME engine and
-     *  voices as desktop hive-client-voice, so agents sound identical
+     *  voices as desktop integrated voice, so agents sound identical
      *  on both). When [pocketOk], speakQueued synthesizes chunks on
      *  [synthExec] and plays PCM through PcmPlayer, which gives TRUE
      *  mid-word hold (AudioTrack.pause keeps position) — the system-TTS

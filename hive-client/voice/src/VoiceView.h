@@ -45,7 +45,7 @@ class VoiceView : public Gtk::Box {
     // < Back pressed — MainWindow pops to the roster and destroys us.
     sigc::signal<void()>& signal_back() { return signal_back_; }
 
-    // DebugShell hooks.
+    // Diagnostic hooks (main-client UiApi and integration tests).
     std::string debugAgentName() const { return agentName_; }
     std::string debugPhaseName() const;
     std::string debugStatusText() const;

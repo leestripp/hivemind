@@ -412,7 +412,9 @@ bool SphereArea::on_render(const Glib::RefPtr<Gdk::GLContext>& context) {
 
     glViewport(0, 0, static_cast<GLsizei>(viewportW_),
                static_cast<GLsizei>(viewportH_));
-    glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
+    // Let the Gtk::GLArea composite over the themed voice page instead of
+    // painting a second, hard-coded dark background inside a light UI.
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);

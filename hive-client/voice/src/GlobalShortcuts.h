@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace hv {
 
@@ -13,8 +14,9 @@ namespace hv {
 // them; the portal is the sanctioned path — the bind request shows
 // a one-time permission dialog, afterwards Activated/Deactivated
 // signals arrive over the session bus even when the window is on
-// another workspace/activity. The session token is persisted so
-// later launches restore silently (no new dialog).
+// another workspace/activity. Each run creates a fresh live session;
+// GNOME persists the approved binding by app id, so later launches restore
+// silently (no new dialog).
 //
 // Usage: construct with an onActivated callback, call bind(). The
 // callback fires on the GTK main thread (posted via idle), so it
@@ -24,9 +26,18 @@ class GlobalShortcuts {
     explicit GlobalShortcuts(std::function<void()> onActivated);
     ~GlobalShortcuts();
 
-    // Bind (or restore) the shortcut. trigger is a GTK accelerator
-    // string, e.g. "<Control><Super>space". Safe to call repeatedly.
-    void bind(const std::string& trigger);
+    // Unsubscribe every callback and close the portal session. Idempotent.
+    // This is required for mode-scoped bindings: unsubscribing Activated
+    // alone leaves the compositor forwarding the key after voice closes.
+    void close();
+
+    // Bind (or restore) the shortcut. preferredTrigger uses the freedesktop
+    // Shortcuts Specification, e.g. "CTRL+ALT+Return" or
+    // "LOGO+ALT+BackSpace" — not a GTK accelerator string. Call once.
+    void bind(const std::string& preferredTrigger);
+
+    // True only when BindShortcuts returned push-to-talk in its bound subset.
+    bool bound() const { return bound_; }
 
  private:
     void createSession();
@@ -38,7 +49,9 @@ class GlobalShortcuts {
     std::string sessionToken_;
     std::string pendingBindTrigger_;
     bool binding_ = false;
-    guint subActivated_ = 0;
+    bool bound_ = false;
+    std::vector<guint> subscriptions_;
+    bool closed_ = false;
 };
 
 }  // namespace hv
