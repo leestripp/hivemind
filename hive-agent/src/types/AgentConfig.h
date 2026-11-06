@@ -155,6 +155,9 @@ struct AgentConfig {
     // Example (webui demo loads the user's global skills):
     //   cfg.skills_dirs = { hive::Paths::global().global_skills_dir() };
     //   cfg.skills      = { "firefox", "memory-leak" };
+    // Set false when skills_dirs is a complete, explicitly ordered scan list.
+    // hive-agent uses this to put curated starters before workspace edits.
+    bool skills_include_default_directories = true;
     std::vector<std::filesystem::path> skills_dirs;
     std::vector<std::string>           skills;
 

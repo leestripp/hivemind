@@ -60,9 +60,9 @@ and complete their work autonomously.
 - **Routines, event triggers & skills** — scheduled prompts ("watch this,
   ping me daily") fired by a 30 s scheduler tick; durable one-shot
   `agent_idle` triggers that wake a watcher when another agent has finished
-  all live, queued, and managed background work; and a **global skill library**
-  (Anthropic SKILL.md format) shared across agents via per-agent enable
-  toggles — plus per-agent learned skills that stay agent-owned.
+  all live, queued, and managed background work; and curated starter skills
+  installed once for every agent. Agents own and edit their private and shared
+  workspace skills themselves.
 - **Voice-enabled native GTK4 client** (`hive-client`) — ONE desktop app
   for roster/avatars, threads, live chat, rich media, agent management and
   integrated ChimpFlow voice. Selecting an agent opens its voice page beside
@@ -179,9 +179,10 @@ POST                  /api/threads/:id/attachments      user/agent file attachme
 GET  /api/threads/:id/activity                live turn state
 POST/GET/DELETE       /api/routines[/:id]     POST …/:id/run
 GET/POST/DELETE       /api/agents/:id/skills[/name]          local (agent-owned) skills
-GET/POST/DELETE       /api/skills[/name]                     global skill library
+GET/DELETE            /api/skills[/name]                     installed curated starters
+GET                   /api/skills/registry                   curated starter catalog
+POST                  /api/skills/install                    install by catalog name for all agents
 GET/POST/DELETE       /api/secrets[/name]                    secret broker (write-only values)
-GET/POST              /api/agents/:id/global-skills          per-agent global-skill toggle
 GET/POST              /api/agents/:id/container/{status,start,stop,exec}
 GET/DELETE            /api/workers[/:name]                   worker registry
 GET/POST              /api/agents/:id/screen/{status,start,stop,password}
@@ -197,7 +198,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `docs/api.md` | REST API reference (auth, roster, threads, routines, skills, containers, models) |
 | `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, Caddy TLS, lockdown |
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
-| `docs/skills.md` | Global skill library design — symlinks, local/global split |
+| `docs/skills.md` | Curated starters and agent-owned workspace/private skills |
 | `docs/client.md` | Voice-enabled GTK4 client — chat, narration, dialogs, menus, theming |
 | `hive-client/voice/README.md` | Embedded voice module — ChimpFlow, PipeWire, build/runtime and tests |
 | `docs/voice-global-shortcuts.md` | XDG/GNOME voice key contract, giomm callback trap, safety and diagnosis |

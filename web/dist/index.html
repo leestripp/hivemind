@@ -291,55 +291,23 @@
     <div class="page-body page-wide">
       <div class="page-head">
         <div>
-          <h2>🧩 Skills</h2>
+          <h2>🧩 Starter Skills</h2>
           <p class="muted">
-            Two tiers of skills. The <strong>Synced Library</strong> below is the
-            hub-managed, read-only tier: it syncs to every worker and containers
-            mount it at <code>/skills</code> — toggle a chip to enable a skill per
-            agent. <strong>Workspace Global Skills</strong> are the writable tier
-            agents create themselves in <code>/workspace/.agents/skills/</code> on
-            each machine — shared by all agents on that worker, lazy-loaded live,
-            and listed here per machine (agents manage them; this view is read-only).
+            Install a curated skill once and every agent can use it. The hub
+            places a writable copy in each worker's shared
+            <code>/workspace/.agents/skills/</code> directory. Offline workers
+            receive missing starters automatically when they reconnect.
+          </p>
+          <p class="muted">
+            These are starting copies, not a read-only library: ask an agent to
+            correct or improve one and it can edit its shared workspace copy.
+            Reconnects preserve those edits. Agents can also create shared
+            workspace skills or private skills themselves; this page intentionally
+            shows only the curated starters installed here, not agents' own skills.
           </p>
         </div>
       </div>
-      <div class="section-head">
-        <h3>Synced Library <span class="muted" style="font-weight:normal">(read-only <code>/skills</code> in every container)</span></h3>
-        <div>
-          <button id="skills-install" class="btn" title="Clone a repo containing a SKILL.md into the library">Install from Git</button>
-          <button id="skills-add" class="btn">+ Add Skill</button>
-        </div>
-      </div>
-      <table class="kv-table">
-        <thead><tr><th>Name</th><th>Trigger / Description</th><th>Version</th><th>Enabled for</th><th></th></tr></thead>
-        <tbody id="skills-tbody"><tr><td colspan="5" class="muted">loading…</td></tr></tbody>
-      </table>
-      <div class="section-head" style="margin-top:18px">
-        <h3>🖥 Workspace Global Skills — per machine</h3>
-        <div><button id="skills-ws-refresh" class="btn">↻ Refresh</button></div>
-      </div>
-      <p class="muted" style="margin-top:0">
-        Live from each worker's <code>/workspace/.agents/skills/</code> — writable
-        by every agent on that machine, discovered live (no restarts). To manage
-        one, ask an agent on that machine.
-      </p>
-      <div id="skills-workspace" class="agents-grid"><p class="muted">loading…</p></div>
-      <div class="section-head" style="margin-top:18px">
-        <h3>🏪 Registry — curated, one-click install</h3>
-      </div>
       <div id="skills-registry" class="agents-grid"><p class="muted">loading…</p></div>
-    </div>
-  </div>
-
-  <div id="skill-install-modal" class="modal-overlay hidden">
-    <div class="modal-panel">
-      <div class="modal-head"><h3>Install Skill from Git</h3><button class="icon-btn" data-close title="Close">✕</button></div>
-      <form id="skill-install-form">
-        <label>Git URL <input name="git_url" required placeholder="https://github.com/you/your-skill.git"></label>
-        <label>Subdirectory (optional) <input name="path" placeholder="skills/my-skill — if SKILL.md isn't at repo root"></label>
-        <p class="muted">Shallow-clones the repo, validates SKILL.md frontmatter, and copies the skill into the global library.</p>
-        <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="submit">Install</button></div>
-      </form>
     </div>
   </div>
 
@@ -427,23 +395,6 @@
         <div class="modal-actions">
           <button type="button" class="btn" data-close>Cancel</button>
           <button type="submit" class="btn btn-primary">Add</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div id="skill-modal" class="modal-overlay hidden">
-    <div class="modal-panel">
-      <div class="modal-head"><h3>Add Global Skill</h3><button class="icon-btn" data-close title="Close">✕</button></div>
-      <form id="skill-form">
-        <label>Name <input name="name" required pattern="[a-z0-9-]+" placeholder="kebab-case, e.g. code-review"></label>
-        <label>Trigger description <input name="description" placeholder="When should agents activate this? e.g. Reviews code diffs for bugs"></label>
-        <label>Instructions (markdown body of SKILL.md)
-          <textarea name="content" rows="8" required placeholder="# Skill Title&#10;&#10;## Step 1: …"></textarea>
-        </label>
-        <div class="modal-actions">
-          <button type="button" class="btn" data-close>Cancel</button>
-          <button type="submit" class="btn btn-primary">Create</button>
         </div>
       </form>
     </div>

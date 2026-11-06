@@ -83,16 +83,12 @@ std::string AgentProcess::build_env_file() {
     env_line(body, "HIVEMIND_MCP_SERVERS", spec_.mcp_servers.dump());
     // Runtime descriptor (2026-10-12): ONE binary, environment-aware
     // tools. Containers keep the mount paths; host agents get their real
-    // workspace root, the worker's skill library by HOST path, and their
+    // workspace root and their
     // service ports as an identity mapping (no NAT outside a container).
     RuntimeEnv renv;
     if (spec_.host_agent) {
         renv.runtime = "host";
         renv.workspace_root = hwrunner::host_workspace(spec_.name);
-        const fs::path sk = fs::path(hwrunner::worker_dir()) / "skills";
-        std::error_code sk_ec;
-        fs::create_directories(sk, sk_ec);   // containers get it via ensure_container
-        renv.skills_dir = sk.string();
         const int svc_base = hwrunner::service_port_base(spec_.id);
         if (svc_base > 0) {
             renv.service_host = hwrunner::service_host_addr();
@@ -102,26 +98,14 @@ std::string AgentProcess::build_env_file() {
     } else {
         renv.runtime = "container";
         renv.workspace_root = "/workspace";
-        // Synced canonical library, mounted read-only at /skills
-        // (ensure_container). Container service env rides podman -e
-        // (service_env_args) instead — 8000+ -> per-agent host block.
-        renv.skills_dir = "/skills";
+        // Curated starters and agent-authored skills share the writable
+        // workspace tier. Container service env rides podman -e instead.
     }
     body += runtime_env_lines(renv);
     // Phase 60: hub-rendered granted secrets (HIVE_SECRET_<NAME>=…,
     // pre-escaped) — appended verbatim; the file is 0600 worker-local.
     if (!spec_.secret_env.empty())
         body += spec_.secret_env;
-    // Phase 50: per-skill gate (comma-joined; hive-agent parses at startup)
-    if (!spec_.disabled_skills.empty()) {
-        std::string joined;
-        for (const auto& n : spec_.disabled_skills) {
-            if (!joined.empty()) joined += ',';
-            joined += n;
-        }
-        env_line(body, "HIVEMIND_SKILLS_DISABLED", joined);
-    }
-
     const fs::path dir = fs::path(hwrunner::worker_dir()) / "env";
     std::error_code ec;
     fs::create_directories(dir, ec);

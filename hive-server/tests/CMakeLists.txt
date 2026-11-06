@@ -57,3 +57,6 @@ hivemind_test(test_secret_routes)
 hivemind_test(test_llmstore)
 hivemind_test(test_model_catalog)
 hivemind_test(test_share_store)
+
+# Curated starter catalog only: no arbitrary installs or per-agent switches.
+hivemind_test(test_skill_routes)

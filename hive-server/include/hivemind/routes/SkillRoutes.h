@@ -1,21 +1,17 @@
-// include/hivemind/routes/SkillRoutes.h
-// -----------------------------------------------------------------------------
-// Global skills library (HiveMind 2.0). hive-brain discovers per-agent skills in
-// <agent_dir>/.agents/skills (project-local). HiveMind adds a managed GLOBAL
-// library at ~/.local/share/hivemind/skills/; "enabling" a global skill for an
-// agent symlinks it into the agent's skills dir, so there is one source of
-// truth and edits propagate to every enabled agent.
-//
-//   GET    /api/skills                        library + per-skill enabled agents
-//   POST   /api/skills                        {name, description, content}
-//   DELETE /api/skills/:name                  remove from library + all symlinks
-//   GET    /api/agents/:id/global-skills      enabled global skill names
-//   POST   /api/agents/:id/global-skills      {name, enabled}  (toggle symlink)
-// -----------------------------------------------------------------------------
+// Curated starter-skill installation into writable workspace-global skills.
+// The hub tracks only catalog entries it installed; it does not inventory
+// agents' personal skills or arbitrary workspace skills.
 #pragma once
+
+#include <string>
 
 namespace OmniNet::HTTP { class Server; class Request; class Response; }
 
 class AgentStore;
+class WorkerChannel;
+class WorkerStore;
 
-void register_skill_routes(OmniNet::HTTP::Server& server, AgentStore& agents);
+void register_skill_routes(OmniNet::HTTP::Server& server, WorkerStore& workers,
+                           WorkerChannel& channel);
+void sync_installed_starter_skills(WorkerChannel& channel,
+                                   const std::string& worker);

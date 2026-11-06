@@ -141,9 +141,15 @@ fixed temperature 1.0). Re-discovery preserves each model's
 
 | Endpoint | Notes |
 |----------|-------|
-| `GET /api/skills` | the hub's canonical library |
-| `POST /api/skills/install` | install from registry → syncs to all workers |
-| per-agent enable | roster PATCH; applied to containers at next spawn |
+| `GET /api/skills/registry` | Curated catalog with installed state |
+| `GET /api/skills` | Installed curated starters only |
+| `POST /api/skills/install` | `{"name":"catalog-entry"}` → writable workspace copies for all agents |
+| `DELETE /api/skills/:name` | Uninstall for all agents; every enrolled worker must be online |
+
+There are no per-agent skill switches. Agents create and edit shared workspace
+skills and private skills themselves; the hub does not inventory them. Offline
+workers receive missing installed starters automatically on reconnect. Existing
+workspace copies are preserved, so reconnects do not undo agent corrections.
 
 ## Agent event triggers (worker bridge)
 

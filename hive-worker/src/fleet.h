@@ -51,7 +51,6 @@ struct AgentSpec {
     std::string type;          // Phase 35: "" -> standard, "gpu" -> kImageGpu + devices
     std::string memory;        // Phase 69: podman size ("4g"); "" -> worker default
     double cpus = 0;           // Phase 69: CPU cap; 0 -> worker default
-    std::vector<std::string> disabled_skills;  // Phase 50: hub's per-skill gate
     std::string secret_env;      // Phase 60: hub-rendered HIVE_SECRET_* lines
     // Phase 72: run bare-metal as unix user hivex-<name> (sudo, NO
     // sandbox) instead of a podman container. The worker's own
@@ -82,7 +81,7 @@ inline std::string resolved_image(const AgentSpec& s) {
 struct RuntimeEnv {
     std::string runtime;          // "container" | "host"
     std::string workspace_root;   // "/workspace" or the host path
-    std::string skills_dir;       // "/skills" or the host library path
+    std::string skills_dir;       // optional explicit extra skill roots
     std::string service_host;     // "" -> service sharing disabled
     int service_port_base = 0;    // host: identity mapping (agent binds
     int service_port_count = 0;   // the advertised port directly)

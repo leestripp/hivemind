@@ -92,14 +92,6 @@ public:
                                          int timeout_s = 30,
                                          const std::string& agent = "");
 
-    /// §Skills-Global: synchronous listing of a worker's workspace global
-    /// skills (/workspace/.agents/skills). Relay-only — the hub persists
-    /// nothing. nullopt when the worker is offline; throws on timeout.
-    struct WsSkillsResult { bool ok = false; nlohmann::json skills;
-                            std::string error; };
-    std::optional<WsSkillsResult> list_workspace_skills(
-        const std::string& worker, int timeout_s = 15);
-
     /// Phase 30.4: synchronous screen control on the worker (the worker
     /// runs the podman steps ContainerManager runs locally). image +
     /// resolution are passed through from server config.
@@ -127,16 +119,11 @@ public:
                      std::span<const uint8_t> data);
     void stream_close(const std::string& sid);
 
-    /// Phase 33: push a skill directory to a worker (server→worker).
-    /// Reads <skills_root>/<skill>/ on the SERVER and streams it as
-    /// skill_begin / skill_file (192KB base64 chunks, eof flag) / skill_end;
-    /// the worker writes ~/.local/share/hive-worker/skills/<skill>/ and
-    /// links home-<agent>/.agents/skills/<skill> → /skills/<skill>, then
-    /// acks (skill_ack). nullopt when offline; ok=false + error on failure.
+    /// Stream a curated starter into the worker's writable workspace-global
+    /// skill directories. Existing workspace copies are preserved verbatim.
     struct PushResult { bool ok = false; std::string error;
                         int files = 0; int64_t bytes = 0; };
     std::optional<PushResult> push_skill(const std::string& worker,
-                                         const std::string& agent,
                                          const std::string& skill,
                                          int timeout_s = 180);
     /// Phase 33 D: push a file into the worker's shared workspace
@@ -149,10 +136,9 @@ public:
                                         const std::string& data,
                                         int timeout_s = 120);
 
-    /// Phase 33: remove an enabled skill on the worker (unlink + delete the
-    /// rig-local copy).
+    /// Remove a curated starter from every workspace-global skill root on
+    /// the worker. Personal skill directories are never touched.
     std::optional<PushResult> remove_skill(const std::string& worker,
-                                           const std::string& agent,
                                            const std::string& skill,
                                            int timeout_s = 30);
 
@@ -227,15 +213,6 @@ private:
         ScreenResult result;
     };
     std::unordered_map<std::string, std::shared_ptr<ScreenJob>> screen_jobs_;
-
-    // §Skills-Global: in-flight workspace_skills requests (id → result slot)
-    struct WsSkillsJob {
-        std::mutex m;
-        std::condition_variable cv;
-        bool done = false;
-        WsSkillsResult result;
-    };
-    std::unordered_map<std::string, std::shared_ptr<WsSkillsJob>> ws_skills_jobs_;
 
     // 31: file_fetch jobs (id → waiter)
     struct FileJob {

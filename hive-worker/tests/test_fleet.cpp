@@ -51,9 +51,6 @@ int main() {
         b.mcp_servers = json::array({{"command","x"}});
         assert(a != b);                          // mcp change -> restart
         b = a;
-        b.disabled_skills.push_back("web");
-        assert(a != b);                          // skill gate -> restart
-        b = a;
         b.temperature = 0.5;
         assert(a != b);                          // tuning change -> restart
         b = a;
@@ -115,8 +112,7 @@ int main() {
 
     // 2026-10-12: runtime descriptor env (pure). Container agents keep
     // the mount paths + no service env (that rides podman -e); host
-    // agents get their real workspace root, the host skill library path,
-    // and an IDENTITY service-port mapping (container_base == port_base).
+    // agents get their real workspace root and an IDENTITY service-port mapping (container_base == port_base).
     {
         hwfleet::RuntimeEnv c;
         c.runtime = "container"; c.workspace_root = "/workspace";

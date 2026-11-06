@@ -29,3 +29,6 @@ hive_worker_test(test_heartbeat_watchdog)
 
 # Shared Linux host sampler and heartbeat JSON normalization.
 hive_worker_test(test_host_stats)
+
+# Curated starters install globally without overwriting agent edits.
+hive_worker_test(test_starter_skills)

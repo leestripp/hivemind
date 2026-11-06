@@ -461,6 +461,8 @@ void AgentImpl::initialize()
         !cfg_.skills_disabled.empty()) {
         try {
             body_->skill_manager = std::make_unique<SkillManager>();
+            body_->skill_manager->include_default_directories =
+                cfg_.skills_include_default_directories;
             body_->skill_manager->init_after_settings();
             auto* sm = body_->skill_manager.get();
 
@@ -469,9 +471,8 @@ void AgentImpl::initialize()
             // sees disabled skills, and activate_skill() refuses them
             // at runtime.
             sm->set_disabled_skills(cfg_.skills_disabled);
-            // Add developer-specified directories to the search
-            // list (append, don't replace — init_after_settings() already
-            // added the default user/project directories).
+            // Add the host's ordered scan list. With default directories
+            // enabled they are appended; otherwise this is the complete list.
             for (const auto& dir : cfg_.skills_dirs) {
                 sm->add_skill_directory(dir);
             }

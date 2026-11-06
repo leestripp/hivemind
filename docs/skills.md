@@ -1,58 +1,70 @@
-# Skills — one library, everywhere
+# Skills — curated starters plus agent-owned skills
 
-Skills are Anthropic-style capability packages (SKILL.md + scripts and
-resources). The hub owns the canonical library and every agent sees
-the same skills — because the skill files sit at hive-brain' known global
-location inside every container.
+Skills are Anthropic-style capability packages (`SKILL.md` plus optional
+scripts and resources). HiveMind has one simple hub action: **install a curated
+starter for every agent**. There are no per-agent enable switches.
 
-## The Skills Manager (hub side)
+## Curated starters
 
-- Canonical library: `~/.local/share/hivemind/skills/` on the hub.
-- Discovery + install: the `search_skills` / `install_skill` agent tools
-  and the client's Skills page operate on this library (unchanged from
-  v1 — registry of curated skills, install on demand).
-- Sync: when a worker connects (and whenever the library changes), the
-  hub pushes the library over the worker channel (`skill_sync` begin/
-  file/end/remove ops — the Phase 33 transport, kept). Delta sync by
-  content hash so reconnects are cheap.
+The web UI's **Skills** page lists only the curated registry. **Install for all
+agents** clones that entry on the hub, validates its `SKILL.md`, and streams a
+copy to each connected worker. Workers install missing copies in:
 
-## The worker side
+```
+/workspace/.agents/skills/<skill-name>/
+```
 
-- Lands the library at `~/.local/share/hive-worker/skills/`.
-- Bind-mounts it read-only into every agent container at `/skills`
-  (`HIVEMIND_SKILLS_DIR`). Agents **cannot** modify it — this is the
-  built-in, hub-managed tier.
-- Per-agent enable/disable is roster metadata; the hub passes each
-  agent's enabled list at spawn (env filter — hive-brain `skills`
-  config).
+That is the shared, writable workspace tier. Every agent on the worker sees the
+starter without a restart. An offline enrolled worker receives missing starters
+on reconnect, before the hub spawns its agents.
 
-## The workspace global tier (§Skills-Global, 2026-09-30)
+These are **starting copies, not a read-only library**. Ask an agent to correct
+or improve one and it can edit the shared copy through its normal tools. A
+reconnect never overwrites an existing copy, including an agent-edited one.
+The hub's `~/.local/share/hivemind/skills/` directory is only an internal
+installation cache; it is not an inventory of agents' skills.
 
-`/workspace/.agents/skills/` is THE writable global skill library,
-shared by every agent on the worker via the shared `/workspace` mount.
-Agents create shared skills here themselves — write
-`<skill-name>/SKILL.md`, no hub involvement, no restart:
+**Uninstall** removes that starter's shared workspace copies. It requires every
+enrolled worker to be online so the hub cannot silently strand copies on an
+offline machine. Private agent skills are never touched.
 
-- **Lazy-loaded at runtime**: `discover_skills` performs a live rescan
-  on every call, the per-turn system-prompt catalog refreshes when the
-  cache is older than 30 s (`maybe_refresh_cache`), and `load_skill`
-  reads disk first — so creations AND edits are picked up immediately.
-- **Skip reasons are surfaced**: a directory dropped from the catalog
-  (no SKILL.md, bad frontmatter, missing name/description) appears in
-  `discover_skills`' `skipped` list with the reason — never silent.
-- **Priority**: the workspace global is scanned after `/skills`, so a
-  workspace skill shadows a same-named library skill (deterministically,
-  even under parallel discovery).
-- **Per-rig**: like the rest of `/workspace`, each worker has its own
-  independent global tier. There is no cross-rig sync — that is by
-  design.
-- `~/.agents/skills/` (container home) remains on the scan list as a
-  PRIVATE per-agent tier, but it dies with the container — anything
-  shared must go to `/workspace/.agents/skills/`.
+## Skills agents own
 
-## Why this just works now
+Agents can create and improve skills themselves through chat:
 
-In v1 the brain was on the server and skill SCRIPTS had to execute in a
-remote container — hence streaming sync and symlink surgery. The
-brain is in the container, next to `/skills`. A skill that says "run
-`render.sh`" works: the script, the shell, and the agent are one place.
+- `/workspace/.agents/skills/` — shared by every agent on that worker and
+  writable by all of them. Use this for a team-wide skill or correction.
+- `~/.agents/skills/` in the agent's home — private to that agent.
+
+The hub deliberately does **not** list, enable, disable, or synchronize these
+agent-owned skills. Ask the agent that owns them, or an agent on the relevant
+worker for a shared workspace skill.
+
+Image-baked built-ins remain available from
+`/usr/local/share/hive-agent/skills`. Discovery rescans the filesystem, so new
+and edited skills are picked up live. If two directories contain the same skill
+name, the later directory wins. HiveMind's order is:
+
+1. optional explicit `HIVEMIND_SKILLS_DIR` entries;
+2. image-baked built-ins;
+3. shared workspace skills (including installed starters);
+4. private home skills.
+
+Thus a workspace correction overrides a built-in or explicitly supplied starter,
+and a private copy has the final say.
+
+The former read-only `/skills` library mount and hub-computed per-agent disabled
+list are retired. Old files under the worker's `skills/` directory are left in
+place for inspection but are no longer mounted or synchronized.
+
+## HTTP API
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/skills/registry` | Curated catalog with each entry's installed state |
+| `GET /api/skills` | Installed curated starters only |
+| `POST /api/skills/install` | Body: `{"name":"catalog-entry"}`; install for all agents |
+| `DELETE /api/skills/:name` | Uninstall a curated starter for all agents |
+
+Arbitrary Git URLs, hand-authored hub skills, workspace inventory, and per-agent
+`/global-skills` toggles are intentionally not part of this API.

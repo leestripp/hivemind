@@ -45,8 +45,8 @@ client. This document describes the current architecture.
   the agent is idle).
 - Shared `/workspace` mount per worker so its agents collaborate on the
   same files; per-agent home volumes for history/memory.
-- Synced skills library mounted read-only into every container at
-  hive-brain' global skills dir.
+- Curated starter skills copied into each worker's writable shared workspace;
+  agents' own shared/private skills remain agent-owned.
 - Relays the task protocol between hub and the in-container agents.
 
 ### hive-agent — the brain (in-container)

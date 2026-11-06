@@ -81,7 +81,7 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   model, inspect execution history, and migrate them between workers.
   Tool calls execute autonomously; there is no approval inbox.
 - **Skills page** — browse the hub's library, install from the registry,
-  per-agent enable toggles.
+  installation for every agent; agents own their workspace/private skills.
 - **Computer use** — watch an agent's browser live (worker-hosted
   browser containers), take over logins, hand control back.
 

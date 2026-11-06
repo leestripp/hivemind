@@ -457,18 +457,10 @@ int main(int argc, char** argv) {
     cfg.stream = true;
     cfg.max_agent_iterations = 600;
 
-    // Skills (§Skills-Global, 2026-09-30): two tiers.
-    //   1. HIVEMIND_SKILLS_DIR (=/skills)   - read-only synced library,
-    //     agents cannot modify it (baked skills stay as-is).
-    //   2. <project>/.agents/skills/        - THE writable global skills
-    //     dir, shared by every agent on this worker via the shared
-    //     /workspace mount. Listed LAST so a workspace skill shadows a
-    //     same-named library skill. Created here best-effort (the worker
-    //     also seeds it) and lazy-loaded at runtime: discovery re-scans,
-    //     so skills agents create or edit are picked up without a restart.
-    // ~/.agents/skills (container home) stays on the default scan list as
-    // a PRIVATE per-agent tier — fine for personal skills, but it dies
-    // with the container, so anything shared must go to the workspace dir.
+    // Curated starters are writable starting copies. Search them before the
+    // shared workspace so an agent's same-named correction wins; a private
+    // ~/.agents/skills copy has the final say. Explicit ordering also avoids
+    // SkillManager's first-directory-wins de-duplication trap.
     {
         std::vector<fs::path> dirs;
         std::string extra = env_or("HIVEMIND_SKILLS_DIR");
@@ -480,20 +472,19 @@ int main(int argc, char** argv) {
             if (colon == std::string::npos) break;
             pos = colon + 1;
         }
-        const fs::path global_dir = project_root / ".agents" / "skills";
         std::error_code ec;
-        fs::create_directories(global_dir, ec);  // best-effort
-        dirs.push_back(global_dir);
-        // Phase 71: image-baked built-in skills (mcp-self-service etc),
-        // COPY'd into the image by Containerfile.hive-agent. Optional —
-        // absent on bare-metal dev runs, present in containers.
         const fs::path builtin_dir =
             env_or("HIVEMIND_BUILTIN_SKILLS_DIR").empty()
                 ? fs::path{"/usr/local/share/hive-agent/skills"}
                 : fs::path{env_or("HIVEMIND_BUILTIN_SKILLS_DIR")};
-        if (fs::is_directory(builtin_dir, ec))
-            dirs.push_back(builtin_dir);
-        cfg.skills_dirs = dirs;
+        if (fs::is_directory(builtin_dir, ec)) dirs.push_back(builtin_dir);
+        const fs::path global_dir = project_root / ".agents" / "skills";
+        fs::create_directories(global_dir, ec);  // best-effort shared tier
+        dirs.push_back(global_dir);
+        const fs::path private_dir = fs::path(env_or("HOME")) / ".agents/skills";
+        dirs.push_back(private_dir);
+        cfg.skills_include_default_directories = false;
+        cfg.skills_dirs = std::move(dirs);
     }
     // Phase 50: per-skill gate from the hub (comma-joined names). Applied
     // at initialize() via cfg.skills_disabled; task frames refresh it live.
@@ -1754,21 +1745,6 @@ int main(int argc, char** argv) {
                         log_err("llm config apply failed for model '" + model + "'");
                     }
                 }
-            }
-            // Phase 50: live disabled-skills gate. The hub computes the
-            // agent's disabled set (hub-known skills minus its enabled
-            // global-skills) and rides it on every task frame, so skill
-            // enable/disable takes effect without a process restart.
-            if (op.contains("disabled_skills") && op["disabled_skills"].is_array()) {
-                std::set<std::string> desired;
-                for (const auto& n : op["disabled_skills"])
-                    if (n.is_string()) desired.insert(n.get<std::string>());
-                std::set<std::string> current;
-                for (const auto& n : agent.disabled_skills()) current.insert(n);
-                for (const auto& n : desired)
-                    if (!current.count(n)) agent.set_skill_enabled(n, false);
-                for (const auto& n : current)
-                    if (!desired.count(n)) agent.set_skill_enabled(n, true);
             }
             Task t{op.value("id", ""), op.value("text", ""),
                    op.value("thread_id", "")};

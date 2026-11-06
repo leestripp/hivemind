@@ -25,7 +25,6 @@ set(CORE_SOURCES
     src/ShareStore.cpp
     src/ContainerManager.cpp
     src/ExecAuditStore.cpp
-    src/AgentTools.cpp
     src/ChatService.cpp
     src/FanInPolicy.cpp
     src/HubRouter.cpp

@@ -88,7 +88,7 @@ another rig to "just read it from /workspace".
 | `scratch/` | Temporary working files. May be cleaned at any time — nothing here is kept. |
 | `archive/` | Finished/inactive work. Move, don't delete. |
 | `.hivemind/` | Server-owned (prompts, internal state) — agents don't touch. |
-| `.agents/skills/` | GLOBAL skill library shared by every agent on this worker. Writable — to create a shared skill, add `<skill-name>/SKILL.md` here; it is picked up live (no restart). The `/skills` mount is the read-only built-in library. |
+| `.agents/skills/` | GLOBAL skill library shared by every agent on this worker. Writable — to create a shared skill, add `<skill-name>/SKILL.md` here; it is picked up live (no restart). Curated starters are installed here too; agents may edit them. |
 
 ## Departments
 
@@ -731,11 +731,9 @@ void ensure_container(const std::string& agent, std::string image,
     fs::path base = worker_dir();
     fs::path ws = base / "workspace";
     fs::path home = base / ("home-" + agent);
-    fs::path skills = base / "skills";   // Phase 33: synced skill library
     std::error_code ec;
     fs::create_directories(ws, ec);
     fs::create_directories(home, ec);
-    fs::create_directories(skills, ec);
 
     // Phase 36: ALWAYS publish loopback 6080 (dynamic host port) — the
     // screen stack then starts by pure exec, with NO container recreate
@@ -773,7 +771,6 @@ void ensure_container(const std::string& agent, std::string image,
         args.insert(args.end(), {"--add-host", "leestrippai.com:host-gateway"});
     args.insert(args.end(), {"-v", ws.string() + ":/workspace",
                        "-v", home.string() + "/:/home/hive:U",
-                       "-v", skills.string() + ":/skills:ro",
                        "-w", "/workspace", image});
     std::string out;
     if (podman_simple(args, &out) != 0)
@@ -1015,7 +1012,6 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         fs::path base = worker_dir();
         fs::path ws = base / "workspace";   // shared per-worker (see ensure_container)
         fs::path home = base / ("home-" + agent);
-        fs::path skills = base / "skills";  // Phase 33
         std::error_code ec;
         fs::create_directories(ws, ec);
         fs::create_directories(home, ec);
@@ -1057,8 +1053,7 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         cargs.insert(cargs.end(), {
                            "-v", ws.string() + ":/workspace",
                            "-v", home.string() + "/:/home/hive:U",
-                           "-v", skills.string() + ":/skills:ro",
-                           "-w", "/workspace", image});
+                               "-w", "/workspace", image});
         if (podman_simple(cargs, &out) != 0) {
             r.error = "podman create (screen image) failed: " + out;
             return r;

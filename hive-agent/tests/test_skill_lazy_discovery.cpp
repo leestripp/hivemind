@@ -153,9 +153,9 @@ void test_load_by_name_sees_edits() {
     std::cout << "test_load_by_name_sees_edits OK\n";
 }
 
-// 4b: collision priority — the LATER directory wins (workspace global is
-// listed last so it shadows the read-only library).
-void test_later_dir_wins() {
+// 4b: collision priority — the LATER directory wins. Production lists
+// curated starters before the workspace so an agent-edited copy wins.
+void test_starter_dir_wins() {
     auto root = fresh_dir("priority");
     auto library = root / "library";   // e.g. read-only /skills
     auto global  = root / "global";    // e.g. /workspace/.agents/skills
@@ -163,13 +163,13 @@ void test_later_dir_wins() {
     write_skill(global,  "shared-name", "workspace copy");
 
     SkillManager mgr;
-    make_manager(mgr, {library, global});
+    make_manager(mgr, {global, library});
     mgr.refresh_cache();
     assert(mgr.get_all_cached_skills().at("shared-name").metadata.description
-           == "workspace copy");
+           == "library copy");
     auto loaded = mgr.load_skill_by_name("shared-name");
-    assert(loaded && loaded->metadata.description == "workspace copy");
-    std::cout << "test_later_dir_wins OK\n";
+    assert(loaded && loaded->metadata.description == "library copy");
+    std::cout << "test_starter_dir_wins OK\n";
 }
 
 // 5: include_default_directories=false scans only host-passed dirs.
@@ -198,7 +198,7 @@ int main() {
     test_maybe_refresh_throttle();
     test_skip_reasons();
     test_load_by_name_sees_edits();
-    test_later_dir_wins();
+    test_starter_dir_wins();
     test_replace_default_dirs();
     std::cout << "test_skill_lazy_discovery: all passed\n";
     return 0;

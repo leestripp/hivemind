@@ -45,7 +45,6 @@
 #include "hivemind/WorkerStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerRouter.h"
-#include "hivemind/AgentTools.h"
 #include "hivemind/routes/WorkerRoutes.h"
 #include "hivemind/routes/ModelRoutes.h"
 #include "hivemind/LlmStore.h"
@@ -155,7 +154,6 @@ int main(int argc, char* argv[]) {
     WorkerRouter::install(&agent_store, &worker_channel);   // Phase 30.3
     // Phase 30: let the collaboration tools see the worker registry too
     // (list_workers tool + create_agent's worker placement param).
-    agent_tools::install_worker_access(&worker_store, &worker_channel);
     // Phase C: pure hub. Turns run on workers (hive-agent); the HubRouter
     // dispatches task ops over the worker channel and feeds results back.
     hivemind::SecretStore secret_store;   // hoisted: hub handles secret_req
@@ -203,25 +201,12 @@ int main(int argc, char* argv[]) {
                             const nlohmann::json& now) {
             (void)worker_telemetry.record(w, host, now);
         };
-    // Phase 33: on worker (re)connect, re-push every enabled global skill
-    // for each agent homed on that rig (self-heals after worker downtime).
-    worker_channel.on_worker_online = [&agent_store, &hub,
+    // Reconnect installs only missing curated starters. The worker preserves
+    // every existing workspace copy, including agent edits.
+    worker_channel.on_worker_online = [&hub,
                                        &worker_channel](const std::string& wname) {
-        // Phase C: spawn roster agents homed here (idempotent).
+        sync_installed_starter_skills(worker_channel, wname);
         hub.reconcile_worker(wname);
-        json keep = json::array();
-        for (const auto& a : agent_store.list_agents()) {
-            if (a.worker != wname) continue;
-            for (const auto& sk : agent_tools::list_enabled_skills(a.id)) {
-                agent_tools::push_skill_to_worker(a, sk);
-                keep.push_back(sk);
-            }
-        }
-        // Prune stale skill dirs on the worker: the sync protocol only
-        // adds, so leftovers from long-disabled skills would linger in
-        // the shared /skills mount forever (hit 2026-09-03).
-        worker_channel.send(wname,
-                            {{"op","skills_prune"},{"keep",keep}});
     };
     ConnectorStore connector_store;
 
@@ -332,7 +317,7 @@ int main(int argc, char* argv[]) {
     register_config_routes(server);
     register_routine_routes(server, routine_store, agent_store,
                             thread_store, chat_service);
-    register_skill_routes(server, agent_store);
+    register_skill_routes(server, worker_store, worker_channel);
     register_secret_routes(server, agent_store, secret_store,
         [&hub](const std::string& agent_id) {
             // Grant changed → push a fresh spawn frame so the agent's env

@@ -10,7 +10,6 @@ hive-brain brain, packaged as **hive-agent**) actually runs.
 |-------|--------|------|---------|
 | `/workspace` | worker's shared workspace dir | rw | **The agent's project root.** All agents on the worker share it — and hive-brain derives everything from it |
 | `$HOME` | per-agent host dir (home volume) | rw | Non-hive-brain dotfiles (browser profiles, app config) — survives container replacement |
-| `/skills` | worker's synced skills library | ro | Mounted at hive-brain' global skills location; every agent sees the same skills |
 
 Running at project root `/workspace` puts the hive-brain state tree on the
 shared volume:
@@ -42,9 +41,10 @@ The container's main process is hive-agent, a thin hive-brain host:
 - Speaks NDJSON on stdio: `task` ops in, events out (ready / delta /
   message / send_agent_message / status / log).
   Full mapping table: `docs/hive-worker.md`.
-- Skills load from `/skills` (global mount) AND `/workspace/.agents/
-  skills/` (project-local, shared) automatically; helper scripts execute
-  locally — same machine as the brain, no sync tricks.
+- Skills load from `/workspace/.agents/skills/` (curated starters and
+  agent-authored shared skills), the image-baked built-in directory, and the
+  agent's private `~/.agents/skills/`; helper scripts execute locally — same
+  machine as the brain, no sync tricks.
 - MCP servers are local child processes (stdio) or direct network
   clients. Full MCP support, in-container, no shortcuts.
 
@@ -61,7 +61,7 @@ survive re-seeds and container recreations. The boot seed
 the worker even when empty) manages only `origin='hub'` rows.
 `mcp_add`/`mcp_enable` apply immediately, like other valid tool calls.
 A built-in `mcp-self-service` skill (image-baked
-at `/usr/local/share/hive-agent/skills`, appended to `skills_dirs`)
+at `/usr/local/share/hive-agent/skills`, before the workspace in `skills_dirs`)
 teaches the install → register → verify → document loop.
 
 ## Lifecycle

@@ -329,21 +329,6 @@ void WorkerChannel::handle(Connection& ws) {
                 sj->done = true;
                 sj->cv.notify_all();
             }
-        } else if (op == "workspace_skills_result") {
-            std::shared_ptr<WsSkillsJob> wj;
-            {
-                std::lock_guard lk(m_);
-                auto it = ws_skills_jobs_.find(frame.value("id", ""));
-                if (it != ws_skills_jobs_.end()) wj = it->second;
-            }
-            if (wj) {
-                std::lock_guard jl(wj->m);
-                wj->result.ok = true;
-                wj->result.skills = frame.value("skills", json::array());
-                wj->result.error = frame.value("error", "");
-                wj->done = true;
-                wj->cv.notify_all();
-            }
         } else if (op == "stream_opened" || op == "stream_error") {        } else if (op == "stream_opened" || op == "stream_error") {
             // open_stream waits on this via a ScreenJob-shaped slot? no —
             // streams have their own ack slot:
@@ -541,36 +526,6 @@ WorkerChannel::screen_ctl(const std::string& worker, const std::string& agent,
     return sj->result;
 }
 
-// ── §Skills-Global: workspace global skills listing ────────────────────
-std::optional<WorkerChannel::WsSkillsResult>
-WorkerChannel::list_workspace_skills(const std::string& worker, int timeout_s) {
-    if (!is_online(worker)) return std::nullopt;
-    const std::string id = "ws-" + std::to_string(next_job_++);
-    auto wj = std::make_shared<WsSkillsJob>();
-    {
-        std::lock_guard lk(m_);
-        ws_skills_jobs_[id] = wj;
-    }
-    if (!send(worker, {{"op","workspace_skills"},{"id",id}})) {
-        std::lock_guard lk(m_);
-        ws_skills_jobs_.erase(id);
-        return std::nullopt;
-    }
-    std::unique_lock lk(wj->m);
-    if (!wj->cv.wait_for(lk, std::chrono::seconds(timeout_s),
-                         [&]{ return wj->done; })) {
-        std::lock_guard g(m_);
-        ws_skills_jobs_.erase(id);
-        throw std::runtime_error("worker workspace_skills timed out");
-    }
-    auto result = wj->result;
-    {
-        std::lock_guard g(m_);
-        ws_skills_jobs_.erase(id);
-    }
-    return result;
-}
-
 // ── 30.4: streams ───────────────────────────────────────────────────────
 std::string WorkerChannel::open_stream(const std::string& worker,
                                        uint16_t port,
@@ -763,7 +718,7 @@ bool valid_skill_name33(const std::string& n) {
 } // namespace
 
 std::optional<WorkerChannel::PushResult>
-WorkerChannel::push_skill(const std::string& worker, const std::string& agent,
+WorkerChannel::push_skill(const std::string& worker,
                           const std::string& skill, int timeout_s) {
     PushResult res;
     if (!valid_skill_name33(skill)) {
@@ -791,7 +746,7 @@ WorkerChannel::push_skill(const std::string& worker, const std::string& agent,
     } guard{this, id};
 
     if (!send(worker, json{{"op","skill_begin"},{"id",id},
-                           {"agent",agent},{"skill",skill}})) {
+                           {"skill",skill}})) {
         res.error = "worker offline mid-send";
         return res;
     }
@@ -861,7 +816,7 @@ WorkerChannel::push_skill(const std::string& worker, const std::string& agent,
 }
 
 std::optional<WorkerChannel::PushResult>
-WorkerChannel::remove_skill(const std::string& worker, const std::string& agent,
+WorkerChannel::remove_skill(const std::string& worker,
                             const std::string& skill, int timeout_s) {
     PushResult res;
     if (!valid_skill_name33(skill)) { res.error = "bad skill name"; return res; }
@@ -879,7 +834,7 @@ WorkerChannel::remove_skill(const std::string& worker, const std::string& agent,
     } guard{this, id};
 
     if (!send(worker, json{{"op","skill_remove"},{"id",id},
-                           {"agent",agent},{"skill",skill}})) {
+                           {"skill",skill}})) {
         res.error = "worker offline mid-send";
         return res;
     }

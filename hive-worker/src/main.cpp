@@ -16,6 +16,7 @@
 #include "fleet.h"
 #include "migration_ops.h"
 #include "heartbeat_watchdog.h"
+#include "StarterSkills.h"
 #include "hivemind/HostStats.h"
 
 #include <nlohmann/json.hpp>
@@ -50,14 +51,16 @@ using OmniNet::WebSocket::Connection;
 // A flag-based graceful stop would hang in the blocking receiveText().
 static std::atomic<bool> g_stop{false};
 
-// Phase 33: in-progress skill syncs (id → state)
+// In-progress curated starter installs (id → state). Only newly-created
+// workspace directories are listed here, so existing agent edits are never
+// overwritten and an aborted install can clean up its own partial files.
 struct SkillSync {
-    std::string agent;
     std::string skill;
-    fs::path dir;
+    std::vector<fs::path> dirs;
     int files = 0;
     int64_t bytes = 0;
 };
+
 static std::mutex sync_m;
 static std::unordered_map<std::string, SkillSync> syncs;
 // Phase H: in-flight workspace file pushes (id -> accumulated bytes)
@@ -758,13 +761,6 @@ int main(int argc, char* argv[]) {
                             spec.host_agent    = specj.value("host_agent",false);
                             // Phase 60: granted secrets (rendered env text)
                             spec.secret_env    = specj.value("secret_env","");
-                            // Phase 50: per-skill gate from the hub
-                            if (specj.contains("disabled_skills") &&
-                                specj["disabled_skills"].is_array())
-                                for (const auto& n : specj["disabled_skills"])
-                                    if (n.is_string())
-                                        spec.disabled_skills.push_back(
-                                            n.get<std::string>());
                             g_fleet->spawn(spec);
                             // Phase 66f: a container recreate leaves the
                             // screen stack DOWN even though the pin
@@ -1319,11 +1315,7 @@ int main(int argc, char* argv[]) {
                     }
                 } else if (op == "skill_begin" || op == "skill_file" ||
                            op == "skill_end" || op == "skill_abort" ||
-                           op == "skill_remove" || op == "skills_prune") {
-                    // Phase 33: skill sync from the server. Files land in
-                    // ~/.local/share/hive-worker/skills/<skill>/; on skill_end
-                    // the agent's home gets ~/.agents/skills/<skill> →
-                    // /skills/<skill> (absolute target resolves in-container).
+                           op == "skill_remove") {
                     const std::string id = frame.value("id", "");
                     auto fail = [&](const std::string& err) {
                         try { send_frame({{"op","skill_ack"},{"id",id},
@@ -1332,170 +1324,125 @@ int main(int argc, char* argv[]) {
                     };
                     const fs::path wbase = fs::path{std::getenv("HOME")} /
                                            ".local/share/hive-worker";
-                    if (op == "skills_prune") {
-                        // Desired-state sweep: "keep" is the union of every
-                        // enabled skill for agents homed on this worker.
-                        // Anything else in the shared library (or mirrored
-                        // into an agent home) is a stale leftover — the
-                        // push protocol only ever ADDS. (2026-09-03: a
-                        // long-disabled remotion-create lingered on the
-                        // droplet and leaked into Chief's /skills mount.)
-                        std::set<std::string> keep;
-                        for (const auto& k : frame.value("keep", json::array()))
-                            if (k.is_string()) keep.insert(k.get<std::string>());
-                        std::vector<fs::path> doomed;
-                        std::error_code ec;
-                        for (const auto& de :
-                             fs::directory_iterator(wbase / "skills", ec))
-                            if (!keep.count(de.path().filename().string()))
-                                doomed.push_back(de.path());
-                        for (const auto& he : fs::directory_iterator(wbase, ec)) {
-                            if (he.path().filename().string().rfind("home-", 0) != 0)
-                                continue;
-                            const fs::path mdir = he.path() / ".agents/skills";
-                            std::error_code ec2;
-                            if (!fs::exists(mdir, ec2)) continue;
-                            for (const auto& me : fs::directory_iterator(mdir, ec2))
-                                if (!keep.count(me.path().filename().string()))
-                                    doomed.push_back(me.path());
-                        }
-                        for (const auto& d : doomed) {
-                            std::error_code ec3;
-                            fs::remove_all(d, ec3);
-                            if (!ec3)
-                                std::cerr << "[skills] pruned stale "
-                                          << d.filename().string() << "\n";
-                        }
-                    } else if (op == "skill_remove") {
-                        const std::string agent = frame.value("agent", "");
+                    if (op == "skill_remove") {
                         const std::string skill = frame.value("skill", "");
-                        std::error_code ec;
-                        fs::remove(wbase / ("home-" + agent) /
-                                   ".agents/skills" / skill, ec);
-                        fs::remove_all(wbase / "skills" / skill, ec);
-                        try { send_frame({{"op","skill_ack"},{"id",id},
-                                          {"ok",!ec},
-                                          {"error", ec ? ec.message() : ""}}); }
-                        catch (...) {}
+                        if (!hwskills::valid_name(skill)) {
+                            fail("bad skill name");
+                        } else {
+                            const auto roots = hwskills::workspace_roots(
+                                wbase, hwrunner::g_host_workspace_root);
+                            const std::string error =
+                                hwskills::remove_starter(roots, skill);
+                            try { send_frame({{"op","skill_ack"},{"id",id},
+                                              {"ok",error.empty()},
+                                              {"error",error}}); }
+                            catch (...) {}
+                        }
                     } else if (op == "skill_begin") {
                         const std::string skill = frame.value("skill", "");
-                        // validate name: [a-z0-9-] only
-                        bool okn = !skill.empty() && skill.size() <= 64;
-                        for (char c : skill)
-                            if (!((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'))
-                                okn = false;
-                        if (!okn) { fail("bad skill name"); }
-                        else {
-                            std::lock_guard lk(sync_m);
-                            syncs[id] = SkillSync{frame.value("agent",""),
-                                                  skill, {}, 0, 0};
-                            std::error_code ec;
-                            fs::remove_all(wbase / "skills" / skill, ec);
-                            fs::create_directories(wbase / "skills" / skill, ec);
+                        if (!hwskills::valid_name(skill)) {
+                            fail("bad skill name");
+                        } else {
+                            const auto roots = hwskills::workspace_roots(
+                                wbase, hwrunner::g_host_workspace_root);
+                            auto plan = hwskills::prepare_install(roots, skill);
+                            if (!plan.error.empty()) {
+                                fail(plan.error);
+                            } else {
+                                SkillSync sync{skill, std::move(plan.dirs), 0, 0};
+                                std::lock_guard lk(sync_m);
+                                syncs[id] = std::move(sync);
+                            }
                         }
                     } else if (op == "skill_file") {
                         std::lock_guard lk(sync_m);
                         auto it = syncs.find(id);
-                        if (it == syncs.end()) { fail("unknown sync id"); }
-                        else {
-                            SkillSync& sy = it->second;
+                        if (it == syncs.end()) {
+                            fail("unknown sync id");
+                        } else {
+                            SkillSync& sync = it->second;
                             std::string rel = frame.value("path", "");
-                            // confine: relative, no ".."
                             while (!rel.empty() && rel.front() == '/')
                                 rel.erase(rel.begin());
-                            if (rel.empty() ||
-                                rel.find("..") != std::string::npos) {
-                                fail("bad path"); syncs.erase(it);
+                            auto dec = OmniNet::Crypto::base64Decode(
+                                frame.value("data", ""));
+                            if (rel.empty() || rel.find("..") != std::string::npos ||
+                                !dec) {
+                                for (const auto& dir : sync.dirs) {
+                                    std::error_code cleanup;
+                                    fs::remove_all(dir, cleanup);
+                                }
+                                syncs.erase(it);
+                                fail("invalid skill file frame");
                             } else {
-                                auto dec = OmniNet::Crypto::base64Decode(
-                                    frame.value("data", ""));
-                                if (!dec) { fail("bad base64"); syncs.erase(it); }
-                                else {
-                                    const fs::path fp =
-                                        wbase / "skills" / sy.skill / rel;
-                                    std::error_code ec;
-                                    fs::create_directories(fp.parent_path(), ec);
-                                    std::ofstream out(fp, std::ios::binary |
-                                                          std::ios::app);
-                                    out.write((const char*)dec->data(),
-                                              (std::streamsize)dec->size());
-                                    sy.bytes += (int64_t)dec->size();
-                                    if (frame.value("eof", false)) sy.files++;
-                                    if (sy.bytes > 50ll*1024*1024) {
-                                        fail("skill too large");
+                                std::error_code ec;
+                                for (const auto& dir : sync.dirs) {
+                                    const fs::path file = dir / rel;
+                                    fs::create_directories(file.parent_path(), ec);
+                                    std::ofstream out(file, std::ios::binary |
+                                                             std::ios::app);
+                                    out.write(reinterpret_cast<const char*>(dec->data()),
+                                              static_cast<std::streamsize>(dec->size()));
+                                    if (!out && !ec)
+                                        ec = std::make_error_code(std::errc::io_error);
+                                    if (ec) break;
+                                }
+                                if (ec) {
+                                    for (const auto& dir : sync.dirs) {
+                                        std::error_code cleanup;
+                                        fs::remove_all(dir, cleanup);
+                                    }
+                                    syncs.erase(it);
+                                    fail("workspace skill write failed: " + ec.message());
+                                } else {
+                                    sync.bytes += static_cast<int64_t>(dec->size());
+                                    if (frame.value("eof", false)) sync.files++;
+                                    if (sync.bytes > 50ll * 1024 * 1024) {
+                                        for (const auto& dir : sync.dirs) {
+                                            std::error_code cleanup;
+                                            fs::remove_all(dir, cleanup);
+                                        }
                                         syncs.erase(it);
+                                        fail("skill too large");
                                     }
                                 }
                             }
                         }
                     } else if (op == "skill_abort") {
                         std::lock_guard lk(sync_m);
-                        syncs.erase(id);   // partial files stay, harmless
-                    } else {   // skill_end
-                        SkillSync sy;
+                        auto it = syncs.find(id);
+                        if (it != syncs.end()) {
+                            for (const auto& dir : it->second.dirs) {
+                                std::error_code cleanup;
+                                fs::remove_all(dir, cleanup);
+                            }
+                            syncs.erase(it);
+                        }
+                    } else {  // skill_end
+                        SkillSync sync;
                         {
                             std::lock_guard lk(sync_m);
                             auto it = syncs.find(id);
-                            if (it == syncs.end()) { fail("unknown sync id"); }
-                            else { sy = it->second; syncs.erase(it); }
-                        }
-                        if (!sy.skill.empty()) {
-                            // v2: brains read the canonical /skills mount directly
-                            // (HIVEMIND_SKILLS_DIR) - no per-agent home symlinks.
-                            try {
-                                send_frame({{"op","skill_ack"},{"id",id},{"ok",true},
-                                            {"files",sy.files},{"bytes",sy.bytes}});
-                            } catch (...) {}
-                            std::cerr << "[skills] synced " << sy.skill << " ("
-                                      << sy.files << " files)\n";
-                        }
-                        }   // skill_end
-                } else if (op == "workspace_skills") {
-                    // §Skills-Global (2026-09-30): list THIS rig's shared
-                    // workspace global skills (/workspace/.agents/skills).
-                    // Synchronous reply — the server blocks on it.
-                    const std::string id = frame.value("id", "");
-                    const fs::path root = fs::path{std::getenv("HOME")} /
-                        ".local/share/hive-worker/workspace/.agents/skills";
-                    json skills = json::array();
-                    std::error_code ec;
-                    if (fs::is_directory(root, ec)) {
-                        for (auto& e : fs::directory_iterator(root, ec)) {
-                            if (ec) break;
-                            if (!e.is_directory(ec)) continue;
-                            const fs::path md = e.path() / "SKILL.md";
-                            if (!fs::exists(md, ec)) continue;
-                            std::ifstream in(md);
-                            std::string name, desc, ver, line;
-                            bool in_fm = false, got_fm = false;
-                            // Minimal flat-key frontmatter parse (first ---
-                            // block only) — enough for the catalog view.
-                            while (std::getline(in, line)) {
-                                if (line == "---") {
-                                    if (!got_fm) { in_fm = true; got_fm = true; continue; }
-                                    break;  // second --- ends frontmatter
-                                }
-                                if (!in_fm) continue;
-                                const auto colon = line.find(':');
-                                if (colon == std::string::npos) continue;
-                                std::string k = line.substr(0, colon);
-                                std::string v = line.substr(colon + 1);
-                                const auto b = v.find_first_not_of(" \t");
-                                if (b != std::string::npos) v = v.substr(b);
-                                if (k == "name") name = v;
-                                else if (k == "description") desc = v;
-                                else if (k == "version") ver = v;
+                            if (it == syncs.end()) {
+                                fail("unknown sync id");
+                            } else {
+                                sync = std::move(it->second);
+                                syncs.erase(it);
                             }
-                            skills.push_back({
-                                {"name", name.empty() ? e.path().filename().string() : name},
-                                {"description", desc},
-                                {"version", ver},
-                                {"dir", e.path().filename().string()}});
+                        }
+                        if (!sync.skill.empty()) {
+                            for (const auto& dir : sync.dirs)
+                                hwskills::make_agent_writable(dir);
+                            try { send_frame({{"op","skill_ack"},{"id",id},
+                                              {"ok",true},{"files",sync.files},
+                                              {"bytes",sync.bytes},
+                                              {"already_present",sync.dirs.empty()}}); }
+                            catch (...) {}
+                            std::cerr << "[skills] workspace starter " << sync.skill
+                                      << " ready (" << sync.dirs.size()
+                                      << " new copy/copies)\n";
                         }
                     }
-                    try { send_frame({{"op","workspace_skills_result"},
-                                      {"id",id},{"skills",skills}}); }
-                    catch (...) {}
                 } else if (op == "screen_ctl") {
                     // 30.4: synchronous reply — the server blocks on it.
                     const std::string id = frame.value("id", "");

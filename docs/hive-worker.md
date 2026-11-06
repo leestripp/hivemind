@@ -347,7 +347,9 @@ a separate phase-2 decision.
 
 ## Skills
 
-The hub streams its canonical library down (`skill_begin` / `skill_file`
-/ `skill_end` / `skill_remove`; the worker answers `skill_ack`). The
-worker stores it under `~/.local/share/hive-worker/skills/` and
-bind-mounts it read-only into containers at hive-brain' global skills dir.
+The hub streams curated starters (`skill_begin` / `skill_file` / `skill_end` /
+`skill_remove`; the worker answers `skill_ack`). The worker installs only
+missing copies under `/workspace/.agents/skills/`, shared and writable by every
+agent on that worker. Existing copies are never overwritten on reconnect, so
+agent corrections survive. The former read-only `/skills` mount is retired;
+agents' private and self-created workspace skills are not inventoried by the hub.
