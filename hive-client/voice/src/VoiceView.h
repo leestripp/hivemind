@@ -45,6 +45,10 @@ class VoiceView : public Gtk::Box {
     // < Back pressed — MainWindow pops to the roster and destroys us.
     sigc::signal<void()>& signal_back() { return signal_back_; }
 
+    // Main-client roster snapshots (GUI thread). This is the ONLY source of
+    // agent-wide busy/ready state; VoiceView makes no roster activity calls.
+    void updateAgents(const std::vector<AgentInfo>& agents);
+
     // Diagnostic hooks (main-client UiApi and integration tests).
     std::string debugAgentName() const { return agentName_; }
     std::string debugPhaseName() const;
@@ -52,6 +56,16 @@ class VoiceView : public Gtk::Box {
     bool debugTurnDone() const { return turnDone_; }
     int debugTtsOutstanding() const;
     bool debugTtsSpeaking() const;
+    bool debugAgentBusy() const {
+        return haveSharedAgentBusy_ && sharedAgentBusy_;
+    }
+    bool debugCancelVisible() const {
+        return cancel_ && cancel_->get_visible();
+    }
+    bool debugTalkSensitive() const { return talk_ && talk_->get_sensitive(); }
+    std::string debugTalkLabel() const {
+        return talk_ ? std::string{talk_->get_label()} : std::string{};
+    }
     void debugSay(const std::string& text);  // as if STT produced it
 
     // What the TALK button does — same debounce + phase switch. Used by
@@ -86,6 +100,7 @@ class VoiceView : public Gtk::Box {
     void sendTranscript();
     void postTranscript(const std::string& text);
     void sendAndEnterWait(const std::string& text);
+    void syncAgentBusyChrome();
     bool reresolveIfThreadGone(const std::exception& e);
     void startIdleNarration();
     void speakNotice(const std::string& text);
@@ -106,7 +121,7 @@ class VoiceView : public Gtk::Box {
     void audioDrainWatchTick();
     void inboxWatchTick();
     void pollTick();
-    void handleTick(bool threadBusy, bool agentBusy,
+    void handleTick(bool threadBusy, bool agentBusy, bool haveAgentBusy,
                     const std::string& error, const std::string& partial,
                     bool cancelling, int gen, bool grew);
 
@@ -148,13 +163,15 @@ class VoiceView : public Gtk::Box {
     // -- state ------------------------------------------------------------
     Phase phase_ = Phase::Setup;
     std::string thread_id_;
-    bool showingAgentBusy_ = false;
+    // Written by HiveWindow roster delivery on the GUI thread; also read by
+    // the voice I/O worker when posting a message. No second roster poll.
+    std::atomic<bool> sharedAgentBusy_{false};
+    std::atomic<bool> haveSharedAgentBusy_{false};
     std::atomic<bool> stopping_{false};
     bool queuedBehindStop_ = false;
     std::string lastMessageId_;
     std::string finalText_;
     std::size_t finalCredit_ = 0;
-    std::map<std::string, std::string> agentNames_;
     std::deque<PendingNote> pendingSpeech_;
     std::string streamText_;
     std::size_t spokenLen_ = 0;

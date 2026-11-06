@@ -82,15 +82,19 @@ full-message chunking and UTF-8-safe splitting for bubble narration.
 ## Turn activity scopes
 
 A voice session streams reply text from the selected agent's DM, but its
-lifetime follows the agent-wide activity signal (`GET /api/agents/activity`).
-During agent-to-agent relays the DM can be idle while the agent is still
-working in another thread. In that state the app keeps listening and speaks
-new DM messages, then returns to idle only when the agent is idle across all
-threads. `test_voice_turn_logic` covers the scope transitions.
-`test_api_client_activity` exercises the real HTTP response envelope: the
-agent map is nested under `agents`. Looking up the id at the JSON root made
-every agent appear idle, which ended live turns early and repeatedly
-restarted their partial narration.
+lifetime follows the main HiveWindow roster snapshots (`GET /api/agents`),
+delivered through `VoiceView::updateAgents`. The voice view makes no separate
+roster or `/api/agents/activity` requests. During agent-to-agent relays the
+DM can be idle while the agent is still working in another thread; the shared
+roster keeps the voice turn active until that agent is ready across all
+threads. `test_voice_turn_logic` covers shared busy/ready, stale-DM and
+first-snapshot fallback transitions.
+
+A stored final DM message can arrive after the roster is already ready. That
+idle-start narration is marked complete before playback, and each shared
+ready snapshot kicks a final poll if an active view still needs one. This
+prevents the finished-audio/visible-Cancel stuck state. Normal `toIdle("")`
+also clears stale status text instead of preserving "Replying…".
 
 TTS completion is tracked by exact utterance tag, so late playback callbacks
 from a stopped turn cannot consume a newer turn's outstanding count. Once

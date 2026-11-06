@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 using hv::voice_turn::ActivityScope;
+using hv::voice_turn::SharedAgentState;
+using hv::voice_turn::effectiveAgentBusy;
 using hv::voice_turn::inFlight;
 using hv::voice_turn::workingOffThread;
 
@@ -37,4 +39,19 @@ TEST_CASE("audio drain only expires while silent past its bound") {
     REQUIRE_FALSE(audioDrainExpired(true, 90000, 75000));
     REQUIRE_FALSE(audioDrainExpired(false, 74999, 75000));
     REQUIRE(audioDrainExpired(false, 75000, 75000));
+}
+
+TEST_CASE("shared roster ready wins over stale DM activity", "[voice-turn]") {
+    REQUIRE_FALSE(effectiveAgentBusy(true, {.known = true, .busy = false}));
+    REQUIRE_FALSE(effectiveAgentBusy(false, {.known = true, .busy = false}));
+}
+
+TEST_CASE("shared roster busy covers work in another thread", "[voice-turn]") {
+    REQUIRE(effectiveAgentBusy(false, {.known = true, .busy = true}));
+    REQUIRE(effectiveAgentBusy(true, {.known = true, .busy = true}));
+}
+
+TEST_CASE("first roster snapshot missing uses DM activity", "[voice-turn]") {
+    REQUIRE(effectiveAgentBusy(true, {.known = false, .busy = false}));
+    REQUIRE_FALSE(effectiveAgentBusy(false, {.known = false, .busy = false}));
 }

@@ -267,6 +267,27 @@ Gtk::Widget* make_avatar(const std::string& name, bool is_user,
     return img;
 }
 
+hv::AgentInfo voice_agent_info(const json& a) {
+    hv::AgentInfo info;
+    info.id = a.value("id", "");
+    info.name = a.value("name", "");
+    info.role = a.value("role", "");
+    info.avatar = a.value("avatar", "");
+    info.state = a.value("state", "");
+    info.worker = a.value("worker", "");
+    info.busy = a.value("busy", false);
+    info.online = a.value("online", info.state != "offline");
+    return info;
+}
+
+std::vector<hv::AgentInfo> voice_agent_infos(const json& agents) {
+    std::vector<hv::AgentInfo> out;
+    if (!agents.is_array()) return out;
+    out.reserve(agents.size());
+    for (const auto& a : agents) out.push_back(voice_agent_info(a));
+    return out;
+}
+
 } // namespace
 
 // Install a HeaderBar as a dialog's titlebar (CSD) so the compositor doesn't
@@ -1324,6 +1345,10 @@ void HiveWindow::poll_roster() {
                 if (!alive_) return;
                 auto arr = agents.value("agents", json::array());
                 auto warr = workers.value("workers", json::array());
+                // The embedded voice view consumes the SAME fresh roster
+                // snapshot as the working Agents list. Do this before the
+                // signature early-return so its first snapshot always lands.
+                if (voice_) voice_->updateAgents(voice_agent_infos(arr));
                 std::string sig;
                 for (auto& a : arr) {
                     sig += a.value("id", "") + ":" +
@@ -3153,21 +3178,14 @@ void HiveWindow::show_voice(const nlohmann::json& agent) {
     voice_prefs_.setBase(server_url_);
     voice_prefs_.setApiKey(api_.api_key());
 
-    hv::AgentInfo info;
-    info.id = agent.value("id", "");
-    info.name = agent.value("name", "");
-    info.role = agent.value("role", "");
-    info.avatar = agent.value("avatar", "");
-    info.state = agent.value("state", "");
-    info.worker = agent.value("worker", "");
-    info.busy = agent.value("busy", false);
-    info.online = agent.value("online", info.state != "offline");
+    hv::AgentInfo info = voice_agent_info(agent);
 
     voice_builder_ = Gtk::Builder::create_from_resource(
         "/org/hivemind/voice/ui/voice.ui");
     voice_ = Gtk::Builder::get_widget_derived<hv::VoiceView>(
         voice_builder_, "voiceRoot", voice_prefs_, std::move(info));
     voice_->signal_back().connect([this] { show_sidebar(); });
+    voice_->updateAgents(voice_agent_infos(agents_));
     left_stack_.add(*voice_, "voice");
     left_stack_.set_visible_child("voice");
 
@@ -5389,6 +5407,13 @@ nlohmann::json HiveWindow::ui_state() {
             {"voice_agent", voice_ ? voice_->debugAgentName() : ""},
             {"voice_phase", voice_ ? voice_->debugPhaseName() : ""},
             {"voice_status", voice_ ? voice_->debugStatusText() : ""},
+            {"voice_agent_busy", voice_ && voice_->debugAgentBusy()},
+            {"voice_cancel_visible", voice_ && voice_->debugCancelVisible()},
+            {"voice_talk_sensitive", voice_ && voice_->debugTalkSensitive()},
+            {"voice_talk_label", voice_ ? voice_->debugTalkLabel() : ""},
+            {"voice_turn_done", voice_ && voice_->debugTurnDone()},
+            {"voice_tts_outstanding", voice_ ? voice_->debugTtsOutstanding() : 0},
+            {"voice_tts_speaking", voice_ && voice_->debugTtsSpeaking()},
             {"voice_shortcut_activations", voice_shortcut_activations_},
             {"sidebar_visible", left_stack_.get_visible_child_name() == "sidebar"},
             {"chat_visible", chat_box_.get_visible()},

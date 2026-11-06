@@ -28,7 +28,10 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   [Voice global shortcuts on GNOME/Wayland](voice-global-shortcuts.md) for the
   portal contract, giomm callback-order warning, accessibility rules, and
   diagnostic runbook. The voice page also shows the shortcut and a live
-  ChimpFlow Online/Offline status card.
+  ChimpFlow Online/Offline status card. Agent busy/ready state comes from the
+  main window's existing roster snapshots, not a second voice-side roster
+  poll; a shared ready transition restores the idle sphere and Talk control,
+  hides Cancel, and drains any remaining narration before completing.
 - **Message narration** — readable agent bubbles have a small Play button.
   It reads that exact message through ChimpFlow with the sender's configured
   voice, including messages in the Inbox. Clicking another bubble interrupts

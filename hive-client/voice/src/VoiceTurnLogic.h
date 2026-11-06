@@ -20,6 +20,19 @@ struct ActivityScope {
     return activity.agent_busy && !activity.thread_busy;
 }
 
+// The main HiveWindow roster is the single source of agent-wide busy/ready
+// state. Until its first snapshot arrives, preserve the old thread-scoped
+// behavior rather than guessing that the agent is idle.
+struct SharedAgentState {
+    bool known;
+    bool busy;
+};
+
+[[nodiscard]] constexpr bool effectiveAgentBusy(
+    bool thread_busy, SharedAgentState shared) noexcept {
+    return shared.known ? shared.busy : thread_busy;
+}
+
 }  // namespace hv::voice_turn
 
 namespace hv::voice_turn {

@@ -222,6 +222,72 @@ void VoiceView::updateChimpflowHealth(const bool online) {
         online ? "ChimpFlow is responding" : "ChimpFlow is not responding");
 }
 
+void VoiceView::updateAgents(const std::vector<AgentInfo>& agents) {
+    bool found = false;
+    bool busy = false;
+    std::vector<AgentSnapshot> roster;
+    roster.reserve(agents.size());
+    for (const auto& a : agents) {
+        roster.push_back({a.id, a.name, a.online, a.busy});
+        if (a.id == agent_.id) {
+            found = true;
+            busy = a.busy;
+        }
+    }
+    sharedAgentBusy_ = busy;
+    haveSharedAgentBusy_ = found;
+
+    // Stop confirmation now arrives through the same working roster path as
+    // the Agents list. No independent listAgents/agent-activity retry loop.
+    if (stopping_ && found && !busy) {
+        toIdle("Stopped");
+    } else {
+        // A stored final DM message can start narration after the agent is
+        // already ready. If that race left us active without a live poll,
+        // the shared ready snapshot must restart the final completion path.
+        if (found && !busy && !turnDone_ &&
+            (phase_ == Phase::Thinking || phase_ == Phase::Streaming))
+            schedulePollTick(0);
+        syncAgentBusyChrome();
+    }
+
+    if (prefs_.stateAnnounce()) {
+        for (const auto& ann : announcer_->diff(roster))
+            pendingSpeech_.push_back({ann.agentId, ann.text});
+        speakPending();
+    }
+}
+
+void VoiceView::syncAgentBusyChrome() {
+    if (phase_ != Phase::Idle || !haveSharedAgentBusy_) return;
+    if (sharedAgentBusy_) {
+        if (sphere_) sphere_->setState(SphereState::Thinking);
+        if (status_) status_->set_label(agentName_ + " is working…");
+        if (cancel_) cancel_->set_visible(true);
+        return;
+    }
+
+    // Reconcile EVERY shared ready snapshot, not only a boolean edge. This
+    // repairs any visual state left by a phase transition while the roster
+    // was changing: idle sphere, ready Talk, no stale Cancel/stop control.
+    if (sphere_) {
+        sphere_->setState(SphereState::Idle);
+        sphere_->setLevel(0.0f);
+    }
+    if (talk_) {
+        talk_->remove_css_class("hv-active");
+        talk_->set_label("TALK");
+        talk_->set_sensitive(true);
+    }
+    if (cancel_) cancel_->set_visible(false);
+    if (status_) {
+        const Glib::ustring was = agentName_ + " is working…";
+        if (status_->get_label() == was ||
+            status_->get_label() == "Stopping…")
+            status_->set_label("");
+    }
+}
+
 // -- setup -----------------------------------------------------------------
 
 void VoiceView::openThread() {
@@ -230,10 +296,6 @@ void VoiceView::openThread() {
             thread_id_ = api_->openDm(agent_.id);
             lastMessageId_ = api_->latestMessageId(thread_id_);
             try { api_->markRead(thread_id_); } catch (...) {}
-            try {
-                for (const auto& a : api_->listAgents())
-                    agentNames_[a.id] = a.name;
-            } catch (...) {}
             toUi([this] {
                 toIdle("Tap TALK and speak");
                 scheduleInboxWatch(kIdlePollMs);
@@ -283,7 +345,8 @@ void VoiceView::toIdle(const std::string& message) {
         talk_->set_sensitive(true);
     }
     if (cancel_) cancel_->set_visible(false);
-    if (!message.empty() && status_) status_->set_label(message);
+    if (status_) status_->set_label(message);
+    syncAgentBusyChrome();
     // Notes that arrived mid-turn wait for exactly this moment.
     if (!pendingSpeech_.empty()) speakPending();
 }
@@ -345,11 +408,7 @@ void VoiceView::sendAndEnterWait(const std::string& text) {
         preAct = api_->activity(thread_id_);
         havePre = true;
     } catch (...) {}
-    bool agentBusy = false;
-    try {
-        for (const auto& a : api_->listAgents())
-            if (a.id == agent_.id) agentBusy = a.busy;
-    } catch (...) {}
+    const bool agentBusy = haveSharedAgentBusy_ && sharedAgentBusy_;
     const bool queuedBehindStop = havePre && preAct.cancelling;
     const bool queued = queuedBehindStop || agentBusy;
     api_->postMessage(thread_id_, text, "voice");
@@ -518,7 +577,7 @@ void VoiceView::cancelCurrent() {
             confirmStopThread();
             break;
         case Phase::Idle:
-            if (showingAgentBusy_) {
+            if (haveSharedAgentBusy_ && sharedAgentBusy_) {
                 post([this] { stopAgentAndConfirm(); });
             } else {
                 toIdle("Cancelled");
@@ -577,38 +636,22 @@ void VoiceView::confirmStopThread() {
 }
 
 void VoiceView::stopAgentAndConfirm() {
-    bool free_ = false;
     try {
         api_->cancelAgent(agent_.id);
-        const long deadline = nowMs() + kStopConfirmMs;
-        while (nowMs() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            try {
-                for (const auto& a : api_->listAgents()) {
-                    if (a.id == agent_.id) {
-                        free_ = !a.busy;
-                        break;
-                    }
-                }
-            } catch (...) {
-            }
-            if (free_) break;
-        }
     } catch (const std::exception&) {
         toUi([this] { toIdle("Stop failed — try again"); });
         return;
     }
-    toUi([this, free_] {
-        if (free_) {
-            showingAgentBusy_ = false;
+    toUi([this] {
+        if (phase_ != Phase::Idle) return;
+        if (haveSharedAgentBusy_ && !sharedAgentBusy_) {
             toIdle("Stopped");
-        } else if (phase_ == Phase::Idle) {
-            stopping_ = true;
-            if (talk_) talk_->set_sensitive(false);
-            if (status_)
-                status_->set_label("Still busy — the current command "
-                                   "must finish first…");
+            return;
         }
+        stopping_ = true;
+        if (talk_) talk_->set_sensitive(false);
+        if (status_) status_->set_label("Stopping…");
+        // updateAgents() confirms the shared roster's busy -> ready edge.
     });
 }
 
@@ -708,9 +751,6 @@ void VoiceView::inboxWatchTick() {
         return;
     }
     post([this] {
-        std::vector<PendingNote> fresh;
-        std::string meBusy;
-        bool haveMe = false;
         ThreadActivity act;
         bool haveAct = false;
         bool dmConsumed = false;
@@ -724,7 +764,14 @@ void VoiceView::inboxWatchTick() {
                     // Per-message credit — never re-reads earlier messages.
                     if (!finalText_.empty()) finalText_ += ' ';
                     finalText_ += trimStr(m.body);
-                    toUi([this] { speakFinalTail(); });
+                    toUi([this] {
+                        // messagesAfter returns STORED final messages. When
+                        // this narration began from Idle there is no live
+                        // poll left to mark completion later, so the stored
+                        // final tail is itself a completed narration turn.
+                        if (phase_ == Phase::Idle) turnDone_ = true;
+                        speakFinalTail();
+                    });
                 }
             }
             try {
@@ -734,63 +781,18 @@ void VoiceView::inboxWatchTick() {
             // Deliberately no You/inbox narration: completion notes there
             // duplicate what the agent's DM narration already spoke. The
             // inbox is left unread for the text UIs. (lee, 2026-10-25)
-            std::vector<AgentSnapshot> roster;
-            try {
-                for (const auto& a : api_->listAgents()) {
-                    agentNames_[a.id] = a.name;
-                    roster.push_back({a.id, a.name, a.online, a.busy});
-                    if (a.id == agent_.id) {
-                        meBusy = a.busy ? "1" : "0";
-                        haveMe = true;
-                    }
-                }
-            } catch (...) {}
-            if (!roster.empty() && prefs_.stateAnnounce()) {
-                for (const auto& ann : announcer_->diff(roster))
-                    fresh.push_back({ann.agentId, ann.text});
-            }
             try { if (dmConsumed) api_->markRead(thread_id_); } catch (...) {}
         } catch (const std::exception& e) {
             if (!reresolveIfThreadGone(e)) {
                 // poll blip — reschedule below
             }
         }
-        toUi([this, fresh = std::move(fresh), meBusy, haveMe,
-              act = std::move(act), haveAct]() mutable {
-            // Stop confirmation (agent level).
-            if (stopping_ && haveMe && meBusy == "0") {
-                stopping_ = false;
-                showingAgentBusy_ = false;
-                toIdle("Stopped");
-            }
+        toUi([this, act = std::move(act), haveAct]() mutable {
             if (haveAct) {
                 if (!act.busy) narrationGiveUpLen_ = 0;
                 else if (narrationGiveUpLen_ == 0 ||
                          act.partial.size() > narrationGiveUpLen_)
                     startIdleNarration();
-            }
-            if (!fresh.empty()) {
-                for (auto& n : fresh) pendingSpeech_.push_back(std::move(n));
-                speakPending();
-            }
-            // Working chrome, edge-triggered on the roster busy flag.
-            if (haveMe && phase_ == Phase::Idle &&
-                ((meBusy == "1") != showingAgentBusy_)) {
-                showingAgentBusy_ = (meBusy == "1");
-                if (showingAgentBusy_) {
-                    if (sphere_) sphere_->setState(SphereState::Thinking);
-                    if (status_) status_->set_label(agentName_ + " is working…");
-                    if (cancel_) cancel_->set_visible(true);
-                } else {
-                    if (sphere_) sphere_->setState(SphereState::Idle);
-                    if (cancel_) cancel_->set_visible(false);
-                    if (status_) {
-                        const Glib::ustring was = agentName_ + " is working…";
-                        if (status_->get_label() == was ||
-                            status_->get_label() == "Stopping…")
-                            status_->set_label("");
-                    }
-                }
             }
             scheduleInboxWatch(kIdlePollMs);
         });
@@ -819,10 +821,11 @@ void VoiceView::pollTick() {
         return;
     }
     const int gen = turnGen_;
-    post([this, gen] {
+    const bool agentBusy = sharedAgentBusy_;
+    const bool haveAgentBusy = haveSharedAgentBusy_;
+    post([this, gen, agentBusy, haveAgentBusy] {
         try {
             ThreadActivity act = api_->activity(thread_id_);
-            const bool agentBusy = api_->agentBusy(agent_.id);
             bool appended = false;
             for (const auto& m : api_->messagesAfter(thread_id_, lastMessageId_)) {
                 lastMessageId_ = m.id;
@@ -835,9 +838,9 @@ void VoiceView::pollTick() {
             netFailSince_ = 0;
             const bool grew = appended || act.partial.size() > lastPartialLen_;
             if (!act.partial.empty()) lastPartialLen_ = act.partial.size();
-            toUi([this, act, agentBusy, gen, grew] {
-                handleTick(act.busy, agentBusy, act.error, act.partial,
-                           act.cancelling, gen, grew);
+            toUi([this, act, agentBusy, haveAgentBusy, gen, grew] {
+                handleTick(act.busy, agentBusy, haveAgentBusy, act.error,
+                           act.partial, act.cancelling, gen, grew);
             });
         } catch (const std::exception& e) {
             fprintf(stderr, "hive-poll: tick threw: %s\n", e.what());
@@ -852,14 +855,17 @@ void VoiceView::pollTick() {
 }
 
 void VoiceView::handleTick(bool threadBusy, bool agentBusy,
-                           const std::string& error,
+                           bool haveAgentBusy, const std::string& error,
                            const std::string& partial, bool cancelling,
                            int gen, bool grew) {
     if (gen != turnGen_) return;  // stale tick from a cancelled turn
     if (phase_ != Phase::Thinking && phase_ != Phase::Streaming) return;
     if (grew) lastProgressMs_ = nowMs();
     const bool busy = threadBusy;
-    const hv::voice_turn::ActivityScope scope{threadBusy, agentBusy};
+    const hv::voice_turn::ActivityScope scope{
+        threadBusy,
+        hv::voice_turn::effectiveAgentBusy(
+            threadBusy, {haveAgentBusy, agentBusy})};
     if (!error.empty()) {
         tts_->stop();
         toIdle("Agent error: " + error);
@@ -868,7 +874,7 @@ void VoiceView::handleTick(bool threadBusy, bool agentBusy,
         return;
     }
     // Stop confirmation: only stand down once the turn actually died.
-    if (!busy && stopping_) {
+    if (!scope.agent_busy && stopping_) {
         toIdle("Stopped");
         return;
     }

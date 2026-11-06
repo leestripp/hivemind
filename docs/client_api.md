@@ -82,10 +82,14 @@ kicks a poll. Errors if the id is not in the loaded thread list.
 Body: `{"agent": "<name-or-id>"}` → `{"selected": "<agent-id>"}`.
 Selects/reuses the agent DM and runs the same ChimpFlow health probe as a
 roster click. `GET /ui/state` exposes `voice_mode`, `voice_available`,
-`voice_agent`, `voice_phase`, `voice_status`, `voice_shortcut_active`,
-`voice_shortcut`, `voice_shortcut_activations`, `sidebar_visible`,
-`chat_visible`, `app_color_scheme` and `high_contrast` for integration
-assertions. The activation counter increments after a real portal Activated
+`voice_agent`, `voice_phase`, `voice_status`, `voice_agent_busy`,
+`voice_cancel_visible`, `voice_talk_sensitive`, `voice_talk_label`,
+`voice_turn_done`, `voice_tts_outstanding`, `voice_tts_speaking`,
+`voice_shortcut_active`, `voice_shortcut`, `voice_shortcut_activations`,
+`sidebar_visible`, `chat_visible`, `app_color_scheme` and `high_contrast`
+for integration assertions. `voice_agent_busy` is delivered from the main
+window's roster poll, so a busy-to-ready transition can be compared directly
+with the working Agents list. The activation counter increments after a real portal Activated
 signal reaches the live voice callback. Shortcut fields report the mode-scoped
 portal lifecycle; they do not synthesize key presses. The physical-delivery
 runbook is in [voice-global-shortcuts.md](voice-global-shortcuts.md).
