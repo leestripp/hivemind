@@ -6,6 +6,7 @@ using hv::voice_turn::ActivityScope;
 using hv::voice_turn::SharedAgentState;
 using hv::voice_turn::effectiveAgentBusy;
 using hv::voice_turn::inFlight;
+using hv::voice_turn::readyCompletionPollNeeded;
 using hv::voice_turn::workingOffThread;
 
 TEST_CASE("agent-wide idle completes a voice turn", "[voice-turn]") {
@@ -54,4 +55,19 @@ TEST_CASE("shared roster busy covers work in another thread", "[voice-turn]") {
 TEST_CASE("first roster snapshot missing uses DM activity", "[voice-turn]") {
     REQUIRE(effectiveAgentBusy(true, {.known = false, .busy = false}));
     REQUIRE_FALSE(effectiveAgentBusy(false, {.known = false, .busy = false}));
+}
+
+TEST_CASE("ready never cancels transcription or send", "[voice-turn]") {
+    const SharedAgentState ready{.known = true, .busy = false};
+    REQUIRE_FALSE(readyCompletionPollNeeded(ready, false, false));
+}
+
+TEST_CASE("ready repairs only an unfinished streaming narration", "[voice-turn]") {
+    const SharedAgentState ready{.known = true, .busy = false};
+    REQUIRE(readyCompletionPollNeeded(ready, false, true));
+    REQUIRE_FALSE(readyCompletionPollNeeded(ready, true, true));
+    REQUIRE_FALSE(readyCompletionPollNeeded(
+            {.known = true, .busy = true}, false, true));
+    REQUIRE_FALSE(readyCompletionPollNeeded(
+            {.known = false, .busy = false}, false, true));
 }

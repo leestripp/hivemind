@@ -33,6 +33,15 @@ struct SharedAgentState {
     return shared.known ? shared.busy : thread_busy;
 }
 
+// Ready-state reconciliation is ONLY for a streaming narration whose normal
+// completion poll was missed. Thinking also covers STT transcription and the
+// HTTP post; polling then can return to Idle and discard the user's voice
+// message before it is sent.
+[[nodiscard]] constexpr bool readyCompletionPollNeeded(
+    SharedAgentState shared, bool turn_done, bool streaming) noexcept {
+    return shared.known && !shared.busy && !turn_done && streaming;
+}
+
 }  // namespace hv::voice_turn
 
 namespace hv::voice_turn {

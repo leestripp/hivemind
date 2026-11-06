@@ -245,8 +245,8 @@ void VoiceView::updateAgents(const std::vector<AgentInfo>& agents) {
         // A stored final DM message can start narration after the agent is
         // already ready. If that race left us active without a live poll,
         // the shared ready snapshot must restart the final completion path.
-        if (found && !busy && !turnDone_ &&
-            (phase_ == Phase::Thinking || phase_ == Phase::Streaming))
+        if (hv::voice_turn::readyCompletionPollNeeded(
+                {found, busy}, turnDone_, phase_ == Phase::Streaming))
             schedulePollTick(0);
         syncAgentBusyChrome();
     }

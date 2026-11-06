@@ -92,9 +92,11 @@ first-snapshot fallback transitions.
 
 A stored final DM message can arrive after the roster is already ready. That
 idle-start narration is marked complete before playback, and each shared
-ready snapshot kicks a final poll if an active view still needs one. This
-prevents the finished-audio/visible-Cancel stuck state. Normal `toIdle("")`
-also clears stale status text instead of preserving "Replying…".
+ready snapshot kicks a final poll only if a streaming narration still needs
+one. It must never poll Thinking: that phase includes STT transcription and
+the HTTP post, so an early ready transition there would discard the user's
+voice message. `test_voice_turn_logic` covers that send regression. Normal
+`toIdle("")` also clears stale status text instead of preserving "Replying…".
 
 TTS completion is tracked by exact utterance tag, so late playback callbacks
 from a stopped turn cannot consume a newer turn's outstanding count. Once
