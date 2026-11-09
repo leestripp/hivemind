@@ -15,7 +15,7 @@ unix parts substituted for podman parts:
 |---|---|---|
 | **Per-agent state** | `home-<id>` dir → bind-mounted `/home/hive` | real unix home `/home/hivex-<name>` (sudo `-H`) |
 | **Shared workspace** | worker workspace → bind-mounted `/workspace` | the real worker workspace (`--host-workspace-root`) — cwd for every host agent on the rig |
-| **On delete** | container + `home-<id>` removed; workspace untouched | unix user + home permanently removed (NO archive); `/workspace` untouched |
+| **On delete** | container + `home-<id>` + private state permanently removed; shared files kept | unix user + home + private state permanently removed (NO archive); shared files kept |
 
 Same shape, same cleanup boundaries: per-agent state dies with the
 agent; the shared company drive is permanent. If you understand what a
@@ -114,17 +114,22 @@ error in the worker journal and never falls back to a plain
 `userdel` that would strand the home. Manual `deprovision-host-agent`
 uses the same helper for repair.
 
-**The workspace is SHARED and NEVER cleaned up.** With the worker's
+**Delete Agent permanently deletes ALL agent-private contents.** There
+is no archive, trash, or undo: the roster record, running process, Unix
+account, home, sudoers entry, brain/history/state under
+`.hive-agent/<Name>/`, legacy private state, generated prompt/config
+files, and worker-local environment are deleted. Empty transport folders
+are removed when possible.
+
+**Only SHARED company files are preserved.** With the worker's
 `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) every host
 agent on the rig runs with cwd = `DIR` itself — the same shared company
-drive the containers see bind-mounted at `/workspace`. With the
-standard service account, use
-`/home/hivemind/.local/share/hive-worker/workspace`; a large filesystem
-may be mounted there. Provision's `--workspace-root
-DIR` just verifies the directory exists; nothing per-agent is created, and
-neither roster delete nor deprovision ever touches the workspace.
-Without the flag the agent's cwd is its home dir (which IS
-permanently deleted on delete).
+drive the containers see bind-mounted at `/workspace`. Other agents and
+people may own or depend on those shared files, so deletion never removes
+the workspace itself or shared work products. With the standard service
+account, use `/home/hivemind/.local/share/hive-worker/workspace`; a large
+filesystem may be mounted there. Without the flag the agent's cwd is its
+home dir, which is permanently deleted on delete.
 
 ## Runtime mechanics
 

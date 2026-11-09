@@ -25,16 +25,17 @@ Two operational flags round the story out:
   the standard `hivemind` service account, use
   `/home/hivemind/.local/share/hive-worker/workspace` so host agents and
   containers use the same physical directory. It is the agents'
-  permanent company drive: **neither roster delete nor deprovision ever
-  touches it.** Without the flag the agent runs in its home dir instead.
-- **Roster delete auto-cleans the unix side.** Deleting a host agent via
-  the API makes the worker run the root helper
-  (`/usr/local/sbin/hivex-deprovision`, installed by provisioning, with
-  a scoped NOPASSWD sudoers grant): processes killed, home archived to
-  `/var/backups/hivex-<name>-<timestamp>.tar.gz`, user and sudoers
-  entry removed — workspace untouched. If the worker is offline at
-  delete time the hub logs an audit line telling you to run
-  `sudo hive-worker deprovision-host-agent <name>` manually.
+  permanent company drive. Shared files survive deletion; the deleted
+  agent's private `.hive-agent/<Name>/` state does not. Without the flag
+  the agent runs in its home dir instead.
+- **Delete Agent permanently deletes all agent-private contents.** The
+  worker runs `/usr/local/sbin/hivex-deprovision` through a scoped
+  NOPASSWD sudoers grant. Processes, the Unix account, home, private
+  brain/history/state, generated prompt/config files, and sudoers entry
+  are permanently deleted. **No archive or trash copy is made.** Shared
+  company files and other agents' state are preserved. If the worker is
+  offline, deletion returns 409 before roster/thread changes; bring it
+  online and retry.
 
 ## Running as a service (systemd user unit)
 

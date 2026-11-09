@@ -69,21 +69,34 @@ bool confirm() {
 }
 
 /// Root helper installed by provision: removes a host-agent unix user
-/// (processes, home, and its sudoers entry). The
-/// workspace under --host-workspace-root is NEVER touched. The worker
+/// (processes, home, private state, and its sudoers entry). Shared company
+/// files under --host-workspace-root are NEVER touched. The worker
 /// invokes this via `sudo -n` on roster delete (auto-cleanup); the
 /// sudoers grant is limited to exactly this root-owned, validated script.
 constexpr const char* kHelper = R"SH(#!/bin/sh
 # HiveMind host-agent removal. Root-only via /etc/sudoers.d/hivex-deprovision.
 # Delete the private home with the account and remove its sudoers grant. No
 # archive is made: roster deletion is deliberate and media homes can be huge.
-# The shared agent workspace is NEVER touched. Any failure leaves the account in
-# place and returns non-zero so the worker logs that manual repair is needed.
+# Shared company files are NEVER touched. Optional args identify ONLY the
+# agent's private state inside the shared workspace:
+#   hivex-deprovision <user> [workspace-root agent-name agent-id]
+# Any failure returns non-zero so the worker logs that repair is needed.
 set -eu
 user="${1:-}"
 echo "$user" | grep -Eq '^hivex-[a-z0-9-]{1,26}$' \
     || { echo "bad user name: '$user'" >&2; exit 2; }
 id "$user" >/dev/null 2>&1 || { echo "no such user: $user" >&2; exit 1; }
+wsroot="${2:-}"; agent_name="${3:-}"; agent_id="${4:-}"
+if [ -n "$wsroot" ]; then
+    case "$wsroot" in /*) ;; *) echo "workspace root must be absolute" >&2; exit 2;; esac
+    [ "$wsroot" != "/" ] || { echo "refusing workspace root /" >&2; exit 2; }
+    case "$agent_name" in ""|"."|".."|*/*)
+        echo "unsafe agent state name: '$agent_name'" >&2; exit 2;;
+    esac
+    case "$agent_id" in *[!A-Za-z0-9-]*)
+        echo "unsafe agent id: '$agent_id'" >&2; exit 2;;
+    esac
+fi
 
 # Stop user-manager services and existing processes. System services with
 # Restart=always can come back later, so the userdel loop below kills again.
@@ -121,8 +134,18 @@ done
     echo "userdel -r failed; account preserved for manual repair" >&2
     exit 1
 }
-rm  "/etc/sudoers.d/$user"
-echo "hivex-deprovision: removed $user (home deleted; workspace untouched)"
+# Delete private brain/history/state and generated prompt files from the
+# shared workspace. Other agents' state and all shared company files stay.
+if [ -n "$wsroot" ]; then
+    rm -rf -- "$wsroot/.hive-agent/$agent_name"         "$wsroot/.daedalus/daedalus-$agent_name"
+    if [ -n "$agent_id" ]; then
+        rm -f -- "$wsroot/.hivemind/prompts/$agent_id.txt"
+    fi
+    # Remove only EMPTY infrastructure dirs; never delete shared content.
+    rmdir "$wsroot/.hive-agent" "$wsroot/.hivemind/prompts"         "$wsroot/.hivemind" "$wsroot/attachments" "$wsroot/incoming"         "$wsroot/shared" 2>/dev/null || true
+fi
+rm -f "/etc/sudoers.d/$user"
+echo "hivex-deprovision: removed $user (home and private state deleted; shared files untouched)"
 )SH";
 
 /// Root helper installed by install_support: provisions ONE host-agent
@@ -479,7 +502,9 @@ int deprovision(const std::string& agent_name) {
     // Use the exact same helper as roster deletion. Keeping a second,
     // weaker implementation here previously let manual and automatic
     // cleanup behave differently.
-    return run({"/usr/local/sbin/hivex-deprovision", user}) == 0 ? 0 : 1;
+    return run({"/usr/local/sbin/hivex-deprovision", user,
+                hwrunner::host_workspace(agent_name), agent_name, ""}) == 0
+               ? 0 : 1;
 }
 
 } // namespace hwhostagent

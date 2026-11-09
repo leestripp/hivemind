@@ -194,7 +194,8 @@ void AgentProcess::spawn_exec() {
         // Workspace (cwd / project root): the SHARED
         // --host-workspace-root dir (e.g. the /workspace mount on the
         // host — the same company drive the containers see), else the
-        // home dir. NEVER deleted — not by remove(), not by deprovision.
+        // home dir. The workspace itself is never deleted; private
+        // .hive-agent/<Name> state is removed on roster deletion.
         const std::string ws = hwrunner::host_workspace(spec_.name);
         if (!fs::is_directory(ws))
             throw std::runtime_error(
@@ -587,6 +588,8 @@ void Fleet::remove(const std::string& agent_id) {
     std::error_code ec;
     fs::remove(fs::path(hwrunner::worker_dir()) / "env"
                / (agent_id + ".env"), ec);
+    fs::remove(fs::path(hwrunner::worker_dir()) / "workspace"
+               / ".hivemind" / "prompts" / (agent_id + ".txt"), ec);
     fs::remove_all(fs::path(hwrunner::worker_dir())
                    / ("home-" + agent_id), ec);
 }

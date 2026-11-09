@@ -1017,9 +1017,9 @@ int main(int argc, char* argv[]) {
                     // Phase 72: roster delete of a HOST agent also cleans
                     // up the unix side — user, home, sudoers — via the
                     // root helper. No home archive is made.
-                    // provisioning installed. The agent's WORKSPACE is
-                    // never touched. Best-effort: a failure (old helper,
-                    // revoked grant) is logged loudly, never fatal.
+                    // Shared company files are preserved; the agent's
+                    // private state in that workspace is deleted. Failures
+                    // are logged loudly, never fatal to the worker.
                     if (frame.value("host_agent", false) &&
                         hwrunner::g_allow_host_agents) {
                         const std::string user =
@@ -1027,7 +1027,11 @@ int main(int argc, char* argv[]) {
                         std::string out;
                         const int rc = hwrunner::run_as_user(
                             "root", {"/usr/local/sbin/hivex-deprovision",
-                                     user}, "", &out);
+                                     user,
+                                     hwrunner::host_workspace(
+                                         frame.value("name", "")),
+                                     frame.value("name", ""), aid},
+                            "", &out);
                         if (rc == 0)
                             std::cerr << "HOST AGENT deprovisioned on "
                                       << "roster delete: " << user << " — "
