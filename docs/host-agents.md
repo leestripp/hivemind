@@ -21,6 +21,11 @@ Same shape, same cleanup boundaries: per-agent state dies with the
 agent; the shared company drive is permanent. If you understand what a
 container agent gets, you already understand what a host agent gets.
 
+The shared drive includes `second-brain/`, the Markdown knowledge base used by
+every agent's `brain` tool. Provisioning grants all `hivex` users write access
+through the shared group and default ACLs. A shared `--host-workspace-root` is
+required for cross-agent brain sharing. See [second-brain.md](second-brain.md).
+
 ## ⚠ READ THIS BEFORE ENABLING
 
 A host agent can do **anything root can do**. Through error,

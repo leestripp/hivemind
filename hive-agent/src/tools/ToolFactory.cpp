@@ -5,6 +5,7 @@
 #include "tools/BashTool.h"
 #include "tools/SkillTool.h"
 #include "tools/MemoryTool.h"
+#include "tools/BrainTool.h"
 #include "tools/ReadImageTool.h"
 #include "tools/WebFetchTool.h"
 #include "tools/WebSearchTool.h"
@@ -98,6 +99,9 @@ void ToolFactory::initialize_tools() {
     register_tool(std::make_shared<ForgetTool>());
     register_tool(std::make_shared<MemoriesTool>());
     register_tool(std::make_shared<MemoryStatsTool>());
+
+    // Shared long-term Markdown knowledge for every agent on this worker.
+    register_tool(std::make_shared<BrainTool>());
 
     // §READ-IMAGE-CORE (2026-08-10): local image -> base64 data URI so
     // vision-capable models (Kimi K3, moonshot-v1-*-vision) can see it.

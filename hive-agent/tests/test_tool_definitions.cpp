@@ -80,6 +80,7 @@ TEST_SUITE("ToolDefinitions") {
         // §PDF-CORE (2026-08-31): read_pdf is a built-in again
         // (poppler-cpp is a REQUIRED dependency of the library build).
         CHECK(std::find(tool_names.begin(), tool_names.end(), "read_pdf") != tool_names.end());
+        CHECK(std::find(tool_names.begin(), tool_names.end(), "brain") != tool_names.end());
 
         // Non-core tools are NOT in the default set.
         CHECK(std::find(tool_names.begin(), tool_names.end(), "read_file") == tool_names.end());

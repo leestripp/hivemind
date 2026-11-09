@@ -42,6 +42,7 @@ TEST_SUITE("Host prompt passes through verbatim") {
         // State machine and reserved-dirs appear.
         CHECK(prompt.find("# State Machine")              != std::string::npos);
         CHECK(prompt.find("# Reserved Agent Directories") != std::string::npos);
+        CHECK(prompt.find("# Shared Second Brain") != std::string::npos);
         // §ContextCache: NO per-iteration Context Status block — the
         // composed prompt must stay byte-static across the session so
         // provider prompt caches (MiniMax / Kimi) can match the prefix.

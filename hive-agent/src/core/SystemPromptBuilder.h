@@ -130,6 +130,9 @@ public:
     /// no host option to disable it.
     static std::string getExternalContentSecuritySection();
 
+    /// Worker-shared Markdown knowledge; distinct from private session memory.
+    static std::string getSecondBrainSection();
+
     // ---- utility ----
 
     static size_t estimateTokens(const std::string& text);

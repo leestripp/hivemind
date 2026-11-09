@@ -60,6 +60,10 @@ client. This document describes the current architecture.
 - Full hive-brain feature set: skills with scripts, MCP servers spawned as
   local child processes, persistent memory + conversation history on the
   home volume.
+- Built-in `brain` tool for one worker-shared Markdown second brain at
+  `/workspace/second-brain`, with PARA folders, wiki-links, and FTS5 search;
+  see [second-brain.md](second-brain.md). Private `remember` memory remains
+  per-agent.
 - Provider/model configuration arrives in each task's `llm` block. The
   hub resolves it from `llm.db`; the worker relays it without persisting
   it, and hive-agent applies it before the turn. Environment-based model

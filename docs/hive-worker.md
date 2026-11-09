@@ -74,7 +74,9 @@ systemctl --user is-active hive-worker
 
 The standard on-disk workspace is therefore always
 `/home/hivemind/.local/share/hive-worker/workspace`. Container agents
-still see it as `/workspace` inside their containers.
+still see it as `/workspace` inside their containers. Its `second-brain/`
+directory is the worker-wide Markdown knowledge store exposed through the
+agent `brain` tool; see [second-brain.md](second-brain.md).
 
 For optional **host agents**, use a unit drop-in rather than editing the
 standard `ExecStart`:

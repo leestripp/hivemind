@@ -235,6 +235,14 @@ if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
     /usr/bin/chmod -R g+rwX "$wsroot"
     /usr/bin/find "$wsroot" -type d -exec /usr/bin/chmod g+s {} +
     /usr/bin/setfacl -R -d -m "g::rwX" "$wsroot"
+    # Worker-wide second brain: distinct unix accounts share Markdown and
+    # the FTS index through hivex group/default ACLs.
+    for d in second-brain second-brain/inbox second-brain/projects \
+        second-brain/areas second-brain/resources second-brain/archives; do
+        /usr/bin/install -d -m 2775 -o root -g hivex "$wsroot/$d"
+    done
+    /usr/bin/setfacl -R -m "u:$user:rwX" "$wsroot/second-brain"
+    /usr/bin/setfacl -R -d -m "u:$user:rwx" "$wsroot/second-brain"
     # Agent state dir root: owned by whichever agent first created it,
     # so later agents could not mkdir their own (2026-10-13 spawn
     # crash). Root-own it and ACL-grant each provisioned agent rwx.
