@@ -6,6 +6,7 @@
 #include "hivemind/ChatService.h"
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
+#include "hivemind/LlmStore.h"
 #include "hivemind/WorkerChannel.h"
 #include "hivemind/WorkerStore.h"
 #include "hivemind/RoutineStore.h"
@@ -54,6 +55,18 @@ int main() {
     ThreadStore threads{tmp / "threads.db"};
     RoutineStore routines{tmp / "routines.db"};
     WorkerStore wstore{tmp / "workers.db"};
+    LlmStore llm{tmp / "llm.db"};
+    ProviderInfo provider;
+    provider.name = "test-provider";
+    provider.host = "http://127.0.0.1";
+    llm.upsert_provider(provider);
+    LlmModelInfo model;
+    model.name = "test-model";
+    model.provider = provider.name;
+    llm.upsert_model(model);
+    model.name = "changed-model";
+    llm.upsert_model(model);
+    llm.set_default_model("test-model");
     WorkerChannel wchannel{wstore, 0, "127.0.0.1"};   // never start()ed
     hivemind::SecretStore secrets{tmp / "secrets.db",
                                   tmp / "secrets.key"};
@@ -65,7 +78,8 @@ int main() {
     OmniNet::HTTP::Server::Config cfg;
     cfg.port = 0;                       // ephemeral
     OmniNet::HTTP::Server server{cfg};
-    register_roster_routes(server, agents, threads, hub, chat, routines, wstore);
+    register_roster_routes(server, agents, threads, hub, chat, routines, wstore,
+                           nullptr, &llm);
     server.startAsync();
     // wait for bind (port() is the CONFIGURED port; boundPort() is actual)
     for (int i = 0; i < 50 && server.boundPort() == 0; ++i)
@@ -85,6 +99,14 @@ int main() {
                 {{"name", "Zed"}, {"role", "coder"}, {"worker", "local"}});
     assert(r.statusCode() == 400);
 
+    // An explicit model must resolve in the hub registry. Empty still
+    // means "inherit the server default" and is the normal create path.
+    r = request("POST", port, "/api/agents",
+                {{"name", "UnknownModel"}, {"role", "coder"},
+                 {"worker", "testrig"}, {"model", "not-registered"}});
+    assert(r.statusCode() == 400);
+    assert(jget(port, "/api/agents")["agents"].empty());
+
     r = request("POST", port, "/api/agents",
                 {{"name", "Alpha"}, {"role", "coder"}, {"worker", "testrig"},
                  {"avatar", "engineering-female"}});
@@ -92,6 +114,15 @@ int main() {
     const std::string a1 = json::parse(r.bodyAsString())["id"];
     assert(json::parse(r.bodyAsString())["avatar"] == "engineering-female");
     assert(jget(port, "/api/agents/" + a1)["avatar"] == "engineering-female");
+    r = request("PATCH", port, "/api/agents/" + a1,
+                {{"model", "still-not-registered"}});
+    assert(r.statusCode() == 400);
+    assert(jget(port, "/api/agents/" + a1)["model"] == "");
+    r = request("PATCH", port, "/api/agents/" + a1,
+                {{"model", "test-model"}});
+    assert(r.statusCode() == 200);
+    r = request("PATCH", port, "/api/agents/" + a1, {{"model", ""}});
+    assert(r.statusCode() == 200);
     r = request("PATCH", port, "/api/agents/" + a1, {{"role", "builder"}});
     assert(r.statusCode() == 200);
     assert(jget(port, "/api/agents/" + a1)["avatar"] == "engineering-female");

@@ -136,7 +136,9 @@ automatically.
 
 LLM providers, models, and provider credentials are **hub-owned** in
 `~/.local/share/hivemind/llm.db`. Manage them through `/api/providers`
-and `/api/models`; blank agent model means the hub default. At dispatch,
+and `/api/models`; blank agent model means the hub default. Explicit model names on agent
+create/patch must resolve in that registry; unknown names are rejected
+with HTTP 400 rather than spawning an agent that cannot dispatch. At dispatch,
 the hub resolves the effective provider/model and injects an `llm` block
 into the task frame. The worker relays that configuration to hive-agent,
 which applies it before the turn with `explicit_model_wins`. Protect the

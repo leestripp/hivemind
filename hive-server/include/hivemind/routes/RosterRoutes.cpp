@@ -11,6 +11,7 @@
 #include "hivemind/ChatService.h"
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
+#include "hivemind/LlmStore.h"
 
 #include <iostream>
 #include "hivemind/RoutineStore.h"
@@ -171,7 +172,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                             ChatService& chat,
                             RoutineStore& routines,
                             WorkerStore& workers,
-                            TriggerStore* triggers) {
+                            TriggerStore* triggers,
+                            LlmStore* llm) {
 
     // v2: an agent MUST be placed on an ENROLLED hive-worker. There is no
     // hub-local execution anymore -- "local" (or any never-enrolled name)
@@ -263,7 +265,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
 
     // ── POST /api/agents ──────────────────────────────────────────────────
     server.post("/api/agents",
-        [&agents, &hub, &workers](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+        [&agents, &hub, &workers, llm](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
             json body;
             try { body = json::parse(req.bodyAsString()); }
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
@@ -271,6 +273,14 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             std::string name = body.value("name", "");
             std::string role = body.value("role", "");
             std::string model = body.value("model", "");
+            // Empty means "resolve the hub default at dispatch time". An
+            // explicit unknown model must not spawn a ready-looking agent
+            // whose every turn is deferred for missing LLM configuration.
+            if (!model.empty() && llm && !llm->resolve(model)) {
+                send_error(resp, 400, "unknown model '" + model +
+                    "'; register it first or omit model to use the server default");
+                return;
+            }
             std::string ws = body.value("workspace_mode", "shared");
             if (ws == "host") ws = "shared";   // host mode removed (2026-08-25)
             // an unknown name is accepted here — same contract as the PATCH.
@@ -370,7 +380,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.patch("/api/agents/:id",
-        [&agents, &hub, &workers](const OmniNet::HTTP::Request& req,
+        [&agents, &hub, &workers, llm](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -382,6 +392,12 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             catch (...) { send_error(resp, 400, "invalid JSON"); return; }
 
             const std::string ptype = body.value("type", "");  // Phase 35
+            const std::string pmodel = body.value("model", existing->model);
+            if (!pmodel.empty() && llm && !llm->resolve(pmodel)) {
+                send_error(resp, 400, "unknown model '" + pmodel +
+                    "'; register it first or use an empty model for the server default");
+                return;
+            }
             // Phase 69: "" = keep, "default" = clear to worker default.
             const std::string pmemory = body.value("memory", "");
             if (!validate_memory(pmemory)) {
@@ -448,7 +464,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 auto a = agents.update_agent(seg[2],
                     body.value("name", existing->name),
                     body.value("role", existing->role),
-                    body.value("model", existing->model),
+                    pmodel,
                     body.value("workspace_mode", existing->workspace_mode),
                     body.value("avatar", existing->avatar),
                     body.value("worker", ""),   // "" = keep current

@@ -27,6 +27,7 @@ class HubRouter;
 class ChatService;
 class WorkerStore;
 class TriggerStore;
+class LlmStore;
 
 void register_roster_routes(OmniNet::HTTP::Server& server,
                             AgentStore& agents,
@@ -35,4 +36,5 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                             ChatService& chat,
                             RoutineStore& routines,
                             WorkerStore& workers,
-                            TriggerStore* triggers = nullptr);
+                            TriggerStore* triggers = nullptr,
+                            LlmStore* llm = nullptr);

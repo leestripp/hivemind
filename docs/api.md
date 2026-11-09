@@ -102,7 +102,9 @@ the hub home and backups, and use authenticated TLS worker channels when
 workers are off-host. At dispatch the resolved provider configuration is
 injected into each task's `llm` object and relayed by the worker to
 hive-agent. `GET /api/models` reads this hub registry and supplies model
-choices to clients. Blank agent model selects the hub default.
+choices to clients. Blank agent model selects the hub default. Explicit model names on
+agent create/patch must resolve in this registry; unknown names are
+rejected with HTTP 400 instead of spawning an agent that cannot dispatch.
 
 ### Hub model registry (Phase 43 — the authoritative path)
 
