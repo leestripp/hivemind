@@ -14,7 +14,7 @@ unix parts substituted for podman parts:
 | | Container agent | Host agent |
 |---|---|---|
 | **Per-agent state** | `home-<id>` dir → bind-mounted `/home/hive` | real unix home `/home/hivex-<name>` (sudo `-H`) |
-| **Shared workspace** | worker workspace → bind-mounted `/workspace` | the host's real `/workspace` mount — cwd for every host agent on the rig |
+| **Shared workspace** | worker workspace → bind-mounted `/workspace` | the real worker workspace (`--host-workspace-root`) — cwd for every host agent on the rig |
 | **On delete** | container + `home-<id>` removed; workspace untouched | unix user + home removed (home archived to `/var/backups/`); `/workspace` untouched |
 
 Same shape, same cleanup boundaries: per-agent state dies with the
@@ -57,9 +57,20 @@ per-command review:
 
 ## Setup (on the worker rig)
 
+Use the standard `hivemind` service account and configure the worker as
+documented in [hive-worker.md](hive-worker.md#standard-service-account):
+
+```ini
+# ~/.config/systemd/user/hive-worker.service.d/host-agents.conf
+[Service]
+Environment=HIVE_ALLOW_HOST_AGENTS=1
+Environment=HIVE_HOST_WORKSPACE_ROOT=/home/hivemind/.local/share/hive-worker/workspace
+```
+
 ```sh
 # ONCE per rig, as root — helpers + scoped sudoers grant:
-sudo hive-worker install-host-agent-support --worker-user <account>
+sudo /home/hivemind/hivemind/build/hive-worker/hive-worker \
+  install-host-agent-support --worker-user hivemind
 ```
 
 After that, **creating a host agent in a client is the whole flow**:
@@ -99,9 +110,11 @@ audit line says so; run `deprovision-host-agent` on the rig to finish.
 **The workspace is SHARED and NEVER cleaned up.** With the worker's
 `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) every host
 agent on the rig runs with cwd = `DIR` itself — the same shared company
-drive the containers see bind-mounted at `/workspace` (on ubuntu-pc that
-IS the host's `/workspace` RAID mount). Provision's `--workspace-root
-DIR` just verifies the mount exists; nothing per-agent is created, and
+drive the containers see bind-mounted at `/workspace`. With the
+standard service account, use
+`/home/hivemind/.local/share/hive-worker/workspace`; a large filesystem
+may be mounted there. Provision's `--workspace-root
+DIR` just verifies the directory exists; nothing per-agent is created, and
 neither roster delete nor deprovision ever touches the workspace.
 Without the flag the agent's cwd is its home dir (which IS
 archived+removed on delete).

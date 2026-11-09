@@ -1,6 +1,10 @@
 # hive-worker systemd USER unit — template.
-# Install per worker host:
-#   1. cp hive-worker.service ~/.config/systemd/user/hive-worker.service
+# Install per worker host under the dedicated "hivemind" account:
+#   0. sudo useradd -m -s /bin/bash hivemind
+#      sudo passwd -l hivemind
+#      sudo loginctl enable-linger hivemind
+#   1. As hivemind, build ~/hivemind, then:
+#      cp hive-worker.service ~/.config/systemd/user/hive-worker.service
 #   2. Edit @WORKER_NAME@ (hub-unique, e.g. gpu-rig) and @WORKER_KEY@
 #      (mint on the hub host: build/hive-server/hive-server enroll-worker
 #       <name>  — prints an hmwk_… key)

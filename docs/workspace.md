@@ -25,12 +25,13 @@ Consequences:
 - The hub keeps **no copy** of workspace content (dumb hub; the
   `/api/files` listing is relayed from the worker live).
 
-On first startup the worker seeds the workspace layout below plus the
-default `index.md` (`hwrunner::seed_workspace`, hive-worker/src/runner.cpp).
-Seeding is idempotent and **never overwrites** an existing `index.md` —
-agents maintain the live map thereafter. The in-repo skeleton
-(`hive-server/data/workspace/index.md`) is the canonical text and seeds
-the hub's own workspace root via `ServerConfig::seed_workspace`.
+On startup the worker ensures only `.agents/skills/` exists
+(`hwrunner::seed_workspace`, hive-worker/src/runner.cpp). It does **not**
+seed company-drive folders or an `index.md`, so restarting a fresh or
+deliberately reset worker never recreates the historical layout. Agents
+create the conventions below on demand and maintain their own map if
+they need one. The separate hub-side workspace skeleton is managed by
+`ServerConfig::seed_workspace`.
 
 ## Layout
 
@@ -80,12 +81,13 @@ conventions — create it when the department is created, keep it current.
 
 ## Host agents (Phase 72)
 
-Bare-metal host agents share this workspace directly: with the worker's
-`--host-workspace-root` pointed at the host's `/workspace` RAID mount
-(ubuntu-pc), every host agent runs with cwd = `/workspace` — the same
-company drive, no per-agent split. It is permanent: roster delete and
-deprovision never touch it. Without the flag a host agent runs in its
-home dir instead. See [host-agents.md](host-agents.md).
+Bare-metal host agents share this workspace directly. Set the worker's
+`--host-workspace-root` (or `HIVE_HOST_WORKSPACE_ROOT`) to the standard
+worker workspace, `/home/hivemind/.local/share/hive-worker/workspace`;
+every host agent runs there while containers see the same directory as
+`/workspace`. A larger disk or RAID can be mounted at that standard
+path. The workspace is permanent: roster delete and deprovision never
+touch it. See [host-agents.md](host-agents.md).
 
 ## Related
 

@@ -301,9 +301,8 @@ int main(int argc, char* argv[]) {
         c["host_agents"] = hwrunner::g_allow_host_agents;
         caps = c.dump();
     }
-    // First-run workspace seeding: create the company-drive layout and
-    // the default index.md map BEFORE any agent container mounts it.
-    // Idempotent + never overwrites (agents maintain the live map).
+    // Ensure the shared skill-library location exists before any agent
+    // mounts the workspace. Deliberately do not seed company-drive folders.
     hwrunner::seed_workspace(hwrunner::worker_dir() + "/workspace");
 
     const std::string url = server + "/api/workers/channel";

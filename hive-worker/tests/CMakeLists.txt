@@ -17,7 +17,7 @@ endmacro()
 hive_worker_test(test_fleet)
 set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
 
-# First-run workspace seeding (layout + default index.md, never overwrite).
+# Fresh workspace seeding creates only .agents/skills and never clobbers content.
 hive_worker_test(test_workspace_seed)
 
 # Per-agent service-port registry + advertised host address (2026-10-09).

@@ -21,11 +21,12 @@ Two operational flags round the story out:
 
 - `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) — the
   SHARED workspace every host agent on the rig runs in (cwd = `DIR`
-  itself), exactly like the containers' bind-mounted `/workspace`. On
-  ubuntu-pc that's the host's `/workspace` RAID mount. It is the
-  agents' permanent company drive: **neither roster delete nor
-  deprovision ever touches it.** Without the flag the agent runs in its
-  home dir instead.
+  itself), exactly like the containers' bind-mounted `/workspace`. For
+  the standard `hivemind` service account, use
+  `/home/hivemind/.local/share/hive-worker/workspace` so host agents and
+  containers use the same physical directory. It is the agents'
+  permanent company drive: **neither roster delete nor deprovision ever
+  touches it.** Without the flag the agent runs in its home dir instead.
 - **Roster delete auto-cleans the unix side.** Deleting a host agent via
   the API makes the worker run the root helper
   (`/usr/local/sbin/hivex-deprovision`, installed by provisioning, with
@@ -37,17 +38,90 @@ Two operational flags round the story out:
 
 ## Running as a service (systemd user unit)
 
-A ready template lives at `hive-server/deploy/hive-worker.service` —
-copy it to `~/.config/systemd/user/hive-worker.service`, fill in
-`@WORKER_NAME@` / `@WORKER_KEY@` (mint keys on the hub with
-`hive-server enroll-worker <name>`), then `systemctl --user
-daemon-reload && systemctl --user enable --now hive-worker` and
-`sudo loginctl enable-linger $USER`.
+### Standard service account
+
+Fresh installs use a dedicated, unprivileged **`hivemind`** account on
+every worker. Do not run the worker from the operator's desktop account;
+that makes paths, permissions, and login-session lifetime machine-
+specific.
+
+```sh
+# As root/sudo on a new worker:
+sudo useradd --create-home --shell /bin/bash hivemind
+sudo passwd -l hivemind
+sudo loginctl enable-linger hivemind
+
+# As hivemind (for example, sudo -iu hivemind):
+git clone <repository-url> ~/hivemind
+cmake -S ~/hivemind -B ~/hivemind/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ~/hivemind/build --target hive-worker hive-agent -j"$(nproc)"
+install -d ~/.config/systemd/user
+cp ~/hivemind/hive-server/deploy/hive-worker.service \
+   ~/.config/systemd/user/hive-worker.service
+```
+
+Fill in `@WORKER_NAME@` / `@WORKER_KEY@` in the unit. Mint the key on
+the hub with `hive-server enroll-worker <name>`, then, still as
+`hivemind`, run:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now hive-worker
+systemctl --user is-enabled hive-worker
+systemctl --user is-active hive-worker
+```
+
+The standard on-disk workspace is therefore always
+`/home/hivemind/.local/share/hive-worker/workspace`. Container agents
+still see it as `/workspace` inside their containers.
+
+For optional **host agents**, use a unit drop-in rather than editing the
+standard `ExecStart`:
+
+```ini
+# ~/.config/systemd/user/hive-worker.service.d/host-agents.conf
+[Service]
+Environment=HIVE_ALLOW_HOST_AGENTS=1
+Environment=HIVE_HOST_WORKSPACE_ROOT=/home/hivemind/.local/share/hive-worker/workspace
+```
+
+Then install the explicitly opt-in root helpers once:
+
+```sh
+sudo /home/hivemind/hivemind/build/hive-worker/hive-worker \
+  install-host-agent-support --worker-user hivemind
+```
+
+### Optional: put the workspace on a larger filesystem
+
+A large disk or RAID may be mounted directly at the standard workspace
+path; no custom worker directory or symlink layout is needed. Stop the
+worker before moving an existing mount, preserve the filesystem's
+contents, and leave the mounted root writable by `hivemind`. For
+example, an `/etc/fstab` entry uses the filesystem UUID:
+
+```fstab
+UUID=<filesystem-uuid> /home/hivemind/.local/share/hive-worker/workspace btrfs nosuid,nodev,nofail 0 0
+```
+
+When the workspace is a separate mount, add this guard so the worker
+cannot silently start on the underlying system-disk directory if the
+filesystem is unavailable:
+
+```ini
+# ~/.config/systemd/user/hive-worker.service.d/workspace-mount.conf
+[Unit]
+ConditionPathIsMountPoint=/home/hivemind/.local/share/hive-worker/workspace
+```
+
+Reload both systemd managers after changing `/etc/fstab` or the unit,
+mount the filesystem, verify `findmnt -T` reports the intended source,
+and only then start the worker.
 
 Skipping the `enable` is the classic way to make every agent on the rig
-vanish after a reboot (droplet, 2026-09-29): the hub is enabled but the
-WORKER is not, containers stay stopped, and the roster shows everyone
-offline. Post-boot health check:
+vanish after a reboot: the hub is enabled but the WORKER is not,
+containers stay stopped, and the roster shows everyone offline.
+Post-boot health check:
 `systemctl --user is-enabled hive-worker && systemctl --user is-active hive-worker`.
 
 The template sets `KillMode=mixed` on purpose: rootless podman's port
