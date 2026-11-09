@@ -13,7 +13,9 @@ export const API = {
     return k || '';
   },
   async req(method, path, body) {
-    const opt = { method, headers: {} };
+    // Dynamic API data must never come from a browser cache: explicit
+    // Refresh actions must re-read the worker's current state.
+    const opt = { method, headers: {}, cache: 'no-store' };
     if (path.startsWith('/api/') && path !== '/api/health')
       opt.headers['Authorization'] = 'Bearer ' + this.getKey();
     if (body !== undefined) {

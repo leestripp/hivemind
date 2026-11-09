@@ -60,3 +60,11 @@ hivemind_test(test_share_store)
 
 # Curated starter catalog only: no arbitrary installs or per-agent switches.
 hivemind_test(test_skill_routes)
+
+# Web API cache discipline (runs when Node.js is available on the build rig).
+find_program(HIVEMIND_NODE_EXECUTABLE node)
+if(HIVEMIND_NODE_EXECUTABLE)
+    add_test(NAME test_web_api_no_store
+        COMMAND ${HIVEMIND_NODE_EXECUTABLE} --test
+                ${CMAKE_SOURCE_DIR}/web/tests/api_no_store.test.mjs)
+endif()

@@ -186,6 +186,9 @@ void register_file_routes(OmniNet::HTTP::Server& server,
             });
             send_json(resp, json{{"path", rel}, {"entries", entries},
                                  {"worker", *worker}});
+            // A manual UI refresh reuses this URL. Do not let a browser or
+            // intermediary replay a directory listing from before a change.
+            resp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         });
 
     server.get("/api/files/download",

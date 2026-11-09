@@ -128,7 +128,12 @@ export function enterFiles() { loadWorkers().then(ok => {
 }); }
 
 export function initFiles() {
-  $('files-refresh').addEventListener('click', () => load());
+  $('files-refresh').addEventListener('click', () => {
+    load().catch(e => {
+      $('files-tbody').innerHTML =
+        `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`;
+    });
+  });
   $('files-worker').addEventListener('change', (e) => {
     worker = e.target.value;
     cwd = '';          // different rig, different tree - back to root
