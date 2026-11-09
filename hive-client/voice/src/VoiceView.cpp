@@ -943,7 +943,7 @@ void VoiceView::handleTick(bool threadBusy, bool agentBusy,
 
 void VoiceView::speakFinalTail() {
     if (finalText_.empty()) return;
-    std::size_t credit = speech::commonPrefixLen(finalText_, narratedLive_);
+    std::size_t credit = speech::finalNarrationCredit(finalText_, narratedLive_);
     if (credit < finalCredit_) credit = finalCredit_;  // append-only: never regress
     if (credit < finalText_.size()) {
         const std::string tail = trimStr(finalText_.substr(credit));

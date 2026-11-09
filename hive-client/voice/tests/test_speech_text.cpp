@@ -75,3 +75,31 @@ TEST_CASE("toSpeechChunks: never cuts a UTF-8 sequence", "[speech]") {
 TEST_CASE("toSpeechChunks: zero budget produces no work", "[speech]") {
     REQUIRE(toSpeechChunks("Readable text.", 0).empty());
 }
+
+TEST_CASE("final narration credit preserves the ordinary prefix path") {
+    const std::string final = "Final answer. Unheard tail.";
+    const std::string live = "Final answer.";
+    REQUIRE(finalNarrationCredit(final, live) == live.size());
+}
+
+TEST_CASE("final narration credit covers a report after progress text") {
+    const std::string final =
+        "All threads are closed. Posting the full summary. # Daily report";
+    const std::string live =
+        "Pulling the routine ids. Banking the fix first. " + final;
+    REQUIRE(finalNarrationCredit(final, live) == final.size());
+}
+
+TEST_CASE("final narration credit keeps only an unheard suffix") {
+    const std::string final = "Final answer. Unheard tail.";
+    const std::string live = "Working through the request. Final answer.";
+    REQUIRE(finalNarrationCredit(final, live) ==
+            std::string("Final answer.").size());
+}
+
+TEST_CASE("final narration credit handles repeated prefixes and no match") {
+    REQUIRE(finalNarrationCredit("ababa!", "progress abab") == 4);
+    REQUIRE(finalNarrationCredit("Final answer", "unrelated progress") == 0);
+    REQUIRE(finalNarrationCredit("", "anything") == 0);
+    REQUIRE(finalNarrationCredit("Final answer", "") == 0);
+}

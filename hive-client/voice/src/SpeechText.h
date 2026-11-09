@@ -45,4 +45,9 @@ std::vector<std::string> toSpeechChunks(std::string_view raw,
 // already-spoken streamed text).
 std::size_t commonPrefixLen(std::string_view a, std::string_view b);
 
+// Bytes at the start of final_text already queued from the live feed.
+// The stored final message may follow progress commentary in that feed.
+std::size_t finalNarrationCredit(std::string_view final_text,
+                                 std::string_view narrated_live);
+
 }  // namespace speech

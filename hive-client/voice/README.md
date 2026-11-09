@@ -43,6 +43,13 @@ restores Agents/Threads without losing the DM. Hub connection settings come
 from the main client. Voice inherits the main GNOME dark/light/high-contrast
 appearance. The page shows the scoped shortcut and live ChimpFlow health.
 
+Automatic voice narration is scoped STRICTLY to the selected agent's DM
+(`thread_id_`). VoiceView never polls or narrates the User Inbox: those
+completion summaries duplicate what the DM already spoke and remain unread
+for manual review. Inbox speech is available only through each message's
+explicit Play button. Optional agent-state announcements contain no message
+bodies and are disabled by default.
+
 Readable agent chat bubbles also have a Play button. It uses an independent
 narration engine owned by `HiveWindow`, reads the exact stored message with
 the sender's configured voice, and interrupts previous bubble narration when
@@ -76,7 +83,8 @@ owns this global shortcut.
 `test_voice_turn_logic`, `test_api_client_activity`, `test_tts_tag_ledger`,
 `test_prefs`, `test_avatars`, `test_wav_codec`, and `test_audio_common`
 (run via ctest from the top-level build). `test_speech_text` also covers
-full-message chunking and UTF-8-safe splitting for bubble narration.
+full-message chunking, UTF-8-safe splitting for bubble narration, and
+live/final narration credit after progress commentary.
 
 
 ## Turn activity scopes
@@ -97,6 +105,18 @@ one. It must never poll Thinking: that phase includes STT transcription and
 the HTTP post, so an early ready transition there would discard the user's
 voice message. `test_voice_turn_logic` covers that send regression. Normal
 `toIdle("")` also clears stale status text instead of preserving "Replying…".
+
+### Live/final narration de-duplication
+
+The live activity partial can contain progress commentary that is not part
+of the stored final message. Therefore final-message credit is NOT a common
+prefix of the two complete strings: the stored final may begin later in the
+live text. `speech::finalNarrationCredit` finds the final message's already
+narrated prefix at the end of the live feed (including a fully narrated
+final after progress text). Only the unheard suffix is queued. This avoids
+re-reading long reports at turn completion while preserving a genuinely
+unheard final tail. Regression coverage includes ordinary prefix alignment,
+progress-before-final, partial final text, repeated prefixes, and no match.
 
 TTS completion is tracked by exact utterance tag, so late playback callbacks
 from a stopped turn cannot consume a newer turn's outstanding count. Once

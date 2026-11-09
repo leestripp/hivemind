@@ -281,4 +281,30 @@ std::size_t commonPrefixLen(std::string_view a, std::string_view b) {
     return i;
 }
 
+std::size_t finalNarrationCredit(const std::string_view final_text,
+                                 const std::string_view narrated_live) {
+    if (final_text.empty()) return 0;
+
+    // KMP tracks the longest FINAL prefix ending at the current LIVE byte.
+    // Unlike a common-prefix comparison, this covers live progress text
+    // before the stored final message. Reaching final_text.size() means the
+    // whole final message was already queued, even if more live text follows.
+    std::vector<std::size_t> fallback(final_text.size(), 0);
+    for (std::size_t i = 1, matched = 0; i < final_text.size(); ++i) {
+        while (matched > 0 && final_text[i] != final_text[matched])
+            matched = fallback[matched - 1];
+        if (final_text[i] == final_text[matched]) ++matched;
+        fallback[i] = matched;
+    }
+
+    std::size_t matched = 0;
+    for (const char ch : narrated_live) {
+        while (matched > 0 && ch != final_text[matched])
+            matched = fallback[matched - 1];
+        if (ch == final_text[matched]) ++matched;
+        if (matched == final_text.size()) return matched;
+    }
+    return matched;
+}
+
 }  // namespace speech
