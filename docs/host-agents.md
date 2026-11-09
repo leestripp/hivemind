@@ -103,9 +103,15 @@ sudo hive-worker deprovision-host-agent rooty
 /api/agents/:id` stops the process, drops the roster row, and the worker
 auto-deprovisions: processes killed, home archived to
 `/var/backups/hivex-<name>-<timestamp>.tar.gz`, unix user and sudoers
-entry removed. The hub logs a `HOST AGENT deleted …` audit line. If the
-worker was offline at delete time the cleanup can't be delivered — the
-audit line says so; run `deprovision-host-agent` on the rig to finish.
+entry removed. The hub logs a `HOST AGENT deleted …` audit line. A
+bare-metal delete is rejected with **409** while its worker is offline,
+before any roster/thread/routine changes; bring the worker online and
+retry. This prevents the roster from forgetting an account that still
+exists on the machine. Persistent `Restart=always` processes are killed
+again while `userdel -r` is retried. Archive or account-removal failure
+returns an error in the worker journal and never falls back to a plain
+`userdel` that would strand the home. Manual `deprovision-host-agent`
+uses the same helper for repair.
 
 **The workspace is SHARED and NEVER cleaned up.** With the worker's
 `--host-workspace-root DIR` (env `HIVE_HOST_WORKSPACE_ROOT`) every host

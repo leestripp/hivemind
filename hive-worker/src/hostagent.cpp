@@ -74,23 +74,64 @@ bool confirm() {
 /// invokes this via `sudo -n` on roster delete (auto-cleanup); the
 /// sudoers grant is limited to exactly this root-owned, validated script.
 constexpr const char* kHelper = R"SH(#!/bin/sh
-# HiveMind Phase 72: remove one host-agent unix user. Root-only via
-# /etc/sudoers.d/hivex-deprovision. NEVER touches the agent workspace
-# (<host-workspace-root>/hivex-<name>) — that drive is permanent.
+# HiveMind host-agent removal. Root-only via /etc/sudoers.d/hivex-deprovision.
+# Archive the private home, then remove the account and sudoers grant. The
+# shared agent workspace is NEVER touched. Any failure leaves the account in
+# place and returns non-zero so the worker logs that manual repair is needed.
 set -eu
 user="${1:-}"
 echo "$user" | grep -Eq '^hivex-[a-z0-9-]{1,26}$' \
     || { echo "bad user name: '$user'" >&2; exit 2; }
 id "$user" >/dev/null 2>&1 || { echo "no such user: $user" >&2; exit 1; }
-pkill -u "$user" 2>/dev/null || true
+
+# Stop user-manager services and existing processes. System services with
+# Restart=always can come back later, so the userdel loop below kills again.
+loginctl disable-linger "$user" >/dev/null 2>&1 || true
+loginctl terminate-user "$user" >/dev/null 2>&1 || true
+pkill -TERM -u "$user" 2>/dev/null || true
+n=0
+while pgrep -u "$user" >/dev/null 2>&1 && [ "$n" -lt 20 ]; do
+    sleep 0.1
+    n=$((n + 1))
+done
+pkill -KILL -u "$user" 2>/dev/null || true
+n=0
+while pgrep -u "$user" >/dev/null 2>&1 && [ "$n" -lt 20 ]; do
+    sleep 0.1
+    n=$((n + 1))
+done
+
 stamp=$(date -u +%Y%m%d-%H%M%S)
+archive="/var/backups/$user-$stamp.tar.gz"
 if [ -d "/home/$user" ]; then
-    tar -czf "/var/backups/$user-$stamp.tar.gz" -C /home "$user" \
-        || echo "warning: home archive failed" >&2
+    if ! tar -czf "$archive" -C /home "$user"; then
+        rm  "$archive"
+        echo "home archive failed; account left untouched" >&2
+        exit 1
+    fi
 fi
-userdel -r "$user" 2>/dev/null || userdel "$user"
+
+# The 2026-11-09 Forge deletion failed here: a persistent Blender service
+# restarted between pkill and userdel. Retry with a fresh SIGKILL each time;
+# RestartSec gives us ample windows, and we never fall back to plain userdel
+# (which would strand the home directory).
+removed=0
+n=0
+while [ "$n" -lt 30 ]; do
+    pkill -KILL -u "$user" 2>/dev/null || true
+    if userdel -r "$user"; then
+        removed=1
+        break
+    fi
+    sleep 0.2
+    n=$((n + 1))
+done
+[ "$removed" -eq 1 ] || {
+    echo "userdel -r failed; account preserved for manual repair" >&2
+    exit 1
+}
 rm  "/etc/sudoers.d/$user"
-echo "hivex-deprovision: removed $user (home archived to /var/backups/$user-$stamp.tar.gz; workspace untouched)"
+echo "hivex-deprovision: removed $user (home archived to $archive; workspace untouched)"
 )SH";
 
 /// Root helper installed by install_support: provisions ONE host-agent
@@ -444,30 +485,10 @@ int deprovision(const std::string& agent_name) {
     }
     if (!confirm()) return 1;
 
-    // Stop anything the agent is running, archive the home (never
-    // silently destroy the agent's work), remove user + sudoers.
-    run({"/usr/bin/pkill", "-u", user});   // best-effort
-    char stamp[32] = {0};
-    {
-        time_t t = time(nullptr);
-        strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", gmtime(&t));
-    }
-    const std::string arc = "/var/backups/" + user + "-" + stamp + ".tar.gz";
-    if (run({"/usr/bin/tar", "-czf", arc, "-C", "/home", user}) == 0)
-        std::cerr << "home archived to " << arc << "\n";
-    else
-        std::cerr << "warning: home archive failed (continuing)\n";
-    if (run({"/usr/sbin/userdel", "-r", user}) != 0) {
-        std::cerr << "userdel failed\n";
-        return 1;
-    }
-    run({"/usr/bin/rm", "-f",
-         "/etc/sudoers.d/hivex-" + user.substr(6)});
-    std::cerr << "Host agent '" << agent_name << "' deprovisioned "
-              << "(user " << user << " removed, sudoers entry deleted, "
-              << "home archived). /usr/local/bin/hive-agent left in place "
-              << "— it may serve other host agents.\n";
-    return 0;
+    // Use the exact same helper as roster deletion. Keeping a second,
+    // weaker implementation here previously let manual and automatic
+    // cleanup behave differently.
+    return run({"/usr/local/sbin/hivex-deprovision", user}) == 0 ? 0 : 1;
 }
 
 } // namespace hwhostagent

@@ -179,6 +179,9 @@ public:
     void push_spawn(const std::string& agent_id);
     /// Roster delete: worker destroys the container + local state too.
     void remove_agent(const RosterAgent& agent);
+    /// Bare-metal deletion requires a live worker: otherwise its Unix
+    /// account would silently outlive the roster record.
+    bool worker_online(const std::string& name) const;
 
     /// Build the agent_spawn op for a roster agent.
     nlohmann::json spawn_frame(const RosterAgent& agent) const;

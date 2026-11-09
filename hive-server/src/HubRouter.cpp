@@ -520,6 +520,10 @@ void HubRouter::stop_agent(const RosterAgent& agent) {
     states_[agent.id] = "down";
 }
 
+bool HubRouter::worker_online(const std::string& name) const {
+    return channel_.is_online(name);
+}
+
 void HubRouter::remove_agent(const RosterAgent& agent) {
     // Phase 72: host_agent + name let the worker auto-deprovision the
     // unix user on roster delete (workspace never touched).

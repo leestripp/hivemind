@@ -514,6 +514,11 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             const std::string id = seg[2];
             auto existing = agents.get_agent(id);
             if (!existing) { send_error(resp, 404, "agent not found"); return; }
+            if (existing->host_agent && !hub.worker_online(existing->worker)) {
+                send_error(resp, 409,
+                           "bare-metal worker is offline; agent and Unix account were not deleted. Bring the worker online and retry");
+                return;
+            }
 
             const std::string reassign_to = req.queryParameter("reassign_to", "");
             if (!reassign_to.empty() && reassign_to != id
@@ -575,10 +580,9 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     std::cerr << "[roster] container teardown for " << id
                               << " failed: " << e.what() << "\n";
                 }
-                // Phase 72: deleting a host agent stops the process but
-                // deliberately does NOT remove the unix user — deprovision
-                // is manual/local/root-only. Leave a loud audit line so a
-                // forgotten sudo user is never silent.
+                // Bare-metal deletion also archives and removes the Unix
+                // account on the connected worker. Offline deletion was
+                // rejected above, before any roster/thread data changed.
                 if (existing->host_agent) {
                     // Mirror of the worker's host_user() mapping (lowercase,
                     // non-alnum -> '-').

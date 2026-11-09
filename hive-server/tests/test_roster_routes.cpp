@@ -313,6 +313,13 @@ int main() {
     const std::string a4 = json::parse(r.bodyAsString())["id"];
     assert(jget(port, "/api/agents/" + a4)["host_agent"] == true);
 
+    // A bare-metal delete while its worker is offline must be atomic: no
+    // roster deletion and no thread/routine cascade, because the hub cannot
+    // remove the remote Unix account. This used to strand hivex-* users.
+    r = request("DELETE", port, "/api/agents/" + a4);
+    assert(r.statusCode() == 409);
+    assert(jget(port, "/api/agents/" + a4)["host_agent"] == true);
+
     r = request("PATCH", port, "/api/agents/" + a2,
                 {{"host_agent", true}, {"model", "changed-model"}});
     assert(r.statusCode() == 200);
