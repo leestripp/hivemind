@@ -15,7 +15,7 @@ unix parts substituted for podman parts:
 |---|---|---|
 | **Per-agent state** | `home-<id>` dir → bind-mounted `/home/hive` | real unix home `/home/hivex-<name>` (sudo `-H`) |
 | **Shared workspace** | worker workspace → bind-mounted `/workspace` | the real worker workspace (`--host-workspace-root`) — cwd for every host agent on the rig |
-| **On delete** | container + `home-<id>` removed; workspace untouched | unix user + home removed (home archived to `/var/backups/`); `/workspace` untouched |
+| **On delete** | container + `home-<id>` removed; workspace untouched | unix user + home permanently removed (NO archive); `/workspace` untouched |
 
 Same shape, same cleanup boundaries: per-agent state dies with the
 agent; the shared company drive is permanent. If you understand what a
@@ -95,21 +95,22 @@ Removing one:
 
 ```sh
 sudo hive-worker deprovision-host-agent rooty
-# stops its processes, archives the home to
-# /var/backups/hivex-rooty-<timestamp>.tar.gz, removes user + sudoers
+# stops its processes and permanently removes its home, user + sudoers
+# (NO archive)
 ```
 
 **Deleting the agent from the roster cleans everything up.** `DELETE
 /api/agents/:id` stops the process, drops the roster row, and the worker
-auto-deprovisions: processes killed, home archived to
-`/var/backups/hivex-<name>-<timestamp>.tar.gz`, unix user and sudoers
-entry removed. The hub logs a `HOST AGENT deleted …` audit line. A
+auto-deprovisions: processes killed, home permanently deleted with the
+unix user, and sudoers entry removed. **No archive is made.** Media and
+model homes can be enormous; delete means delete. The hub logs a
+`HOST AGENT deleted …` audit line. A
 bare-metal delete is rejected with **409** while its worker is offline,
 before any roster/thread/routine changes; bring the worker online and
 retry. This prevents the roster from forgetting an account that still
 exists on the machine. Persistent `Restart=always` processes are killed
-again while `userdel -r` is retried. Archive or account-removal failure
-returns an error in the worker journal and never falls back to a plain
+again while `userdel -r` is retried. Account-removal failure returns an
+error in the worker journal and never falls back to a plain
 `userdel` that would strand the home. Manual `deprovision-host-agent`
 uses the same helper for repair.
 
@@ -123,7 +124,7 @@ may be mounted there. Provision's `--workspace-root
 DIR` just verifies the directory exists; nothing per-agent is created, and
 neither roster delete nor deprovision ever touches the workspace.
 Without the flag the agent's cwd is its home dir (which IS
-archived+removed on delete).
+permanently deleted on delete).
 
 ## Runtime mechanics
 

@@ -580,8 +580,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     std::cerr << "[roster] container teardown for " << id
                               << " failed: " << e.what() << "\n";
                 }
-                // Bare-metal deletion also archives and removes the Unix
-                // account on the connected worker. Offline deletion was
+                // Bare-metal deletion also removes the Unix account and
+                // home on the connected worker, WITHOUT an archive. Offline deletion was
                 // rejected above, before any roster/thread data changed.
                 if (existing->host_agent) {
                     // Mirror of the worker's host_user() mapping (lowercase,
@@ -593,7 +593,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     std::cerr << "HOST AGENT deleted: '" << existing->name
                               << "' — worker '" << existing->worker
                               << "' asked to deprovision unix user hivex-"
-                              << uname << " (home archived; workspace never "
+                              << uname << " (home deleted; workspace never "
                               << "touched). If the worker was offline, run "
                               << "'sudo hive-worker deprovision-host-agent "
                               << existing->name << "' on that rig\n";

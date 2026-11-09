@@ -1015,8 +1015,8 @@ int main(int argc, char* argv[]) {
                                   << " failed: " << e.what() << "\n";
                     }
                     // Phase 72: roster delete of a HOST agent also cleans
-                    // up the unix side — user, home (archived to
-                    // /var/backups first), sudoers — via the root helper
+                    // up the unix side — user, home, sudoers — via the
+                    // root helper. No home archive is made.
                     // provisioning installed. The agent's WORKSPACE is
                     // never touched. Best-effort: a failure (old helper,
                     // revoked grant) is logged loudly, never fatal.

@@ -69,14 +69,15 @@ bool confirm() {
 }
 
 /// Root helper installed by provision: removes a host-agent unix user
-/// (processes, home — archived first — and its sudoers entry). The
+/// (processes, home, and its sudoers entry). The
 /// workspace under --host-workspace-root is NEVER touched. The worker
 /// invokes this via `sudo -n` on roster delete (auto-cleanup); the
 /// sudoers grant is limited to exactly this root-owned, validated script.
 constexpr const char* kHelper = R"SH(#!/bin/sh
 # HiveMind host-agent removal. Root-only via /etc/sudoers.d/hivex-deprovision.
-# Archive the private home, then remove the account and sudoers grant. The
-# shared agent workspace is NEVER touched. Any failure leaves the account in
+# Delete the private home with the account and remove its sudoers grant. No
+# archive is made: roster deletion is deliberate and media homes can be huge.
+# The shared agent workspace is NEVER touched. Any failure leaves the account in
 # place and returns non-zero so the worker logs that manual repair is needed.
 set -eu
 user="${1:-}"
@@ -101,16 +102,6 @@ while pgrep -u "$user" >/dev/null 2>&1 && [ "$n" -lt 20 ]; do
     n=$((n + 1))
 done
 
-stamp=$(date -u +%Y%m%d-%H%M%S)
-archive="/var/backups/$user-$stamp.tar.gz"
-if [ -d "/home/$user" ]; then
-    if ! tar -czf "$archive" -C /home "$user"; then
-        rm  "$archive"
-        echo "home archive failed; account left untouched" >&2
-        exit 1
-    fi
-fi
-
 # The 2026-11-09 Forge deletion failed here: a persistent Blender service
 # restarted between pkill and userdel. Retry with a fresh SIGKILL each time;
 # RestartSec gives us ample windows, and we never fall back to plain userdel
@@ -131,7 +122,7 @@ done
     exit 1
 }
 rm  "/etc/sudoers.d/$user"
-echo "hivex-deprovision: removed $user (home archived to $archive; workspace untouched)"
+echo "hivex-deprovision: removed $user (home deleted; workspace untouched)"
 )SH";
 
 /// Root helper installed by install_support: provisions ONE host-agent
