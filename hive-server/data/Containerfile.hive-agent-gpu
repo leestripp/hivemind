@@ -104,9 +104,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # Ubuntu packages land in standard paths (/usr/bin, /usr/lib/x86_64-linux-gnu)
 # — no PATH/LD_LIBRARY_PATH fiddling needed.
 
-USER hive
-WORKDIR /workspace
-
 # ── MCP socket server autostart ──────────────────────────────────────
 # blender-mcp-up.sh: idempotent launcher (enables the addon once per
 # volume, starts `blender --background --command blender_mcp`, waits for
@@ -115,4 +112,9 @@ WORKDIR /workspace
 COPY hive-server/data/blender-mcp-up.sh /usr/local/bin/blender-mcp-up.sh
 COPY hive-server/data/hive-agent-init.sh /usr/local/bin/hive-agent-init.sh
 RUN chmod +x /usr/local/bin/blender-mcp-up.sh /usr/local/bin/hive-agent-init.sh
+
+# COPY creates root-owned files, so finish permission changes before dropping
+# privileges; chmod as hive fails in rootless builds.
+USER hive
+WORKDIR /workspace
 CMD ["/usr/local/bin/hive-agent-init.sh"]
