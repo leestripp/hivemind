@@ -24,7 +24,15 @@ Container agents see the worker workspace as `/workspace`. Bare-metal agents
 use `--host-workspace-root`; the standard service configuration gives both
 runtimes the same physical workspace. Note filenames are safe, unique slugs.
 YAML frontmatter stores title, tags, and UTC timestamps; `[[note-id]]` links
-connect notes. Files remain readable and editable in any text editor.
+connect notes. Files remain readable and editable in any text editor. Both
+inline tag lists and YAML block sequences are accepted, including files that
+also contain third-party metadata such as Basic Memory's `permalink`.
+
+Run only one active writer/indexer against a shared brain directory. In
+particular, retire any legacy Basic Memory watcher when deploying the built-in
+brain: it rewrites frontmatter and file ownership while indexing, which can
+make notes unwritable by container agents. Its separate state can be retained
+for backup without running the service.
 
 `.index/brain.db` is only a **rebuildable SQLite FTS5 cache**, not a second
 source of truth. Operations reconcile file changes automatically;

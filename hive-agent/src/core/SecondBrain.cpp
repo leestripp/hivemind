@@ -650,7 +650,14 @@ std::optional<BrainNote> SecondBrain::parse_file(const fs::path& path,
         std::string line;
         std::getline(lines, line);
         bool closed = false;
-        while (std::getline(lines, line)) {
+        bool has_pending_line = false;
+        std::string pending_line;
+        while (has_pending_line || std::getline(lines, line)) {
+            if (has_pending_line) {
+                line = std::move(pending_line);
+                pending_line.clear();
+                has_pending_line = false;
+            }
             const auto cleaned = trim(line);
             if (cleaned == "---") { closed = true; break; }
             const auto colon = line.find(':');
@@ -658,7 +665,29 @@ std::optional<BrainNote> SecondBrain::parse_file(const fs::path& path,
             const auto key = to_lower(trim(std::string_view(line).substr(0, colon)));
             const auto value = trim(std::string_view(line).substr(colon + 1));
             if (key == "title") note.title = yaml_unquote(value);
-            else if (key == "tags") note.tags = parse_tag_list(value);
+            else if (key == "tags") {
+                note.tags = parse_tag_list(value);
+                // Also accept YAML block sequences. Basic Memory rewrites
+                // shared Markdown into this form while indexing it:
+                //   tags:
+                //   - first-tag
+                //   - second-tag
+                if (value.empty()) {
+                    while (std::getline(lines, line)) {
+                        const auto item = trim(line);
+                        if (item == "---") { closed = true; break; }
+                        if (!item.empty() && item.front() == '-') {
+                            auto tags = parse_tag_list(item.substr(1));
+                            note.tags.insert(note.tags.end(), tags.begin(), tags.end());
+                            continue;
+                        }
+                        pending_line = line;
+                        has_pending_line = true;
+                        break;
+                    }
+                    if (closed) break;
+                }
+            }
             else if (key == "created") note.created = yaml_unquote(value);
             else if (key == "updated") note.updated = yaml_unquote(value);
         }

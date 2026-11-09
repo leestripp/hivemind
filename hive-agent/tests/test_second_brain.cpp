@@ -86,6 +86,24 @@ TEST_CASE("SecondBrain shares Markdown and FTS across independent agents") {
     CHECK(!fs::exists(temp.root / "resources" / "hivemind-brain.md"));
     CHECK(alice.read(note.id)->folder == "projects");
 
+    // Basic Memory's watcher writes valid block-sequence YAML plus its own
+    // metadata. Reading it must preserve tags instead of silently dropping them.
+    const fs::path basic_memory = temp.root / "resources" / "basic-memory.md";
+    write(basic_memory,
+          "---\nid: ignored-filename-id\ntitle: \"Basic Memory Compatible\"\n"
+          "tags:\n- shared-brain\n- integration-test\n"
+          "created: 2026-11-09 04:45:10+00:00\n"
+          "updated: 2026-11-09 04:45:10+00:00\n"
+          "permalink: main/resources/basic-memory\n---\n\n"
+          "# Basic Memory Compatible\n\nWatcher-written metadata.\n");
+    const auto compatible = bob.read("basic-memory");
+    REQUIRE(compatible.has_value());
+    CHECK(compatible->title == "Basic Memory Compatible");
+    CHECK(compatible->tags ==
+          std::vector<std::string>{"shared-brain", "integration-test"});
+    CHECK(compatible->body.find("Watcher-written metadata.") != std::string::npos);
+    CHECK(alice.list("", "integration-test").size() == 1);
+
     // Same-size, same-second hand edits must still invalidate the index.
     const fs::path manual = temp.root / "inbox" / "manual.md";
     write(manual, "# Manual\n\nfirst-token\n");
