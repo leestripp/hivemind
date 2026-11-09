@@ -36,8 +36,9 @@ for backup without running the service.
 
 `.index/brain.db` is only a **rebuildable SQLite FTS5 cache**, not a second
 source of truth. Operations reconcile file changes automatically;
-`brain(action="reindex")` forces reconciliation after manual maintenance. A
-shared file lock serializes access across agent processes, and atomic renames
+`brain(action="reindex")` forces reconciliation after manual maintenance.
+Cache-format/parser version upgrades invalidate older cached metadata on first
+launch, even when the Markdown file size and mtime are unchanged. A shared file lock serializes access across agent processes, and atomic renames
 prevent partially written notes. The brain is shared workspace content, so
 deleting an agent does **not** delete its notes.
 

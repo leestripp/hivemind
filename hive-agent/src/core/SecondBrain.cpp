@@ -222,6 +222,21 @@ SecondBrain::SecondBrain(fs::path brain_root)
         "CREATE VIRTUAL TABLE IF NOT EXISTS brain_fts USING fts5("
         "id UNINDEXED, title, tags, body,"
         "tokenize='porter unicode61')");
+
+    // Version 2 adds block-sequence YAML tag parsing. Invalidate caches
+    // written by version 1: their file size/mtime still match, so an ordinary
+    // reconciliation would otherwise retain the incorrectly empty tags.
+    auto version_stmt = db_->prepare("PRAGMA user_version");
+    const int version = version_stmt.step()
+                            ? static_cast<int>(version_stmt.columnInt64(0))
+                            : 0;
+    if (version < 2) {
+        db_->transaction([&] {
+            db_->execute("DELETE FROM brain_fts");
+            db_->execute("DELETE FROM brain_notes");
+            db_->execute("PRAGMA user_version = 2");
+        });
+    }
 }
 
 SecondBrain::~SecondBrain() = default;

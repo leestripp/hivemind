@@ -1,6 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include <db/Database.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -121,6 +123,28 @@ TEST_CASE("SecondBrain shares Markdown and FTS across independent agents") {
     REQUIRE(bob.remove(note.id));
     CHECK(!alice.read(note.id).has_value());
     CHECK(alice.search("organizing").empty());
+}
+
+TEST_CASE("SecondBrain invalidates stale pre-block-tag caches") {
+    TempBrain temp;
+    {
+        SecondBrain initial(temp.root);
+        initial.capture("resources", "Versioned Cache", {"integration-test"},
+                        "The Markdown remains unchanged while its cache is stale.");
+    }
+    {
+        OmniNet::DB::Database db;
+        db.open((temp.root / ".index" / "brain.db").string());
+        db.execute("UPDATE brain_notes SET tags = ''");
+        db.execute("PRAGMA user_version = 0");
+        db.close();
+    }
+
+    SecondBrain upgraded(temp.root);
+    const auto rows = upgraded.list("", "integration-test");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows.front().id == "versioned-cache");
+    CHECK(rows.front().tags == "integration-test");
 }
 
 TEST_CASE("SecondBrain serializes competing captures") {
