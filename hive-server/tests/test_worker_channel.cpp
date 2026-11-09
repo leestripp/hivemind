@@ -15,14 +15,17 @@
 #include "hivemind/HostStats.h"
 #include "hivemind/WorkerStore.h"
 #include "websocket/WebSocket.h"
+#include "crypto/Crypto.h"
 
 #include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 using nlohmann::json;
@@ -79,6 +82,9 @@ int main() {
     std::atomic<bool> got_welcome{false};
     std::atomic<bool> got_heartbeat_ack{false};
     std::atomic<bool> got_telemetry{false};
+    std::mutex stream_m;
+    std::condition_variable stream_cv;
+    std::string stream_bytes;
     json telemetry_host;
     json telemetry_now;
     ch.on_telemetry = [&](const std::string& worker, const json& host,
@@ -95,6 +101,22 @@ int main() {
             if (msg.find("\"ping\"") != std::string::npos) got_ping = true;
             if (msg.find("\"heartbeat_ack\"") != std::string::npos)
                 got_heartbeat_ack = true;
+            const auto frame = json::parse(msg);
+            if (frame.value("op", "") == "stream_open") {
+                const std::string sid = frame.value("sid", "");
+                const std::string response =
+                    "HTTP/1.1 101 Switching Protocols\r\n\r\n";
+                // Force the earliest possible arrival: the real worker can
+                // relay the bridge's 101 immediately after stream_opened.
+                // The hub must already have its receive callback installed;
+                // otherwise this first response disappears and /screen/ws
+                // waits forever with a blank viewer.
+                b.sendText(json{{"op", "stream_data"}, {"sid", sid},
+                    {"b64", OmniNet::Crypto::base64Encode(std::span<const uint8_t>(
+                        reinterpret_cast<const uint8_t*>(response.data()),
+                        response.size()))}}.dump());
+                b.sendText(json{{"op", "stream_opened"}, {"sid", sid}}.dump());
+            }
         });
         std::thread rl([&] { b.readLoop(); });
         b.sendText(hello(key).dump());
@@ -130,6 +152,26 @@ int main() {
         for (int i = 0; i < 30 && !got_ping; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         assert(got_ping && "send() frame never delivered to replacement conn");
+
+        // 2026-11-08 blank-screen regression: bytes arriving with the open
+        // acknowledgement must not race callback registration and vanish.
+        const std::string sid = ch.open_stream("rig1", 16121,
+            [&](std::string_view bytes) {
+                {
+                    std::lock_guard lk(stream_m);
+                    stream_bytes.append(bytes);
+                }
+                stream_cv.notify_all();
+            }, [] {});
+        assert(!sid.empty() && "stream did not open");
+        {
+            std::unique_lock lk(stream_m);
+            const bool arrived = stream_cv.wait_for(lk, std::chrono::seconds(2),
+                [&] { return !stream_bytes.empty(); });
+            assert(arrived && "first bridge bytes were dropped during stream open");
+            assert(stream_bytes == "HTTP/1.1 101 Switching Protocols\r\n\r\n");
+        }
+        ch.stream_close(sid);
 
         b.close();
         // NOTE: OmniNet client close() does not wake a readLoop blocked in

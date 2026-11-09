@@ -329,7 +329,7 @@ void WorkerChannel::handle(Connection& ws) {
                 sj->done = true;
                 sj->cv.notify_all();
             }
-        } else if (op == "stream_opened" || op == "stream_error") {        } else if (op == "stream_opened" || op == "stream_error") {
+        } else if (op == "stream_opened" || op == "stream_error") {
             // open_stream waits on this via a ScreenJob-shaped slot? no —
             // streams have their own ack slot:
             std::shared_ptr<StreamAck> ack;
@@ -537,10 +537,18 @@ std::string WorkerChannel::open_stream(const std::string& worker,
     {
         std::lock_guard lk(m_);
         stream_acks_[sid] = ack;
+        // Install the receive path BEFORE asking the worker to connect.
+        // The worker sends stream_opened and can immediately relay the
+        // bridge's HTTP 101 in the next channel frame. Registering only
+        // after this waiter wakes loses that first frame (and can also lose
+        // an immediate close), leaving /screen/ws stuck on a blank viewer.
+        streams_[sid] = std::make_shared<Stream>(
+            Stream{worker, std::move(on_data), std::move(on_close)});
     }
     if (!send(worker, {{"op","stream_open"},{"sid",sid},{"port",port}})) {
         std::lock_guard lk(m_);
         stream_acks_.erase(sid);
+        streams_.erase(sid);
         return "";
     }
     {
@@ -549,15 +557,17 @@ std::string WorkerChannel::open_stream(const std::string& worker,
                               [&]{ return ack->done; })) {
             std::lock_guard g(m_);
             stream_acks_.erase(sid);
+            streams_.erase(sid);
             return "";
         }
     }
     {
         std::lock_guard lk(m_);
         stream_acks_.erase(sid);
-        if (!ack->ok) return "";
-        streams_[sid] = std::make_shared<Stream>(
-            Stream{worker, std::move(on_data), std::move(on_close)});
+        if (!ack->ok) {
+            streams_.erase(sid);
+            return "";
+        }
     }
     return sid;
 }
