@@ -24,7 +24,10 @@ container agent gets, you already understand what a host agent gets.
 The shared drive includes `second-brain/`, the Markdown knowledge base used by
 every agent's `brain` tool. Provisioning grants all `hivex` users write access
 through the shared group and default ACLs. A shared `--host-workspace-root` is
-required for cross-agent brain sharing. See [second-brain.md](second-brain.md).
+required for cross-agent brain sharing. Provisioning keeps these directories
+owned by the worker user (the uid mapped into containers), group `hivex`, and
+adds each bare-metal user through group/default ACLs; root ownership here would
+break container writes. See [second-brain.md](second-brain.md).
 
 ## ⚠ READ THIS BEFORE ENABLING
 

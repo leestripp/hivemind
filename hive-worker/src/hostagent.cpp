@@ -236,10 +236,12 @@ if [ -n "$wsroot" ] && [ -d "$wsroot" ] && [ -d "$ws" ]; then
     /usr/bin/find "$wsroot" -type d -exec /usr/bin/chmod g+s {} +
     /usr/bin/setfacl -R -d -m "g::rwX" "$wsroot"
     # Worker-wide second brain: distinct unix accounts share Markdown and
-    # the FTS index through hivex group/default ACLs.
+    # the FTS index through hivex group/default ACLs. The WORKER user must
+    # own the dirs: Podman maps that same uid into containers, so root-owned
+    # dirs make every container brain write fail after a host agent spawns.
     for d in second-brain second-brain/inbox second-brain/projects \
         second-brain/areas second-brain/resources second-brain/archives; do
-        /usr/bin/install -d -m 2775 -o root -g hivex "$wsroot/$d"
+        /usr/bin/install -d -m 2775 -o "$wuser" -g hivex "$wsroot/$d"
     done
     /usr/bin/setfacl -R -m "u:$user:rwX" "$wsroot/second-brain"
     /usr/bin/setfacl -R -d -m "u:$user:rwx" "$wsroot/second-brain"
