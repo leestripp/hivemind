@@ -42,19 +42,25 @@ std::string TtsEngine::voice() const {
 }
 
 void TtsEngine::speakQueued(const std::string& text) {
-    if (text.empty()) return;
-    {
-        std::lock_guard<std::mutex> lk(m_);
-        if (queue_.size() >= 40) return;  // never-ready cap, as Android
-        const std::uint64_t tag = nextTag_++;
-        queue_.push_back({epoch_, tag, text, voice_});
-        pending_.add(tag);
-        outstanding_ = static_cast<int>(pending_.size());
-    }
+    std::lock_guard<std::mutex> lk(m_);
+    enqueue(text, voice_);
+}
+
+// m_ is held by the caller.
+void TtsEngine::enqueue(const std::string& text, const std::string& voice) {
+    if (text.empty() || queue_.size() >= 40) return;  // cap, as Android
+    const std::uint64_t tag = nextTag_++;
+    queue_.push_back({epoch_, tag, text, voice});
+    pending_.add(tag);
+    outstanding_ = static_cast<int>(pending_.size());
     cv_.notify_one();
 }
 
 void TtsEngine::stop() {
+    // Serialize cancellation with the worker's epoch-check + audio submit.
+    // Otherwise stop() can land between those two operations and a stale
+    // utterance can reassert speaking_ after the queue was cleared.
+    std::lock_guard publish_lock{publish_m_};
     {
         std::lock_guard<std::mutex> lk(m_);
         epoch_++;  // in-flight tags from before are now stale
@@ -68,12 +74,10 @@ void TtsEngine::stop() {
 
 void TtsEngine::preview(const std::string& text, const std::string& voice) {
     stop();  // QUEUE_FLUSH: interrupt anything playing
-    DecodedWav d = synthesize(text, voice);
-    const std::uint64_t tag = [&] {
-        std::lock_guard<std::mutex> lk(m_);
-        return nextTag_++;
-    }();
-    if (!d.pcm.empty()) playback_.submit(tag, std::move(d.pcm), d.rate);
+    // Synthesis can take seconds; use the worker so the GTK thread stays
+    // responsive when several voices are tried in quick succession.
+    std::lock_guard<std::mutex> lk(m_);
+    enqueue(text, voice);
 }
 
 float TtsEngine::level(float nowSec) const {
@@ -100,16 +104,7 @@ void TtsEngine::workerLoop() {
         }
         const std::uint64_t epochAtSpawn = u.epoch;
         DecodedWav d = synthesize(u.text, u.voice);
-        // A stop() landed while the request was in flight: the
-        // utterance is dead, its tag is stale — do not touch the queue
-        // accounting.
-        {
-            std::lock_guard<std::mutex> lk(m_);
-            if (epoch_ != epochAtSpawn) continue;
-        }
-        if (!d.pcm.empty()) {
-            playback_.submit(u.tag, std::move(d.pcm), d.rate);
-        } else {
+        if (d.pcm.empty()) {
             // Synthesis failed: no playback item will ever carry this
             // tag, so complete the queue slot HERE. Without this the
             // speakQueued() increment of outstanding_ leaks — the app
@@ -118,16 +113,28 @@ void TtsEngine::workerLoop() {
             // long after the agent finished; polling has already
             // stopped because the agent went idle).
             onTagDone(u.tag);
+            continue;
         }
+
+        // Speaking means audio was actually accepted for playback, not
+        // merely that an HTTP synthesis request is in flight. The publish
+        // lock makes this check + state change + submit atomic with stop().
+        std::lock_guard publish_lock{publish_m_};
+        std::lock_guard<std::mutex> lk(m_);
+        // A stop() landed while the request was in flight: the utterance is
+        // dead, its tag is stale — do not touch the queue accounting.
+        if (epoch_ != epochAtSpawn) continue;
+        speaking_ = true;
+        playback_.submit(u.tag, std::move(d.pcm), d.rate);
     }
 }
 
 void TtsEngine::onTagDone(std::uint64_t tag) {
     {
         std::lock_guard<std::mutex> lk(m_);
-        // Stop() clears the ledger. Late device callbacks from that epoch,
-        // duplicate notifications, and untracked voice-preview tags are
-        // ignored instead of consuming a newer turn's outstanding count.
+        // Stop() clears the ledger. Late device callbacks from that epoch
+        // and duplicate/unknown notifications are ignored instead of
+        // consuming a newer turn's outstanding count.
         if (!pending_.contains(tag)) return;
         const bool empty = pending_.complete(tag);
         outstanding_ = static_cast<int>(pending_.size());
@@ -144,7 +151,6 @@ DecodedWav TtsEngine::synthesize(const std::string& text,
         // Same loudness whatever voice the agent wears — the catalog
         // spans ~6 dB RMS voice-to-voice otherwise.
         normalizeLoudness(d.pcm);
-        speaking_ = true;
         return d;
     } catch (const std::exception& e) {
         // Synthesis failed — silence, not noise; the error is already

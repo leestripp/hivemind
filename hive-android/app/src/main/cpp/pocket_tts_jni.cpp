@@ -10,6 +10,8 @@
 #include <android/log.h>
 #include <audiocpp.h>
 
+#include "loudness.h"
+
 #include <mutex>
 #include <string>
 #include <cmath>
@@ -18,6 +20,7 @@
 #define LOG_TAG "PocketTts"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 namespace {
 
@@ -113,34 +116,19 @@ Java_com_hivemind_voice_PocketTts_nativeSynthesize(JNIEnv* env, jobject /*thiz*/
     }
     g_rate = rate > 0 ? rate : 24000;
 
-    /* Loudness normalization (2026-10-14): pocket voices vary wildly in
-     * output level (lee: "the voice volumes do vary a lot"). RMS-normalize
-     * each chunk to a fixed target so every voice lands at the same
-     * perceived loudness; gain clamped to [-12dB, +12dB] so near-silent
-     * chunks aren't blown up, then peak-limited so hot voices never clip. */
-    {
-        const float target_rms = 0.09f;
-        double sum = 0.0;
-        const size_t n = frames * channels;
-        for (size_t i = 0; i < n; ++i) sum += double(samples[i]) * samples[i];
-        const float rms = n ? float(std::sqrt(sum / n)) : 0.f;
-        if (rms > 1e-4f) {
-            float gain = target_rms / rms;
-            if (gain < 0.25f) gain = 0.25f;
-            if (gain > 4.0f)  gain = 4.0f;
-            for (size_t i = 0; i < n; ++i) {
-                float s2 = samples[i] * gain;
-                if (s2 >  0.97f) s2 =  0.97f;
-                if (s2 < -0.97f) s2 = -0.97f;
-                const_cast<float*>(samples)[i] = s2;
-            }
-        }
-    }
+    // Normalize a private copy: the result API exposes const samples.
+    const size_t n = frames * channels;
+    std::vector<float> normalized(samples, samples + n);
+    const auto loudness = pockettts::normalizeLoudness(normalized.data(),
+                                                        normalized.size());
+    LOGD("loudness raw_rms=%.5f gain=%.3f out_rms=%.5f peak=%.3f",
+         loudness.inputRms, loudness.gain, loudness.outputRms,
+         loudness.outputPeak);
 
     jfloatArray out = env->NewFloatArray(static_cast<jsize>(frames * channels));
     if (out) {
         env->SetFloatArrayRegion(out, 0, static_cast<jsize>(frames * channels),
-                                 samples);
+                                 normalized.data());
     }
     audiocpp_result_free(result);
     return out;   // nullptr on OOM — Kotlin falls back to system TTS

@@ -2,14 +2,27 @@
 // agent, voice assignments, thresholds). JSON at
 // ~/.config/hive-client-voice/prefs.json. Mirrors the Android Prefs.kt.
 //
-// Speech (TTS+STT) is served by the local ChimpFlow gateway; its URL
-// and key are NOT persisted secrets — the key comes from the
-// CHIMPFLOW_KEY environment variable or a ~/.config/hive-client-voice/
-// chimpflow.key file (mode 600), the URL from CHIMPFLOW_URL.
+// Speech (TTS+STT) is served by the local ChimpFlow gateway. Its API key
+// is never written into prefs.json: it comes from CHIMPFLOW_KEY or the
+// separate mode-600 chimpflow.key file. CHIMPFLOW_URL remains a fallback
+// until an endpoint is explicitly saved in Settings.
 #pragma once
 
 #include <map>
 #include <string>
+
+namespace voice_settings {
+
+struct ChimpFlowEndpoint {
+    std::string address{"127.0.0.1"};
+    std::string port{"8090"};
+};
+
+ChimpFlowEndpoint parseEndpoint(const std::string& url);
+std::string makeLoopbackUrl(const std::string& address,
+                            const std::string& port);
+
+}  // namespace voice_settings
 
 class Prefs {
 public:
@@ -28,8 +41,8 @@ public:
     bool onboardingDone() const { return onboarding_done_; }
     void setOnboardingDone(bool v) { onboarding_done_ = v; }
 
-    // Per-agent voice assignment: agent id -> ChimpFlow voice/model id
-    // ("pocket-tts") or "" for the engine default.
+    // Per-agent voice assignment: agent id -> ChimpFlow speaker id
+    // (for example "alba") or "" for the engine default.
     std::string voiceFor(const std::string& agent_id) const;
     void setVoiceFor(const std::string& agent_id, const std::string& voice);
 
@@ -50,12 +63,14 @@ public:
     int windowHeight() const { return window_height_; }
     void setWindowHeight(int v) { window_height_ = v; }
 
-    // ChimpFlow gateway. Not persisted: url falls back to the
-    // CHIMPFLOW_URL env var (default http://127.0.0.1:8090); the key
-    // comes from CHIMPFLOW_KEY or the chimpflow.key file next to
-    // prefs.json — a secret never written into prefs.json.
-    static std::string chimpflowUrl();
-    static std::string chimpflowKey();
+    // ChimpFlow gateway. The URL is persisted as ordinary configuration;
+    // CHIMPFLOW_URL is used only while no URL has been saved. The key comes
+    // from CHIMPFLOW_KEY or chimpflow.key until explicitly set in Settings,
+    // which writes only the separate mode-600 key file.
+    std::string chimpflowUrl() const;
+    void setChimpflowUrl(const std::string& v) { chimpflow_url_ = v; }
+    std::string chimpflowKey() const;
+    void setChimpflowKey(const std::string& v);
 
     static std::string configPath();
 
@@ -70,4 +85,8 @@ private:
     bool state_announce_{false};
     int window_width_{0};
     int window_height_{0};
+    std::string chimpflow_url_;
+    std::string chimpflow_key_;
+    bool chimpflow_key_set_{false};
+    mutable bool chimpflow_key_dirty_{false};
 };

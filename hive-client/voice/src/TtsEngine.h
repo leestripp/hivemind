@@ -50,6 +50,7 @@ class TtsEngine {
     void stop();
 
     // One-off sample playback (voice picker); interrupts anything prior.
+    // Synthesis runs on the TTS worker, never on the caller's UI thread.
     void preview(const std::string& text, const std::string& voice);
 
     // Animated 0..1 envelope for the sphere while the agent talks.
@@ -74,12 +75,16 @@ class TtsEngine {
 
     void workerLoop();
     void onTagDone(std::uint64_t tag);
+    void enqueue(const std::string& text, const std::string& voice);
     // POST to ChimpFlow and decode the WAV; {} on failure (logged).
     DecodedWav synthesize(const std::string& text, const std::string& voice);
 
     AudioPlayback& playback_;
     std::unique_ptr<ChimpFlowClient> chimp_;
     mutable std::mutex m_;
+    // stop() takes this before m_; the worker takes it around its final
+    // epoch check + audio submit so cancellation cannot slip between them.
+    std::mutex publish_m_;
     std::deque<Utterance> queue_;
     TtsTagLedger pending_;
     std::condition_variable cv_;

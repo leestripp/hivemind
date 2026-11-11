@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 
 namespace hv {
 
@@ -13,7 +14,38 @@ constexpr float kMinGain = 0.25f;  // sanity bounds for degenerate input
 // dB) covers them, and the peak cap above keeps that safe.
 constexpr float kMaxGain = 6.0f;
 constexpr float kSilenceRms = 1e-4f;    // below this: leave it alone
+std::atomic<float> g_master_volume{1.0f};
+std::atomic<bool> g_master_muted{false};
 }  // namespace
+
+void setMasterVolume(float volume) noexcept {
+    if (!std::isfinite(volume)) return;
+    g_master_volume.store(std::clamp(volume, 0.0f, 1.0f),
+                          std::memory_order_relaxed);
+}
+
+float masterVolume() noexcept {
+    return g_master_volume.load(std::memory_order_relaxed);
+}
+
+void setMasterMuted(bool muted) noexcept {
+    g_master_muted.store(muted, std::memory_order_relaxed);
+}
+
+bool masterMuted() noexcept {
+    return g_master_muted.load(std::memory_order_relaxed);
+}
+
+float masterGain() noexcept {
+    return masterMuted() ? 0.0f : masterVolume();
+}
+
+void applyOutputGain(std::span<int16_t> pcm, float gain) noexcept {
+    if (gain >= 1.0f) return;
+    gain = std::clamp(gain, 0.0f, 1.0f);
+    for (auto& sample : pcm)
+        sample = static_cast<int16_t>(static_cast<float>(sample) * gain);
+}
 
 void normalizeLoudness(Pcm16& pcm) {
     if (pcm.empty()) return;

@@ -30,6 +30,8 @@ public:
     void play(const std::string& file);
     void toggle_pause();
     void stop();
+    // Re-read the process-wide gain without changing play/pause/EOS state.
+    void syncMasterVolume();
 
     void set_on_eos(std::function<void()> cb) { on_eos_ = std::move(cb); }
     void set_on_error(std::function<void(std::string)> cb) {

@@ -41,6 +41,22 @@ target_link_libraries(hive_client_attachments PUBLIC PkgConfig::GTKMM)
 # self-contained (no runtime data-dir lookup). CurrentColor icons are
 # re-tinted at load time to match the active dark/light theme.
 find_program(GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
+find_program(GLIB_COMPILE_SCHEMAS glib-compile-schemas REQUIRED)
+
+# Build a compiled schema for development runs and isolated UI tests. The
+# install rule below installs the XML and compiles it into the chosen prefix.
+set(GSETTINGS_SCHEMA ${CMAKE_CURRENT_SOURCE_DIR}/data/org.hivemind.Client.gschema.xml)
+set(GSETTINGS_SCHEMA_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/schemas)
+file(MAKE_DIRECTORY ${GSETTINGS_SCHEMA_BUILD_DIR})
+add_custom_command(
+    OUTPUT ${GSETTINGS_SCHEMA_BUILD_DIR}/gschemas.compiled
+    COMMAND ${GLIB_COMPILE_SCHEMAS}
+            --targetdir=${GSETTINGS_SCHEMA_BUILD_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/data
+    DEPENDS ${GSETTINGS_SCHEMA}
+    COMMENT "Compiling Hive Dash GSettings schema")
+add_custom_target(hive-client-schemas ALL
+    DEPENDS ${GSETTINGS_SCHEMA_BUILD_DIR}/gschemas.compiled)
 set(GRESOURCE_XML ${CMAKE_CURRENT_SOURCE_DIR}/data/hivemind.gresource.xml)
 set(GRESOURCE_C   ${CMAKE_CURRENT_BINARY_DIR}/hivemind-resources.c)
 file(GLOB GRESOURCE_DEPS CONFIGURE_DEPENDS
@@ -64,6 +80,7 @@ add_executable(hive-client
     src/UiApi.cpp
     ${GRESOURCE_C}
 )
+add_dependencies(hive-client hive-client-schemas)
 
 target_include_directories(hive-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hive-client PRIVATE
@@ -84,6 +101,14 @@ endif()
 include(GNUInstallDirs)
 
 install(TARGETS hive-client DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES ${GSETTINGS_SCHEMA}
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/glib-2.0/schemas")
+# Expand CMAKE_INSTALL_PREFIX at INSTALL time so `cmake --install --prefix`
+# compiles the schema in the actual destination, not the configure-time one.
+install(CODE "execute_process(
+    COMMAND \"${GLIB_COMPILE_SCHEMAS}\"
+            \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/glib-2.0/schemas\"
+    COMMAND_ERROR_IS_FATAL ANY)")
 
 # Desktop file is configured so Exec= carries the absolute install path;
 # desktop sessions do not reliably have ~/.local/bin in PATH.

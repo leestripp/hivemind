@@ -45,7 +45,11 @@ What the window currently shows/knows (GTK-thread snapshot).
   "upload_in_flight": false,
   "upload_preparing": false,
   "attach_row_visible": true,
-  "attach_label": "📎 upload.bin"
+  "attach_label": "📎 upload.bin",
+  "master_volume": 1.0,
+  "master_muted": false,
+  "master_gain": 1.0,
+  "volume_popover_visible": false
 }
 ```
 
@@ -55,6 +59,8 @@ What the window currently shows/knows (GTK-thread snapshot).
 - `upload_in_flight`, `upload_preparing`, `attach_row_visible`, and
   `attach_label` expose the composer’s upload activity for image-preparation
   and delayed-transfer UI regression tests.
+- `master_volume`, `master_muted`, `master_gain`, and
+  `volume_popover_visible` expose the app-wide speaker control.
 
 ### GET /ui/messages
 The bubbles actually rendered in the chat view, in order.
@@ -97,6 +103,10 @@ runbook is in [voice-global-shortcuts.md](voice-global-shortcuts.md).
 ### POST /ui/action/voice-back
 → `{"voice_mode": false, "was_open": true|false, "current_thread": "…"}`.
 Runs the embedded voice page's Back path, preserving the current DM.
+Navigation tears down only the local voice panel; it does not cancel the
+agent's hub-side turn. `cmake --build build --target check-voice-back-ui`
+regression-tests Back → roster → the same agent → Back against an isolated
+fake hub and fails on any agent/thread cancel or stop request.
 
 ### POST /ui/action/send
 Body: `{"body": "…"}` → `202 {"sent": true, "thread": "<id>"}`.
@@ -110,6 +120,18 @@ Body: `{"name": "<attachment filename>"}` → `{"activated": "<name>"}` or
 `404`. Finds the named inline video's red play button and activates it on
 the GTK main loop. Activating the same card again toggles pause/resume;
 activating another card moves the single persistent player to that card.
+
+### POST /ui/action/master-volume
+Body: `{"volume": 0.65, "muted": false}` → the effective `volume`, `muted`,
+and `gain`. Drives the real GTK slider and mute checkbox. `volume` is clamped
+to 0.0–1.0. Muting sets gain to zero but preserves the selected volume and
+never stops, pauses, clears, or cancels playback or agent work. Volume is
+persisted in GSettings as `org.hivemind.Client master-volume`; mute is
+session-only. The regression closes and relaunches the real app to verify
+restoration. Use
+`POST /ui/action/open-dialog` with `{"name": "volume"}` to activate the
+speaker button. `cmake --build build --target check-master-volume-ui` runs
+the isolated live-GTK regression.
 
 ### POST /ui/action/stop
 → `{"cancel_requested": true}`. Same as the Stop button: `POST

@@ -17,7 +17,8 @@ the reply.
 - **TTS**: on-device pocket-tts (audio.cpp through JNI) is primary,
   synthesizing streamed sentence chunks to PCM/AudioTrack with per-agent
   voices. Android platform `TextToSpeech` remains the fallback when the
-  pocket model cannot load or an individual synthesis fails.
+  pocket model cannot load or an individual synthesis fails. This is fully
+  on-device; the app does not call ChimpFlow over the network.
 - **Sphere**: OpenGL ES 2.0 point-cloud renderer in C++ (NDK,
   `app/src/main/cpp/sphere_renderer.cpp`) — Fibonacci lattice displaced
   by simplex noise; amplitude follows mic RMS while listening and a
@@ -58,6 +59,24 @@ configured voice uses the engine default. DM replies and system notices
 use the session agent's voice. The app clears the hub's persisted unread
 mark (`POST /api/threads/:id/read`) for messages it speaks, and opening
 the Inbox clears that thread's unread mark on desktop/web too.
+
+## Speech loudness and volume
+
+Pocket-TTS chunks are RMS-normalized for consistent voices, with a peak-safe
+gain cap rather than hard per-sample clipping. `PcmPlayer` also reads the
+assistant-stream volume and applies a square-root playback-gain curve:
+`sqrt(current / maximum)`. Maximum device volume therefore permits full
+normalized output, while low settings add extra headroom reduction. The
+`android.media.VOLUME_CHANGED_ACTION` receiver updates the active `AudioTrack`
+immediately when a volume key changes; speech does not need re-synthesis.
+
+Run the dependency-free native loudness regression tests with:
+
+```bash
+c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+  tests/test_loudness.cpp -o /tmp/hive-test-loudness
+/tmp/hive-test-loudness
+```
 
 ## Avatars
 

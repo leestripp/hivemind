@@ -38,6 +38,18 @@ if(EXISTS "/usr/bin/python3")
         DEPENDS hive-client
         USES_TERMINAL
         COMMENT "Checking Scheduled Tasks grouping, sizing, selection, and delete confirmation")
+    add_custom_target(check-voice-back-ui
+        COMMAND /usr/bin/python3
+                ${CMAKE_CURRENT_SOURCE_DIR}/voice_back_ui_regression.py
+        DEPENDS hive-client
+        USES_TERMINAL
+        COMMENT "Checking that voice Back navigation never cancels the agent")
+    add_custom_target(check-master-volume-ui
+        COMMAND /usr/bin/python3
+                ${CMAKE_CURRENT_SOURCE_DIR}/master_volume_ui_regression.py
+        DEPENDS hive-client
+        USES_TERMINAL
+        COMMENT "Checking app-wide master volume and non-stopping mute")
 endif()
 
 # 4K image resizing and byte-preserving small/non-image uploads.

@@ -1,5 +1,7 @@
 #include "GstVideoPlayer.h"
 
+#include "AudioCommon.h"
+
 #include <glibmm.h>
 
 #include <cstdio>
@@ -23,6 +25,7 @@ GstVideoPlayer::GstVideoPlayer() {
     }
 
     g_object_set(playbin_, "video-sink", sink_, nullptr);
+    syncMasterVolume();
     GdkPaintable* raw_paintable = nullptr;
     g_object_get(sink_, "paintable", &raw_paintable, nullptr);
     if (!raw_paintable) {
@@ -61,6 +64,12 @@ void GstVideoPlayer::play(const std::string& file) {
     g_object_set(playbin_, "uri", uri.c_str(), nullptr);
     playing_ = gst_element_set_state(playbin_, GST_STATE_PLAYING) !=
                GST_STATE_CHANGE_FAILURE;
+}
+
+void GstVideoPlayer::syncMasterVolume() {
+    if (!playbin_) return;
+    g_object_set(playbin_, "volume", static_cast<double>(hv::masterVolume()),
+                 "mute", hv::masterMuted(), nullptr);
 }
 
 void GstVideoPlayer::toggle_pause() {

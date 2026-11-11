@@ -101,7 +101,7 @@ class TtsEngine(
         (preferredVoiceName ?: pocketVoice)?.let {
             if (it in PocketTts.VOICES) pocketVoice = it
         }
-        player = PcmPlayer(PocketTts.sampleRate,
+        player = PcmPlayer(context.applicationContext, PocketTts.sampleRate,
             onChunkPlayed = { counted -> if (counted) chunkDone() },
             onLevel = { rms = it })
         Log.i(TAG, "pocket-tts active (voice=${pocketVoice ?: "alba"})")

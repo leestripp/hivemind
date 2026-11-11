@@ -93,7 +93,8 @@ int main() {
         const std::string bytes(1000000, 'x');  // >= 1000 triggers grouping
         auto meta = api.upload_attachment("thread-1", "big.bin", bytes);
         assert(meta.value("size", 0) == 1000000);
-        assert(api.download("/api/flaky") == "video-bytes");
+        const std::string downloaded = api.download("/api/flaky");
+        assert(downloaded == "video-bytes");
     } catch (const std::exception& e) {
         std::cerr << "upload threw: " << e.what() << std::endl;
         server.stop();

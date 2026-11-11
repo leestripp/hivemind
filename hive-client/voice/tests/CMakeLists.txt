@@ -45,6 +45,11 @@ target_link_libraries(test_tts_tag_ledger PRIVATE Catch2::Catch2WithMain)
 target_include_directories(test_tts_tag_ledger PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+# Stop/cancellation race against a real, delayed ChimpFlow HTTP response.
+add_executable(test_tts_stop_race test_tts_stop_race.cpp)
+target_link_libraries(test_tts_stop_race PRIVATE Catch2::Catch2WithMain
+    hive_voice_ui OmniNet)
+
 add_executable(test_prefs test_prefs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/Prefs.cpp)
 target_link_libraries(test_prefs PRIVATE Catch2::Catch2WithMain
@@ -66,7 +71,12 @@ add_executable(test_audio_common test_audio_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AudioCommon.cpp)
 target_link_libraries(test_audio_common PRIVATE Catch2::Catch2WithMain)
 
-foreach(t test_speech_text test_transcript_text test_announcer test_voice_turn_logic test_api_client_activity test_tts_tag_ledger test_prefs test_avatars test_wav_codec test_audio_common)
+# App-wide mute/volume must not stop or clear the playback queue.
+add_executable(test_audio_master test_audio_master.cpp)
+target_link_libraries(test_audio_master PRIVATE Catch2::Catch2WithMain
+    hive_voice_ui)
+
+foreach(t test_speech_text test_transcript_text test_announcer test_voice_turn_logic test_api_client_activity test_tts_tag_ledger test_tts_stop_race test_prefs test_avatars test_wav_codec test_audio_common test_audio_master)
     if(TARGET compile_options)
         target_link_libraries(${t} PRIVATE compile_options)
     endif()

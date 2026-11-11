@@ -32,11 +32,22 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   main window's existing roster snapshots, not a second voice-side roster
   poll; a shared ready transition restores the idle sphere and Talk control,
   hides Cancel, and drains any remaining narration before completing.
-- **Message narration** — readable agent bubbles have a small Play button.
-  It reads that exact message through ChimpFlow with the sender's configured
-  voice, including messages in the Inbox. Clicking another bubble interrupts
-  the previous narration; long messages are queued in UTF-8-safe speech
-  chunks, and markup, links and code are cleaned for speech.
+- **Message narration** — readable agent bubbles have a small Play/Stop
+  toggle. Play reads that exact message through ChimpFlow with the sender's
+  configured voice, including messages in the Inbox. While narration is active
+  the same button becomes Stop; clicking it immediately silences playback and
+  drops the remaining queue. Natural completion restores Play. Clicking another
+  bubble interrupts the previous narration, and entering an agent's voice page
+  stops bubble narration so it cannot play beneath Talk. Long messages are
+  queued in UTF-8-safe speech chunks, and markup, links and code are cleaned
+  for speech.
+- **Master volume** — the speaker button beside Settings opens a popover with
+  a 0–100% slider and **Mute all app audio**. The shared gain covers voice-mode
+  speech, message narration, feedback sounds, and inline video without changing
+  the system volume. Mute changes gain only: playback and agent work continue
+  normally, and unmuting restores the selected level. The preferred volume is
+  stored immediately in GSettings (`org.hivemind.Client master-volume`) and
+  restored on launch; mute is session-only and always starts off.
 - **Chat images** — image attachments (png/jpg/jpeg/gif/webp) render
   inline, scaled to 480px, click for full-size; downloaded via the hub
   into `~/.cache/hivemind-client/attachments/<thread_id>/` (cached — a

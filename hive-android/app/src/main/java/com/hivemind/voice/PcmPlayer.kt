@@ -1,11 +1,17 @@
 package com.hivemind.voice
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.util.Log
 import java.util.concurrent.ArrayBlockingQueue
+import kotlin.math.sqrt
 
 /**
  * Queued float-PCM player for PocketTts output (AudioTrack, 24 kHz
@@ -18,6 +24,7 @@ import java.util.concurrent.ArrayBlockingQueue
  * when enqueued) — TtsEngine's outstanding accounting hangs off it.
  */
 class PcmPlayer(
+    context: Context,
     private val sampleRate: Int,
     private val onChunkPlayed: (counted: Boolean) -> Unit,
     private val onLevel: (Float) -> Unit,
@@ -38,6 +45,18 @@ class PcmPlayer(
         private set
 
     private val track: AudioTrack
+    private val appContext = context.applicationContext
+    private val audioManager = appContext.getSystemService(AudioManager::class.java)
+    private var volumeReceiverRegistered = false
+    private val volumeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val stream = intent?.getIntExtra(EXTRA_VOLUME_STREAM_TYPE, -1) ?: -1
+            // MUSIC is included because ASSISTANT is aliased to it on some
+            // devices; the gain is always read from the assistant stream.
+            if (stream == STREAM_ASSISTANT || stream == AudioManager.STREAM_MUSIC)
+                applyPlaybackVolume("key")
+        }
+    }
 
     private val writer = Thread {
         while (running) {
@@ -64,6 +83,29 @@ class PcmPlayer(
             AudioTrack.MODE_STREAM,
             AudioManager.AUDIO_SESSION_ID_GENERATE)
         track.play()
+        applyPlaybackVolume("initial")
+        val filter = IntentFilter(VOLUME_CHANGED_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            appContext.registerReceiver(volumeReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else
+            @Suppress("DEPRECATION") appContext.registerReceiver(volumeReceiver, filter)
+        volumeReceiverRegistered = true
+    }
+
+    /** Extra low-volume headroom, separate from Android's device attenuation.
+     *  Square-root curve: gentle through the middle, full gain at maximum,
+     *  and no unexpected +12 dB voice boost at the bottom of the rocker. */
+    private fun applyPlaybackVolume(reason: String) {
+        try {
+            val index = audioManager.getStreamVolume(STREAM_ASSISTANT)
+            val max = audioManager.getStreamMaxVolume(STREAM_ASSISTANT)
+            val gain = playbackGainForVolume(index, max)
+            val result = track.setVolume(gain)
+            if (result != AudioTrack.SUCCESS) Log.w(TAG, "setVolume returned $result")
+            Log.d(TAG, "volume $reason: assistant=$index/$max gain=%.3f".format(gain))
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "could not apply assistant volume", e)
+        }
     }
 
     /** [counted]=false for picker previews — their completion must not
@@ -92,6 +134,10 @@ class PcmPlayer(
 
     fun destroy() {
         running = false
+        if (volumeReceiverRegistered) {
+            runCatching { appContext.unregisterReceiver(volumeReceiver) }
+            volumeReceiverRegistered = false
+        }
         queue.clear()
         queue.offer(poison)        // unblock the writer; it breaks on it
         runCatching { writer.join(2_000) }
@@ -118,5 +164,17 @@ class PcmPlayer(
         if (!playing) onLevel(0f)
     }
 
-    companion object { private const val TAG = "PcmPlayer" }
+    companion object {
+        private const val TAG = "PcmPlayer"
+        // AudioManager.STREAM_ASSISTANT is @SystemApi; stable since API 26,
+        // which is also this app's minSdk. Using the public int API is enough.
+        private const val STREAM_ASSISTANT = 11
+        private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+        private const val EXTRA_VOLUME_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
+    }
+}
+
+internal fun playbackGainForVolume(index: Int, maxIndex: Int): Float {
+    if (index <= 0 || maxIndex <= 0) return 0f
+    return sqrt(index.toFloat() / maxIndex).coerceIn(0f, 1f)
 }

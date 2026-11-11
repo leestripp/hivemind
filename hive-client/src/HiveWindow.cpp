@@ -1,5 +1,6 @@
 #include "HiveWindow.h"
 #include "AttachmentUpload.h"
+#include "AudioCommon.h"
 #include "AudioPlayback.h"
 #include "ChimpFlowClient.h"
 #include "GlobalShortcuts.h"
@@ -335,10 +336,35 @@ void HiveWindow::setup_icons() {
     slot(new_thread_btn_,    "thread-add", "Start a new thread");
     slot(tasks_btn_,         "task-add",   "Schedule a task (routine)");
     slot(connect_btn_,       "connect",    "Connect to a hive-server");
+    slot(volume_btn_,        "volume",     "Master volume");
     slot(settings_btn_,      "settings",   "Settings — your display name & avatar");
     slot(send_btn_,          "send",       "Send message");
 
+    sync_master_volume_ui();
+}
 
+void HiveWindow::sync_master_volume_ui() {
+    // Gain only. Never stop/clear/pause playback or cancel an agent turn.
+    hv::setMasterVolume(
+        static_cast<float>(volume_scale_.get_value() / 100.0));
+    hv::setMasterMuted(volume_mute_.get_active());
+    if (app_settings_)
+        app_settings_->set_double("master-volume", hv::masterVolume());
+    if (active_video_media_) active_video_media_->syncMasterVolume();
+
+    const bool silent = hv::masterMuted() || hv::masterVolume() <= 0.0f;
+    const std::string icon = silent ? "volume-muted" : "volume";
+    for (auto& slot : icon_slots_) {
+        if (slot.btn != &volume_btn_) continue;
+        slot.icon = icon;
+        slot.img->set(themed_icon_pixbuf(icon, 16, dark_mode_));
+    }
+    const auto percent = static_cast<int>(std::lround(hv::masterVolume() * 100));
+    const std::string state = hv::masterMuted()
+        ? "muted"
+        : std::to_string(percent) + "%";
+    volume_btn_.set_tooltip_text("Master volume — " + state);
+    set_accessible_label(volume_btn_, "Master volume, " + state);
 }
 
 void HiveWindow::refresh_themed_icons() {
@@ -351,6 +377,7 @@ nlohmann::json HiveWindow::ui_open_dialog(const std::string& name) {
         if (name == "new-thread")      on_new_thread();
         else if (name == "new-agent")  on_new_agent();
         else if (name == "settings")   on_settings();
+        else if (name == "volume")     volume_btn_.activate();
         else if (name == "tasks")      on_new_task();
         else return json{{"error", "unknown dialog"}};
         return json{{"opened", name}};
@@ -480,9 +507,9 @@ void HiveWindow::apply_font_scale() {
 }
 
 // Settings — classic two-pane dialog: section sidebar on the left
-// (Interface / User), settings stack on the right. Interface switches apply
-// live; User identity saves with the Save button. Add a row to a page (or a
-// sidebar row + stack page) per future preference.
+// (Interface / User / ChimpFlow), settings stack on the right. Interface
+// switches apply live; User identity and the ChimpFlow connection save with
+// the Save button. Per-agent voice choices save immediately and preview.
 void HiveWindow::on_settings() {
     auto* dialog = Gtk::make_managed<Gtk::Dialog>();
     dialog->set_title("Settings");
@@ -516,6 +543,7 @@ void HiveWindow::on_settings() {
     };
     add_section("interface", "🖥  Interface");
     add_section("user", "👤  User");
+    add_section("chimpflow", "🔊  ChimpFlow");
     sidebar->signal_row_selected().connect([stack](Gtk::ListBoxRow* row) {
         if (row) stack->set_visible_child(
             (const char*)row->get_data("page"));
@@ -623,12 +651,220 @@ void HiveWindow::on_settings() {
     user->attach(*avatar_grid, 1, 1);
     stack->add(*user, "user");
 
+    // ── ChimpFlow page ──────────────────────────────────────────────────
+    // Connection fields share the dialog's existing Save button. Voice
+    // assignments are independent: selecting one saves it immediately and
+    // synthesizes a short greeting off the GTK thread.
+    auto* voice_page =
+        Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
+    voice_page->add_css_class("hv-settings-page");
+
+    auto* connection_grid = Gtk::make_managed<Gtk::Grid>();
+    connection_grid->set_row_spacing(10);
+    connection_grid->set_column_spacing(12);
+    const auto endpoint =
+        voice_settings::parseEndpoint(voice_prefs_.chimpflowUrl());
+    auto* address = Gtk::make_managed<Gtk::Entry>();
+    address->set_text(endpoint.address);
+    address->set_placeholder_text("127.0.0.1");
+    address->set_hexpand(true);
+    address->set_input_purpose(Gtk::InputPurpose::URL);
+    set_accessible_label(*address, "ChimpFlow address");
+    auto* port = Gtk::make_managed<Gtk::Entry>();
+    port->set_text(endpoint.port);
+    port->set_placeholder_text("8090");
+    port->set_max_width_chars(8);
+    port->set_input_purpose(Gtk::InputPurpose::DIGITS);
+    set_accessible_label(*port, "ChimpFlow port");
+    auto* chimp_key = Gtk::make_managed<Gtk::PasswordEntry>();
+    chimp_key->set_text(voice_prefs_.chimpflowKey());
+    chimp_key->set_show_peek_icon(true);
+    chimp_key->set_hexpand(true);
+    set_accessible_label(*chimp_key, "ChimpFlow API key");
+    auto add_connection_row = [connection_grid](const char* text,
+                                                Gtk::Widget& field, int row) {
+        auto* label = Gtk::make_managed<Gtk::Label>(text);
+        label->set_halign(Gtk::Align::END);
+        connection_grid->attach(*label, 0, row);
+        connection_grid->attach(field, 1, row);
+    };
+    add_connection_row("Address", *address, 0);
+    add_connection_row("Port", *port, 1);
+    add_connection_row("API key", *chimp_key, 2);
+    voice_page->append(*connection_grid);
+
+    auto* connection_error = Gtk::make_managed<Gtk::Label>();
+    connection_error->set_wrap(true);
+    connection_error->set_xalign(0.0f);
+    connection_error->set_halign(Gtk::Align::START);
+    connection_error->add_css_class("error");
+    voice_page->append(*connection_error);
+
+    auto* voice_intro = Gtk::make_managed<Gtk::Label>(
+        "Agent voices save automatically. Selecting a voice plays a short preview.");
+    voice_intro->set_wrap(true);
+    voice_intro->set_xalign(0.0f);
+    voice_intro->set_halign(Gtk::Align::START);
+    voice_page->append(*voice_intro);
+    auto* voice_status = Gtk::make_managed<Gtk::Label>("Checking ChimpFlow…");
+    voice_status->set_wrap(true);
+    voice_status->set_xalign(0.0f);
+    voice_status->set_halign(Gtk::Align::START);
+    voice_status->add_css_class("dim-label");
+    voice_page->append(*voice_status);
+
+    auto* voice_scroll = Gtk::make_managed<Gtk::ScrolledWindow>();
+    voice_scroll->set_policy(Gtk::PolicyType::NEVER,
+                             Gtk::PolicyType::AUTOMATIC);
+    voice_scroll->set_vexpand(true);
+    auto* voice_list = Gtk::make_managed<Gtk::ListBox>();
+    voice_list->set_selection_mode(Gtk::SelectionMode::NONE);
+    voice_list->add_css_class("boxed-list");
+    voice_scroll->set_child(*voice_list);
+    voice_page->append(*voice_scroll);
+    stack->add(*voice_page, "chimpflow");
+
+    auto weak_dialog = std::make_shared<Gtk::Dialog*>(dialog);
+    dialog->signal_destroy().connect(
+        [weak_dialog] { *weak_dialog = nullptr; });
+    const auto settings_agents = agents_;
+    const auto chimpflow_url = voice_prefs_.chimpflowUrl();
+    const auto chimpflow_api_key = voice_prefs_.chimpflowKey();
+    run_async([this, async = async_, weak_dialog, voice_status, voice_list,
+               settings_agents, chimpflow_url, chimpflow_api_key] {
+        std::vector<std::string> voices;
+        std::string error;
+        try {
+            hv::ChimpFlowClient chimpflow{chimpflow_url, chimpflow_api_key};
+            if (chimpflow_api_key.empty())
+                error = "Enter the ChimpFlow API key, then click Save.";
+            else if (!chimpflow.healthy())
+                error = "ChimpFlow is offline. Check the address and port, then click Save.";
+            else {
+                voices = chimpflow.voices();
+                if (voices.empty()) error = "ChimpFlow returned no voices.";
+            }
+        } catch (const std::exception& e) {
+            error = std::string{"Could not load ChimpFlow voices: "} + e.what();
+        }
+        {
+            std::lock_guard<std::mutex> lk(async->queue_m);
+            async->done_queue.push_back(
+                [this, weak_dialog, voice_status, voice_list, settings_agents,
+                 voices = std::move(voices), error = std::move(error)] {
+                    if (!alive_ || !*weak_dialog) return;
+                    voice_status->set_text(
+                        error.empty()
+                            ? std::to_string(voices.size()) + " voices available"
+                            : error);
+                    if (settings_agents.empty()) {
+                        auto* empty = Gtk::make_managed<Gtk::Label>(
+                            "No agents available");
+                        empty->set_margin(16);
+                        empty->set_halign(Gtk::Align::START);
+                        empty->add_css_class("dim-label");
+                        voice_list->append(*empty);
+                        return;
+                    }
+                    for (const auto& agent : settings_agents) {
+                        const std::string id = agent.value("id", "");
+                        const std::string agent_name = agent.value("name", "?");
+                        if (id.empty()) continue;
+                        const std::string current = voice_prefs_.voiceFor(id);
+                        auto voice_ids =
+                            std::make_shared<std::vector<std::string>>();
+                        std::vector<Glib::ustring> labels;
+                        voice_ids->push_back("");
+                        labels.push_back("Default voice");
+                        for (const auto& voice : voices) {
+                            voice_ids->push_back(voice);
+                            labels.push_back(voice);
+                        }
+                        if (!current.empty() &&
+                            std::find(voice_ids->begin(), voice_ids->end(),
+                                      current) == voice_ids->end()) {
+                            voice_ids->push_back(current);
+                            labels.push_back(current + " (saved)");
+                        }
+
+                        auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
+                        auto* box = Gtk::make_managed<Gtk::Box>(
+                            Gtk::Orientation::HORIZONTAL, 12);
+                        box->set_margin(8);
+                        auto* agent_label =
+                            Gtk::make_managed<Gtk::Label>(agent_name);
+                        agent_label->set_halign(Gtk::Align::START);
+                        agent_label->set_hexpand(true);
+                        agent_label->set_ellipsize(Pango::EllipsizeMode::END);
+                        auto* dropdown = Gtk::make_managed<Gtk::DropDown>(
+                            Gtk::StringList::create(labels));
+                        dropdown->set_valign(Gtk::Align::CENTER);
+                        dropdown->set_sensitive(error.empty());
+                        set_accessible_label(*dropdown,
+                                             "Voice for " + agent_name);
+                        // GtkDropDown otherwise announces only its current
+                        // value ("Default voice"), leaving six identical
+                        // controls to a screen reader. The visible agent
+                        // label is the accessible name; the voice remains
+                        // the control's selected value.
+                        gtk_accessible_update_relation(
+                            GTK_ACCESSIBLE(dropdown->gobj()),
+                            GTK_ACCESSIBLE_RELATION_LABELLED_BY,
+                            agent_label->gobj(), nullptr, -1);
+                        const auto found = std::find(
+                            voice_ids->begin(), voice_ids->end(), current);
+                        if (found != voice_ids->end())
+                            dropdown->set_selected(static_cast<guint>(
+                                std::distance(voice_ids->begin(), found)));
+                        box->append(*agent_label);
+                        box->append(*dropdown);
+                        row->set_child(*box);
+                        voice_list->append(*row);
+
+                        // Connect AFTER selecting the persisted value so
+                        // opening Settings never saves or speaks a preview.
+                        dropdown->property_selected().signal_changed().connect(
+                            [this, dropdown, voice_ids, id, agent_name,
+                             voice_status] {
+                                const auto selected = dropdown->get_selected();
+                                if (selected >= voice_ids->size()) return;
+                                const std::string& voice = (*voice_ids)[selected];
+                                voice_prefs_.setVoiceFor(id, voice);
+                                try {
+                                    voice_prefs_.save();
+                                } catch (const std::exception& e) {
+                                    voice_status->set_text(e.what());
+                                    return;
+                                }
+                                stop_agent_message_speech();
+                                ensure_chat_tts();
+                                chat_tts_->preview("Hi, I'm " + agent_name + ".",
+                                                   voice);
+                            });
+                    }
+                });
+        }
+        async->dispatcher.emit();
+    });
+
     if (auto* r0 = sidebar->get_row_at_index(0)) sidebar->select_row(*r0);
 
     dialog->get_content_area()->append(*body);
     dialog->signal_response().connect(
-        [this, dialog, name, chosen, tiles](int r) {
+        [this, dialog, name, chosen, tiles, address, port, chimp_key,
+         connection_error](int r) {
             if (r == (int)Gtk::ResponseType::OK) {
+                try {
+                    voice_prefs_.setChimpflowUrl(voice_settings::makeLoopbackUrl(
+                        address->get_text(), port->get_text()));
+                    voice_prefs_.setChimpflowKey(chimp_key->get_text());
+                    voice_prefs_.save();
+                } catch (const std::exception& e) {
+                    connection_error->set_text(e.what());
+                    return;  // keep the dialog open for correction
+                }
+                stop_agent_message_speech();
+                chat_tts_.reset();  // reconnect on the next preview/message
                 display_name_ = name->get_text();
                 user_avatar_  = *chosen;
                 save_config();
@@ -685,11 +921,48 @@ HiveWindow::HiveWindow() {
         [this] { maybe_show_connect_dialog(); });
     settings_btn_.signal_clicked().connect(
         sigc::mem_fun(*this, &HiveWindow::on_settings));
+
+    auto* volume_title = Gtk::make_managed<Gtk::Label>("Master volume");
+    volume_title->set_halign(Gtk::Align::START);
+    volume_title->add_css_class("heading");
+    volume_box_.set_margin(12);
+    volume_box_.append(*volume_title);
+    volume_box_.append(volume_scale_);
+    volume_box_.append(volume_mute_);
+    volume_popover_.set_child(volume_box_);
+    volume_popover_.set_parent(volume_btn_);
+    if (auto schemas = Gio::SettingsSchemaSource::get_default();
+        schemas && schemas->lookup("org.hivemind.Client", true)) {
+        app_settings_ = Gio::Settings::create("org.hivemind.Client");
+        hv::setMasterVolume(
+            static_cast<float>(app_settings_->get_double("master-volume")));
+    }
+    volume_scale_.set_range(0.0, 100.0);
+    volume_scale_.set_increments(1.0, 10.0);
+    volume_scale_.set_value(hv::masterVolume() * 100.0);
+    volume_scale_.set_draw_value(true);
+    volume_scale_.set_value_pos(Gtk::PositionType::RIGHT);
+    volume_scale_.set_digits(0);
+    volume_scale_.set_size_request(220, -1);
+    volume_scale_.set_tooltip_text("Volume for all Hive Dash audio");
+    volume_mute_.set_active(hv::masterMuted());
+    volume_mute_.set_tooltip_text(
+        "Silence app audio without stopping playback or agents");
+    set_accessible_label(volume_scale_, "Master volume percentage");
+    set_accessible_label(volume_mute_, "Mute all app audio");
+    volume_btn_.signal_clicked().connect(
+        [this] { volume_popover_.popup(); });
+    volume_scale_.signal_value_changed().connect(
+        [this] { sync_master_volume_ui(); });
+    volume_mute_.signal_toggled().connect(
+        [this] { sync_master_volume_ui(); });
+
     header_.pack_start(new_agent_btn_);
     header_.pack_start(new_thread_btn_);
     header_.pack_start(tasks_btn_);
     header_.pack_end(connect_btn_);
     header_.pack_end(settings_btn_);
+    header_.pack_end(volume_btn_);
     // CSD: install our HeaderBar AS the window titlebar so the compositor
     // doesn't draw a second (server-side) title bar above it.
     set_titlebar(header_);
@@ -943,6 +1216,7 @@ HiveWindow::HiveWindow() {
 
 HiveWindow::~HiveWindow() {
     alive_ = false;
+    volume_popover_.unparent();
     dispatcher_connection_.disconnect();
     {
         std::lock_guard<std::mutex> lk(async_->queue_m);
@@ -1520,13 +1794,16 @@ void HiveWindow::rebuild_roster() {
             row->set_child(*row_box);
             row->set_data("agent_id", new std::string(a.value("id", "")),
                           [](void* p) { delete static_cast<std::string*>(p); });
-            // Right-click → agent context menu (Edit / Delete)
+            // Right-click opens ONLY the context menu. Claim the sequence
+            // during capture so GtkListBox never selects the row and opens
+            // the DM / embedded voice page underneath the popover.
             auto rc = Gtk::GestureClick::create();
-            rc->set_button(0);   // listen to all buttons, filter in the handler
+            rc->set_button(GDK_BUTTON_SECONDARY);
+            rc->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
             rc->signal_pressed().connect(
                 [this, rc, agent = a](int, double x, double y) {
-                    if (rc->get_current_button() == GDK_BUTTON_SECONDARY)
-                        show_agent_menu(*rc->get_widget(), agent, x, y);
+                    rc->set_state(Gtk::EventSequenceState::CLAIMED);
+                    show_agent_menu(*rc->get_widget(), agent, x, y);
                 });
             row->add_controller(rc);
             if (!g.online) row->add_css_class("hv-offline");
@@ -1979,10 +2256,58 @@ void HiveWindow::update_live_bubble(const nlohmann::json& turns) {
 
 void HiveWindow::speak_agent_message(const std::string& sender_id,
                                      const std::string& sender_label,
-                                     const std::string& body) {
+                                     const std::string& body,
+                                     Gtk::Button* button) {
+    // The active bubble's button is a Stop button, not a replay request.
+    if (button && chat_speak_button_ == button) {
+        stop_agent_message_speech();
+        return;
+    }
     const auto chunks = speech::toSpeechChunks(body);
     if (chunks.empty()) return;
 
+    // A different bubble takes over: silence the old message and restore its
+    // Play icon before showing Stop on the new one.
+    stop_agent_message_speech();
+    ensure_chat_tts();
+    chat_speak_button_ = button;
+    chat_speak_sender_label_ = sender_label;
+    if (button) {
+        button->set_label("\u23F9");
+        button->set_tooltip_text("Stop reading " + sender_label + "'s message");
+        set_accessible_button_label(*button, "Stop reading " + sender_label +
+                                    "'s message aloud");
+    }
+
+    const std::string voice = voice_prefs_.voiceFor(sender_id);
+    chat_tts_->applyVoice(voice);
+    std::fprintf(stderr,
+                 "hive-client: chat tts sender=%s voice=%s chunks=%zu\n",
+                 sender_label.c_str(),
+                 voice.empty() ? "<default>" : voice.c_str(), chunks.size());
+    for (const auto& chunk : chunks) chat_tts_->speakQueued(chunk);
+}
+
+void HiveWindow::reset_agent_message_speak_button() {
+    auto* button = chat_speak_button_;
+    chat_speak_button_ = nullptr;
+    if (button) {
+        button->set_label("\u25B6");
+        button->set_tooltip_text("Read " + chat_speak_sender_label_ +
+                                 "'s message with ChimpFlow");
+        set_accessible_button_label(*button, "Read " + chat_speak_sender_label_ +
+                                    "'s message aloud");
+    }
+    chat_speak_sender_label_.clear();
+}
+
+void HiveWindow::stop_agent_message_speech() {
+    chat_speech_generation_.fetch_add(1);
+    reset_agent_message_speak_button();
+    if (chat_tts_) chat_tts_->stop();
+}
+
+void HiveWindow::ensure_chat_tts() {
     if (!chat_audio_) {
         chat_audio_ = std::make_unique<hv::AudioPlayback>();
         chat_audio_->start();
@@ -1991,18 +2316,16 @@ void HiveWindow::speak_agent_message(const std::string& sender_id,
         chat_tts_ = std::make_unique<hv::TtsEngine>(
             *chat_audio_, voice_prefs_.chimpflowUrl(),
             voice_prefs_.chimpflowKey());
+        chat_tts_->onQueueEmpty =
+            [this, weak_ui = std::weak_ptr<int>(ui_lifetime_token_)] {
+                const auto generation = chat_speech_generation_.load();
+                Glib::signal_idle().connect_once([this, weak_ui, generation] {
+                    if (weak_ui.expired() || !alive_ ||
+                        generation != chat_speech_generation_.load()) return;
+                    reset_agent_message_speak_button();
+                });
+            };
     }
-
-    // Match Android Inbox: a new tap interrupts the previous message and
-    // starts this one immediately, using the SENDER's configured voice.
-    chat_tts_->stop();
-    const std::string voice = voice_prefs_.voiceFor(sender_id);
-    chat_tts_->applyVoice(voice);
-    std::fprintf(stderr,
-                 "hive-client: chat tts sender=%s voice=%s chunks=%zu\n",
-                 sender_label.c_str(),
-                 voice.empty() ? "<default>" : voice.c_str(), chunks.size());
-    for (const auto& chunk : chunks) chat_tts_->speakQueued(chunk);
 }
 
         // Phase 55: row construction extracted so history page-back can PREPEND
@@ -2214,9 +2537,16 @@ void HiveWindow::speak_agent_message(const std::string& sender_id,
         set_accessible_button_label(*play, "Read " + sender_label +
                                     "'s message aloud");
         play->signal_clicked().connect(
-            [this, sender_id, sender_label, clean] {
-                speak_agent_message(sender_id, sender_label, clean);
+            [this, play, sender_id, sender_label, clean] {
+                speak_agent_message(sender_id, sender_label, clean, play);
             });
+        play->signal_destroy().connect([this, play] {
+            if (chat_speak_button_ != play) return;
+            chat_speak_button_ = nullptr;
+            chat_speak_sender_label_.clear();
+            // Never leave speech playing with no visible way to stop it.
+            if (alive_) stop_agent_message_speech();
+        });
         box->append(*play);
         }
         row->append(*box);
@@ -3086,6 +3416,7 @@ void HiveWindow::select_thread_row(const std::string& id) {
 }
 
 void HiveWindow::on_agent_selected() {
+    if (agent_menu_open_) return;
     auto* row = roster_list_.get_selected_row();
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("agent_id"));
@@ -3145,20 +3476,22 @@ void HiveWindow::on_agent_selected() {
 }
 
 void HiveWindow::maybe_show_voice(const nlohmann::json& agent) {
+    if (agent_menu_open_) return;
     const std::string agent_id = agent.value("id", "");
     if (agent_id.empty()) return;
     const auto request = ++voice_request_;
-    run_async([this, async = async_, agent, agent_id, request] {
+    const auto chimpflow_url = voice_prefs_.chimpflowUrl();
+    const auto key = voice_prefs_.chimpflowKey();
+    run_async([this, async = async_, agent, agent_id, request, chimpflow_url, key] {
         // A healthy gateway without its locally configured key cannot drive
         // either STT or TTS. In that case preserve the ordinary agent-click
         // behavior rather than opening a voice page that cannot work.
-        const std::string key = Prefs::chimpflowKey();
-        hv::ChimpFlowClient chimpflow{Prefs::chimpflowUrl(), key};
+        hv::ChimpFlowClient chimpflow{chimpflow_url, key};
         const bool available = !key.empty() && chimpflow.healthy();
         {
             std::lock_guard<std::mutex> lk(async->queue_m);
             async->done_queue.push_back([this, async, agent, agent_id, request, available] {
-                if (!alive_ || request != voice_request_) return;
+                if (!alive_ || agent_menu_open_ || request != voice_request_) return;
                 voice_available_ = available;
                 // The user may have opened another thread while localhost
                 // health was being checked. Never switch back unexpectedly.
@@ -3171,6 +3504,7 @@ void HiveWindow::maybe_show_voice(const nlohmann::json& agent) {
 }
 
 void HiveWindow::show_voice(const nlohmann::json& agent) {
+    stop_agent_message_speech();
     if (voice_) show_sidebar();
 
     // Hive Client owns hub credentials. Reuse voice-only preferences such
@@ -3408,6 +3742,11 @@ void HiveWindow::attach_picked_file(const std::string& path) {
 
 void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agent,
                                  double x, double y) {
+    // Opening the context menu is not agent activation. Block selection /
+    // activation callbacks for its lifetime and invalidate a ChimpFlow health
+    // probe that might otherwise open voice after the menu appears.
+    agent_menu_open_ = true;
+    ++voice_request_;
     auto* pop = Gtk::make_managed<Gtk::Popover>();
     pop->set_has_arrow(false);
     pop->set_autohide(true);
@@ -3443,7 +3782,10 @@ void HiveWindow::show_agent_menu(Gtk::Widget& anchor, const nlohmann::json& agen
     pop->set_parent(anchor);
     Gdk::Rectangle rect((int)x, (int)y, 1, 1);
     pop->set_pointing_to(rect);
-    pop->signal_closed().connect([pop] { pop->unparent(); });
+    pop->signal_closed().connect([this, pop] {
+        agent_menu_open_ = false;
+        pop->unparent();
+    });
     pop->popup();
 }
 
@@ -5414,6 +5756,13 @@ nlohmann::json HiveWindow::ui_state() {
             {"voice_turn_done", voice_ && voice_->debugTurnDone()},
             {"voice_tts_outstanding", voice_ ? voice_->debugTtsOutstanding() : 0},
             {"voice_tts_speaking", voice_ && voice_->debugTtsSpeaking()},
+            {"chat_tts_outstanding", chat_tts_ ? chat_tts_->outstanding() : 0},
+            {"chat_tts_speaking", chat_tts_ && chat_tts_->speaking()},
+            {"chat_tts_button_active", chat_speak_button_ != nullptr},
+            {"master_volume", hv::masterVolume()},
+            {"master_muted", hv::masterMuted()},
+            {"master_gain", hv::masterGain()},
+            {"volume_popover_visible", volume_popover_.get_visible()},
             {"voice_shortcut_activations", voice_shortcut_activations_},
             {"sidebar_visible", left_stack_.get_visible_child_name() == "sidebar"},
             {"chat_visible", chat_box_.get_visible()},
@@ -5556,6 +5905,18 @@ nlohmann::json HiveWindow::ui_voice_back() {
         return nlohmann::json{{"voice_mode", false},
                               {"was_open", was_open},
                               {"current_thread", current_thread_}};
+    });
+}
+
+nlohmann::json HiveWindow::ui_set_master_volume(double volume, bool muted) {
+    return invoke_on_ui([this, volume, muted] {
+        // Drive the real controls so their ordinary GTK callbacks run.
+        volume_scale_.set_value(std::clamp(volume, 0.0, 1.0) * 100.0);
+        volume_mute_.set_active(muted);
+        sync_master_volume_ui();
+        return nlohmann::json{{"volume", hv::masterVolume()},
+                              {"muted", hv::masterMuted()},
+                              {"gain", hv::masterGain()}};
     });
 }
 

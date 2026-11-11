@@ -165,6 +165,13 @@ void UiApi::start() {
             send_json(resp, w.ui_voice_back());
         });
 
+    server_->post("/ui/action/master-volume",
+        [&w](const OmniNet::HTTP::Request& req, OmniNet::HTTP::Response& resp) {
+            const json b = body_json(req);
+            send_json(resp, w.ui_set_master_volume(
+                b.value("volume", 1.0), b.value("muted", false)));
+        });
+
     server_->post("/ui/action/stop",
         [&w](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             send_json(resp, w.ui_stop());

@@ -2,13 +2,15 @@
 #include "../src/PlaybackRateLogic.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
 
 using hv::Pcm16;
 using hv::normalizeLoudness;
-using Catch::Matchers::WithinAbs;
+
+// REQUIRE_THAT is avoided on purpose: Catch2's INTERNAL_CHECK_THAT
+// token-pastes a _catch_sr literal suffix that cppcheck cannot parse
+// (unknownMacro), so the RMS tolerance is asserted with REQUIRE + CAPTURE.
 
 namespace {
 
@@ -40,14 +42,18 @@ Pcm16 sine(float amplitude, std::size_t n) {
 TEST_CASE("quiet voice is gained up to the target RMS", "[audio]") {
     Pcm16 pcm = sine(0.08f, 8000);  // RMS ≈ 0.057 — the caro_davy case
     normalizeLoudness(pcm);
-    REQUIRE_THAT(rmsOf(pcm), WithinAbs(0.106, 0.005));
+    const float rms = rmsOf(pcm);
+    CAPTURE(rms);
+    REQUIRE(std::abs(rms - 0.106f) <= 0.005f);
     REQUIRE(peakOf(pcm) <= 0.95f);
 }
 
 TEST_CASE("loud voice is attenuated to the same target", "[audio]") {
     Pcm16 pcm = sine(0.22f, 8000);  // RMS ≈ 0.156
     normalizeLoudness(pcm);
-    REQUIRE_THAT(rmsOf(pcm), WithinAbs(0.106, 0.005));
+    const float rms = rmsOf(pcm);
+    CAPTURE(rms);
+    REQUIRE(std::abs(rms - 0.106f) <= 0.005f);
     REQUIRE(peakOf(pcm) <= 0.95f);
 }
 
@@ -89,4 +95,26 @@ TEST_CASE("native-rate playback drains old audio before reopening") {
     REQUIRE(rateSwitchBlocked(24000, 16000, true));
     REQUIRE_FALSE(rateSwitchBlocked(24000, 16000, false));
     REQUIRE_FALSE(rateSwitchBlocked(24000, 24000, true));
+}
+
+TEST_CASE("master volume scales samples and mute only changes gain", "[audio]") {
+    Pcm16 pcm{10000, -10000, 0, 2000, -32768, 32767};
+    hv::applyOutputGain(std::span{pcm}, 0.5f);
+    REQUIRE(pcm == Pcm16{5000, -5000, 0, 1000, -16384, 16383});
+
+    hv::applyOutputGain(std::span{pcm}, 0.0f);
+    REQUIRE(pcm == Pcm16(6, 0));
+
+    hv::setMasterVolume(0.35f);
+    REQUIRE(std::abs(hv::masterVolume() - 0.35f) < 0.0001f);
+    hv::setMasterMuted(true);
+    REQUIRE(hv::masterGain() == 0.0f);
+    REQUIRE(std::abs(hv::masterVolume() - 0.35f) < 0.0001f);
+    hv::setMasterMuted(false);
+    REQUIRE(std::abs(hv::masterGain() - 0.35f) < 0.0001f);
+
+    hv::setMasterVolume(-1.0f);
+    REQUIRE(hv::masterGain() == 0.0f);
+    hv::setMasterVolume(2.0f);
+    REQUIRE(hv::masterGain() == 1.0f);
 }

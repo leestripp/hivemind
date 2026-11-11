@@ -268,6 +268,9 @@ struct PwSink {
             const std::size_t avail = ring_.size() - ringPos_;
             n = std::min(capacity, avail);
             std::copy_n(ring_.data() + ringPos_, n, dst);
+            // Master mute/volume is gain, never a queue or stream state
+            // change: samples and completion tags keep advancing silently.
+            applyOutputGain(std::span<int16_t>{dst, n}, masterGain());
             ringPos_ += n;
             // Walk the play order: every tag whose last sample this
             // buffer just consumed is complete.

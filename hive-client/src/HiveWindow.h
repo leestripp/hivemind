@@ -4,6 +4,7 @@
 #include <giomm/settings.h>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -60,6 +61,7 @@ public:
     nlohmann::json ui_stop();
     nlohmann::json ui_close();
     nlohmann::json ui_voice_back();
+    nlohmann::json ui_set_master_volume(double volume, bool muted);
     nlohmann::json ui_delete_thread(const std::string& id);
 
 private:
@@ -72,6 +74,7 @@ private:
     // Phase 37: follow the GNOME system style (host-run client) — reads
     // org.gnome.desktop.interface color-scheme and tracks it live.
     void follow_system_theme();
+    Glib::RefPtr<Gio::Settings> app_settings_;     // persistent app preferences
     Glib::RefPtr<Gio::Settings> iface_settings_;   // kept alive for watch
     Glib::RefPtr<Gio::Settings> a11y_settings_;
     Glib::RefPtr<Gtk::CssProvider> appearance_css_;
@@ -87,6 +90,7 @@ private:
     struct IconSlot { Gtk::Button* btn; Gtk::Image* img; std::string icon; };
     std::vector<IconSlot> icon_slots_;
     void setup_icons();
+    void sync_master_volume_ui();
     void maybe_show_connect_dialog();   // when no key is configured
 
     // ── data loading (worker threads → dispatcher → UI) ───────────────────
@@ -102,6 +106,8 @@ private:
     std::string roster_sig_;   // last busy/state signature
     std::string current_dm_agent_;  // agent whose DM is focused ("" if none)
     bool restoring_selection_ = false;  // rebuild_roster reselect guard
+    // Secondary-click opens actions only, never the agent DM/voice page.
+    bool agent_menu_open_ = false;
 
     // ── UI callbacks ──────────────────────────────────────────────────────
     void on_agent_selected();
@@ -117,6 +123,7 @@ private:
     void attach_picked_file(const std::string& path);
 
     void on_send();
+    void ensure_chat_tts();  // narration and Settings voice previews
     void on_new_agent();
     void show_agent_dialog(const nlohmann::json* existing);  // nullptr = create
     void on_edit_agent(const nlohmann::json& agent);
@@ -161,7 +168,10 @@ private:
     // Phase 55: bounded history — page-back through older messages.
     void speak_agent_message(const std::string& sender_id,
                              const std::string& sender_label,
-                             const std::string& body);
+                             const std::string& body,
+                             Gtk::Button* button);
+    void stop_agent_message_speech();
+    void reset_agent_message_speak_button();
     Gtk::Widget* build_message_row(const std::string& sender_kind,
                                    const std::string& sender_id,
                                    const std::string& sender_label,
@@ -316,7 +326,12 @@ private:
     Gtk::Button new_thread_btn_;
     Gtk::Button tasks_btn_;              // schedule a routine ("Add Task")
     Gtk::Button settings_btn_;           // user profile settings
+    Gtk::Button volume_btn_;             // app-wide output gain + mute
     Gtk::Button connect_btn_;
+    Gtk::Popover volume_popover_;
+    Gtk::Box volume_box_{Gtk::Orientation::VERTICAL, 10};
+    Gtk::Scale volume_scale_{Gtk::Orientation::HORIZONTAL};
+    Gtk::CheckButton volume_mute_{"Mute all app audio"};
     bool dark_mode_ = false;             // persisted in config.json
     // User profile (persisted in config.json): chat identity for the human.
     std::string display_name_;           // "" = "You"
@@ -343,6 +358,9 @@ private:
     // persists across thread switches, never steals the voice-page sink.
     std::unique_ptr<hv::AudioPlayback> chat_audio_;
     std::unique_ptr<hv::TtsEngine> chat_tts_;
+    Gtk::Button* chat_speak_button_ = nullptr;
+    std::string chat_speak_sender_label_;
+    std::atomic<std::uint64_t> chat_speech_generation_{0};
     Glib::RefPtr<Gtk::Builder> voice_builder_;
     hv::VoiceView* voice_ = nullptr;  // owned by left_stack_/voice_builder_
     std::unique_ptr<hv::GlobalShortcuts> voice_shortcuts_;
