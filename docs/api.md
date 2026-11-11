@@ -41,7 +41,7 @@ stores the records with the reply message (injecting the worker name).
 Both also accept `host_agent`; see [host-agents.md](host-agents.md).
 The hub returns 409 when the worker lacks the `host_agents` capability.
 Runtime selection needs no command-approval or typed-acknowledgment field.
-| `DELETE /api/agents/:id` | remove (worker reaps the container) |
+| `DELETE /api/agents/:id` | remove (worker reaps the container); cancels its live turns and deletes **all** agent-authored messages across the User Inbox, DMs, group and pair threads. User, system and other agents’ messages are preserved; the response includes `messages_deleted` |
 | `GET /api/agents/:id/activity` | per-agent live state |
 
 Moving an agent to another worker = PATCH worker; the hub re-homes the

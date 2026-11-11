@@ -397,6 +397,43 @@ int main() {
     assert(notice_messages[0].value("sender_kind", "") == "system");
     assert(notice_body == "[phone · sms] " + std::string(499, 'a'));
 
+    // ── Agent deletion: remove EVERY message the agent authored ────────
+    // The User Inbox has no participants, so participant-based thread
+    // cleanup alone leaves deleted-agent UUIDs visible there forever.
+    const auto cleanup_group = threads.create_thread(
+        "deletion cleanup", "group", {a1, a2});
+    threads.add_message(cleanup_group.id, "agent", a1, "delete this");
+    threads.add_message(cleanup_group.id, "agent", a2, "keep this");
+    threads.add_message(cleanup_group.id, "user", "", "keep the question");
+
+    r = request("DELETE", port, "/api/agents/" + a1);
+    assert(r.statusCode() == 200);
+    const auto deletion = json::parse(r.bodyAsString());
+    assert(deletion["messages_deleted"] == 3);   // two inbox + one group
+
+    im = jget(port, "/api/threads/user/messages");
+    assert(im["messages"].empty());
+    const auto remaining =
+        jget(port, "/api/threads/" + cleanup_group.id + "/messages");
+    bool kept_other_agent = false, kept_user = false, saw_removal_note = false;
+    for (const auto& m : remaining["messages"]) {
+        assert(m.value("sender_id", "") != a1);
+        if (m.value("body", "") == "keep this" &&
+            m.value("sender_id", "") == a2)
+            kept_other_agent = true;
+        if (m.value("body", "") == "keep the question" &&
+            m.value("sender_kind", "") == "user")
+            kept_user = true;
+        if (m.value("sender_kind", "") == "system" &&
+            m.value("body", "") == "Alpha was removed from the hive.")
+            saw_removal_note = true;
+    }
+    assert(kept_other_agent);
+    assert(kept_user);
+    assert(saw_removal_note);
+    assert(jget(port, "/api/threads/" + cleanup_group.id)
+               ["agent_ids"] == json::array({a2}));
+
     // ── drain background turns before exit (they fail fast: no LLM) ───────
     chat.quiesce();
 

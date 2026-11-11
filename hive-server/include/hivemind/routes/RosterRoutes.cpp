@@ -491,9 +491,10 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
         });
 
-    // Cascade delete: threads the agent was in are cleaned up (solo threads
-    // deleted, group threads keep going without the agent), and its routines
-    // are either deleted or moved to another agent via ?reassign_to=<id>.
+    // Cascade delete: every message authored by the agent is removed (including
+    // the zero-participant User Inbox), solo threads are deleted, group threads
+    // keep going without the agent, and its routines are either deleted or moved
+    // to another agent via ?reassign_to=<id>.
         // v2: explicit brain lifecycle on the owning worker (agent_stop is
     // graceful; start = spawn on the owning worker; offline -> 503).
     server.post("/api/agents/:id/start",
@@ -523,7 +524,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.delete_("/api/agents/:id",
-        [&agents, &threads, &hub, &routines, triggers](const OmniNet::HTTP::Request& req,
+        [&agents, &threads, &hub, &chat, &routines, triggers](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -541,6 +542,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 && !agents.get_agent(reassign_to)) {
                 send_error(resp, 400, "reassign target agent not found"); return;
             }
+
+            // Stop late turn results first: cancellation suppresses the final
+            // append, and any flushed partial is removed by the sender-wide
+            // cleanup below. Participant cleanup alone misses the zero-member
+            // User Inbox and retained group/pair history (2026-11-11).
+            chat.cancel_agent_turns(id);
+            const int messages_deleted = threads.delete_messages_from_agent(id);
 
             // 1. Routines: reassign (moving routine-thread participation to
             //    the new owner) or delete.
@@ -619,6 +627,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             send_json(resp, json{
                 {"deleted", true},
                 {"threads_deleted", threads_deleted},
+                {"messages_deleted", messages_deleted},
                 {"threads_left", threads_left},
                 {"routines_deleted", routines_deleted},
                 {"routines_reassigned", routines_reassigned},

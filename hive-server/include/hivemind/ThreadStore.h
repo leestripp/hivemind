@@ -125,6 +125,13 @@ public:
     /// Inbox MAY be cleared (unlike delete) — it is the agent->human
     /// channel and only its history goes. Returns rows removed.
     int clear_messages(const std::string& thread_id);
+
+    /// Delete every agent-authored message by this sender across ALL threads.
+    /// Needed when deleting a roster agent: the User Inbox has no participants,
+    /// and group/pair threads retain their other participants and messages.
+    /// Returns rows removed; user/system messages are never touched.
+    int delete_messages_from_agent(const std::string& sender_id);
+
     bool remove_participant(const std::string& thread_id,
                             const std::string& agent_id);
     bool add_participant(const std::string& thread_id,

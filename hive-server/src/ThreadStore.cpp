@@ -848,6 +848,31 @@ int ThreadStore::clear_messages(const std::string& thread_id) {
     return removed;
 }
 
+int ThreadStore::delete_messages_from_agent(const std::string& sender_id) {
+    sqlite3* db = open_conn();
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "DELETE FROM messages WHERE sender_kind = 'agent' AND sender_id = ?";
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        const std::string error = sqlite3_errmsg(db);
+        sqlite3_close(db);
+        throw std::runtime_error("ThreadStore agent-message delete prepare failed: " +
+                                 error);
+    }
+    bind_text(st, 1, sender_id);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        const std::string error = sqlite3_errmsg(db);
+        sqlite3_finalize(st);
+        sqlite3_close(db);
+        throw std::runtime_error("ThreadStore agent-message delete failed: " +
+                                 error);
+    }
+    const int removed = sqlite3_changes(db);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return removed;
+}
+
 bool ThreadStore::delete_thread(const std::string& id) {
     if (is_user_thread(id)) return false;   // Phase 44: inbox is protected
     sqlite3* db = open_conn();
