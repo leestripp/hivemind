@@ -326,6 +326,12 @@ int main(int argc, char* argv[]) {
                 f = {{"op","task_delta"},{"agent",agent_id},
                      {"task",ev.value("task","")},
                      {"text",ev.value("text","")}};
+            else if (kind == "progress")
+                f = {{"op","task_progress"},{"agent",agent_id},
+                     {"task",ev.value("task","")},
+                     {"kind",ev.value("kind","")},
+                     {"tool",ev.value("tool","")},
+                     {"detail",ev.value("detail",json::object())}};
             // 2026-10-15 (Plan.md): attach_file shipped a file MID-TURN.
             // Promote it to the canonical dir and forward it to the hub
             // immediately — attachments that wait for task_result are

@@ -280,6 +280,7 @@ hive-agent stdout events and the channel op the worker maps them to:
 |----|-----------|
 | `ready` | `agent_status` state=ready |
 | `delta` {task,text} | `task_delta` |
+| `progress` {task,kind,tool,detail} | `task_progress` → live activity timestamps, LLM/tool phase and repeated-tool diagnostics; no tool arguments or output payloads |
 | `message` {task,thread_id,body,error} | `task_result` |
 | `background_done` {process_id,task,thread_id,command,exit_code,stdout,stderr} | `background_done` → targeted system nudge and normal agent turn in the originating thread |
 | `send_agent_message` {target,text} | `agent_msg` |

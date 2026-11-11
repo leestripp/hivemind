@@ -788,10 +788,51 @@ void ChatService::append_delta(const std::string& task_id,
     std::lock_guard<std::mutex> lk(m_);
     auto it = by_task_.find(task_id);
     if (it != by_task_.end()) {
-        auto& p = it->second->partial;
+        auto& turn = it->second;
+        turn->last_activity = std::chrono::steady_clock::now();
+        turn->activity_kind = "assistant_delta";
+        turn->activity_detail.clear();
+        turn->stalled = false;
+        turn->stall_notified = false;
+        auto& p = turn->partial;
         if (p.size() < kMaxPartial)
             p += text.substr(0, kMaxPartial - p.size());
     }
+}
+
+void ChatService::note_progress(const std::string& task_id,
+                                const std::string& kind,
+                                const std::string& tool,
+                                const std::string& detail) {
+    if (kind.empty()) return;
+    std::lock_guard<std::mutex> lk(m_);
+    auto it = by_task_.find(task_id);
+    if (it == by_task_.end() || it->second->done ||
+        it->second->cancelling)
+        return;
+    auto& turn = it->second;
+    turn->last_activity = std::chrono::steady_clock::now();
+    turn->activity_kind = kind;
+    turn->activity_detail = detail;
+    // Bound worker-supplied diagnostic text without splitting UTF-8.
+    if (turn->activity_detail.size() > 512) {
+        size_t cut = 512;
+        while (cut > 0 &&
+               (static_cast<unsigned char>(turn->activity_detail[cut]) &
+                0xC0) == 0x80)
+            --cut;
+        turn->activity_detail.resize(cut);
+    }
+    if (kind == "tool_call" && !tool.empty()) {
+        if (turn->last_tool == tool)
+            ++turn->repeated_tool_calls;
+        else {
+            turn->last_tool = tool;
+            turn->repeated_tool_calls = 1;
+        }
+    }
+    turn->stalled = false;
+    turn->stall_notified = false;
 }
 
 void ChatService::post_turn_attachment(
@@ -799,6 +840,7 @@ void ChatService::post_turn_attachment(
         const std::string& agent_id, const std::string& attachments_json) {
     if (attachments_json.empty() || attachments_json == "[]") return;
     if (thread_id.empty() || agent_id.empty()) return;
+    note_progress(task_id, "attachment");
     try {
         if (!threads_.get_thread(thread_id)) return;   // deleted mid-turn
         const std::string msg_id = threads_.add_message(
@@ -1100,14 +1142,14 @@ ChatService::agent_activity() {
 
 void ChatService::quiesce() { stopping_ = true; }
 
-// ── Phase 39 H3: turn watchdog ───────────────────────────────────────
+// ── Turn maintenance and stall observation ──────────────────────────
 
-int ChatService::turn_timeout_s() {
+int ChatService::stall_notify_s() {
     static const int v = [] {
-        const char* e = std::getenv("HIVEMIND_TURN_TIMEOUT_S");
-        if (!e || !*e) return 1200;
+        const char* e = std::getenv("HIVEMIND_STALL_NOTIFY_S");
+        if (!e || !*e) return 300;
         const int n = std::atoi(e);
-        return n >= 0 ? n : 1200;
+        return n >= 0 ? n : 300;
     }();
     return v;
 }
@@ -1123,7 +1165,8 @@ int ChatService::cancel_grace_s() {
 }
 
 void ChatService::start_watchdog() {
-    if (turn_timeout_s() <= 0) return;   // disabled
+    // Even with notifications disabled this thread must retain explicit-
+    // cancel recovery and TTL maintenance (2026-11-11 Option 4).
     watchdog_ = std::thread([this] { watchdog_loop(); });
 }
 
@@ -1137,118 +1180,144 @@ void ChatService::watchdog_loop() {
         // 60s tick, but wake promptly on shutdown.
         for (int i = 0; i < 60 && !stopping_; ++i)
             std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (stopping_) break;
+        if (!stopping_) watchdog_sweep(std::chrono::steady_clock::now());
+    }
+}
 
-        const int timeout = turn_timeout_s();
-        struct Victim { std::string task_id, thread_id, agent_id;
-                        bool was_cancelling = false;
-                        std::shared_ptr<LiveTurn> turn; };
-        std::vector<Victim> victims;
+void ChatService::watchdog_sweep(
+        const std::chrono::steady_clock::time_point now) {
+    struct Victim {
+        std::string task_id, thread_id, agent_id;
+        std::shared_ptr<LiveTurn> turn;
+    };
+    struct Stall {
+        std::string thread_id, agent_id, agent_name, activity, tool;
+        int quiet_s = 0;
+        int repeated_tool_calls = 0;
+        std::shared_ptr<LiveTurn> turn;
+    };
+    std::vector<Victim> victims;
+    std::vector<Victim> retired;
+    std::vector<Stall> stalls;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        for (auto& [tid, vec] : live_) {
+            // Terminal turns are safe to drop here. Worker-offline
+            // deferred dummies must not linger until a hub restart.
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                    [](const auto& t) { return t->done; }),
+                vec.end());
+            for (auto& t : vec) {
+                if (t->done || t->task_id.empty() || t->reply_posted)
+                    continue;
+                if (t->cancelling) {
+                    // Only an EXPLICIT cancel is force-retired. Its grace
+                    // path unblocks the serial queue if the worker never
+                    // confirms; ordinary age/quiet never reaches this path.
+                    if (t->cancel_started ==
+                        std::chrono::steady_clock::time_point{})
+                        t->cancel_started = now;
+                    const auto cancelling_s = std::chrono::duration_cast<
+                        std::chrono::seconds>(now - t->cancel_started).count();
+                    if (cancelling_s >= cancel_grace_s())
+                        victims.push_back(
+                            {t->task_id, t->thread_id, t->agent_id, t});
+                    continue;
+                }
+                const int notify_s = stall_notify_s();
+                const auto quiet_s = std::chrono::duration_cast<
+                    std::chrono::seconds>(now - t->last_activity).count();
+                if (notify_s <= 0 || t->stall_notified || quiet_s < notify_s)
+                    continue;
+                t->stalled = true;
+                t->stall_notified = true;
+                stalls.push_back({t->thread_id, t->agent_id, t->agent_name,
+                                  t->activity_kind, t->last_tool,
+                                  static_cast<int>(quiet_s),
+                                  t->repeated_tool_calls, t});
+            }
+        }
+    }
+
+    for (const auto& v : victims) {
+        {
+            // A completion may have raced the collection sweep. Never
+            // corrupt a successful turn with a late cancel-retirement.
+            std::lock_guard<std::mutex> lk(m_);
+            if (v.turn->done) continue;
+        }
+        std::fprintf(stderr,
+            "[chat] WATCHDOG: explicit cancel %.16s on agent %.8s "
+            "unconfirmed after grace — retiring\n",
+            v.task_id.c_str(), v.agent_id.c_str());
+        if (auto agent = agents_.get_agent(v.agent_id)) {
+            try { hub_.cancel_agent(*agent, v.thread_id); }
+            catch (const std::exception& e) {
+                std::fprintf(stderr,
+                    "[chat] ERROR repeating cancel for %.16s: %s\n",
+                    v.task_id.c_str(), e.what());
+            }
+        }
+        flush_partial(*v.turn);
+        try {
+            threads_.add_message(v.thread_id, "system", "hivemind",
+                "*(the cancel was never confirmed by the worker — "
+                "turn retired by the hub watchdog)*");
+        } catch (const std::exception& e) {
+            std::fprintf(stderr,
+                "[chat] ERROR recording cancel retirement %.16s: %s\n",
+                v.task_id.c_str(), e.what());
+        }
+        std::lock_guard<std::mutex> lk(m_);
+        auto it = live_.find(v.thread_id);
+        if (it != live_.end())
+            for (auto& t : it->second)
+                if (t->task_id == v.task_id) t->done = true;
+        by_task_.erase(v.task_id);
+        retired.push_back(v);
+    }
+    for (const auto& v : retired) {
+        for (auto& d : deliveries_.find_all_by_task(v.task_id))
+            deliveries_.mark_error(d.id, "cancel unconfirmed (watchdog)");
+        drain_agent(v.agent_id);
+    }
+
+    for (const auto& s : stalls) {
         {
             std::lock_guard<std::mutex> lk(m_);
-            const auto now = std::chrono::steady_clock::now();
-            for (auto& [tid, vec] : live_) {
-                // 2026-10-22 (improvements sweep): reap terminal turns.
-                // The worker-offline deferred path leaves done=true
-                // dummies in live_ (kept for activity()); if the thread
-                // never dispatches again they would linger until hub
-                // restart. Terminal == safe to drop here.
-                vec.erase(std::remove_if(vec.begin(), vec.end(),
-                        [](const auto& t) { return t->done; }),
-                    vec.end());
-                for (auto& t : vec) {
-                    // reply_posted turns are mid-completion; their
-                    // result is on the wire (bug sweep 2, see
-                    // cancel_agent_turns).
-                    if (t->done || t->task_id.empty() || t->reply_posted)
-                        continue;
-                    const auto now_s = now;
-                    const bool already_cancelling = t->cancelling;
-                    if (t->cancelling) {
-                        // Cancel never confirmed by the worker (dropped task
-                        // frame, dead worker, idle brain) — retire after the
-                        // grace period or the turn wedges busy forever.
-                        if (t->cancel_started ==
-                            std::chrono::steady_clock::time_point{})
-                            t->cancel_started = now_s;
-                        const auto cs = std::chrono::duration_cast<
-                            std::chrono::seconds>(now_s - t->cancel_started).count();
-                        if (cs < cancel_grace_s()) continue;
-                    } else {
-                        const auto age = std::chrono::duration_cast<
-                            std::chrono::seconds>(now_s - t->started).count();
-                        if (age < timeout) continue;
-                        t->cancelling = true;
-                        t->cancel_started = now_s;
-                        if (!t->task_id.empty())
-                            cancelled_tasks_.insert(t->task_id);
-                    }
-                    victims.push_back({t->task_id, t->thread_id, t->agent_id,
-                                       already_cancelling, t});
-                }
-            }
+            // Progress after collection clears stall_notified. Do not post
+            // a stale warning for a turn that has resumed or completed.
+            if (s.turn->done || !s.turn->stall_notified) continue;
         }
-        for (const auto& v : victims) {
-            {
-                // 2026-10-22 (bug sweep B3): complete_turn may have
-                // finished this turn between our collection sweep and
-                // now (its result frame was already on the wire).
-                // Acting anyway posted a bogus "timed out" system
-                // message and marked a SUCCESSFUL turn's delivery rows
-                // error. Recheck under m_ before touching anything.
-                std::lock_guard<std::mutex> lk(m_);
-                if (v.turn->done) continue;
-            }
+        std::string where = s.activity.empty() ? "unknown" : s.activity;
+        if (!s.tool.empty()) where += " " + s.tool;
+        if (s.repeated_tool_calls > 1)
+            where += ", " + std::to_string(s.repeated_tool_calls) +
+                     " consecutive calls";
+        const std::string notice =
+            "*(" + s.agent_name + " may be stalled: no observable progress "
+            "for " + std::to_string(s.quiet_s) + "s (last: " + where +
+            "). The turn is still running and will NOT be cancelled "
+            "automatically. Use Stop if you want to interrupt it.)*";
+        try {
+            threads_.add_message(s.thread_id, "system", "hivemind", notice);
             std::fprintf(stderr,
-                "[chat] WATCHDOG: turn %.16s on agent %.8s %s — retiring\n",
-                v.task_id.c_str(), v.agent_id.c_str(),
-                v.was_cancelling
-                    ? "cancel unconfirmed by worker (grace elapsed)"
-                    : ("exceeded " + std::to_string(timeout) + "s").c_str());
-            // Abort worker-side so the agent's serial queue unblocks.
-            if (auto agent = agents_.get_agent(v.agent_id)) {
-                try { hub_.cancel_agent(*agent, v.thread_id); }
-                catch (...) {}
-            }
-            // Phase 52: preserve whatever the agent said before dying.
-            // (Cancel-path turns were already flushed by cancel_thread;
-            // flush_partial is idempotent via the flag.)
-            if (v.turn) flush_partial(*v.turn);
-            // Tell the thread what happened, then retire the turn.
-            try {
-                threads_.add_message(v.thread_id, "system", "hivemind",
-                    v.was_cancelling
-                        ? "*(the cancel was never confirmed by the worker — "
-                          "turn retired by the hub watchdog)*"
-                        : "*(a turn timed out after " + std::to_string(timeout) +
-                          "s and was cancelled — hub watchdog)*");
-            } catch (...) {}
-            std::lock_guard<std::mutex> lk(m_);
-            auto it = live_.find(v.thread_id);
-            if (it != live_.end())
-                for (auto& t : it->second)
-                    if (t->task_id == v.task_id) t->done = true;
-            by_task_.erase(v.task_id);
-        }
-        // Phase 66b: a force-retired turn FAILS its delivery row —
-        // visible in message_status, not tombstoned-silent — and the
-        // freed agent drains its next queued wake.
-        for (const auto& v : victims) {
-            for (auto& d : deliveries_.find_all_by_task(v.task_id))
-                deliveries_.mark_error(d.id,
-                    v.was_cancelling ? "cancel unconfirmed (watchdog)"
-                                     : "turn timeout (watchdog)");
-            drain_agent(v.agent_id);
-        }
-        // TTL sweeps: old queued wakes and relay links become visible
-        // terminal states instead of silently vanishing.
-        const int expired = deliveries_.expire_queued(wake_ttl_s());
-        if (expired > 0)
+                "[chat] STALL: agent %.8s task turn quiet for %ds; "
+                "notification only\n", s.agent_id.c_str(), s.quiet_s);
+        } catch (const std::exception& e) {
             std::fprintf(stderr,
-                "[delivery] %d queued wake(s) expired (ttl %ds)\n",
-                expired, wake_ttl_s());
-        deliveries_.expire_relays(static_cast<int>(relay_ttl().count()));
+                "[chat] ERROR recording stall for agent %.8s: %s\n",
+                s.agent_id.c_str(), e.what());
+        }
     }
+
+    // TTL sweeps remain independent of stall-notification settings.
+    const int expired = deliveries_.expire_queued(wake_ttl_s());
+    if (expired > 0)
+        std::fprintf(stderr,
+            "[delivery] %d queued wake(s) expired (ttl %ds)\n",
+            expired, wake_ttl_s());
+    deliveries_.expire_relays(static_cast<int>(relay_ttl().count()));
 }
 
 void ChatService::post_dispatch_deferred_notice(

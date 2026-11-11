@@ -156,6 +156,12 @@ an agent a message exists) are durable rows in `deliveries.db`
 - **Busy receivers stay `queued`** — the hub dispatches one wake per idle
   transition (turn completion / agent-ready / watchdog), so a wake can
   never be tombstoned by the turn watchdog while queued agent-side.
+- **Turn age never cancels work** — the hub watchdog performs TTL and
+  explicit-cancel maintenance only. `HIVEMIND_STALL_NOTIFY_S` (default
+  300, 0 disables notices) adds one visible warning after a quiet period;
+  it does not change delivery state or interrupt the agent. LLM/tool
+  progress resets the quiet timer. Worker death and explicit Stop retain
+  their existing bounded failure/recovery paths.
 - **Hub restarts requeue orphans** (`dispatched → queued` on boot) and
   draining resumes as agents report ready. Terminal rows prune after 7d.
 - **Idempotency** per (target, source message) replaces content-window

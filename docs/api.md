@@ -13,7 +13,7 @@ except `/api/health`.
 | `GET /api/shares?agent=` | agent-to-agent file shares (2026-10-11, admin scope): metadata audit surface for the `share_file` tool — sender/target/size/state (`active`/`revoked`)/fetch counters; blob contents never transit the hub (staged on the sender's worker) |
 | `GET /api/threads/:id/messages?after=` | incremental poll |
 | `POST /api/threads/:id/messages` | user message → hub routes a `task` to each agent participant's worker. Optional `"source": "user"|"voice"` (message header, Plan.md); anything else → 400 |
-| `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags) — fed by worker `task_delta` events |
+| `GET /api/threads/:id/activity` | live turn state (streamed deltas, busy flags, elapsed/quiet time, LLM/tool phase, repeated-tool count and warning-only `stalled`) — fed by worker `task_delta`/`task_progress` events |
 | `POST /api/threads/:id/cancel` | cancel in-flight turns + mute agent fan-in on the thread (~10 min) — the right-click Stop path |
 | `GET /api/threads` | each thread carries `unread`: non-user messages newer than the persisted `user` read mark (no mark → all) — the client's badge count, survives restarts. `unread` is gated to user-relevant threads (2026-10-01): kind `user`/kind `dm`, or any group the user has posted in — pure agent-to-agent threads always report 0. Also `group_id`: custom thread-group id or null (= smart group derived from `kind`) |
 | `GET /api/thread-groups` | user's custom thread groups (id/name/position/member_count) |
@@ -42,7 +42,7 @@ Both also accept `host_agent`; see [host-agents.md](host-agents.md).
 The hub returns 409 when the worker lacks the `host_agents` capability.
 Runtime selection needs no command-approval or typed-acknowledgment field.
 | `DELETE /api/agents/:id` | remove (worker reaps the container); cancels its live turns and deletes **all** agent-authored messages across the User Inbox, DMs, group and pair threads. User, system and other agents’ messages are preserved; the response includes `messages_deleted` |
-| `GET /api/agents/:id/activity` | per-agent live state |
+| `GET /api/agents/:id/activity` | per-agent live state; `/api/agents/activity` exposes the same progress diagnostics across all agents |
 
 Moving an agent to another worker = PATCH worker; the hub re-homes the
 agent (old worker stops it, new worker spawns it, history volume is
@@ -55,6 +55,16 @@ a 32g cap costs nothing until used. On PATCH, `""`/`-1` = keep current,
 `"default"`/`0` = reset to the worker default. The worker applies them
 at container create AND reconciles live containers in place via
 `podman update` — no recreate needed when limits change.
+
+## Long turns and stall notifications
+
+There is no wall-clock turn timeout. A legitimate turn may run for hours.
+After `HIVEMIND_STALL_NOTIFY_S` seconds without an assistant delta or
+LLM/tool lifecycle event (default 300), the hub posts a system warning and
+sets `stalled:true`; it leaves the turn and its delivery running. Fresh
+progress clears the flag. The warning is advisory—use the normal Stop
+operation if interruption is actually wanted. Setting the interval to 0
+disables warnings but not explicit-cancel recovery or queue maintenance.
 
 ## Workers
 

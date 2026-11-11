@@ -611,6 +611,14 @@ void HubRouter::on_worker_frame(const std::string& worker,
                                        frame.value("text", ""));
         return;
     }
+    if (op == "task_progress") {
+        if (chat_)
+            chat_->note_progress(frame.value("task", ""),
+                                 frame.value("kind", ""),
+                                 frame.value("tool", ""),
+                                 frame.value("detail", json::object()).dump());
+        return;
+    }
     if (op == "trigger_req") {
         handle_trigger_req(worker, agent_id, frame);
         return;

@@ -48,6 +48,15 @@ public:
         std::string worker;           // placement, for the exec audit row
         std::chrono::steady_clock::time_point started =
             std::chrono::steady_clock::now();  // turn start, for avg_ms
+        // Activity is diagnostic only. Elapsed time must never be treated
+        // as evidence that a productive turn is wedged (2026-11-11).
+        std::chrono::steady_clock::time_point last_activity = started;
+        std::string activity_kind = "dispatched";
+        std::string activity_detail;
+        std::string last_tool;
+        int repeated_tool_calls = 0;
+        bool stalled = false;
+        bool stall_notified = false;
         bool done = false;
         bool cancelling = false;
         // Phase 52: partial already posted to the thread (cancel /
@@ -142,6 +151,13 @@ public:
 
     // -- HubRouter callbacks (worker channel events) --------------------
     void append_delta(const std::string& task_id, const std::string& text);
+    void note_progress(const std::string& task_id, const std::string& kind,
+                       const std::string& tool = "",
+                       const std::string& detail = "");
+
+    // Run one maintenance/stall-notification sweep. The explicit clock
+    // makes the no-age-kill and cancel-grace policies deterministic to test.
+    void watchdog_sweep(std::chrono::steady_clock::time_point now);
     /// 2026-10-15 (Plan.md): an attach_file attachment shipped MID-TURN.
     /// Posts the file(s) as their own complete message immediately so
     /// they survive turn interrupts (watchdog/cancel) — attachments that
@@ -290,19 +306,17 @@ private:
     std::unordered_map<std::string, std::shared_ptr<LiveTurn>> by_task_;
     std::atomic<bool> stopping_{false};
 
-    // Phase 39 H3 — turn watchdog. hive-agent runs tasks serially per
-    // agent, so one hung turn strands every later task to that agent;
-    // hub-side there was NO timeout at all (a wedged worker task sat in
-    // by_task_ forever, 2026-09-03 incident). The watchdog sweeps every
-    // 60s and force-cancels turns older than HIVEMIND_TURN_TIMEOUT_S
-    // (default 1200; 0 disables). cancelled_tasks_ tombstones tell
-    // complete_turn to silently drop a late result for a cancelled task
-    // instead of taking the H2 restart-recovery path.
+    // Maintenance watchdog. Long/quiet turns are NOT killed automatically:
+    // progress is reported and a quiet turn earns one visible warning per
+    // active period. Explicit cancels still get bounded retirement, and
+    // relay/read-mark TTLs still expire. Env: HIVEMIND_STALL_NOTIFY_S
+    // (default 300s, 0 disables notifications only). cancelled_tasks_
+    // tombstones still guard explicit-cancel completion races.
     std::thread watchdog_;
     std::unordered_set<std::string> cancelled_tasks_;
     void start_watchdog();
     void watchdog_loop();
-    static int turn_timeout_s();   // env HIVEMIND_TURN_TIMEOUT_S, def 1200
+    static int stall_notify_s();   // env HIVEMIND_STALL_NOTIFY_S, def 300
     // Grace for a cancel to be confirmed by the worker before the watchdog
     // force-retires the turn. env HIVEMIND_CANCEL_GRACE_S, def 90.
     static int cancel_grace_s();

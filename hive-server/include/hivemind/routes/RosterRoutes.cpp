@@ -55,6 +55,23 @@ json agent_json(const RosterAgent& a) {
     };
 }
 
+json turn_diagnostics_json(const ChatService::LiveTurn& t) {
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        now - t.started).count();
+    const auto quiet = std::chrono::duration_cast<std::chrono::seconds>(
+        now - t.last_activity).count();
+    return {
+        {"elapsed_s", elapsed},
+        {"last_activity", t.activity_kind},
+        {"last_activity_age_s", quiet},
+        {"activity_detail", t.activity_detail},
+        {"last_tool", t.last_tool},
+        {"repeated_tool_calls", t.repeated_tool_calls},
+        {"stalled", t.stalled},
+    };
+}
+
 json thread_json(const Thread& t) {
     return {
         {"id", t.id}, {"title", t.title}, {"kind", t.kind},
@@ -360,11 +377,14 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
     server.get("/api/agents/activity",
         [&chat](const OmniNet::HTTP::Request&, OmniNet::HTTP::Response& resp) {
             json m = json::object();
-            for (auto& [aid, t] : chat.agent_activity())
-                m[aid] = json{{"busy", true},
+            for (auto& [aid, t] : chat.agent_activity()) {
+                auto j = json{{"busy", true},
                               {"cancelling", t.cancelling},
                               {"agent_name", t.agent_name},
                               {"partial_len", (int)t.partial.size()}};
+                j.update(turn_diagnostics_json(t));
+                m[aid] = std::move(j);
+            }
             send_json(resp, json{{"agents", m}});
         });
 
@@ -1200,11 +1220,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
             }
             json turns = json::array();
             for (auto& t : chat.activity(seg[2])) {
-                turns.push_back({
+                auto j = json{
                     {"agent_id", t.agent_id}, {"agent_name", t.agent_name},
                     {"partial", t.partial}, {"error", t.error},
                     {"done", t.done}, {"cancelling", t.cancelling},
-                });
+                };
+                j.update(turn_diagnostics_json(t));
+                turns.push_back(std::move(j));
             }
             send_json(resp, json{{"busy", chat.busy(seg[2])},
                                  {"turns", turns}});

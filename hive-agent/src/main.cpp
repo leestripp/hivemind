@@ -297,15 +297,55 @@ public:
         emit({{"ev", "delta"}, {"task", current_task()}, {"text", std::string(text)}});
     }
 
+    void progress(std::string_view kind, std::string_view tool = {},
+                  const json& detail = json::object()) noexcept {
+        try {
+            json ev = {{"ev", "progress"}, {"task", current_task()},
+                       {"kind", std::string(kind)}};
+            if (!tool.empty()) ev["tool"] = std::string(tool);
+            if (!detail.empty()) ev["detail"] = detail;
+            emit(ev);
+        } catch (const std::exception& e) {
+            // Observability must never terminate the turn it monitors.
+            log_err(std::string("progress event failed: ") + e.what());
+        } catch (...) {
+            log_err("progress event failed: unknown error");
+        }
+    }
+
     void on_tool_call(std::string_view name,
                       const nlohmann::json& args) noexcept override {
         replies_.on_tool_call(name, args);
+        progress("tool_call", name);
     }
 
     void on_tool_result(std::string_view name,
                         std::string_view /*call_id*/,
                         const nlohmann::json& result) noexcept override {
         replies_.on_tool_result(name, result);
+        progress("tool_result", name);
+    }
+
+    void on_tool_progress(std::string_view name,
+                          const nlohmann::json& update) noexcept override {
+        json detail = json::object();
+        if (update.is_object()) {
+            for (const char* key : {"stage", "percent"})
+                if (update.contains(key)) detail[key] = update[key];
+        }
+        progress("tool_progress", name, detail);
+    }
+
+    void on_llm_wait_started() noexcept override {
+        progress("llm_wait_started");
+    }
+
+    void on_llm_response_started() noexcept override {
+        progress("llm_response_started");
+    }
+
+    void on_llm_request_finished() noexcept override {
+        progress("llm_request_finished");
     }
 
     // Brain state machine -> roster presence. hive-brain notifies every
@@ -317,11 +357,13 @@ public:
         if (st == "done" || st == "cancelled") st = "ready";
         if (st == "idle") return;   // constructed/reset noise; fleet already knows
         emit({{"ev", "status"}, {"state", st}});
+        progress("state_change", {}, {{"state", st}});
     }
 
     void on_error(hive::ErrorKind /*kind*/, std::string_view msg,
                   bool will_retry) noexcept override {
         errored_ = true;
+        progress("llm_error", {}, {{"will_retry", will_retry}});
         emit({{"ev", "log"},
               {"level", will_retry ? "warn" : "error"},
               {"text", std::string(msg)}});
