@@ -174,9 +174,12 @@ int main() {
         ch.stream_close(sid);
 
         b.close();
-        // NOTE: OmniNet client close() does not wake a readLoop blocked in
-        // recv -- detach instead of joining (thread dies at process exit).
-        rl.detach();
+        // close() sends the WebSocket close frame but deliberately leaves the
+        // TCP socket open. Wake the blocked receive explicitly, then join
+        // before `b` is destroyed: a detached readLoop retains `this` and
+        // otherwise races the destructor (observed as a null virtual call).
+        b.m_socket->shutdown(SHUT_RDWR);
+        rl.join();
     }
 
     ch.stop();
