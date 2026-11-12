@@ -165,9 +165,9 @@ TEST(post_with_body) {
 }
 
 // ============================================================================
-// Test: 404 returns HttpStatus error
+// Test: 404 returns a response with ok() == false
 // ============================================================================
-TEST(http_404_error) {
+TEST(http_404_response) {
     if (!network_available()) {
         std::cerr << "SKIP: network not available\n";
         return 0;
@@ -181,9 +181,10 @@ TEST(http_404_error) {
     auto fut = session.submit(req);
     auto result = fut.get();
 
-    CHECK(!result.has_value());
-    if (!result) {
-        CHECK(result.error() == HttpError::HttpStatus);
+    CHECK(result.has_value());
+    if (result) {
+        CHECK_EQ(result->status_code, 404L);
+        CHECK(!result->ok());
     }
     return 0;
 }
@@ -358,7 +359,7 @@ int main() {
     local_failures += test_basic_get();
     local_failures += test_get_with_bearer_token();
     local_failures += test_post_with_body();
-    local_failures += test_http_404_error();
+    local_failures += test_http_404_response();
     local_failures += test_invalid_url();
     local_failures += test_batch_parallel();
     local_failures += test_cancellation_via_stop_token();
