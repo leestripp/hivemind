@@ -35,6 +35,10 @@ std::vector<std::string> toSpeechSentences(std::string_view raw);
 // fillers dropped). Used for full-note playback.
 std::string forSpeech(std::string_view raw);
 
+// True only for the hub's synthetic attachment-only message body. It is not
+// user-facing prose and must not enter final narration or its prefix credit.
+bool isAttachmentOnlyBody(std::string_view body);
+
 // Full-message playback: preserve sentence-sized queueing, splitting only
 // oversized sentences. Splits prefer whitespace and never cut a UTF-8
 // sequence. maxBytes is a byte budget, not a Unicode character count.

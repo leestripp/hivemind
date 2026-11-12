@@ -758,7 +758,8 @@ void VoiceView::inboxWatchTick() {
             for (const auto& m : api_->messagesAfter(thread_id_, lastMessageId_)) {
                 lastMessageId_ = m.id;
                 dmConsumed = true;
-                if (m.senderKind == "agent" && !m.body.empty()) {
+                if (m.senderKind == "agent" && !m.body.empty() &&
+                        !speech::isAttachmentOnlyBody(m.body)) {
                     // Accumulate into the turn's final text and speak only
                     // the unheard tail (credited against the live narration).
                     // Per-message credit — never re-reads earlier messages.
@@ -829,7 +830,8 @@ void VoiceView::pollTick() {
             bool appended = false;
             for (const auto& m : api_->messagesAfter(thread_id_, lastMessageId_)) {
                 lastMessageId_ = m.id;
-                if (m.senderKind == "agent" && !m.body.empty()) {
+                if (m.senderKind == "agent" && !m.body.empty() &&
+                        !speech::isAttachmentOnlyBody(m.body)) {
                     if (!finalText_.empty()) finalText_ += ' ';
                     finalText_ += trimStr(m.body);
                     appended = true;

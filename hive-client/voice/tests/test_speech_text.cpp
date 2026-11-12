@@ -103,3 +103,23 @@ TEST_CASE("final narration credit handles repeated prefixes and no match") {
     REQUIRE(finalNarrationCredit("", "anything") == 0);
     REQUIRE(finalNarrationCredit("Final answer", "") == 0);
 }
+
+TEST_CASE("attachment-only placeholders cannot poison final narration credit") {
+    const std::string report = "Wooden barrel is done and delivered.";
+    const std::string acknowledgement = " Workspace mapping confirmed.";
+    const std::string live = report;
+    std::string finalText;
+    const std::string bodies[] = {"*(attached a file)*", report,
+                                  acknowledgement};
+    for (const std::string& body : bodies) {
+        if (isAttachmentOnlyBody(body)) continue;
+        if (!finalText.empty() && body.front() != ' ') finalText += ' ';
+        finalText += body;
+    }
+
+    REQUIRE(isAttachmentOnlyBody("  *(attached a file)*\n"));
+    REQUIRE_FALSE(isAttachmentOnlyBody("Report with *(attached a file)*"));
+    REQUIRE(finalText == report + acknowledgement);
+    REQUIRE(finalNarrationCredit(finalText, live) == report.size());
+    REQUIRE(finalText.substr(report.size()) == acknowledgement);
+}

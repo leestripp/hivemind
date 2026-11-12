@@ -281,6 +281,14 @@ std::size_t commonPrefixLen(std::string_view a, std::string_view b) {
     return i;
 }
 
+bool isAttachmentOnlyBody(const std::string_view body) {
+    constexpr std::string_view placeholder = "*(attached a file)*";
+    const std::size_t first = body.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return false;
+    const std::size_t last = body.find_last_not_of(" \t\r\n");
+    return body.substr(first, last - first + 1) == placeholder;
+}
+
 std::size_t finalNarrationCredit(const std::string_view final_text,
                                  const std::string_view narrated_live) {
     if (final_text.empty()) return 0;
