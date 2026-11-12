@@ -2321,6 +2321,37 @@ AgentState LLMClient::run_agent_cycle(const std::string& api_url,
             ThinkTagFilter::strip(message["content"].get<std::string>());
     }
 
+    // 2026-11-12 Forge incident: Kimi can finish with `repeat` and no
+    // assistant content or tool calls. Persisting that response poisoned
+    // every subsequent request (HTTP 400 at the old history position).
+    // Treat it as a failed model response, never as conversation history.
+    if (Messages::is_empty_assistant_message(message)) {
+        const std::string finish_reason = message.value("finish_reason", "unspecified");
+        const std::string signature = "empty_assistant|" + finish_reason;
+        const std::string detail =
+            "Provider returned an empty assistant message (finish_reason=" +
+            finish_reason + "); response discarded before history";
+
+        if (fatal_breaker_should_end_turn(signature)) {
+            emit_error(hive::ErrorKind::ServerError,
+                       "Unrecoverable repeated empty assistant responses - "
+                       "turn ended without saving the invalid responses.",
+                       /*will_retry=*/false);
+            return AgentState::DONE;
+        }
+
+        emit_error(hive::ErrorKind::ServerError, detail, /*will_retry=*/true);
+        messages.push_back({
+            {"role", "user"},
+            {"content", "[SYSTEM ERROR] The provider returned an empty assistant "
+                        "response (finish_reason=" + finish_reason + "). It was not "
+                        "saved. Respond with non-empty text or a valid tool call; "
+                        "do not repeat the previous response."}
+        });
+        if (messages_) messages_->mark_dirty();
+        return AgentState::ACT;
+    }
+
     // Add the assistant's message to history
     messages.push_back(message);
     // PERSIST-DIRTY: raw-reference push - keep the flush worker in the

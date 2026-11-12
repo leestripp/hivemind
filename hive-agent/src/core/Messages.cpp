@@ -1955,6 +1955,23 @@ std::string chain_safe_str(const json& j, const char* key) {
 
 } // namespace
 
+bool Messages::is_empty_assistant_message(const json& msg) {
+    if (!msg.is_object() || chain_safe_str(msg, "role") != "assistant") {
+        return false;
+    }
+
+    const auto has_payload = [&msg](const char* key) {
+        const auto it = msg.find(key);
+        if (it == msg.end() || it->is_null()) return false;
+        if (it->is_string()) return !it->get_ref<const std::string&>().empty();
+        if (it->is_array() || it->is_object()) return !it->empty();
+        return true;
+    };
+
+    return !has_payload("content") && !has_payload("audio_content") &&
+           !has_payload("tool_calls");
+}
+
 json Messages::sanitize_assistant_message(const json& msg,
                                             const std::unordered_set<std::string>& tool_result_ids) const {
     if (!msg.is_object() || !msg.contains("tool_calls")) return msg;
@@ -2069,6 +2086,17 @@ json Messages::sanitize_message_chain(const json& msgs) const {
         open_block.clear();
         answered_in_block.clear();
 
+        // 2026-11-12 Forge incident: a repeat-finished response persisted
+        // as {role:assistant, content:"", audio_content:""}. Kimi rejected
+        // every later request at that history position. Empty assistant
+        // entries are not responses and must never reach the provider.
+        if (is_empty_assistant_message(msg)) {
+            LOG_CERR(INFO, "[Messages] Dropped empty assistant chain entry at index "
+                           << i << " (finish_reason="
+                           << chain_safe_str(msg, "finish_reason") << ")" << '\n');
+            continue;
+        }
+
         if (role == "assistant" && msg.contains("tool_calls")
             && msg["tool_calls"].is_array()) {
             // Collect the ids answered by the contiguous run of tool
@@ -2082,7 +2110,9 @@ json Messages::sanitize_message_chain(const json& msgs) const {
             }
             // Prune tool_calls that have no adjacent result or invalid args.
             json sanitized = sanitize_assistant_message(msg, adjacent_result_ids);
-            if (sanitized.contains("content") || sanitized.contains("tool_calls")) {
+            // Pruning an unanswered tool call can leave the same empty
+            // assistant shape, even when the incoming entry had tool_calls.
+            if (!is_empty_assistant_message(sanitized)) {
                 result.push_back(sanitized);
                 if (sanitized.contains("tool_calls")) {
                     for (const auto& tc : sanitized["tool_calls"]) {

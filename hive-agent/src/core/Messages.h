@@ -532,6 +532,16 @@ public:
      * @return vector of pending tool call IDs
      */
     std::vector<std::string> get_pending_tool_ids() const;
+
+    /**
+     * @brief True for an assistant message with no provider-sendable payload
+     *
+     * Empty content is valid when the assistant carries tool calls or audio;
+     * reasoning metadata alone is not a substitute for a response. Keeping
+     * this invariant in one place prevents response ingestion and history
+     * sanitization from disagreeing about what the provider will accept.
+     */
+    static bool is_empty_assistant_message(const json& message);
     
     /**
      * @brief Sanitize an assistant message (validate tool_calls arguments,

@@ -618,3 +618,61 @@ TEST_SUITE("sanitize_message_chain never throws (SANITIZE-NOTHROW)") {
         cleanup_test_project(proj);
     }
 }
+
+TEST_SUITE("empty assistant response containment (2026-11-12 Forge incident)") {
+
+    TEST_CASE("repeat-finished empty assistant is removed before provider replay") {
+        auto proj = create_test_project();
+        auto msgs = create_test_messages(proj);
+
+        const json empty_repeat = {
+            {"role", "assistant"},
+            {"content", ""},
+            {"audio_content", ""},
+            {"finish_reason", "repeat"},
+        };
+        const json chain = json::array({
+            make_msg("system", "sys"),
+            make_msg("user", "build the barrel"),
+            empty_repeat,
+            make_msg("user", "what happened?"),
+        });
+
+        const json out = msgs.sanitize_message_chain(chain);
+        REQUIRE(out.size() == 3);
+        CHECK(roles_of(out) == std::vector<std::string>({"system", "user", "user"}));
+        CHECK(std::none_of(out.begin(), out.end(), [](const json& msg) {
+            return Messages::is_empty_assistant_message(msg);
+        }));
+        cleanup_test_project(proj);
+    }
+
+    TEST_CASE("pruning an unanswered call cannot leave an empty assistant") {
+        auto proj = create_test_project();
+        auto msgs = create_test_messages(proj);
+
+        json assistant = make_assistant_tc("UNANSWERED");
+        assistant["content"] = "";
+        const json chain = json::array({
+            make_msg("user", "hi"),
+            assistant,
+            make_msg("user", "continue"),
+        });
+
+        const json out = msgs.sanitize_message_chain(chain);
+        REQUIRE(out.size() == 2);
+        CHECK(roles_of(out) == std::vector<std::string>({"user", "user"}));
+        cleanup_test_project(proj);
+    }
+
+    TEST_CASE("tool calls and audio still make an assistant non-empty") {
+        CHECK(!Messages::is_empty_assistant_message(make_assistant_tc("VALID")));
+        CHECK(!Messages::is_empty_assistant_message(json{
+            {"role", "assistant"}, {"content", ""}, {"audio_content", "audio"},
+        }));
+        CHECK(!Messages::is_empty_assistant_message(make_msg("assistant", "answer")));
+        CHECK(Messages::is_empty_assistant_message(json{
+            {"role", "assistant"}, {"content", ""}, {"reasoning_content", "thought"},
+        }));
+    }
+}
