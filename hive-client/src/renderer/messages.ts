@@ -149,9 +149,10 @@ export class MessageRenderer {
           return;
         }
         this.resetSpeechButtons();
+        this.speech.speak(message.body, message.senderId, key);
+        if (this.speech.activeKey !== key) return;
         play.innerHTML = ICON_PAUSE;
         play.setAttribute('aria-label', `Pause message from ${sender}`);
-        this.speech.speak(message.body, message.senderId, key);
       });
       const copy = element('button', { className: 'message-copy', ariaLabel: `Copy message from ${sender}` });
       copy.innerHTML = ICON_COPY;
