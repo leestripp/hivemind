@@ -1,6 +1,12 @@
 import type { Attachment, ChatMessage } from '../shared/contracts.js';
 import { byId, element, errorMessage, formatBytes, formatTime } from './dom.js';
 import type { SpeechPlayer } from './speech-player.js';
+
+const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 2.5v11l9-5.5z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4 2h3.2v12H4zM8.8 2H12v12H8.8z"/></svg>';
+const ICON_COPY = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.4" d="M5.5 4.5h7v9h-7z"/><path fill="none" stroke="currentColor" stroke-width="1.4" d="M10.5 4.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.4 11.6 3.1 8.3l-1.2 1.2 4.5 4.5 8.7-8.7-1.2-1.2z"/></svg>';
+
 import { agentAvatar, userAvatar } from './avatars.js';
 import { agentById, state } from './state.js';
 
@@ -71,10 +77,45 @@ export class MessageRenderer {
 
   resetSpeechButtons(): void {
     document.querySelectorAll<HTMLButtonElement>('.message-speak').forEach((button) => {
-      button.textContent = 'Play';
+      button.innerHTML = ICON_PLAY;
       const id = button.dataset.speechKey ?? '';
       button.setAttribute('aria-label', `Play message${id ? ` from ${id}` : ''}`);
     });
+  }
+
+  private async copyMessageText(text: string, button: HTMLButtonElement, sender: string): Promise<void> {
+    let copied = false;
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch {
+      copied = false;
+    }
+    if (!copied) copied = this.legacyCopy(text);
+    if (!copied) return;
+    button.innerHTML = ICON_CHECK;
+    button.setAttribute('aria-label', 'Copied to clipboard');
+    window.setTimeout(() => {
+      button.innerHTML = ICON_COPY;
+      button.setAttribute('aria-label', `Copy message from ${sender}`);
+    }, 1500);
+  }
+
+  private legacyCopy(text: string): boolean {
+    const area = element('textarea', { className: 'clipboard-helper' });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
   }
 
   private buildMessage(message: ChatMessage): HTMLLIElement {
@@ -99,7 +140,8 @@ export class MessageRenderer {
       element('span', { text: formatTime(message.createdAt) }));
     if (message.senderKind === 'agent' && message.body.trim()) {
       const key = `message-${message.id}`;
-      const play = element('button', { className: 'message-speak', text: 'Play', ariaLabel: `Play message from ${sender}` });
+      const play = element('button', { className: 'message-speak', ariaLabel: `Play message from ${sender}` });
+      play.innerHTML = ICON_PLAY;
       play.dataset.speechKey = sender;
       play.addEventListener('click', () => {
         if (this.speech.activeKey === key) {
@@ -107,11 +149,16 @@ export class MessageRenderer {
           return;
         }
         this.resetSpeechButtons();
-        play.textContent = 'Stop';
-        play.setAttribute('aria-label', `Stop message from ${sender}`);
+        play.innerHTML = ICON_PAUSE;
+        play.setAttribute('aria-label', `Pause message from ${sender}`);
         this.speech.speak(message.body, message.senderId, key);
       });
-      meta.append(play);
+      const copy = element('button', { className: 'message-copy', ariaLabel: `Copy message from ${sender}` });
+      copy.innerHTML = ICON_COPY;
+      copy.addEventListener('click', () => {
+        void this.copyMessageText(message.body, copy, sender);
+      });
+      meta.append(play, copy);
     }
     item.append(meta);
     if (message.body) item.append(element('div', { className: 'message-body', text: message.body }));

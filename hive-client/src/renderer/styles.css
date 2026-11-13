@@ -89,7 +89,11 @@ input[type=range] { accent-color:var(--accent); width:100%; }
 .system-message { max-width:100%; margin:8px 12px; padding:3px; color:var(--dim); font-style:italic; }
 .message-meta { display:flex; align-items:center; gap:8px; margin-bottom:4px; color:var(--dim); font-size:11px; white-space:nowrap; }
 .message-sender { color:var(--fg); font-weight:700; font-size:12px; }
-.message-speak { margin-left:auto; padding:1px 7px; border-radius:999px; font-size:11px; opacity:.75; }
+.message-speak, .message-copy { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--dim); opacity:.75; cursor:pointer; }
+.message-speak { margin-left:auto; }
+.message-speak:hover, .message-copy:hover { opacity:1; background:var(--accent-soft); }
+.message-speak svg, .message-copy svg { width:14px; height:14px; display:block; }
+.clipboard-helper { position:fixed; top:-999px; left:-999px; opacity:0; }
 .message-body { white-space:pre-wrap; }
 .attachment-chip { display:inline-block; margin:6px 5px 0 0; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--dim); font-size:12px; }
 .live-message { opacity:.76; }
