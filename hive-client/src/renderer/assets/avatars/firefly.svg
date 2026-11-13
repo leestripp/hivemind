@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Firefly — HiveMind hex badge</title>
+  <desc>Firefly with a glowing tail on a night hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E1B4B"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- glow behind tail -->
+  <circle cx="120" cy="188" r="34" fill="#FDE047" opacity="0.35"/>
+  <ellipse cx="80" cy="108" rx="24" ry="12" fill="#E0E7FF" opacity="0.6" stroke="#2E2A38" stroke-width="3" transform="rotate(-20 80 108)"/>
+  <ellipse cx="160" cy="108" rx="24" ry="12" fill="#E0E7FF" opacity="0.6" stroke="#2E2A38" stroke-width="3" transform="rotate(20 160 108)"/>
+  <!-- body -->
+  <path d="M88 146 C88 128 102 118 120 118 C138 118 152 128 152 146 L152 158 C152 172 138 182 120 182 C102 182 88 172 88 158 Z" fill="#4B5563" stroke="#2E2A38" stroke-width="5"/>
+  <!-- glowing tail segment -->
+  <path d="M96 178 C96 170 106 164 120 164 C134 164 144 170 144 178 C144 194 134 208 120 208 C106 208 96 194 96 178 Z" fill="#FDE047" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M106 184 C112 189 128 189 134 184" fill="none" stroke="#F59E0B" stroke-width="4"/>
+  <!-- head -->
+  <circle cx="120" cy="96" r="38" fill="#6B7280" stroke="#2E2A38" stroke-width="5"/>
+    <ellipse cx="104" cy="94" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="136" cy="94" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="106" cy="96" r="5.4" fill="#2E2A38"/>
+  <circle cx="138" cy="96" r="5.4" fill="#2E2A38"/>
+  <circle cx="108" cy="92" r="2.4" fill="#FFFFFF"/>
+  <circle cx="140" cy="92" r="2.4" fill="#FFFFFF"/>
+    <ellipse cx="92" cy="114" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="148" cy="114" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M110 116 C115 122 125 122 130 116" fill="none" stroke="#2E2A38" stroke-width="4"/>
+    <path d="M106 78 C102 66 86 48 92 44" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M134 78 C138 66 154 48 148 44" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="92" cy="44" r="6" fill="#FDE047" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="148" cy="44" r="6" fill="#FDE047" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

@@ -40,3 +40,11 @@ __pycache__/
 *.log
 core
 core.*
+
+# Electron client dependencies, generated output, and test artifacts
+node_modules/
+hive-client/dist/
+hive-client/release/
+hive-client/test-results/
+hive-client/playwright-report/
+*.tsbuildinfo

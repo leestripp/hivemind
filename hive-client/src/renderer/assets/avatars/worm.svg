@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Worm — HiveMind hex badge</title>
+  <desc>Bookish garden worm in round glasses on a pink hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9D174D"/>
+      <stop offset="1" stop-color="#FBCFE8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- wiggly body segments -->
+  <path d="M52 176 C60 156 78 158 86 172 C94 186 108 188 118 176 C128 164 144 162 152 174 C160 186 176 188 186 178" fill="none" stroke="#F472B6" stroke-width="22"/>
+  <path d="M52 176 C60 156 78 158 86 172 C94 186 108 188 118 176 C128 164 144 162 152 174 C160 186 176 188 186 178" fill="none" stroke="#2E2A38" stroke-width="28" opacity="0.0"/>
+  <!-- segment lines -->
+  <path d="M76 162 l4 14 M106 176 l2 14 M138 164 l4 14 M166 172 l2 13" stroke="#BE185D" stroke-width="4" fill="none"/>
+  <!-- head -->
+  <circle cx="70" cy="128" r="36" fill="#F9A8D4" stroke="#2E2A38" stroke-width="5"/>
+  <!-- glasses -->
+  <circle cx="58" cy="124" r="13" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="84" cy="124" r="13" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M71 124 L71 124" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="60" cy="126" r="4.5" fill="#2E2A38"/>
+  <circle cx="86" cy="126" r="4.5" fill="#2E2A38"/>
+  <circle cx="62" cy="122" r="2" fill="#FFFFFF"/>
+  <circle cx="88" cy="122" r="2" fill="#FFFFFF"/>
+    <ellipse cx="48" cy="144" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="96" cy="144" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M61 144 C66 150 74 150 79 144" fill="none" stroke="#2E2A38" stroke-width="4"/>
+</svg>

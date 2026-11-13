@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Mantis — HiveMind hex badge</title>
+  <desc>Zen praying mantis on a jade hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#166534"/>
+      <stop offset="1" stop-color="#86EFAC"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- folded forelegs -->
+  <path d="M96 124 L82 148 L96 160 M144 124 L158 148 L144 160" fill="none" stroke="#2E2A38" stroke-width="7"/>
+  <!-- slender body -->
+  <path d="M104 150 C104 128 112 116 120 116 C128 116 136 128 136 150 C136 176 130 202 120 202 C110 202 104 176 104 150 Z" fill="#4ADE80" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M108 162 l24 0 M110 178 l20 0" stroke="#16A34A" stroke-width="3.5" fill="none"/>
+  <!-- triangular head -->
+  <path d="M96 88 C96 66 106 54 120 54 C134 54 144 66 144 88 C144 102 134 112 120 112 C106 112 96 102 96 88 Z" fill="#4ADE80" stroke="#2E2A38" stroke-width="5"/>
+  <!-- huge side eyes -->
+  <ellipse cx="102" cy="84" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="138" cy="84" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="104" cy="86" r="5.5" fill="#14532D"/>
+  <circle cx="140" cy="86" r="5.5" fill="#14532D"/>
+  <circle cx="106" cy="82" r="2.4" fill="#FFFFFF"/>
+  <circle cx="142" cy="82" r="2.4" fill="#FFFFFF"/>
+    <path d="M113 100 C117 106 123 106 127 100" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- antennae -->
+  <path d="M110 58 C106 48 100 42 92 40 M130 58 C134 48 140 42 148 40" fill="none" stroke="#2E2A38" stroke-width="3.5"/>
+</svg>

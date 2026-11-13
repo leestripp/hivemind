@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>HiveMind</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand" aria-label="HiveMind"><span aria-hidden="true">⬡</span> HiveMind</div>
+    <button id="new-agent-button" type="button">＋ New agent</button>
+    <button id="new-thread-button" type="button">＋ New thread</button>
+    <button id="tasks-button" type="button">Scheduled tasks</button>
+    <div class="header-spacer"></div>
+    <div class="connection-summary"><span id="hub-dot" class="status-dot"></span><span id="hub-label">Connecting…</span></div>
+    <button id="connect-button" type="button" class="quiet">Connect</button>
+    <details id="volume-menu" class="volume-menu">
+      <summary aria-label="Master volume" title="Master volume">🔊</summary>
+      <div class="volume-card">
+        <label for="master-volume">Master volume <output id="volume-output" for="master-volume">100%</output></label>
+        <input id="master-volume" type="range" min="0" max="100" step="1" value="100">
+        <label class="check-row" for="mute-audio"><input id="mute-audio" type="checkbox"> Mute all app audio</label>
+      </div>
+    </details>
+    <button id="settings-button" type="button" class="quiet" aria-label="Settings">⚙ Settings</button>
+  </header>
+
+  <main class="app-layout">
+    <aside id="sidebar" class="sidebar" aria-label="Conversations">
+      <section class="sidebar-section agents-section" aria-labelledby="agents-heading">
+        <h2 id="agents-heading" class="section-heading">Agents</h2>
+        <div id="agent-list" class="scroll-list"></div>
+      </section>
+      <section class="sidebar-section threads-section" aria-labelledby="threads-heading">
+        <div class="section-heading section-heading-row"><h2 id="threads-heading">Threads</h2><button id="new-thread-group-button" class="quiet" type="button" aria-label="New thread group">＋ Group</button></div>
+        <div id="thread-list" class="scroll-list"></div>
+      </section>
+    </aside>
+
+    <aside id="voice-panel" class="voice-panel" aria-label="Voice conversation" hidden>
+      <button id="voice-back-button" type="button" class="quiet back-button">‹ Back</button>
+      <div class="voice-identity">
+        <img id="voice-avatar" class="avatar large" alt="">
+        <h2 id="voice-agent-name">Agent</h2>
+        <p id="voice-status" role="status">Ready</p>
+      </div>
+      <canvas id="voice-sphere" class="voice-sphere" role="img" aria-label="Voice activity visual"></canvas>
+      <div class="voice-controls">
+        <button id="voice-stop-button" type="button" class="voice-stop" aria-label="Stop current turn" hidden>✕</button>
+        <button id="talk-button" type="button" class="talk-button">TALK</button>
+      </div>
+      <div class="voice-health-card">
+        <div><span>ChimpFlow</span><span id="voice-health" class="pill">Checking…</span></div>
+      </div>
+    </aside>
+
+    <section class="chat-panel" aria-label="Chat">
+      <header class="chat-header">
+        <div><h2 id="thread-title">Select a conversation</h2><p id="thread-subtitle"></p></div>
+        <button id="stop-button" type="button" class="danger" hidden>Stop</button>
+      </header>
+      <div id="chat-scroll" class="chat-scroll">
+        <button id="load-earlier-button" type="button" class="quiet load-earlier" hidden>Load earlier messages</button>
+        <div id="empty-chat" class="empty-state">
+          <strong>Your team is ready.</strong>
+          <span>Select an agent or thread to start a conversation.</span>
+        </div>
+        <ol id="message-list" class="message-list" aria-label="Messages"></ol>
+        <div id="live-message" class="message agent-message live-message" hidden></div>
+      </div>
+      <div id="pending-attachments" class="pending-attachments" aria-live="polite"></div>
+      <form id="composer" class="composer">
+        <input id="attachment-input" type="file" aria-label="Choose a file to attach" hidden>
+        <button id="attach-button" type="button" class="icon-button" aria-label="Attach a file" title="Attach a file">📎</button>
+        <label for="message-input" class="sr-only">Message</label>
+        <textarea id="message-input" rows="1" placeholder="Message the team…  (Enter to send)" disabled></textarea>
+        <button id="send-button" type="submit" class="primary" disabled>Send</button>
+      </form>
+      <p id="app-status" class="app-status" role="status">Connecting to hive-server…</p>
+    </section>
+  </main>
+
+  <dialog id="thread-manage-dialog" aria-labelledby="thread-manage-title">
+    <header class="dialog-header"><h2 id="thread-manage-title">Thread</h2><button id="thread-manage-close" type="button" class="icon-button" aria-label="Close thread management">✕</button></header>
+    <div class="field"><label for="thread-group-select">Group</label><select id="thread-group-select"></select><button id="thread-new-group-button" type="button" class="quiet">New group and move here…</button></div>
+    <div class="thread-management-actions"><button id="thread-clear-button" type="button">Clear history</button><button id="thread-delete-button" type="button" class="danger">Delete thread</button></div>
+    <p id="thread-manage-error" class="error-text" role="alert"></p>
+  </dialog>
+
+  <dialog id="thread-group-dialog" aria-labelledby="thread-group-title">
+    <form id="thread-group-form">
+      <header class="dialog-header"><h2 id="thread-group-title">New thread group</h2></header>
+      <div class="field"><label for="thread-group-name">Name</label><input id="thread-group-name" type="text" maxlength="160" required></div>
+      <p id="thread-group-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="thread-group-cancel" type="button">Cancel</button><button type="submit" class="primary">Save group</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="skills-dialog" aria-labelledby="skills-title">
+    <header class="dialog-header"><h2 id="skills-title">Skills</h2><button id="skills-close" type="button" class="icon-button" aria-label="Close skills">✕</button></header>
+    <p id="skills-status" class="help-text" role="status">Loading…</p>
+    <section class="skills-section"><h3>Shared library</h3><div id="shared-skill-list"></div></section>
+    <section class="skills-section"><h3>Learned skills</h3><div id="local-skill-list"></div></section>
+    <p id="skills-error" class="error-text" role="alert"></p>
+    <footer class="dialog-actions"><button id="new-skill-button" type="button" class="primary">New skill</button></footer>
+  </dialog>
+
+  <dialog id="skill-editor-dialog" aria-labelledby="skill-editor-title">
+    <form id="skill-editor-form">
+      <header class="dialog-header"><h2 id="skill-editor-title">New skill</h2></header>
+      <div class="dialog-fields">
+        <div class="field"><label for="skill-scope">Location</label><select id="skill-scope"></select></div>
+        <div class="field"><label for="skill-name">Name</label><input id="skill-name" required pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="release-notes"></div>
+        <div class="field"><label for="skill-description">Description</label><input id="skill-description" placeholder="What this skill helps with"></div>
+        <div class="field"><label for="skill-content">Instructions</label><textarea id="skill-content" rows="12" required></textarea></div>
+      </div>
+      <p id="skill-editor-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="skill-editor-cancel" type="button">Cancel</button><button id="skill-create-confirm" type="submit" class="primary">Create skill</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="confirmation-dialog" aria-labelledby="confirmation-title">
+    <form id="confirmation-form">
+      <header class="dialog-header"><h2 id="confirmation-title">Confirm</h2></header>
+      <p id="confirmation-detail" class="help-text confirmation-detail"></p>
+      <footer class="dialog-actions"><button id="confirmation-cancel" type="button">Cancel</button><button id="confirmation-confirm" type="submit" class="danger">Confirm</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="agent-manage-dialog" aria-labelledby="agent-manage-title">
+    <header class="dialog-header"><div><h2 id="agent-manage-title">Agent</h2><p id="agent-manage-subtitle" class="help-text"></p></div><button id="agent-manage-close" type="button" class="icon-button" aria-label="Close agent management">✕</button></header>
+    <div class="agent-management-actions">
+      <button id="agent-cancel-button" type="button">Cancel current work</button>
+      <button id="agent-inspector-button" type="button">Inspector</button>
+      <button id="agent-toggle-running" type="button">Stop container</button>
+      <button id="agent-screen-button" type="button">Computer</button>
+      <button id="agent-screen-view-button" type="button">Computer (view only)</button>
+      <button id="agent-exec-button" type="button">Exec log</button>
+      <button id="agent-skills-button" type="button">Skills</button>
+      <button id="agent-schedule-button" type="button">Schedule task</button>
+      <button id="agent-edit-button" type="button">Edit agent</button>
+      <button id="agent-delete-button" type="button" class="danger">Delete agent</button>
+    </div>
+    <p id="agent-manage-error" class="error-text" role="alert"></p>
+  </dialog>
+
+  <dialog id="agent-inspector-dialog" aria-labelledby="agent-inspector-title">
+    <header class="dialog-header"><h2 id="agent-inspector-title">Inspector</h2><button id="agent-inspector-close" type="button" class="icon-button" aria-label="Close inspector">✕</button></header>
+    <dl id="agent-inspector-details" class="inspector-details"></dl>
+    <p id="agent-inspector-host" class="danger-text" hidden>⚠ HOST AGENT — bare-metal with sudo, NO sandbox</p>
+    <section><h3>Container</h3><p id="agent-inspector-state" class="help-text"></p><div class="dialog-actions"><button id="agent-inspector-start" type="button">Start</button><button id="agent-inspector-stop" type="button">Stop</button></div></section>
+  </dialog>
+
+  <dialog id="exec-log-dialog" aria-labelledby="exec-log-title">
+    <header class="dialog-header"><h2 id="exec-log-title">Exec log</h2><button id="exec-log-close" type="button" class="icon-button" aria-label="Close exec log">✕</button></header>
+    <p id="exec-log-status" class="help-text" role="status">Loading…</p>
+    <pre id="exec-log-content" class="exec-log-content" tabindex="0"></pre>
+    <footer class="dialog-actions"><button id="exec-log-refresh" type="button">Refresh</button></footer>
+  </dialog>
+
+  <dialog id="agent-delete-dialog" aria-labelledby="agent-delete-title">
+    <form id="agent-delete-form">
+      <header class="dialog-header"><h2 id="agent-delete-title">Delete agent</h2></header>
+      <p class="help-text">Delete “<strong id="agent-delete-name"></strong>”?</p>
+      <p id="agent-delete-detail" class="help-text"></p>
+      <div id="agent-reassign-field" class="field" hidden><label id="agent-reassign-label" for="agent-reassign">Scheduled tasks</label><select id="agent-reassign"></select></div>
+      <p id="agent-delete-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="agent-delete-cancel" type="button">Cancel</button><button id="agent-delete-confirm" type="submit" class="danger">Delete</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="tasks-dialog" class="tasks-dialog" aria-labelledby="tasks-title">
+    <header class="dialog-header"><h2 id="tasks-title">Scheduled tasks</h2><button id="tasks-close" type="button" class="icon-button" aria-label="Close scheduled tasks">✕</button></header>
+    <p id="tasks-status" class="help-text" role="status">Loading scheduled tasks…</p>
+    <div id="tasks-list" class="tasks-list"></div>
+    <footer class="dialog-actions"><button id="task-add-button" type="button" class="primary">Add scheduled task</button></footer>
+  </dialog>
+
+  <dialog id="task-editor-dialog" aria-labelledby="task-editor-title">
+    <form id="task-editor-form">
+      <header class="dialog-header"><h2 id="task-editor-title">Add scheduled task</h2></header>
+      <div class="field"><label for="task-name">Name</label><input id="task-name" type="text" maxlength="160" required></div>
+      <div class="field"><label for="task-agent">Agent</label><select id="task-agent" required></select></div>
+      <div class="field"><label for="task-prompt">Prompt</label><textarea id="task-prompt" rows="7" required></textarea></div>
+      <div class="field"><label for="task-schedule-type">Schedule</label><select id="task-schedule-type">
+        <option value="once">Once (one-shot)</option><option value="interval">Interval (every N minutes)</option>
+        <option value="daily">Daily</option><option value="weekly">Weekly</option>
+      </select></div>
+      <section id="task-schedule-once" aria-label="One-shot schedule">
+        <div class="form-grid"><div class="field"><label for="task-once-date">Date (UTC)</label><input id="task-once-date" type="date"></div>
+        <div class="field"><label for="task-once-time">Time (UTC)</label><input id="task-once-time" type="time"></div></div>
+      </section>
+      <section id="task-schedule-interval" aria-label="Interval schedule" hidden>
+        <div class="field"><label for="task-interval">Every N minutes</label><input id="task-interval" type="number" min="1" max="10080" step="1" value="60"></div>
+      </section>
+      <section id="task-schedule-daily" aria-label="Daily schedule" hidden>
+        <div class="field"><label for="task-daily-time">Time (UTC)</label><input id="task-daily-time" type="time" value="09:00"></div>
+      </section>
+      <section id="task-schedule-weekly" aria-label="Weekly schedule" hidden>
+        <div class="field"><label for="task-weekly-time">Time (UTC)</label><input id="task-weekly-time" type="time" value="09:00"></div>
+        <fieldset id="task-weekly-days"><legend>Days</legend>
+          <label class="check-row"><input type="checkbox" value="0">Sunday</label><label class="check-row"><input type="checkbox" value="1">Monday</label>
+          <label class="check-row"><input type="checkbox" value="2">Tuesday</label><label class="check-row"><input type="checkbox" value="3">Wednesday</label>
+          <label class="check-row"><input type="checkbox" value="4">Thursday</label><label class="check-row"><input type="checkbox" value="5">Friday</label>
+          <label class="check-row"><input type="checkbox" value="6">Saturday</label>
+        </fieldset>
+      </section>
+      <p class="help-text">All times are UTC (server clock).</p>
+      <p id="task-editor-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="task-editor-cancel" type="button">Cancel</button><button id="task-save-button" type="submit" class="primary">Create</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="task-delete-dialog" aria-labelledby="task-delete-title">
+    <form id="task-delete-form">
+      <header class="dialog-header"><h2 id="task-delete-title">Delete scheduled task?</h2></header>
+      <p class="help-text">Delete “<span id="task-delete-name"></span>”? This cannot be undone.</p>
+      <p id="task-delete-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="task-delete-cancel" type="button">Cancel</button><button id="task-delete-confirm" type="submit" class="danger">Delete</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="media-dialog" class="media-dialog" aria-labelledby="media-dialog-title">
+    <header class="dialog-header"><h2 id="media-dialog-title">Attachment</h2><button id="media-dialog-close" type="button" class="icon-button" aria-label="Close attachment preview">✕</button></header>
+    <div id="media-dialog-content" class="media-dialog-content"></div>
+  </dialog>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <header class="dialog-header"><h2 id="settings-title">Settings</h2><button id="settings-close" type="button" class="icon-button" aria-label="Close settings">✕</button></header>
+      <div class="settings-layout">
+        <div class="settings-tabs" role="tablist" aria-label="Settings pages">
+          <button id="interface-tab" type="button" role="tab" aria-selected="false" aria-controls="interface-settings">🖥 Interface</button>
+          <button id="user-tab" type="button" role="tab" aria-selected="true" aria-controls="user-settings">👤 User</button>
+          <button id="chimpflow-tab" type="button" role="tab" aria-selected="false" aria-controls="chimpflow-settings">ChimpFlow</button>
+        </div>
+        <div class="settings-content">
+          <section id="interface-settings" role="tabpanel" aria-labelledby="interface-tab" hidden>
+            <div class="field"><span class="field-label">Appearance</span><p class="help-text inline-help">Follows the Linux desktop light/dark preference.</p></div>
+            <div class="field"><label for="font-scale">Font scale <output id="font-scale-output" for="font-scale">100%</output></label><input id="font-scale" type="range" min="0.75" max="1.75" step="0.05" value="1"><p class="help-text inline-help">100% follows the system font and display scaling.</p></div>
+            <div class="field"><span class="field-label">HiveMind server</span><p id="settings-server" class="help-text inline-help"></p></div>
+          </section>
+          <section id="user-settings" role="tabpanel" aria-labelledby="user-tab">
+            <div class="field"><label for="display-name">Display name</label><input id="display-name" name="displayName" type="text" maxlength="160" required></div>
+            <div class="field"><span id="user-avatar-label" class="field-label">Avatar</span><div id="user-avatar" class="avatar-picker" role="radiogroup" aria-labelledby="user-avatar-label"></div></div>
+          </section>
+          <section id="chimpflow-settings" role="tabpanel" aria-labelledby="chimpflow-tab" hidden>
+            <div class="form-grid">
+              <div class="field"><label for="chimpflow-address">Address</label><input id="chimpflow-address" type="text" inputmode="url" placeholder="127.0.0.1" required></div>
+              <div class="field"><label for="chimpflow-port">Port</label><input id="chimpflow-port" type="text" inputmode="numeric" placeholder="8090" required></div>
+            </div>
+            <div class="field"><label for="chimpflow-key">API key</label><input id="chimpflow-key" type="password" autocomplete="off"></div>
+            <div class="field"><label for="speech-model">Speech model</label><select id="speech-model" disabled><option>Loading models…</option></select></div>
+            <p class="help-text">Voices belong to the selected model. Agent voices save automatically; selecting one plays a short preview. Save applies the model to speech.</p>
+            <p id="catalog-status" class="help-text" role="status">Checking ChimpFlow…</p>
+            <div id="voice-assignments" class="voice-assignments"></div>
+          </section>
+        </div>
+      </div>
+      <p id="settings-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="settings-cancel" type="button">Cancel</button><button type="submit" class="primary">Save</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="connect-dialog" aria-labelledby="connect-title">
+    <form id="connect-form">
+      <header class="dialog-header"><h2 id="connect-title">Connect to hive-server</h2></header>
+      <div class="field"><label for="hub-server">Server URL</label><input id="hub-server" type="text" inputmode="url" required></div>
+      <div class="field"><label for="hub-api-key">API key</label><input id="hub-api-key" type="password" autocomplete="off"></div>
+      <p id="connect-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="connect-cancel" type="button">Cancel</button><button id="connect-submit" type="submit" class="primary">Connect</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="new-agent-dialog" aria-labelledby="new-agent-title">
+    <form id="new-agent-form">
+      <header class="dialog-header"><h2 id="new-agent-title">New agent</h2></header>
+      <div class="agent-editor-fields">
+        <div id="agent-template-field" class="field"><label for="agent-template">Template</label><select id="agent-template"><option value="">(blank)</option></select></div>
+        <div class="field"><label for="agent-name">Name</label><input id="agent-name" type="text" maxlength="160" required></div>
+        <div class="field"><label for="agent-role">Role / instructions</label><textarea id="agent-role" rows="7" placeholder="What does this teammate do?"></textarea></div>
+        <div class="form-grid"><div class="field"><label for="agent-provider">Provider</label><select id="agent-provider"></select></div>
+        <div class="field"><label for="agent-model">Model</label><select id="agent-model"><option value="">(hub default)</option></select></div></div>
+        <div class="form-grid"><div class="field"><label for="agent-thinking">Thinking level</label><select id="agent-thinking"><option value="">Inherit from model</option><option value="none">None</option><option value="low">Low</option><option value="high">High</option><option value="max">Max</option></select></div>
+        <div class="field"><label for="agent-worker">Worker</label><select id="agent-worker"><option value="">Hub default</option></select></div></div>
+        <div class="field"><label for="agent-type">Agent type</label><select id="agent-type"><option value="">Standard container</option></select></div>
+        <div class="form-grid"><div id="agent-memory-field" class="field"><label for="agent-memory">Memory limit</label><input id="agent-memory" type="text" maxlength="64" placeholder="Worker default (4g) — e.g. 32g, 1536m"></div>
+        <div id="agent-cpus-field" class="field"><label for="agent-cpus">CPU limit</label><input id="agent-cpus" type="number" min="0" max="1024" step="0.1" placeholder="Worker default (2)"></div></div>
+        <p id="agent-host-warning" class="danger-text help-text" hidden>⚠ HOST AGENT: runs directly on the worker as a real user with passwordless sudo — NO container, NO sandbox. It can install software, modify system files, and destroy the machine. Only use this on a machine you do not mind losing.</p>
+        <div class="field"><span id="agent-avatar-label" class="field-label">Avatar</span><div id="agent-avatar-picker" class="avatar-picker" role="radiogroup" aria-labelledby="agent-avatar-label"></div></div>
+      </div>
+      <p id="new-agent-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="new-agent-cancel" type="button">Cancel</button><button id="agent-submit" type="submit" class="primary">Create agent</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="new-thread-dialog" aria-labelledby="new-thread-title">
+    <form id="new-thread-form">
+      <header class="dialog-header"><h2 id="new-thread-title">New thread</h2></header>
+      <div class="field"><label for="new-thread-name">Title</label><input id="new-thread-name" type="text" maxlength="512" placeholder="Team conversation"></div>
+      <fieldset><legend>Participants</legend><div id="thread-agent-options" class="agent-options"></div></fieldset>
+      <p id="new-thread-error" class="error-text" role="alert"></p>
+      <footer class="dialog-actions"><button id="new-thread-cancel" type="button">Cancel</button><button id="new-thread-submit" type="submit" class="primary" disabled>Create thread</button></footer>
+    </form>
+  </dialog>
+</body>
+</html>

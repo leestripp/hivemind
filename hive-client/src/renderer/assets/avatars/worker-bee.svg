@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Worker Bee — HiveMind hex badge</title>
+  <desc>Classic worker bee on a sky-blue hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0EA5E9"/>
+      <stop offset="1" stop-color="#BAE6FD"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <ellipse cx="76" cy="108" rx="28" ry="14" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(-22 76 108)"/>
+  <ellipse cx="164" cy="108" rx="28" ry="14" fill="#DBEAFE" opacity="0.75" stroke="#2E2A38" stroke-width="3.5" transform="rotate(22 164 108)"/>
+  <path d="M82 156 C82 136 98 126 120 126 C142 126 158 136 158 156 C158 186 144 212 120 212 C96 212 82 186 82 156 Z" fill="#FFD84D" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M86 166 C102 174 138 174 154 166" fill="none" stroke="#2E2A38" stroke-width="10"/>
+  <path d="M92 190 C106 197 134 197 148 190" fill="none" stroke="#2E2A38" stroke-width="10"/>
+  <circle cx="120" cy="102" r="44" fill="#FFD84D" stroke="#2E2A38" stroke-width="5"/>
+    <path d="M104 80 C100 68 82 48 88 44" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <path d="M136 80 C140 68 158 48 152 44" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="88" cy="44" r="6" fill="#F59E0B" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="152" cy="44" r="6" fill="#F59E0B" stroke="#2E2A38" stroke-width="3.5"/>
+    <ellipse cx="103" cy="100" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <ellipse cx="137" cy="100" rx="12" ry="15" fill="#FFFFFF" stroke="#2E2A38" stroke-width="4"/>
+  <circle cx="105" cy="102" r="5.4" fill="#2E2A38"/>
+  <circle cx="139" cy="102" r="5.4" fill="#2E2A38"/>
+  <circle cx="107" cy="98" r="2.4" fill="#FFFFFF"/>
+  <circle cx="141" cy="98" r="2.4" fill="#FFFFFF"/>
+    <ellipse cx="90" cy="122" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+  <ellipse cx="150" cy="122" rx="8" ry="5" fill="#F2A58C" opacity="0.7"/>
+    <path d="M110 124 C115 130 125 130 130 124" fill="none" stroke="#2E2A38" stroke-width="4"/>
+</svg>

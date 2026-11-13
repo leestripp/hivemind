@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" stroke-linecap="round" stroke-linejoin="round">
+  <title>Beetle — HiveMind hex badge</title>
+  <desc>Shiny jewel beetle on an emerald hexagon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#065F46"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.28" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#bg)"/>
+  <path d="M120 4 L220 62 L220 178 L120 236 L20 178 L20 62 Z" fill="url(#glow)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.18">
+    <path d="M48 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M186 30 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M36 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+    <path d="M204 186 l12 7 v14 l-12 7 -12 -7 v-14 z"/>
+  </g>
+
+  <!-- shiny shell -->
+  <path d="M62 144 C62 102 88 78 120 78 C152 78 178 102 178 144 C178 158 174 172 166 182 L74 182 C66 172 62 158 62 144 Z" fill="#10B981" stroke="#2E2A38" stroke-width="5"/>
+  <path d="M120 78 L120 182" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- shine -->
+  <path d="M84 112 C88 98 98 88 110 84" fill="none" stroke="#A7F3D0" stroke-width="6" opacity="0.8"/>
+  <!-- little horn -->
+  <path d="M120 78 L120 56" stroke="#2E2A38" stroke-width="6" fill="none"/>
+  <path d="M120 56 L108 44 M120 56 L132 44" stroke="#2E2A38" stroke-width="5" fill="none"/>
+  <!-- head -->
+  <circle cx="120" cy="86" r="26" fill="#059669" stroke="#2E2A38" stroke-width="5"/>
+  <ellipse cx="108" cy="84" rx="9" ry="12" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <ellipse cx="132" cy="84" rx="9" ry="12" fill="#FFFFFF" stroke="#2E2A38" stroke-width="3.5"/>
+  <circle cx="110" cy="86" r="4.2" fill="#2E2A38"/>
+  <circle cx="134" cy="86" r="4.2" fill="#2E2A38"/>
+  <circle cx="111" cy="83" r="1.8" fill="#FFFFFF"/>
+  <circle cx="135" cy="83" r="1.8" fill="#FFFFFF"/>
+    <path d="M113 96 C117 102 123 102 127 96" fill="none" stroke="#2E2A38" stroke-width="4"/>
+  <!-- legs -->
+  <path d="M66 188 l-8 10 M88 192 l-5 10 M152 192 l5 10 M174 188 l8 10" stroke="#2E2A38" stroke-width="5" fill="none"/>
+</svg>
