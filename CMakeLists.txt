@@ -3,8 +3,7 @@ cmake_minimum_required(VERSION 3.28)
 # ============================================================================
 # HiveMind 2.0 — superbuild
 #   hive-server/  C++23 + OmniNet server (API, agents, graph runner, scheduler)
-#   hive-client-gdk/  GTK4/gtkmm4 native Linux client
-#   */tests/      per-app unit-test suites (hive-server, hive-worker, hive-agent, hive-client-gdk)
+#   */tests/      per-app unit-test suites (hive-server, hive-worker, hive-agent)
 # Deps (first-party, fetched): OmniNet (gitlab.com/leestripp/*)
 # ============================================================================
 
@@ -137,22 +136,9 @@ if(HIVEMIND_BUILD_SERVER)
     add_subdirectory(hive-agent)
 endif()
 
-option(HIVEMIND_BUILD_CLIENT "Build the GTK4/gtkmm4 native client" ON)
-if(HIVEMIND_BUILD_CLIENT)
-    pkg_check_modules(GTKMM gtkmm-4.0)
-    if(GTKMM_FOUND)
-        # Integrated voice is built as part of the single desktop client.
-        add_subdirectory(hive-client-gdk)
-    else()
-        message(WARNING
-            "gtkmm-4.0 not found — skipping hive-client-gdk. "
-            "Ubuntu 26.04: sudo apt install libgtkmm-4.0-dev "
-            "(or configure with -DHIVEMIND_BUILD_CLIENT=OFF to silence this)")
-    endif()
-endif()
 
 # Unit tests live with each app: hive-server/tests, hive-worker/tests,
-# hive-agent/tests, hive-client-gdk/tests. Each app's CMakeLists wires its own
+# hive-agent/tests. Each app's CMakeLists wires its own
 # add_subdirectory(tests); the HIVEMIND_BUILD_SERVER / HIVEMIND_BUILD_CLIENT
 # guards above already skip tests for apps that aren't being built.
 
@@ -165,8 +151,6 @@ endif()
 file(GLOB_RECURSE _LINT_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/hive-server/src/*.cpp"
     "${CMAKE_SOURCE_DIR}/hive-server/include/hivemind/*.cpp"
-    "${CMAKE_SOURCE_DIR}/hive-client-gdk/src/*.cpp"
-    "${CMAKE_SOURCE_DIR}/hive-client-gdk/voice/src/*.cpp"
 )
 
 find_program(_CPPCHECK cppcheck)
@@ -180,8 +164,6 @@ if(_CPPCHECK)
             --suppress=returnByReference
             --error-exitcode=2
             "-DGTK_CHECK_VERSION(a,b,c)=1"
-            -I${CMAKE_SOURCE_DIR}/hive-client-gdk/src
-            -I${CMAKE_SOURCE_DIR}/hive-client-gdk/voice/src
             ${_LINT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Running cppcheck (warning/performance/portability; no style checks)..."

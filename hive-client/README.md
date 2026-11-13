@@ -2,7 +2,7 @@
 
 `hive-client/` is the primary desktop client: Electron, strict TypeScript,
 semantic HTML/CSS, and no UI framework. The previous GTK4/gtkmm4 client is
-preserved in `../hive-client-gdk/`; its C++ build and tests remain supported.
+removed; its history remains reachable in git (archived under `hive-client-gdk/` up to tag 1.4.0).
 
 ## Run
 
