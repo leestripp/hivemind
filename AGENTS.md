@@ -27,9 +27,9 @@ configured runtime identity.
 - **Outbound-only workers** — workers dial the hub over a single
   WebSocket; no inbound ports/DNS/TLS needed on rigs.
 - **File locality** — artifacts stay on the machine that produced them.
-- **Linux-only** — podman (rootless), systemd --user, GTK4/gtkmm4.
-- **One native desktop app** — `hive-client` owns chat, media and the
-  embedded ChimpFlow voice page from `hive-client/voice/`; there is no
+- **Linux-only** — podman (rootless), systemd --user; the desktop client is Electron.
+- **One desktop app** — `hive-client` (Electron + TypeScript) owns chat,
+  media, settings and the embedded ChimpFlow voice page; there is no
   separate voice process, launcher, application ID or debug shell.
 
 Current release line: **1.2.x** (latest tag `1.2.12`). The desktop client
@@ -46,7 +46,7 @@ executable no longer exists.
 | Agent engine | **hive-agent** (in-tree at `hive-agent/src/` — merged into this repo 2026-09-07; builds as part of the main build) |
 | Persistence | **SQLite3** (raw C API via `DbUtil.h` helpers) |
 | JSON | **nlohmann_json** |
-| Native client | **GTK4 / gtkmm-4.0**, integrated PipeWire/ChimpFlow voice (+ optional WebKitGTK 6.0 for embedded noVNC) |
+| Desktop client | **Electron + TypeScript** (`hive-client/`) — chat, media, settings, model-scoped ChimpFlow voice; sandbox helper via `install.sh` |
 | Web dashboard | Vanilla JS + CSS in `web/dist/` (no framework, no bundler) |
 | Agent sandbox | Rootless **podman**; on-demand desktop (Xvfb + x11vnc + noVNC + Chromium) per container — starts on demand, auto-sleeps when viewerless |
 | Crypto/misc | OpenSSL, libpng, poppler-cpp (hive-brain deps) |
@@ -58,7 +58,7 @@ System packages (Ubuntu 26.04):
 ```bash
 sudo apt install -y cmake g++ nlohmann-json3-dev \
     sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev \
-    libgtkmm-4.0-dev podman   # no libcurl — OmniNet is the only HTTP stack
+    podman   # no libcurl — OmniNet is the only HTTP stack
 ```
 
 Configure & build (CMake auto-fetches hive-brain + OmniNet via FetchContent):
@@ -119,10 +119,9 @@ hive-worker/          Remote executor daemon (fleet manager). Links OmniNet
                       ONLY — no hive-brain, no LLM keys, no roster DB.
 hive-agent/           In-container brain: thin hive-brain::Agent host speaking
                       stdio NDJSON with hive-worker. No HTTP.
-hive-client/          Single GTK4/gtkmm4 desktop app: roster, threads,
-                      chat, media, screen view and integrated voice.
-  voice/              Embedded ChimpFlow STT/TTS, PipeWire audio, VoiceView,
-                      speech cleanup, portal shortcut and pure-logic tests.
+hive-client/          Electron + TypeScript desktop app: roster, threads,
+                      chat, media, settings and integrated ChimpFlow voice
+                      (voice UI lives in the renderer; no native module).
 */tests/              per-app ctest suites — one binary per area (assert/Catch2)
 web/dist/             Web dashboard (vanilla JS pages under js/pages/)
 docs/                 design.md, api.md, hive-worker.md, deploy.md, …
@@ -206,7 +205,7 @@ Key architectural mapping:
 | `docs/host-agents.md` | Phase 72 host agents (bare-metal, sudo, NO sandbox — read before enabling) |
 | `docs/computer-use.md` | Live screen share (Xvfb/noVNC) |
 | `docs/skills.md` | Global skill library design |
-| `docs/client.md` / `docs/web.md` | GTK client / web dashboard guides |
+| `docs/client.md` / `docs/web.md` | Legacy GTK client (retired) / web dashboard guides |
 
 ## Practical Tips for Agents
 
@@ -233,9 +232,9 @@ Key architectural mapping:
    hub's 1024-fd limit overnight and 500'd every authed request
    (EMFILE reads as "unable to open database file"). Check fd count
    (`ls /proc/<pid>/fd | wc -l`) before/after repeated route calls.
-10. GTK theme on Ubuntu GNOME: the Appearance panel flips `gtk-theme`
-   ('Yaru'↔'Yaru-dark') and leaves `color-scheme='default'` — read BOTH
-   keys (see `HiveWindow::follow_system_theme`).
+10. (Legacy — retired with the GTK client, kept for history:) GTK theme on
+    Ubuntu GNOME: the Appearance panel flips `gtk-theme` ('Yaru'↔'Yaru-dark')
+    and leaves `color-scheme='default'` — read BOTH keys.
 11. Agent web services get a STABLE LAN URL via the service-port range
    (2026-10-09): containers publish 8000+ 1:1 to a persisted per-agent
    host base; agents use share_service/list_services/unshare_service
@@ -270,7 +269,7 @@ stamped at ENQUEUE, never dispatch). The header is DATA on the delivery
 row — the `[<source> @ <time>]` bracket string is rendered ONLY at the
 agent-prompt edge (`try_dispatch`) and in the hub journal
 (`complete_turn` reply trail). Stored thread bodies stay raw; no
-user-facing surface (GTK, web, Android TTS) renders headers. Vocabulary:
+user-facing surface (Electron client, web, Android TTS) renders headers. Vocabulary:
 `user`, `voice-app`, `routine:<label>`, `agent:<name>`, `phone`,
 `system`, `trigger:agent_idle` — clients may only claim `user`/`voice` on
 POST messages; routine/agent/phone/system/trigger are hub-internal. The voice TTS directive
@@ -339,7 +338,7 @@ Read state (66c) is per-principal high-water marks in
 ONLY the target agent's mark (`delivery_is_read`) — never let any
 other principal's view advance an agent's mark. The human user has a
 reserved `"user"` row: `POST /api/threads/:id/read` advances only it
-(the GTK client fires it debounced on view), and `GET /api/threads`
+(the Electron client fires it debounced on view), and `GET /api/threads`
 carries `unread` = non-user messages newer than that mark — the
 client's badge count, persisted across restarts (the old in-memory
 `last_seen_activity_` badge died on every launch; do not reintroduce

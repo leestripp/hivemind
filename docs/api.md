@@ -1,6 +1,6 @@
 # hive-server API
 
-The hub is a comms router. Its API serves the client (GTK app and web UI)
+The hub is a comms router. Its API serves the Electron desktop client and the web UI
 and the workers' control plane. All endpoints require a Bearer API key
 except `/api/health`.
 

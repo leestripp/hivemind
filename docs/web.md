@@ -2,9 +2,9 @@
 
 The hub serves a static ES-module application from `web/dist`. It is an
 **administrative console**, not a thread/chat client and not an agent host.
-For conversation interfaces use the single voice-enabled GTK desktop client
-(`hive-client`) or the Android app. Desktop voice is embedded in
-`hive-client`; there is no separate native voice client. No `HiveOffice`
+For conversation interfaces use the Electron desktop client
+(`hive-client/`, voice-enabled) or the Android app. Desktop voice is embedded
+in `hive-client`; there is no separate native voice client. No `HiveOffice`
 component exists in this source tree.
 
 ## Pages and capabilities

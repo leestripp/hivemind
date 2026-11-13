@@ -1,8 +1,8 @@
 # HiveMind design (2026-08-29)
 
 HiveMind is a team of persistent AI agents that live in containers on
-worker machines, with a central communications hub and a native GTK4
-client. This document describes the current architecture.
+worker machines, with a central communications hub and an Electron
+desktop client. This document describes the current architecture.
 
 ## Principles
 
@@ -18,7 +18,7 @@ client. This document describes the current architecture.
 4. **File locality.** Work artifacts stay on the machine that produced
    them; bytes cross machines only when explicitly requested (file_fetch,
    show_image, push_file).
-5. **Linux-only.** podman (rootless), systemd --user, GTK4/gtkmm4.
+5. **Linux-only.** podman (rootless), systemd --user; desktop client is Electron.
 
 ## Components
 
@@ -95,10 +95,9 @@ prefix used by provider caches.
 - The Electron main process owns REST/ChimpFlow HTTP and persistent settings;
   the sandboxed renderer receives only a typed IPC bridge. Voice assignments
   are scoped by speech model and agent.
-- `hive-client-gdk/` preserves the former single GTK4/gtkmm4 app and its
-  advanced thread-folder, diagnostics and XDG voice-shortcut integrations. Its
-  `hive-client-gdk/voice/` module remains linked as `VoiceView`.
-- Both clients use the hub REST API and local ChimpFlow HTTP; neither needs
+- The GTK4/gtkmm4 predecessor (`hive-client-gdk/`) was retired 2026-11-13;
+  its history remains in git up to tag 1.4.0.
+- The client uses the hub REST API and local ChimpFlow HTTP; it needs no
   provider LLM credentials.
 
 ## Comms flow at a glance
@@ -143,7 +142,7 @@ keepAliveTimeout=0, per-connection writer queues) are in
 ## Hub transcripts versus agent brain context
 
 The hub's `threads.db` is the durable, per-thread user-visible transcript
-used by the voice-enabled GTK client, Android, and other REST clients. It is not the exact
+used by the voice-enabled Electron client, Android, and other REST clients. It is not the exact
 prompt history sent to a model. Each hive-agent also maintains one
 hive-brain conversation at `/workspace/.hive-agent/<Name>/messages.json`
 on its worker. That conversation is shared across the agent's hub threads,

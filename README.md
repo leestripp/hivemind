@@ -70,8 +70,8 @@ and complete their work autonomously.
   Settings and every other popup are accessible Chromium HTML dialogs, with
   Playwright-operable DOM dropdowns and file inputs. It supports model-scoped
   per-agent voices, Play-button narration, Talk/Send voice turns and live
-  ChimpFlow health. The former GTK4 client remains in `hive-client-gdk` with
-  advanced thread-folder, diagnostics and XDG shortcut integrations. Plus the **web dashboard**:
+  ChimpFlow health. The former GTK4 client was retired 2026-11-13; its history
+  remains reachable in git (tag 1.4.0 and earlier). Plus the **web dashboard**:
   Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
 - **Android app** (`hive-android`) — pick an agent from the info-card
@@ -117,7 +117,7 @@ inspection without becoming checkpoints that interrupt the work.
 # 1. System packages
 sudo apt install -y cmake g++ nlohmann-json3-dev \
     sqlite3 libsqlite3-dev libssl-dev libpng-dev libpoppler-cpp-dev \
-    libgtkmm-4.0-dev podman   # no libcurl — OmniNet is the only HTTP stack
+    podman   # no libcurl — OmniNet is the only HTTP stack
 
 # 2. Configure & build
 cmake -S . -B build
@@ -126,7 +126,6 @@ cmake --build build -j$(nproc)
 # 3. Run
 ./build/hive-server/hive-server    # hub on :8421
 (cd hive-client && npm install && npm start)  # Electron chat + voice
-# Legacy GTK client: ./build/hive-client-gdk/hive-client-gdk
 # or the web UI: xdg-open http://localhost:8421/
 ```
 
@@ -155,9 +154,6 @@ hive-server/   C++23 + OmniNet server: roster, threads, messaging,
 hive-agent/    the agent runtime itself (runs in worker containers)
 hive-client/   Electron + TypeScript desktop client — accessible HTML UI,
                chat, attachments, model-scoped ChimpFlow voices and Talk/Send
-hive-client-gdk/
-               Legacy GTK4/gtkmm4 client — rich media, agent desktops and
-               integrated voice (hive-client-gdk/voice/)
 hive-android/  Android client — NDK GL sphere, on-device STT, streaming
                TTS, inbox watch, text chat with media viewers + GL audio
                player (docs/android.md)
@@ -207,8 +203,7 @@ GET                   /api/models           union of connected workers' catalogs
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Curated starters and agent-owned workspace/private skills |
 | `hive-client/README.md` | Electron client — run, architecture, settings migration and Playwright tests |
-| `docs/client.md` | Legacy GTK4 client — chat, narration, dialogs, menus, theming |
-| `hive-client-gdk/voice/README.md` | Legacy embedded voice module — ChimpFlow, PipeWire, build/runtime and tests |
+| `docs/client.md` | Legacy GTK4 client guide (app retired 2026-11-13 — source history in git, tag 1.4.0) |
 | `docs/voice-global-shortcuts.md` | XDG/GNOME voice key contract, giomm callback trap, safety and diagnosis |
 | `docs/android.md` | Android app — sphere, on-device STT, streaming TTS, inbox watch, chat + media |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |
