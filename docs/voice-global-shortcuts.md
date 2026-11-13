@@ -1,13 +1,13 @@
-# Voice global shortcuts on GNOME/Wayland
+# Legacy GTK voice global shortcuts on GNOME/Wayland
 
-This is the permanent runbook for HiveMind's embedded voice push-to-talk key.
+This is the permanent runbook for the **legacy GTK client's** embedded voice push-to-talk key. The Electron client registers no global shortcuts.
 It records the November 2026 failure, the verified implementation, and the
 checks to use before changing this code again.
 
 The implementation is
-[`hive-client/voice/src/GlobalShortcuts.cpp`](../hive-client/voice/src/GlobalShortcuts.cpp).
+[`hive-client-gdk/voice/src/GlobalShortcuts.cpp`](../hive-client-gdk/voice/src/GlobalShortcuts.cpp).
 The voice-page lifecycle and callback guard are in
-[`hive-client/src/HiveWindow.cpp`](../hive-client/src/HiveWindow.cpp).
+[`hive-client-gdk/src/HiveWindow.cpp`](../hive-client-gdk/src/HiveWindow.cpp).
 
 ## Current behavior and safety boundary
 
@@ -216,9 +216,9 @@ probe from the repository root:
 
 ```bash
 g++ -std=c++23 -Wall -Wextra -Wpedantic \
-  -Ihive-client/voice/src \
+  -Ihive-client-gdk/voice/src \
   /tmp/hive-global-shortcut-cpp-probe.cpp \
-  hive-client/voice/src/GlobalShortcuts.cpp \
+  hive-client-gdk/voice/src/GlobalShortcuts.cpp \
   -o /tmp/hive-global-shortcut-cpp-probe \
   $(pkg-config --cflags --libs giomm-2.68)
 ```

@@ -63,14 +63,15 @@ and complete their work autonomously.
   all live, queued, and managed background work; and curated starter skills
   installed once for every agent. Agents own and edit their private and shared
   workspace skills themselves.
-- **Voice-enabled native GTK4 client** (`hive-client`) — ONE desktop app
-  for roster/avatars, threads, live chat, rich media, agent management and
-  integrated ChimpFlow voice. Selecting an agent opens its voice page beside
-  the existing DM; **Back** returns to Agents/Threads. It supports per-agent
-  voices, Play-button narration on agent bubbles (including Inbox), a
-  page-scoped **Super+Alt+Backspace** Talk shortcut and live ChimpFlow health.
-  There is no separate desktop voice executable or launcher. Plus the **web
-  dashboard**:
+- **Voice-enabled Electron client** (`hive-client`) — ONE desktop app for
+  worker-grouped roster/avatars, threads, live chat, attachments, agent
+  management and integrated ChimpFlow voice. Selecting an agent opens its
+  voice page beside the existing DM; **Back** returns to Agents/Threads.
+  Settings and every other popup are accessible Chromium HTML dialogs, with
+  Playwright-operable DOM dropdowns and file inputs. It supports model-scoped
+  per-agent voices, Play-button narration, Talk/Send voice turns and live
+  ChimpFlow health. The former GTK4 client remains in `hive-client-gdk` with
+  advanced thread-folder, diagnostics and XDG shortcut integrations. Plus the **web dashboard**:
   Agents, Tasks, Files, Skills,
   Secrets, Models, Workers, API keys, Settings.
 - **Android app** (`hive-android`) — pick an agent from the info-card
@@ -124,7 +125,8 @@ cmake --build build -j$(nproc)
 
 # 3. Run
 ./build/hive-server/hive-server    # hub on :8421
-./build/hive-client/hive-client    # native chat + integrated voice client
+(cd hive-client && npm install && npm start)  # Electron chat + voice
+# Legacy GTK client: ./build/hive-client-gdk/hive-client-gdk
 # or the web UI: xdg-open http://localhost:8421/
 ```
 
@@ -151,8 +153,11 @@ off-host: resolved task configuration includes the provider API key.
 hive-server/   C++23 + OmniNet server: roster, threads, messaging,
                routines, containers, worker channel, web UI (web/dist)
 hive-agent/    the agent runtime itself (runs in worker containers)
-hive-client/   Single GTK4/gtkmm4 desktop client — chat, rich media and
-               integrated ChimpFlow voice (hive-client/voice/)
+hive-client/   Electron + TypeScript desktop client — accessible HTML UI,
+               chat, attachments, model-scoped ChimpFlow voices and Talk/Send
+hive-client-gdk/
+               Legacy GTK4/gtkmm4 client — rich media, agent desktops and
+               integrated voice (hive-client-gdk/voice/)
 hive-android/  Android client — NDK GL sphere, on-device STT, streaming
                TTS, inbox watch, text chat with media viewers + GL audio
                player (docs/android.md)
@@ -201,8 +206,9 @@ GET                   /api/models           union of connected workers' catalogs
 | `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, Caddy TLS, lockdown |
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Curated starters and agent-owned workspace/private skills |
-| `docs/client.md` | Voice-enabled GTK4 client — chat, narration, dialogs, menus, theming |
-| `hive-client/voice/README.md` | Embedded voice module — ChimpFlow, PipeWire, build/runtime and tests |
+| `hive-client/README.md` | Electron client — run, architecture, settings migration and Playwright tests |
+| `docs/client.md` | Legacy GTK4 client — chat, narration, dialogs, menus, theming |
+| `hive-client-gdk/voice/README.md` | Legacy embedded voice module — ChimpFlow, PipeWire, build/runtime and tests |
 | `docs/voice-global-shortcuts.md` | XDG/GNOME voice key contract, giomm callback trap, safety and diagnosis |
 | `docs/android.md` | Android app — sphere, on-device STT, streaming TTS, inbox watch, chat + media |
 | `docs/web.md` | Web dashboard — pages, stack, adding a page |

@@ -86,21 +86,26 @@ scoped grants, host-agent warnings, or verification of external actions. The
 section stays before volatile session memory to preserve the static prompt
 prefix used by provider caches.
 
-### hive-client — single voice-enabled GTK4/gtkmm4 app
+### Desktop clients
 
-- Roster, threads, chat, streaming replies, rich media, agent management.
-- `hive-client/voice/` is linked into this same process as `VoiceView`:
-  ChimpFlow STT/TTS, PipeWire audio, per-agent voices, message narration and
-  a page-scoped XDG Talk shortcut. There is no standalone voice executable.
-- Hub conversations use the hub REST API; local voice I/O uses ChimpFlow.
-  The client knows nothing about containers or workers beyond presence and
-  worker-routed attachment downloads.
+- `hive-client/` is the primary Electron + TypeScript app: roster, grouped
+  threads, chat, streaming replies, attachments, agent management, narration
+  and ChimpFlow Talk/Send voice. All controls and dialogs live in its Chromium
+  document, so Playwright can operate the complete UI without AT-SPI.
+- The Electron main process owns REST/ChimpFlow HTTP and persistent settings;
+  the sandboxed renderer receives only a typed IPC bridge. Voice assignments
+  are scoped by speech model and agent.
+- `hive-client-gdk/` preserves the former single GTK4/gtkmm4 app and its
+  advanced thread-folder, diagnostics and XDG voice-shortcut integrations. Its
+  `hive-client-gdk/voice/` module remains linked as `VoiceView`.
+- Both clients use the hub REST API and local ChimpFlow HTTP; neither needs
+  provider LLM credentials.
 
 ## Comms flow at a glance
 
 ```
-hive-client (chat + embedded voice) --REST :8421 (Bearer)--> hive-server
-hive-client/voice --local HTTP :8090--> ChimpFlow (STT/TTS)
+hive-client (Electron main: chat + voice) --REST :8421 (Bearer)--> hive-server
+hive-client (Electron main) --local HTTP :8090------> ChimpFlow (STT/TTS)
                                       |  threads, roster, routines,
                                       |  routines, files; no LLM keys
 hive-worker --WS :8423 /api/workers/channel--> hive-server

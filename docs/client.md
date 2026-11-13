@@ -1,4 +1,4 @@
-# hive-client — GTK4/gtkmm4 native app
+# hive-client-gdk — legacy GTK4/gtkmm4 native app
 
 The client design is solid and carries over from v1 unchanged in shape:
 it talks ONLY to the hive-server hub over HTTPS (Bearer key from
@@ -11,7 +11,7 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
   start collapsed, and render greyed out — click the group header to
   expand/collapse. Agents on an offline worker are dimmed.
 - **Threads** — DM and group threads; chat with streaming replies.
-- **Integrated voice** — this is part of the same `hive-client` process and
+- **Integrated voice** — this is part of the same `hive-client-gdk` process and
   binary; no standalone desktop voice application remains. Selecting an agent
   opens or reuses its DM. When the configured ChimpFlow gateway and API key
   are available, the left sidebar

@@ -1,6 +1,10 @@
-# hive-client UiApi — embedded REST test surface
+> **Legacy client API:** this recipe applies to `hive-client-gdk`. The
+> Electron client is tested through Playwright instead; see
+> `hive-client/README.md`.
 
-Phase 11.5 (2026-08-23). hive-client embeds an OmniNet HTTP server so the
+# hive-client-gdk UiApi — legacy embedded REST test surface
+
+Phase 11.5 (2026-08-23). hive-client-gdk embeds an OmniNet HTTP server so the
 GTK UI can be inspected and driven end-to-end from scripts, tests, and
 agents — no display interaction required.
 
@@ -161,7 +165,7 @@ DISPLAY=:99 xdpyinfo >/dev/null || exit 1
 
 # 2. Launch (single-instance app — kill any running hive-client first)
 setsid dbus-run-session -- env GDK_BACKEND=x11 DISPLAY=:99 \
-    ./build/hive-client/hive-client &
+    ./build/hive-client-gdk/hive-client-gdk &
 
 # 3. Drive it
 curl -s http://127.0.0.1:8481/ui/health
