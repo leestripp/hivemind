@@ -1,6 +1,7 @@
 import type { Attachment, ChatMessage } from '../shared/contracts.js';
 import { byId, element, errorMessage, formatBytes, formatTime } from './dom.js';
 import type { SpeechPlayer } from './speech-player.js';
+import { agentAvatar, userAvatar } from './avatars.js';
 import { agentById, state } from './state.js';
 
 type MediaKind = 'image' | 'video' | 'audio';
@@ -83,6 +84,17 @@ export class MessageRenderer {
     const item = element('li', { className: `message ${message.senderKind}-message` });
     item.dataset.messageId = message.id;
     const meta = element('div', { className: 'message-meta' });
+    if (message.senderKind === 'agent' && agent) {
+      const image = element('img', { className: 'avatar message-avatar' });
+      image.src = agentAvatar(agent);
+      image.alt = '';
+      meta.append(image);
+    } else if (message.senderKind === 'user') {
+      const image = element('img', { className: 'avatar message-avatar' });
+      image.src = userAvatar(state.settings.userAvatar);
+      image.alt = '';
+      meta.append(image);
+    }
     meta.append(element('span', { className: 'message-sender', text: sender }),
       element('span', { text: formatTime(message.createdAt) }));
     if (message.senderKind === 'agent' && message.body.trim()) {

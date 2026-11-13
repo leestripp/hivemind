@@ -2,7 +2,7 @@ import type { ChimpFlowCatalog, SpeechAudio } from '../shared/contracts.js';
 import { objectValue, stringValue } from '../shared/normalize.js';
 import { DEFAULT_CHIMPFLOW_MODEL, type SettingsStore } from './config.js';
 import { discoveryIds, requestBytes, requestJson, responseError } from './http.js';
-import { normalizeWavLoudness } from './loudness.js';
+import { normalizeWavLoudness, wavLufs } from './loudness.js';
 
 function assertWav(bytes: ArrayBuffer): void {
   const view = new DataView(bytes);
@@ -12,7 +12,7 @@ function assertWav(bytes: ArrayBuffer): void {
 }
 
 export class ChimpFlowService {
-  constructor(private readonly settings: SettingsStore) {}
+  constructor(private readonly settings: SettingsStore, private readonly log: (message: string) => void = () => {}) {}
 
   private connection(): { url: string; key: string; model: string } {
     const settings = this.settings.snapshot();
@@ -69,7 +69,12 @@ export class ChimpFlowService {
     if (fallback) console.warn(`ChimpFlow replaced unavailable voice ${fallback} with the model default`);
     // Same loudness whatever voice the agent wears — the catalog spans
     // ~6 dB RMS voice-to-voice otherwise (GTK client parity).
-    return { bytes: normalizeWavLoudness(response.bytes), mimeType: 'audio/wav' };
+    const before = wavLufs(response.bytes);
+    const normalized = normalizeWavLoudness(response.bytes);
+    const after = wavLufs(normalized);
+    const db = (value: number | undefined): string => value === undefined ? 'n/a' : value.toFixed(1);
+    this.log(`synthesize model=${model} voice=${voice || '(default)'} bytes=${normalized.byteLength} lufs ${db(before)} -> ${db(after)} LUFS`);
+    return { bytes: normalized, mimeType: 'audio/wav' };
   }
 
   async transcribe(wav: ArrayBuffer): Promise<string> {

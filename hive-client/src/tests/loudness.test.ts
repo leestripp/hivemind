@@ -1,107 +1,108 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { normalizeLoudness, normalizeWavLoudness } from '../main/loudness.js';
+import { describe, it } from 'node:test';
+import { limitPeaks, measureLufs, normalizeWavLoudness, TARGET_LUFS, wavLufs } from '../main/loudness.js';
 
-function rmsOf(samples: Int16Array): number {
-  let sumSq = 0;
-  for (const s of samples) sumSq += s * s;
-  return Math.sqrt(sumSq / samples.length) / 32768;
-}
-
-function peakOf(samples: Int16Array): number {
-  let peak = 0;
-  for (const s of samples) peak = Math.max(peak, Math.abs(s));
-  return peak / 32768;
-}
-
-function sine(amplitude: number, n: number): Int16Array {
-  const pcm = new Int16Array(n);
-  for (let i = 0; i < n; ++i) pcm[i] = Math.round(amplitude * 32767 * Math.sin(i * 0.05));
-  return pcm;
-}
-
-test('quiet voice is gained up to the target RMS', () => {
-  const pcm = sine(0.08, 8000);  // RMS ≈ 0.057 — the caro_davy case
-  normalizeLoudness(pcm);
-  assert.ok(Math.abs(rmsOf(pcm) - 0.106) <= 0.005, `rms ${rmsOf(pcm)}`);
-  assert.ok(peakOf(pcm) <= 0.95);
-});
-
-test('loud voice is attenuated to the same target', () => {
-  const pcm = sine(0.22, 8000);  // RMS ≈ 0.156
-  normalizeLoudness(pcm);
-  assert.ok(Math.abs(rmsOf(pcm) - 0.106) <= 0.005, `rms ${rmsOf(pcm)}`);
-  assert.ok(peakOf(pcm) <= 0.95);
-});
-
-test('hot peaks never clip — the peak cap wins over the RMS target', () => {
-  const pcm = sine(0.05, 8000);
-  pcm[100] = 32000;   // one near-full-scale transient
-  pcm[4000] = -32000;
-  normalizeLoudness(pcm);
-  assert.ok(peakOf(pcm) <= 0.95);
-});
-
-test('silence and empty input pass through untouched', () => {
-  const silence = new Int16Array(4000);
-  normalizeLoudness(silence);
-  assert.equal(peakOf(silence), 0);
-  const empty = new Int16Array(0);
-  normalizeLoudness(empty);  // must not crash
-  assert.equal(empty.length, 0);
-});
-
-test('very quiet voices get the full boost without clipping', () => {
-  const pcm = sine(0.02, 8000);  // RMS ≈ 0.014 — the stuart_bell case
-  normalizeLoudness(pcm);        // needs ~7.5x; gain cap 6.0 applies
-  assert.ok(rmsOf(pcm) > 0.08);
-  assert.ok(peakOf(pcm) <= 0.95);
-});
-
-test('degenerate extreme input is bounded by the gain clamp', () => {
-  const pcm = sine(0.9, 8000);  // RMS ≈ 0.64 — far above target
-  normalizeLoudness(pcm);
-  assert.ok(rmsOf(pcm) >= 0.15);  // min-gain 0.25 → RMS ≈ 0.16, not 0.106
-  assert.ok(peakOf(pcm) <= 0.95);
-});
-
-function wavWith(samples: Int16Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(44 + samples.length * 2);
-  const view = new DataView(buffer);
-  const writeAscii = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; ++i) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-  writeAscii(0, 'RIFF');
-  view.setUint32(4, 36 + samples.length * 2, true);
-  writeAscii(8, 'WAVE');
-  writeAscii(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);       // PCM
-  view.setUint16(22, 1, true);       // mono
-  view.setUint32(24, 16000, true);
-  view.setUint32(28, 32000, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeAscii(36, 'data');
-  view.setUint32(40, samples.length * 2, true);
-  new Int16Array(buffer, 44, samples.length).set(samples);
-  return buffer;
-}
-
-test('WAV wrapper normalizes the data chunk and keeps the header intact', () => {
-  const pcm = sine(0.02, 8000);
-  const bytes = normalizeWavLoudness(wavWith(pcm));
+function makeWav(samples: Float64Array, rate = 24000): ArrayBuffer {
+  const bytes = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(bytes);
-  assert.equal(view.getUint32(0, false), 0x52494646);  // RIFF
-  const normalized = new Int16Array(bytes, 44, 8000);
-  assert.ok(rmsOf(normalized) > 0.08);
+  const writeAscii = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; ++i) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+  writeAscii(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true);
+  writeAscii(8, 'WAVE'); writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  writeAscii(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; ++i) {
+    const c = Math.max(-1, Math.min(1, samples[i]!));
+    view.setInt16(44 + i * 2, Math.round(c < 0 ? c * 0x8000 : c * 0x7fff), true);
+  }
+  return bytes;
+}
+
+function sine(rate: number, seconds: number, frequency: number, amplitude: number): Float64Array {
+  const out = new Float64Array(Math.round(rate * seconds));
+  for (let i = 0; i < out.length; ++i) out[i] = amplitude * Math.sin(2 * Math.PI * frequency * i / rate);
+  return out;
+}
+
+describe('measureLufs', () => {
+  it('measures a 1 kHz tone near its level plus K-weighting', () => {
+    // Amplitude 0.1 sine: RMS is -23.01 dBFS; K-weighting at the 1 kHz
+    // reference frequency is ~0 dB, so it must read within half a dB of that.
+    const measured = measureLufs(sine(24000, 3, 1000, 0.1), 24000);
+    assert.ok(measured !== undefined);
+    assert.ok(Math.abs(measured! - -23.0) < 0.5, `expected ≈ -23.0, got ${measured}`);
+  });
+
+  it('returns undefined for silence', () => {
+    assert.equal(measureLufs(new Float64Array(24000), 24000), undefined);
+  });
+
+  it('ignores a silent tail when gating', () => {
+    const tone = sine(24000, 2, 1000, 0.1);
+    const withTail = new Float64Array(tone.length + 48000 * 8);
+    withTail.set(tone);
+    const measured = measureLufs(withTail, 24000);
+    assert.ok(measured !== undefined && Math.abs(measured! - -23.0) < 0.8);  // ffmpeg ebur128 reads -23.3 on the same file
+  });
 });
 
-test('non-PCM WAV passes through unchanged', () => {
-  const buffer = wavWith(sine(0.02, 100));
-  new DataView(buffer).setUint16(20, 3, true);  // IEEE float, not PCM
-  const bytes = normalizeWavLoudness(buffer);
-  const original = new Int16Array(buffer, 44, 100);
-  const result = new Int16Array(bytes, 44, 100);
-  assert.deepEqual(Array.from(result), Array.from(original));
+describe('limitPeaks', () => {
+  it('leaves content under the ceiling untouched', () => {
+    const s = sine(24000, 1, 1000, 0.5);
+    limitPeaks(s, 24000);
+    let peak = 0;
+    for (const x of s) peak = Math.max(peak, Math.abs(x));
+    assert.ok(Math.abs(peak - 0.5) < 0.01);
+  });
+
+  it('shaves an over-ceiling burst down to the ceiling', () => {
+    const s = new Float64Array(24000);
+    for (let i = 1200; i < 1800; ++i) s[i] = 0.99;   // 25 ms burst at 0.99
+    limitPeaks(s, 24000);
+    let peak = 0;
+    for (const x of s) peak = Math.max(peak, Math.abs(x));
+    assert.ok(peak <= 0.96, `peak ${peak} above ceiling`);
+  });
+});
+
+describe('normalizeWavLoudness (EBU R128)', () => {
+  it('passes non-WAV bytes through unchanged', () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]).buffer as ArrayBuffer;
+    assert.equal(normalizeWavLoudness(bytes), bytes);
+  });
+
+  it('passes silence through unchanged', () => {
+    const wav = makeWav(new Float64Array(24000));
+    const out = normalizeWavLoudness(wav);
+    assert.equal(wavLufs(out), undefined);
+  });
+
+  it('gains a quiet clean tone up to the target', () => {
+    const wav = makeWav(sine(24000, 3, 1000, 0.03));
+    const out = normalizeWavLoudness(wav);
+    const lufs = wavLufs(out);
+    assert.ok(lufs !== undefined && Math.abs(lufs! - TARGET_LUFS) < 0.5, `got ${lufs}`);
+  });
+
+  it('does not let one full-scale outlier cap the whole utterance (regression)', () => {
+    // Quiet speech-like content with a single click at full scale — the old
+    // absolute-peak cap applied ~unity gain and the clip stayed quiet.
+    const base = sine(24000, 4, 440, 0.045);
+    const click = new Float64Array(base.length);
+    click.set(base);
+    click[48000] = 1.0;
+    const wav = makeWav(click);
+    const out = normalizeWavLoudness(wav);
+    const lufs = wavLufs(out);
+    assert.ok(lufs !== undefined && lufs! > TARGET_LUFS - 1.5, `still quiet: ${lufs}`);
+    const view = new DataView(out);
+    let peak = 0;
+    const int16 = new Int16Array(out, 44, (out.byteLength - 44) / 2);
+    for (const x of int16) peak = Math.max(peak, Math.abs(x));
+    assert.ok(peak / 32768 <= 0.96, `peak ${peak / 32768} exceeds ceiling`);
+    void view;
+  });
 });

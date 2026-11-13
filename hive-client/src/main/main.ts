@@ -10,6 +10,7 @@ import {
   isRecord, normalizeHttpUrl, SettingsStore, validAttachment,
 } from './config.js';
 import { HubService } from './hub.js';
+import { loadWindowState, saveWindowState } from './window-state.js';
 import { ThreadUiStore } from './thread-ui.js';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -22,10 +23,11 @@ app.setName('HiveMind');
 const settings = new SettingsStore(app.getPath('userData'));
 const hub = new HubService(settings);
 const threadUi = new ThreadUiStore(app.getPath('userData'));
-const chimpflow = new ChimpFlowService(settings);
+const chimpflow = new ChimpFlowService(settings, (message) => void logStartup(message));
 let mainWindow: BrowserWindow | undefined;
 let fatalVisible = false;
 const startupLog = path.join(app.getPath('userData'), 'logs', 'startup.log');
+const windowStateFile = path.join(app.getPath('userData'), 'window-state.json');
 
 function errorText(error: unknown): string {
   return error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -327,8 +329,10 @@ async function openAgentScreen(agentId: string, viewOnly: boolean): Promise<void
 }
 
 function createWindow(): void {
+  const savedState = loadWindowState(windowStateFile);
+  void logStartup(`Window size ${savedState.width}x${savedState.height}`);
   mainWindow = new BrowserWindow({
-    title: 'HiveMind', width: 1100, height: 760, minWidth: 760, minHeight: 560,
+    title: 'HiveMind', width: savedState.width, height: savedState.height, minWidth: 760, minHeight: 560,
     show: false, autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#242424' : '#fafafa',
     webPreferences: {
@@ -339,8 +343,19 @@ function createWindow(): void {
     },
   });
   const window = mainWindow;
+  let resizeTimer: NodeJS.Timeout | undefined;
+  const saveSize = (): void => {
+    if (window.isDestroyed()) return;
+    const [width = 0, height = 0] = window.getSize();
+    saveWindowState(windowStateFile, { width, height });
+  };
   window.once('ready-to-show', () => window.show());
-  window.on('closed', () => { if (mainWindow === window) mainWindow = undefined; });
+  window.on('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(saveSize, 500);
+  });
+  window.on('close', () => { clearTimeout(resizeTimer); saveSize(); });
+  window.on('closed', () => { clearTimeout(resizeTimer); if (mainWindow === window) mainWindow = undefined; });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== window.webContents.getURL()) event.preventDefault();
@@ -356,6 +371,8 @@ function createWindow(): void {
     app.quit();
   });
 }
+
+app.on('before-quit', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.emit('close'); });
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
