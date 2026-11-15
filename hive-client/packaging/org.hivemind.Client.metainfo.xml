@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.hivemind.Client</id>
+  <name>HiveMind</name>
+  <summary>Chat with your AI agent hive</summary>
+  <metadata_license>MIT</metadata_license>
+  <description>
+    <p>HiveMind is the native client for a hive-server: persistent,
+    chat-addressable AI agents sandboxed in containers. Roster with live
+    state, threads with markdown + attachments, approval queue for
+    privileged actions, exec-log audit trail, embedded agent screens
+    (noVNC), scheduled routines, and a shared skills library.</p>
+  </description>
+  <launchable type="desktop-id">org.hivemind.Client.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+</component>
