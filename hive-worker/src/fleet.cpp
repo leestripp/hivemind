@@ -119,6 +119,9 @@ std::string AgentProcess::build_env_file() {
 }
 
 void AgentProcess::start() {
+    if (spec_.host_agent && !spec_.host_tcp_ports.empty())
+        throw std::invalid_argument(
+            "host_tcp_ports is container-only; bare-metal agents share the host network");
     {
         std::lock_guard<std::mutex> lk(m_);
         if (state_ != "down") throw std::runtime_error("already started");
@@ -165,7 +168,8 @@ void AgentProcess::start() {
         // Phase 35: type "gpu" -> gpu image + device passthrough flags
         hwrunner::ensure_container(spec_.id, resolved_image(spec_),
                                    spec_.type == "gpu",
-                                   spec_.memory, spec_.cpus);   // Phase 69
+                                   spec_.memory, spec_.cpus,
+                                   &spec_.host_tcp_ports);
     }
     spawn_exec();
     monitor_ = std::thread(&AgentProcess::monitor_loop, this);
@@ -397,7 +401,8 @@ void AgentProcess::monitor_loop() {
             if (!spec_.host_agent)
                 hwrunner::ensure_container(spec_.id, resolved_image(spec_),
                                            spec_.type == "gpu",
-                                           spec_.memory, spec_.cpus);  // Phase 69
+                                           spec_.memory, spec_.cpus,
+                                           &spec_.host_tcp_ports);
             spawn_exec();                // creates a fresh reader_ thread
             // A stop() that landed mid-respawn (spec-change restart)
             // couldn't kill a child that didn't exist yet — do it now

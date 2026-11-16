@@ -70,6 +70,12 @@ std::string MigrationService::begin(const std::string& agent_id,
 
     const bool src_host = a->host_agent;
     const bool tgt_host = target_type == "host";
+    if (tgt_host && !a->host_tcp_ports.empty())
+        throw std::invalid_argument(
+            "clear host_tcp_ports before migrating this agent to bare metal");
+    if (!a->host_tcp_ports.empty() && a->worker != target_worker && !force)
+        throw std::invalid_argument(
+            "this agent has host TCP grants; review the target rig's services and pass force to carry them");
     if (target_type != "container" && target_type != "host")
         throw std::invalid_argument("target_type must be container|host");
     if (a->worker == target_worker && src_host == tgt_host)
@@ -248,7 +254,8 @@ void MigrationService::send_import(const Migration& job) {
           {"model", a->model},
           {"memory", a->memory},
           {"cpus", a->cpus},
-          {"type", a->type}});
+          {"type", a->type},
+          {"host_tcp_ports", hivemind::host_tcp_ports_json(a->host_tcp_ports)}});
 }
 
 // ─── roster flip / rollback ──────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <sqlite3.h>
 #include <nlohmann/json.hpp>
+#include "hivemind/HostTcpPorts.h"
 
 /**
  * AgentStore — SQLite persistence for the agent roster (HiveMind 2.0).
@@ -37,6 +38,8 @@ struct RosterAgent {
     // user hivex-<name> with passwordless sudo. Worker opt-in and runtime
     // selection are configuration, not per-command permission prompts.
     bool host_agent = false;
+    // Container-only outbound host-service allowlist (pasta -T). Empty = none.
+    hivemind::HostTcpPorts host_tcp_ports;
     std::string created_at;
     std::string updated_at;
 };
@@ -69,7 +72,8 @@ public:
                              const std::string& memory = "", // Phase 69: "" = worker default
                              double cpus = 0,                 // Phase 69: 0 = worker default
                              const std::string& thinking_level = "", // 2026-10-01
-                             bool host_agent = false);       // Phase 72
+                             bool host_agent = false,       // Phase 72
+                             hivemind::HostTcpPorts host_tcp_ports = {});
 
     std::optional<RosterAgent> get_agent(const std::string& id);
     std::optional<RosterAgent> get_agent_by_name(const std::string& name);
@@ -89,7 +93,8 @@ public:
                              const std::string& memory = "",     // "" = keep, "default" = clear (Phase 69)
                              double cpus = -1,                    // -1 = keep, 0 = worker default (Phase 69)
                              const std::string& thinking_level = "", // "" = keep, "default" = clear
-                             int host_agent = -1);               // Phase 72: -1 = keep, 0/1 = set
+                             int host_agent = -1,               // Phase 72: -1 = keep, 0/1 = set
+                             std::optional<hivemind::HostTcpPorts> host_tcp_ports = std::nullopt);
 
     /// Delete the roster row (on-disk agent dir is left untouched).
     bool delete_agent(const std::string& id);

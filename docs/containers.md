@@ -91,6 +91,34 @@ container when the agent is idle (busy agents log a journal warning and
 are recycled once idle). The full-netns procedure above is only needed
 when EVERY container fails at once.
 
+### Selected host-loopback TCP services
+
+The roster's `host_tcp_ports` array is the per-container outbound
+allowlist for TCP services listening on the worker's own loopback (for
+example a local ChimpFlow, ComfyUI or OzMail port). Empty is the default
+and denies this path. The worker, not the caller, renders native Podman
+networking:
+
+```sh
+podman inspect -f '{{.HostConfig.NetworkMode}} {{json .Config.CreateCommand}}' hive-<agent-id>
+# HostConfig says "pasta" in both cases; CreateCommand records either
+# --network=pasta or --network=pasta:-T,8090,-T,8765
+```
+
+This is not LAN publishing, host networking, UDP/DNS access, or a secret
+store. Services still need their own authentication. Grant only ports
+whose service exposure is appropriate for that agent.
+
+The desired array is pinned under the worker state directory so exec,
+crash recovery and screen-session recreation retain it. A desired/effective
+mismatch (base mode plus the retained create-command `-T` options) causes a
+controlled `podman rm` + `create` + `start`; home and
+workspace mounts, image/screen/GPU pins, resource limits, service-port
+mappings and the apex host route are preserved. Unchanged spawns leave the
+container alone. Unknown custom `NetworkMode` values stop the operation
+with an error rather than being discarded. Editing or revoking grants is
+blocked while the agent is mid-turn or its worker is offline.
+
 ## On-demand desktop (Phase 36)
 
 The desktop stack (Xvfb + x11vnc + websockify/noVNC + Chromium under
@@ -101,3 +129,23 @@ the x11vnc watchdog first (pidfile) then the stack. The worker's idle
 watcher counts ESTABLISHED :5900 connections and stops the screen after
 HIVEMIND_SCREEN_IDLE_MIN (default 15) viewerless minutes — measured
 reclaim ~350–700 MB per idle agent.
+
+### Disposable integration proof
+
+`hive-worker/tests/test_host_ports_live.py` drives the real worker lifecycle
+against a unique `hive-host-port-test-*` container. It starts two temporary
+host-loopback HTTP servers and verifies default deny, selected allow, a denied
+port, unchanged-container reconciliation, persisted pins across driver
+processes, stop/start, revocation, image preservation, and foreign-network
+fail-closed behavior. Its `finally` block removes the test container and state.
+
+Run only on a rig where `localhost/hive-agent:latest` already exists:
+
+```sh
+cmake --build build --target test_host_ports_live
+python3 hive-worker/tests/test_host_ports_live.py   build/hive-worker/tests/test_host_ports_live
+```
+
+`HIVE_WORKER_DIR` isolates worker pins/workspace/mount state without changing
+Podman's own `HOME` or image store. Normal CTest invokes the driver with no
+arguments and skips it; this proof is never an implicit production-fleet test.

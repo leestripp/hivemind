@@ -89,12 +89,15 @@ nlohmann::json ApiClient::create_agent(const std::string& name,
                                        const std::string& memory,
                                        double cpus,
                                        const std::string& thinking_level,
-                                       int host_agent) {
+                                       int host_agent,
+                                       std::optional<hivemind::HostTcpPorts> host_tcp_ports) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"avatar", avatar}};
     // Phase 72: host agent (bare-metal sudo); omit when unchanged.
     if (host_agent >= 0) body["host_agent"] = host_agent == 1;
+    if (host_tcp_ports) body["host_tcp_ports"] =
+        hivemind::host_tcp_ports_json(*host_tcp_ports);
     if (!worker.empty()) body["worker"] = worker;   // v2: must be an enrolled worker (hub 400s otherwise)
     if (!type.empty())   body["type"]   = type;     // Phase 35
     if (!memory.empty()) body["memory"] = memory;   // Phase 69
@@ -114,7 +117,8 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
                                        const std::string& memory,
                                        double cpus,
                                        const std::string& thinking_level,
-                                       int host_agent) {
+                                       int host_agent,
+                                       std::optional<hivemind::HostTcpPorts> host_tcp_ports) {
     nlohmann::json body{{"name", name}, {"role", role}, {"model", model},
                         {"workspace_mode", workspace_mode},
                         {"avatar", avatar},
@@ -127,6 +131,8 @@ nlohmann::json ApiClient::update_agent(const std::string& id,
     body["thinking_level"] = thinking_level;
     // Phase 72: -1 = omit (keep); 0/1 = set.
     if (host_agent >= 0) body["host_agent"] = host_agent == 1;
+    if (host_tcp_ports) body["host_tcp_ports"] =
+        hivemind::host_tcp_ports_json(*host_tcp_ports);
     return request("PATCH", "/api/agents/" + id, &body);
 }
 

@@ -1,3 +1,19 @@
+## Host TCP grant rollout / rollback
+
+The per-agent `host_tcp_ports` feature needs the new hub AND worker binaries;
+the GTK/web controls alone are not a rollout. The hub schema addition is
+additive (`agents.host_tcp_ports TEXT NOT NULL DEFAULT '[]'`) and existing
+rows remain empty/default-deny. Use the disposable proof in
+[containers.md](containers.md#disposable-integration-proof) on each Podman rig
+before deployment; it must not be retargeted at production agents.
+
+No image rebuild is required for a grant-only edit. Worker network-policy
+drift recreates just that agent's container, preserving its current image and
+pins. Rolling back to an older worker fails closed: it ignores the new pin and
+uses default pasta on any subsequent recreation, revoking host-loopback TCP
+access rather than retaining an unrecognized policy. Restore the paired
+hub/worker version to manage grants again.
+
 # Deployment
 
 > This doc is the topology/reference overview. Operational runbooks

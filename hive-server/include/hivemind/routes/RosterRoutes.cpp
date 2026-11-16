@@ -12,6 +12,7 @@
 #include "hivemind/DeliveryStore.h"
 #include "hivemind/HubRouter.h"
 #include "hivemind/LlmStore.h"
+#include "hivemind/HostTcpPorts.h"
 
 #include <iostream>
 #include "hivemind/RoutineStore.h"
@@ -50,6 +51,7 @@ json agent_json(const RosterAgent& a) {
         {"memory", a.memory}, {"cpus", a.cpus},                  // Phase 69
         {"thinking_level", a.thinking_level},                     // 2026-10-01
         {"host_agent", a.host_agent},                               // Phase 72
+        {"host_tcp_ports", hivemind::host_tcp_ports_json(a.host_tcp_ports)},
         {"mcp_servers", json::parse(a.mcp_servers, nullptr, false)},  // Phase 33
         {"created_at", a.created_at}, {"updated_at", a.updated_at},
     };
@@ -335,7 +337,20 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     send_error(resp, 400, werr); return;
                 }
             }
+            hivemind::HostTcpPorts host_tcp_ports;
+            if (body.contains("host_tcp_ports")) {
+                std::string error;
+                const auto parsed = hivemind::parse_host_tcp_ports(
+                    body["host_tcp_ports"], error);
+                if (!parsed) { send_error(resp, 400, error); return; }
+                host_tcp_ports = *parsed;
+            }
             const bool host_agent = body.value("host_agent", false);
+            if (host_agent && !host_tcp_ports.empty()) {
+                send_error(resp, 400,
+                    "host_tcp_ports is container-only; clear it for a bare-metal agent");
+                return;
+            }
             if (host_agent) {
                 std::string herr;
                 if (!validate_host_capable(workers, worker, herr)) {
@@ -346,7 +361,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 auto a = agents.create_agent(name, role, model, ws,
                                              body.value("avatar", ""), worker,
                                              type, memory, cpus,
-                                             thinking_level, host_agent);
+                                             thinking_level, host_agent,
+                                             std::move(host_tcp_ports));
                 // Phase C: spawn the brain on its worker right away
                 // (idempotent; offline worker spawns on reconnect).
                 hub.reconcile_worker(a.worker);
@@ -400,7 +416,7 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
         });
 
     server.patch("/api/agents/:id",
-        [&agents, &hub, &workers, llm](const OmniNet::HTTP::Request& req,
+        [&agents, &hub, &chat, &workers, llm](const OmniNet::HTTP::Request& req,
                              OmniNet::HTTP::Response& resp) {
             auto seg = path_segments(req.path());
             if (seg.size() < 3) { send_error(resp, 400, "missing id"); return; }
@@ -469,8 +485,37 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 }
                 phost = body["host_agent"].get<bool>() ? 1 : 0;
             }
+            std::optional<hivemind::HostTcpPorts> pports;
+            if (body.contains("host_tcp_ports")) {
+                std::string error;
+                auto parsed = hivemind::parse_host_tcp_ports(
+                    body["host_tcp_ports"], error);
+                if (!parsed) { send_error(resp, 400, error); return; }
+                pports = std::move(*parsed);
+            }
             const bool eff_host = phost == 1 ||
                                   (phost < 0 && existing->host_agent);
+            const auto eff_ports = pports.value_or(existing->host_tcp_ports);
+            if (eff_host && !eff_ports.empty()) {
+                send_error(resp, 400,
+                    "host_tcp_ports is container-only; clear it before selecting bare metal");
+                return;
+            }
+            const bool ports_changed = pports &&
+                                       *pports != existing->host_tcp_ports;
+            if (ports_changed) {
+                if (chat.agent_busy(existing->id)) {
+                    send_error(resp, 409,
+                        "host_tcp_ports changes recreate the container; retry while the agent is idle");
+                    return;
+                }
+                const std::string effw = pw.empty() ? existing->worker : pw;
+                if (!hub.worker_online(effw)) {
+                    send_error(resp, 409,
+                        "host_tcp_ports changes require the agent worker to be online");
+                    return;
+                }
+            }
             if (eff_host) {
                 // Caps must hold on the EFFECTIVE worker — covers enabling
                 // AND moving an existing host agent to a new rig.
@@ -497,7 +542,8 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                     ptype,   // "" = keep, "default" = clear
                     pmemory, pcpus,    // Phase 69
                     pthinking,         // 2026-10-01
-                    phost);            // Phase 72
+                    phost,             // Phase 72
+                    pports);
                 // Name/model changes must not leak into a live brain:
                 // stop, then respawn with the new config (worker dedups).
                 hub.stop_agent(a);
@@ -505,7 +551,13 @@ void register_roster_routes(OmniNet::HTTP::Server& server,
                 // v2: the brain namespace lives on the worker's volume,
                 // keyed by name; a rename starts a fresh brain on the next
                 // spawn (old history stays orphaned on the volume).
-                send_json(resp, agent_json(a));
+                auto response = agent_json(a);
+                if (ports_changed && !eff_host) {
+                    // Spawn is asynchronous; ready/state is the apply signal.
+                    // Never claim the old container was already recreated.
+                    response["container_recreate_required"] = true;
+                }
+                send_json(resp, response);
             } catch (const std::invalid_argument& e) {
                 send_error(resp, 400, e.what());
             }

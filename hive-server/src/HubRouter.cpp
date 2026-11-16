@@ -560,6 +560,7 @@ json HubRouter::spawn_frame(const RosterAgent& agent) const {
             {"type", agent.type},             // Phase 35: "" / "gpu"
             {"memory", agent.memory},         // Phase 69: "" = worker default
             {"cpus", agent.cpus},             // Phase 69: 0 = worker default
+            {"host_tcp_ports", hivemind::host_tcp_ports_json(agent.host_tcp_ports)},
             // Phase 72: host agent — the worker independently verifies its
             // own allow_host_agents opt-in before honoring this (defense in
             // depth; the route-side caps gate is in RosterRoutes).

@@ -24,6 +24,7 @@
 #include <pwd.h>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <cstring>
 
 #include <algorithm>
@@ -51,6 +52,11 @@ std::string container_name(const std::string& agent) {
 }
 
 std::string worker_dir() {
+    // Explicit state-root override keeps disposable integration tests away
+    // from production pins/mounts without changing Podman's own HOME/store.
+    if (const char* override = std::getenv("HIVE_WORKER_DIR");
+        override && *override)
+        return override;
     return (fs::path{std::getenv("HOME") ? std::getenv("HOME") : "."}
          / ".local" / "share" / "hive-worker").string();
 }
@@ -596,66 +602,205 @@ void maybe_run_boot_hook(const std::string& agent) {
                   &out);
 }
 
+std::string pasta_network_mode(hivemind::HostTcpPorts ports) {
+    std::ranges::sort(ports);
+    ports.erase(std::ranges::unique(ports).begin(), ports.end());
+    std::string mode = "pasta";
+    for (const auto port : ports) {
+        mode += mode == "pasta" ? ":-T," : ",-T,";
+        mode += std::to_string(port);
+    }
+    return mode;
+}
+
+std::optional<hivemind::HostTcpPorts> parse_pasta_network_mode(
+        std::string_view mode) {
+    const auto b = mode.find_first_not_of(" \t\r\n");
+    if (b == std::string_view::npos) return std::nullopt;
+    const auto e = mode.find_last_not_of(" \t\r\n");
+    mode = mode.substr(b, e - b + 1);
+    if (mode == "pasta") return hivemind::HostTcpPorts{};
+    constexpr std::string_view prefix = "pasta:";
+    if (!mode.starts_with(prefix)) return std::nullopt;
+    mode.remove_prefix(prefix.size());
+
+    std::vector<std::string_view> tokens;
+    for (std::size_t pos = 0;;) {
+        const auto comma = mode.find(',', pos);
+        auto token = mode.substr(pos, comma == std::string_view::npos
+                                           ? mode.size() - pos : comma - pos);
+        if (token.empty()) return std::nullopt;
+        tokens.push_back(token);
+        if (comma == std::string_view::npos) break;
+        pos = comma + 1;
+    }
+    if (tokens.size() % 2 != 0 ||
+        tokens.size() / 2 > hivemind::kMaxHostTcpPorts)
+        return std::nullopt;
+
+    hivemind::HostTcpPorts ports;
+    for (std::size_t i = 0; i < tokens.size(); i += 2) {
+        if (tokens[i] != "-T") return std::nullopt;
+        unsigned int port = 0;
+        const auto& text = tokens[i + 1];
+        const auto [ptr, ec] = std::from_chars(
+            text.data(), text.data() + text.size(), port);
+        if (ec != std::errc{} || ptr != text.data() + text.size() ||
+            port < 1 || port > 65535)
+            return std::nullopt;
+        ports.push_back(static_cast<std::uint16_t>(port));
+    }
+    std::ranges::sort(ports);
+    ports.erase(std::ranges::unique(ports).begin(), ports.end());
+    return ports;
+}
+
+std::optional<hivemind::HostTcpPorts> parse_podman_pasta_network(
+        const nlohmann::json& create_command, std::string_view host_network_mode) {
+    const auto b = host_network_mode.find_first_not_of(" \t\r\n");
+    const auto e = host_network_mode.find_last_not_of(" \t\r\n");
+    if (b == std::string_view::npos) return std::nullopt;
+    host_network_mode = host_network_mode.substr(b, e - b + 1);
+    if (host_network_mode != "pasta" || !create_command.is_array())
+        return std::nullopt;
+
+    std::optional<std::string> network;
+    for (std::size_t i = 0; i < create_command.size(); ++i) {
+        if (!create_command[i].is_string()) return std::nullopt;
+        const auto arg = create_command[i].get<std::string>();
+        std::optional<std::string> found;
+        if (arg == "--network") {
+            if (++i >= create_command.size() || !create_command[i].is_string())
+                return std::nullopt;
+            found = create_command[i].get<std::string>();
+        } else if (arg.starts_with("--network=")) {
+            found = arg.substr(std::string("--network=").size());
+        }
+        if (found) {
+            if (network || found->empty()) return std::nullopt;
+            network = *found;
+        }
+    }
+    return parse_pasta_network_mode(network.value_or("pasta"));
+}
+
+fs::path host_ports_pin_path(const std::string& agent) {
+    return fs::path(worker_dir()) / "host-ports" / (agent + ".json");
+}
+
+hivemind::HostTcpPorts read_host_ports_pin(const std::string& agent) {
+    std::ifstream in(host_ports_pin_path(agent));
+    if (!in) return {};
+    const std::string body((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    return hivemind::host_tcp_ports_from_db(body);
+}
+
+void write_host_ports_pin(const std::string& agent,
+                          const hivemind::HostTcpPorts& ports) {
+    const fs::path path = host_ports_pin_path(agent);
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::trunc);
+    out << hivemind::host_tcp_ports_dump(ports) << '\n';
+    ::chmod(path.c_str(), 0600);
+}
+
+// A null pointer means a spec-less exec/screen path: retain the fleet's pin.
+// A pointer to an empty vector is an explicit administrative revocation.
+hivemind::HostTcpPorts effective_host_tcp_ports(
+        const std::string& agent, const hivemind::HostTcpPorts* desired) {
+    if (!desired) return read_host_ports_pin(agent);
+    write_host_ports_pin(agent, *desired);
+    return *desired;
+}
+
+bool network_mode_differs(const std::string& cname,
+                          const hivemind::HostTcpPorts& desired) {
+    std::string mode, create_json;
+    if (podman_simple({"inspect", "--format",
+                       "{{.HostConfig.NetworkMode}}", cname}, &mode) != 0 ||
+        podman_simple({"inspect", "--format", "{{json .Config.CreateCommand}}",
+                       cname}, &create_json) != 0)
+        throw std::runtime_error("podman inspect network configuration failed");
+    const auto create_command = nlohmann::json::parse(create_json, nullptr, false);
+    const auto actual = parse_podman_pasta_network(create_command, mode);
+    if (!actual)
+        throw std::runtime_error(
+            "container " + cname + " uses custom networking (" + mode +
+            "); refusing to replace it automatically");
+    return *actual != desired;
+}
+
 void ensure_container(const std::string& agent, std::string image,
-                      bool gpu, const std::string& memory, double cpus) {
+                      bool gpu, const std::string& memory, double cpus,
+                      const hivemind::HostTcpPorts* host_tcp_ports) {
     const std::string cname = container_name(agent);
 
     // Screen session pins the image (see screen_pinned_image).
     if (std::string pinned = screen_pinned_image(agent); !pinned.empty())
         image = pinned;
 
-    // Phase 69: the fleet passes the hub's per-agent caps on every
-    // spawn — pin them so spec-less paths (exec, screen recreate) reuse
-    // the same limits. Spec-less callers pass ""/0 and keep the pin.
+    // Spec-bearing fleet calls pin both resource and network policy so the
+    // spec-less exec and screen recreate paths preserve the exact container.
     if (!memory.empty() || cpus > 0)
         write_limits_pin(agent, {memory, cpus});
     const AgentLimits limits = effective_limits(agent, memory, cpus);
+    const auto desired_ports = effective_host_tcp_ports(agent, host_tcp_ports);
+    const std::string desired_network = pasta_network_mode(desired_ports);
 
     ensure_image_built(image);
 
     std::lock_guard<std::mutex> recreate_lock(container_recreate_mutex());
 
+    auto trimmed = [](std::string v) {
+        while (!v.empty() && (v.back() == '\n' || v.back() == ' ' ||
+                              v.back() == '\t' || v.back() == '\r'))
+            v.pop_back();
+        return v;
+    };
+
     std::string state;
     if (podman_simple({"inspect", "--format", "{{.State.Status}}", cname},
                       &state) == 0) {
-        if (state.find("running") != std::string::npos) {
-            reconcile_limits(cname, limits);   // Phase 69: in-place, no recreate
-            return;   // up
-        }
-        // Stopped container: recreate when the image DRIFTED (dep bumps,
-        // screen-stack changes) so a restart actually picks up the new
-        // image — plain `podman start` would resurrect the old one
-        // forever (hit 2026-09-03: hive-brain 1.0.3 images rebuilt, agents
-        // still on the old IDs). Running containers are left alone —
-        // they adopt the new image at their next natural restart.
-        auto trimmed = [](std::string v) {
-            while (!v.empty() && (v.back() == '\n' || v.back() == ' ' ||
-                                  v.back() == '\t' || v.back() == '\r'))
-                v.pop_back();
-            return v;
-        };
-        std::string have, want;
-        podman_simple({"inspect", "--format", "{{.Image}}", cname}, &have);
-        podman_simple({"image", "inspect", "--format", "{{.Id}}", image},
-                      &want);
-        if (!trimmed(have).empty() && !trimmed(want).empty() &&
-            trimmed(have) != trimmed(want)) {
-            std::cerr << "runner: image drifted for " << cname
-                      << " — recreating on " << image << "\n";
-            podman_simple({"rm", "-f", cname}, nullptr);
-            // fall through to the create path below
-        } else {
-            if (podman_simple({"start", cname}, &state) != 0)
-                throw std::runtime_error("podman start failed: " + state);
-            reconcile_limits(cname, limits);   // Phase 69
+        const bool network_drift = network_mode_differs(cname, desired_ports);
+        if (network_drift) {
+            std::cerr << "runner: host TCP grants changed for " << cname
+                      << " -> " << desired_network
+                      << " — controlled recreate (image unchanged)\n";
+            std::string err;
+            if (podman_simple({"rm", "-f", cname}, &err) != 0)
+                throw std::runtime_error("podman rm for network change failed: " + err);
+            // Fall through to the complete create path below.
+        } else if (state.find("running") != std::string::npos) {
+            reconcile_limits(cname, limits);
             return;
+        } else {
+            // Stopped container: recreate on image drift so a restart does not
+            // resurrect an obsolete image forever. Network policy already
+            // matched above and therefore needs no recreate.
+            std::string have, want;
+            podman_simple({"inspect", "--format", "{{.Image}}", cname}, &have);
+            podman_simple({"image", "inspect", "--format", "{{.Id}}", image},
+                          &want);
+            if (!trimmed(have).empty() && !trimmed(want).empty() &&
+                trimmed(have) != trimmed(want)) {
+                std::cerr << "runner: image drifted for " << cname
+                          << " — recreating on " << image << "\n";
+                std::string err;
+                if (podman_simple({"rm", "-f", cname}, &err) != 0)
+                    throw std::runtime_error("podman rm for image drift failed: " + err);
+            } else {
+                if (podman_simple({"start", cname}, &state) != 0)
+                    throw std::runtime_error("podman start failed: " + state);
+                reconcile_limits(cname, limits);
+                return;
+            }
         }
     }
 
-    // Shared workspace ON THIS WORKER (2026-08-29): all agents on the rig
-    // see the same /workspace, mirroring the server's company-drive model.
-    // Per-agent remains only the home dir. (Was workspace-<agent> — agents
-    // on the same worker couldn't collaborate.)
+    // Shared workspace ON THIS WORKER: all agents on the rig see /workspace.
+    // Only the home dir remains per-agent; both survive recreation.
     fs::path base = worker_dir();
     fs::path ws = base / "workspace";
     fs::path home = base / ("home-" + agent);
@@ -663,16 +808,11 @@ void ensure_container(const std::string& agent, std::string image,
     fs::create_directories(ws, ec);
     fs::create_directories(home, ec);
 
-    // Phase 36: ALWAYS publish loopback 6080 (dynamic host port) — the
-    // screen stack then starts by pure exec, with NO container recreate
-    // (recreating to add the port killed the running agent mid-turn).
-    // Phase 69: memory/cpus from the (pinned) per-agent limits;
-    // --shm-size 1g matches the screen path — GUI apps and Chromium die
-    // on podman's 64Mi default /dev/shm.
     std::vector<std::string> args{"create", "--name", cname,
                        "--memory", limits.memory,
                        "--cpus", format_cpus(limits.cpus),
                        "--shm-size", "1g", "--userns=keep-id",
+                       "--network", desired_network,
                        "-p", "127.0.0.1::6080"};
     {
         const auto lan_args = lan_publish_args(cname);
@@ -685,27 +825,22 @@ void ensure_container(const std::string& agent, std::string image,
         args.insert(args.end(), svc_env.begin(), svc_env.end());
     }
     if (gpu) {
-        // Phase 35: AMD GPU passthrough. /dev/kfd = HIP compute (REQUIRED —
-        // without it rocminfo sees nothing), /dev/dri = GL/Vulkan render
-        // nodes. keep-groups carries the host `render` group membership in.
         args.insert(args.end(), {"--device", "/dev/kfd",
                                  "--device", "/dev/dri",
                                  "--group-add", "keep-groups"});
     }
-    // Pasta hairpin fix (2026-09-21, see self_hosted_apex): on the droplet
-    // the apex self-resolves to the listenerless guest; host-gateway makes
-    // nginx :443/:8443 reachable in-container. Harmless elsewhere.
+    // Preserve the droplet's self-hosted-apex hairpin route on every recreate.
     if (self_hosted_apex())
         args.insert(args.end(), {"--add-host", "leestrippai.com:host-gateway"});
     args.insert(args.end(), {"-v", ws.string() + ":/workspace",
-                       "-v", home.string() + "/:/home/hive:U",
+                       "-v", home.string() + ":/home/hive:U",
                        "-w", "/workspace", image});
     std::string out;
     if (podman_simple(args, &out) != 0)
         throw std::runtime_error("podman create failed: " + out);
     if (podman_simple({"start", cname}, &out) != 0)
         throw std::runtime_error("podman start failed: " + out);
-    reconcile_limits(cname, limits);   // Phase 69: no-op on fresh create
+    reconcile_limits(cname, limits);
     maybe_run_boot_hook(agent);
 }
 
@@ -934,6 +1069,13 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
         if (screen_port_of(agent) == 0 || cur_img != new_img ||
             !lan_ports_present(cname) || !service_range_present(cname))
             recreate = true;
+        try {
+            if (network_mode_differs(cname, effective_host_tcp_ports(agent, nullptr)))
+                recreate = true;
+        } catch (const std::exception& e) {
+            r.error = e.what();
+            return r;
+        }
     }
     if (recreate) {
         podman_simple({"rm", "-f", cname}, &out);
@@ -956,6 +1098,8 @@ ScreenResult screen_ctl(const std::string& agent, const std::string& action,
                            "--cpus", format_cpus(slimits.cpus),
                            "--shm-size", "1g",
                            "--userns=keep-id",
+                           "--network", pasta_network_mode(
+                               effective_host_tcp_ports(agent, nullptr)),
                            "-p", "127.0.0.1::6080"};
         {
             const auto lan_args = lan_publish_args(cname);

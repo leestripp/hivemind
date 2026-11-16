@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include "hivemind/HostTcpPorts.h"
 
 #include <functional>
 #include <mutex>
@@ -56,7 +57,8 @@ public:
                                 const std::string& memory = "",
                                 double cpus = -1,                     // Phase 69: -1 = default
                                 const std::string& thinking_level = "", // 2026-10-01: "" = inherit from model
-                                int host_agent = -1);               // Phase 72: -1 omit, 0/1 set
+                                int host_agent = -1,              // Phase 72: -1 omit, 0/1 set
+                                std::optional<hivemind::HostTcpPorts> host_tcp_ports = std::nullopt);
     nlohmann::json update_agent(const std::string& id,
                                 const std::string& name, const std::string& role,
                                 const std::string& model,
@@ -67,7 +69,8 @@ public:
                                 const std::string& memory = "",
                                 double cpus = -1,                     // Phase 69: -1 keep, 0 reset
                                 const std::string& thinking_level = "", // 2026-10-01: "" keep, "default" clears, else set
-                                int host_agent = -1);               // Phase 72: -1 omit, 0/1 set
+                                int host_agent = -1,              // Phase 72: -1 omit, 0/1 set
+                                std::optional<hivemind::HostTcpPorts> host_tcp_ports = std::nullopt);
     nlohmann::json list_workers();                                   // GET /api/workers (Phase 30)
     nlohmann::json delete_agent(const std::string& id,
                                 const std::string& reassign_to = "");  // DELETE /api/agents/:id[?reassign_to=]

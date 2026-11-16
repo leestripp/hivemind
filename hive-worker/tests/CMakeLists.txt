@@ -20,6 +20,12 @@ set_tests_properties(test_fleet PROPERTIES SKIP_RETURN_CODE 77)
 # Fresh workspace seeding creates only .agents/skills and never clobbers content.
 hive_worker_test(test_workspace_seed)
 
+# Typed per-agent host TCP grants and canonical pasta network rendering.
+hive_worker_test(test_host_ports)
+# Opt-in real Podman proof; no arguments exits 77 so normal CTest skips it.
+hive_worker_test(test_host_ports_live)
+set_tests_properties(test_host_ports_live PROPERTIES SKIP_RETURN_CODE 77)
+
 # Per-agent service-port registry + advertised host address (2026-10-09).
 hive_worker_test(test_service_ports)
 hive_worker_test(test_migration_ops)

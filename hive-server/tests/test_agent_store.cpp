@@ -137,10 +137,33 @@ int main() {
         assert(r && r->memory == "1536m" && r->cpus == 8);
     }
 
+    // ── host TCP grants: normalized creation, keep/set/explicit revoke ──
+    auto net = store.create_agent("Net", "services", "", "shared", "", "rig",
+                                  "", "", 0, "", false, {8765, 8090});
+    assert(net.host_tcp_ports == hivemind::HostTcpPorts({8090, 8765}));
+    assert(store.get_agent(net.id)->host_tcp_ports ==
+           hivemind::HostTcpPorts({8090, 8765}));
+    auto net2 = store.update_agent(net.id, net.name, net.role, net.model,
+        net.workspace_mode, net.avatar, net.worker, net.mcp_servers, net.type,
+        net.memory, net.cpus, net.thinking_level, 0, hivemind::HostTcpPorts{8188});
+    assert(net2.host_tcp_ports == hivemind::HostTcpPorts{8188});
+    auto kept = store.update_agent(net.id, net.name, net.role, net.model,
+        net.workspace_mode, net.avatar, net.worker, net.mcp_servers, net.type,
+        net.memory, net.cpus, net.thinking_level, 0, std::nullopt);
+    assert(kept.host_tcp_ports == hivemind::HostTcpPorts{8188});
+    auto revoked = store.update_agent(net.id, net.name, net.role, net.model,
+        net.workspace_mode, net.avatar, net.worker, net.mcp_servers, net.type,
+        net.memory, net.cpus, net.thinking_level, 0, hivemind::HostTcpPorts{});
+    assert(revoked.host_tcp_ports.empty());
+    {
+        AgentStore reopened{tmp / "agents.db"};
+        assert(reopened.get_agent(net.id)->host_tcp_ports.empty());
+    }
+
     // ── delete ────────────────────────────────────────────────────────────
     assert(store.delete_agent(b.id));
     assert(!store.delete_agent(b.id));  // already gone
-    assert(store.list_agents().size() == 4);   // Nova, Rigger, Forge, Comfy
+    assert(store.list_agents().size() == 5);   // Nova, Rigger, Forge, Comfy, Net
 
 
     // ── thinking level (2026-10-01): "" = inherit from model ──────────────
@@ -159,6 +182,25 @@ int main() {
                                  "", "", "", "", 0, "max");
     assert(t4.thinking_level == "max");                       // set
     assert(store.get_agent(t.id)->thinking_level == "max");   // persisted
+
+    // A pre-feature database upgrades non-destructively to a default-deny [].
+    const fs::path legacy = tmp / "legacy.db";
+    {
+        sqlite3* db = nullptr;
+        assert(sqlite3_open(legacy.c_str(), &db) == SQLITE_OK);
+        const char* sql =
+            "CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+            " role TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',"
+            " workspace_mode TEXT NOT NULL DEFAULT 'shared',"
+            " container_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,"
+            " updated_at TEXT NOT NULL);"
+            "INSERT INTO agents VALUES ('legacy-id','Legacy','','','shared','','now','now');";
+        assert(sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(db);
+    }
+    AgentStore migrated{legacy};
+    auto old = migrated.get_agent("legacy-id");
+    assert(old && old->host_tcp_ports.empty());
 
     fs::remove_all(tmp);
     std::cout << "test_agent_store: OK\n";

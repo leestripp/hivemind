@@ -242,7 +242,14 @@ The worker owns a container per agent (`hive-<agent-id>`):
   (synced library at hive-brain' global skills location).
 - `--userns=keep-id` so container writes land as the worker user.
 - Rootless networking is a shared pasta netns -- see docs/containers.md
-  for the operational gotchas.
+  for the operational gotchas. Spawn's numeric `host_tcp_ports` array
+  becomes a worker-owned `--network=pasta:-T,<port>...` mode (or plain
+  `pasta` for empty). The worker validates and pins the desired list,
+  compares `HostConfig.NetworkMode` with the retained
+  `Config.CreateCommand` `-T` options (Podman 5.7 reports only `pasta` in the
+  former), and recreates only on policy/image drift. Spec-less exec and screen recreation use the pin.
+  Bare-metal agents reject non-empty grants; custom network modes fail
+  closed rather than being recreated implicitly.
 - Liveness: heartbeat reports per-agent state; desired state is replayed
   by the hub on every reconnect.
 - Idle watcher (60s tick, worker-side, channel-independent):

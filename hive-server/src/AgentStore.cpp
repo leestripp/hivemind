@@ -55,13 +55,15 @@ RosterAgent row_to_agent(sqlite3_stmt* st) {
     a.cpus           = sqlite3_column_double(st, 13);  // Phase 69
     a.thinking_level = col(14);   // 2026-10-01: "" = inherit from model
     a.host_agent     = sqlite3_column_int(st, 15) != 0;  // Phase 72
+    a.host_tcp_ports = hivemind::host_tcp_ports_from_db(col(16));
     return a;
 }
 
 constexpr const char* kSelectCols =
     "SELECT id, name, role, model, workspace_mode, container_id,"
     "       created_at, updated_at, avatar, worker,"
-    "       mcp_servers, type, memory, cpus, thinking_level, host_agent FROM agents";
+    "       mcp_servers, type, memory, cpus, thinking_level, host_agent,"
+    "       host_tcp_ports FROM agents";
 
 } // namespace
 
@@ -150,6 +152,11 @@ void AgentStore::ensure_schema() {
     sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN host_agent"
                      " INTEGER NOT NULL DEFAULT 0",
                  nullptr, nullptr, nullptr);
+    // Container-only host TCP allowlist. Missing legacy rows default to []:
+    // upgrading the hub never opens host-loopback access by itself.
+    sqlite3_exec(db, "ALTER TABLE agents ADD COLUMN host_tcp_ports"
+                     " TEXT NOT NULL DEFAULT '[]'",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 }
 
@@ -163,7 +170,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
                                      const std::string& memory,
                                      double cpus,
                                      const std::string& thinking_level,
-                                     bool host_agent) {
+                                     bool host_agent,
+                                     hivemind::HostTcpPorts host_tcp_ports) {
     if (name.empty())
         throw std::invalid_argument("agent name must not be empty");
     if (get_agent_by_name(name))
@@ -183,6 +191,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     a.cpus           = cpus > 0 ? cpus : 0;                     // Phase 69
     a.thinking_level = thinking_level;                          // 2026-10-01
     a.host_agent     = host_agent;                              // Phase 72
+    a.host_tcp_ports = hivemind::normalize_host_tcp_ports(std::move(host_tcp_ports));
     a.created_at     = iso_now();
     a.updated_at     = a.created_at;
 
@@ -192,8 +201,8 @@ RosterAgent AgentStore::create_agent(const std::string& name,
         "INSERT INTO agents (id, name, role, model, workspace_mode,"
         "                   container_id, created_at, updated_at,"
         "                   avatar, worker, type, memory, cpus, thinking_level,"
-        "                   host_agent)"
-        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?,?)";
+        "                   host_agent, host_tcp_ports)"
+        " VALUES (?,?,?,?,?,'',?,?,?,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close(db);
@@ -213,6 +222,7 @@ RosterAgent AgentStore::create_agent(const std::string& name,
     sqlite3_bind_double(st, 12, a.cpus);
     bind_text(st, 13, a.thinking_level);
     sqlite3_bind_int(st, 14, a.host_agent ? 1 : 0);
+    bind_text(st, 15, hivemind::host_tcp_ports_dump(a.host_tcp_ports));
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -273,7 +283,8 @@ RosterAgent AgentStore::update_agent(const std::string& id,
                                      const std::string& memory,
                                      double cpus,
                                      const std::string& thinking_level,
-                                     int host_agent) {
+                                     int host_agent,
+                                     std::optional<hivemind::HostTcpPorts> host_tcp_ports) {
     auto existing = get_agent(id);
     if (!existing)
         throw std::invalid_argument("agent not found: " + id);
@@ -300,7 +311,9 @@ RosterAgent AgentStore::update_agent(const std::string& id,
         " thinking_level = CASE WHEN ? = '' THEN thinking_level"
         "   WHEN ? = 'default' THEN '' ELSE ? END,"
         // Phase 72: -1 = keep current, 0/1 = set.
-        " host_agent = CASE WHEN ? < 0 THEN host_agent ELSE ? END"
+        " host_agent = CASE WHEN ? < 0 THEN host_agent ELSE ? END,"
+        // nullopt = keep; an explicit empty array revokes every grant.
+        " host_tcp_ports = CASE WHEN ? IS NULL THEN host_tcp_ports ELSE ? END"
         " WHERE id=?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
@@ -331,7 +344,14 @@ RosterAgent AgentStore::update_agent(const std::string& id,
     bind_text(st, 21, thinking_level);
     sqlite3_bind_int(st, 22, host_agent);
     sqlite3_bind_int(st, 23, host_agent);
-    bind_text(st, 24, id);
+    const std::string rendered_ports = host_tcp_ports
+        ? hivemind::host_tcp_ports_dump(
+              hivemind::normalize_host_tcp_ports(*host_tcp_ports))
+        : "";
+    if (host_tcp_ports) bind_text(st, 24, rendered_ports);
+    else                sqlite3_bind_null(st, 24);
+    bind_text(st, 25, rendered_ports);
+    bind_text(st, 26, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     sqlite3_close(db);

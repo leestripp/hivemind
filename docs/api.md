@@ -35,8 +35,8 @@ stores the records with the reply message (injecting the worker name).
 | Endpoint | Notes |
 |----------|-------|
 | `GET /api/agents` | list; includes `worker` placement + live status |
-| `POST /api/agents` | create (name, role, model, worker, memory, cpus) |
-| `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills/memory/cpus edits |
+| `POST /api/agents` | create (name, role, model, worker, memory, cpus, host_tcp_ports) |
+| `PATCH /api/agents/:id` | role/model/worker/mcp_servers/skills/memory/cpus/host_tcp_ports edits |
 
 Both also accept `host_agent`; see [host-agents.md](host-agents.md).
 The hub returns 409 when the worker lacks the `host_agents` capability.
@@ -55,6 +55,38 @@ a 32g cap costs nothing until used. On PATCH, `""`/`-1` = keep current,
 `"default"`/`0` = reset to the worker default. The worker applies them
 at container create AND reconciles live containers in place via
 `podman update` — no recreate needed when limits change.
+
+### Container host TCP grants
+
+`host_tcp_ports` is a JSON array of integer TCP ports (1–65535), maximum
+64 entries. The hub sorts and deduplicates it; the default is `[]`.
+Example: `{"host_tcp_ports":[8090,8188,8765]}`. Strings, floats, `auto`,
+port mappings and arbitrary Podman/pasta options are rejected with 400.
+The field is persisted in the roster and included as the normalized numeric
+array in worker spawn and migration-import frames.
+
+Each number grants the container outbound TCP access to that port on its
+**agent worker's host loopback**. It does not publish an inbound service,
+open UDP/DNS, provide credentials, or select another host/network. Empty
+`[]` preserves Podman's default pasta `-T none` behavior. Non-empty grants
+are invalid for `host_agent:true` because bare-metal agents already share
+the host network.
+
+Changing the array on PATCH requires an idle agent and an online worker
+(409 otherwise). The worker compares desired grants with
+`HostConfig.NetworkMode` plus the retained `Config.CreateCommand` `-T`
+options; a difference recreates the existing container
+without rebuilding its image. An unchanged array does not recreate it.
+PATCH response `container_recreate_required:true` means the asynchronous
+spawn/recreate was queued, not that it has finished; the normal agent
+`ready`/state heartbeat is the applied signal. Revocation follows the
+same path. Foreign/custom network modes fail safely instead of being
+silently replaced.
+
+A container-to-container migration preserves the array. Moving an agent
+with grants to a different rig requires `force:true`, which acknowledges
+that the operator reviewed services on that target. Clear the grants
+before migrating to bare metal.
 
 ## Long turns and stall notifications
 

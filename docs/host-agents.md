@@ -242,6 +242,7 @@ then re-run `hivex-provision` for each host agent.
 | Field | Type | Notes |
 |-------|------|-------|
 | `host_agent` | bool | `true` selects bare-metal; `false` selects a container |
+| `host_tcp_ports` | integer array | Container-only; must be empty when `host_agent` is true. Bare-metal agents already share host networking and receive no pasta forwarding. |
 
 Errors: **409** target worker lacks the `host_agents` capability.
 Roster JSON exposes `host_agent` on every agent. Legacy `require_approval`

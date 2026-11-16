@@ -19,6 +19,7 @@
 #include <giomm/resource.h>
 #include <gdkmm/pixbuf.h>
 #include <algorithm>
+#include <charconv>
 #include <map>
 #include <unordered_map>
 #include <future>
@@ -5186,6 +5187,22 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         snprintf(buf, sizeof buf, "%.4g", cur_cpus);
         cpus_entry->set_text(buf);
     }
+    auto* host_ports_entry = Gtk::make_managed<Gtk::Entry>();
+    host_ports_entry->set_placeholder_text("blank = none; e.g. 8090, 8188, 8765");
+    host_ports_entry->set_tooltip_text(
+        "Outbound TCP services on this agent worker's host loopback only. "
+        "Changing this list recreates the container. No public inbound ports, "
+        "UDP, DNS, API keys, or free-form network options.");
+    if (editing && existing->contains("host_tcp_ports") &&
+        (*existing)["host_tcp_ports"].is_array()) {
+        std::string ports;
+        for (const auto& value : (*existing)["host_tcp_ports"]) {
+            if (!value.is_number_integer()) continue;
+            if (!ports.empty()) ports += ", ";
+            ports += std::to_string(value.get<unsigned int>());
+        }
+        host_ports_entry->set_text(ports);
+    }
 
     // Host is a runtime type; show its warning only while selected.
     auto* host_warn = Gtk::make_managed<Gtk::Label>(
@@ -5293,6 +5310,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     if (!editing) add_row("Template", tpl, row_i++);
     Gtk::Label* mem_lbl = nullptr;
     Gtk::Label* cpu_lbl = nullptr;
+    Gtk::Label* host_ports_lbl = nullptr;
     if (show_worker_row) {
         add_row("Worker", worker, row_i++);  // FIRST: Type depends on it
         add_row("Type", type_dd, row_i++);
@@ -5305,6 +5323,7 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     if (show_worker_row) {
         mem_lbl = add_row("Memory cap", memory_entry, row_i++);  // Phase 69
         cpu_lbl = add_row("CPU cap", cpus_entry, row_i++);       // Phase 69
+        host_ports_lbl = add_row("Host TCP ports", host_ports_entry, row_i++);
     }
     else if (!editing) {
         // No worker online: creation is impossible (the hub rejects unknown
@@ -5326,7 +5345,8 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
     // hidden (meaningless off-container). Worker switches rebuild the
     // type list, whose set_selected refires this via property_selected.
     auto refresh_type_ui = [type_dd, type_vals, host_warn,
-                            memory_entry, cpus_entry, mem_lbl, cpu_lbl] {
+                            memory_entry, cpus_entry, mem_lbl, cpu_lbl,
+                            host_ports_entry, host_ports_lbl] {
         const bool host = type_dd->get_selected() < type_vals->size() &&
                           (*type_vals)[type_dd->get_selected()] == "host";
         host_warn->set_visible(host);
@@ -5334,13 +5354,20 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
         cpus_entry->set_visible(!host);
         if (mem_lbl) mem_lbl->set_visible(!host);
         if (cpu_lbl) cpu_lbl->set_visible(!host);
+        host_ports_entry->set_visible(!host);
+        if (host_ports_lbl) host_ports_lbl->set_visible(!host);
     };
     type_dd->property_selected().signal_changed().connect(refresh_type_ui);
     refresh_type_ui();   // initial state (Host preselected when editing)
 
     dialog->get_content_area()->append(*grid);
+    auto* validation = Gtk::make_managed<Gtk::Label>();
+    validation->set_wrap(true);
+    validation->add_css_class("error");
+    validation->set_visible(false);
+    dialog->get_content_area()->append(*validation);
     const std::string edit_id = editing ? existing->value("id", "") : "";
-    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, type_vals, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, was_host](int r) {
+    dialog->signal_response().connect([this, dialog, name, role, model, model_names, worker, worker_names, chosen_avatar, edit_id, templates_json, avatar_tiles, type_dd, type_vals, cur_type, memory_entry, cpus_entry, cur_memory, cur_cpus, editing, think_dd, kThinkValues, existing, was_host, host_ports_entry, validation](int r) {
         if (r == (int)Gtk::ResponseType::OK) {
             std::string n = name->get_text();
             if (!n.empty()) {
@@ -5393,6 +5420,40 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                     !existing->value("thinking_level", "").empty())
                     think = "default";
                 int host = tval == "host" ? 1 : (was_host ? 0 : -1);
+                hivemind::HostTcpPorts host_ports;
+                if (tval != "host") {
+                    const std::string input = host_ports_entry->get_text();
+                    for (std::size_t pos = 0; pos <= input.size();) {
+                        const auto comma = input.find(',', pos);
+                        auto token = input.substr(pos, comma == std::string::npos
+                                                             ? comma : comma - pos);
+                        const auto first = token.find_first_not_of(" \t\r\n");
+                        const auto last = token.find_last_not_of(" \t\r\n");
+                        if (first != std::string::npos) {
+                            token = token.substr(first, last - first + 1);
+                            unsigned int port = 0;
+                            const auto [end, ec] = std::from_chars(
+                                token.data(), token.data() + token.size(), port);
+                            if (ec != std::errc{} ||
+                                end != token.data() + token.size() ||
+                                port < 1 || port > 65535) {
+                                validation->set_text(
+                                    "Host TCP ports must be comma-separated integers from 1 to 65535.");
+                                validation->set_visible(true);
+                                return;
+                            }
+                            host_ports.push_back(static_cast<std::uint16_t>(port));
+                        }
+                        if (comma == std::string::npos) break;
+                        pos = comma + 1;
+                    }
+                    if (host_ports.size() > hivemind::kMaxHostTcpPorts) {
+                        validation->set_text("At most 64 host TCP ports are allowed.");
+                        validation->set_visible(true);
+                        return;
+                    }
+                    host_ports = hivemind::normalize_host_tcp_ports(std::move(host_ports));
+                }
                 delete chosen_avatar;
                 delete model_names;
                 delete worker_names;
@@ -5401,13 +5462,13 @@ void HiveWindow::show_agent_dialog(const nlohmann::json* existing) {
                 delete type_vals;
                 run_async([this, async = async_, n, r2 = role->get_text().raw(),
                            m, ws, av, wk, ty, edit_id,
-                           mem, cp, think, host] {
+                           mem, cp, think, host, host_ports] {
                     if (edit_id.empty())
                         async->api.create_agent(n, r2, m, ws, av, wk, ty, mem, cp, think,
-                                          host);
+                                          host, host_ports);
                     else
                         async->api.update_agent(edit_id, n, r2, m, ws, av, wk, ty, mem, cp, think,
-                                          host);
+                                          host, host_ports);
                     {
                         std::lock_guard<std::mutex> lk(async->queue_m);
                         async->done_queue.push_back([this, async] { if (alive_) refresh_all(); });

@@ -24,7 +24,10 @@ add_subdirectory(voice)
 # Pure, GTK-loop-free helpers shared by the app and the unit tests.
 pkg_check_modules(GLIBMM REQUIRED IMPORTED_TARGET glibmm-2.68)
 add_library(hive_client_core STATIC src/text_utils.cpp)
-target_include_directories(hive_client_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(hive_client_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/hive-common/include
+)
 target_link_libraries(hive_client_core PUBLIC
     PkgConfig::GLIBMM
     nlohmann_json::nlohmann_json

@@ -764,6 +764,14 @@ int main(int argc, char* argv[]) {
                             // Phase 72: bare-metal host agent (verified
                             // against the worker's own opt-in at spawn).
                             spec.host_agent    = specj.value("host_agent",false);
+                            {
+                                std::string error;
+                                auto ports = hivemind::parse_host_tcp_ports(
+                                    specj.value("host_tcp_ports", json::array()),
+                                    error);
+                                if (!ports) throw std::invalid_argument(error);
+                                spec.host_tcp_ports = std::move(*ports);
+                            }
                             // Phase 60: granted secrets (rendered env text)
                             spec.secret_env    = specj.value("secret_env","");
                             g_fleet->spawn(spec);

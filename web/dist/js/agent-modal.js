@@ -79,6 +79,11 @@ function ensureEditor() {
                 <label for="am-cpus">CPU cap</label>
                 <input id="am-cpus" type="number" min="0" step="0.5" placeholder="Worker default">
               </div>
+              <div class="form-field container-cap agent-wide">
+                <label for="am-host-ports">Host TCP ports</label>
+                <input id="am-host-ports" autocomplete="off" placeholder="Blank = none · e.g. 8090, 8188, 8765">
+                <small class="field-hint">Outbound TCP services on this worker’s host loopback only. Changing the list recreates the container; other published services and mounts are preserved. No public inbound ports, UDP, DNS, API keys, or custom network options.</small>
+              </div>
             </div>
             <button type="button" class="btn agent-wide hidden" id="am-migrate">⇄ Migrate to another worker…</button>
             <div id="am-host-warn" class="danger-callout hidden" role="warning">
@@ -122,6 +127,25 @@ function ensureEditor() {
   $('am-close').addEventListener('click', closeEditor);
   $('am-cancel').addEventListener('click', closeEditor);
   return editor;
+}
+
+export function parseHostTcpPorts(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const entries = trimmed.split(',');
+  if (entries.length > 64) throw new Error('At most 64 host TCP ports are allowed.');
+  const ports = entries.map((entry) => {
+    const token = entry.trim();
+    if (!token || [...token].some((char) => char < '0' || char > '9')) {
+      throw new Error('Host TCP ports must be comma-separated integers.');
+    }
+    const port = Number(token);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error('Each host TCP port must be between 1 and 65535.');
+    }
+    return port;
+  });
+  return [...new Set(ports)].sort((a, b) => a - b);
 }
 
 function selectedAvatar() {
@@ -179,6 +203,7 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
   $('am-role').value = identity?.role || '';
   $('am-memory').value = existing?.memory || '';
   $('am-cpus').value = existing?.cpus > 0 ? existing.cpus : '';
+  $('am-host-ports').value = (existing?.host_tcp_ports || []).join(', ');
   $('am-thinking').value = existing?.thinking_level || '';
   selectAvatar(identity?.avatar || '');
   for (const id of ['am-template', 'am-worker', 'am-type', 'am-provider', 'am-model']) {
@@ -296,6 +321,7 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
   applyTemplate(existing || prefill);
   $('am-memory').value = existing?.memory || '';
   $('am-cpus').value = existing?.cpus > 0 ? existing.cpus : '';
+  $('am-host-ports').value = (existing?.host_tcp_ports || []).join(', ');
   $('am-thinking').value = existing?.thinking_level || '';
   templateSelect.onchange = () => {
     const template = templates.find((item) => item.id === templateSelect.value);
@@ -315,6 +341,13 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
     }
     const host = typeSelect.value === 'host';
     const wasHost = !!existing?.host_agent;
+    let hostTcpPorts;
+    try {
+      // Selecting bare metal explicitly revokes old container-only grants.
+      hostTcpPorts = host ? [] : parseHostTcpPorts($('am-host-ports').value);
+    } catch (error) {
+      return setError(error.message);
+    }
 
     const body = {
       name,
@@ -322,6 +355,7 @@ async function prepareEditor(existing, prefill, callbacks, ticket) {
       model: modelSelect.value,
       workspace_mode: 'shared',
       avatar: selectedAvatar(),
+      host_tcp_ports: hostTcpPorts,
     };
     if (!editing) body.worker = workerSelect.value;
     if (typeSelect.value === 'gpu') body.type = 'gpu';

@@ -50,7 +50,7 @@ function ensureModal() {
           <legend>Recovery options</legend>
           <label class="check-row" for="migration-force">
             <input type="checkbox" id="migration-force">
-            <span>Force migration even if the agent is mid-turn</span>
+            <span>Force migration: confirm mid-turn interruption and carry reviewed host TCP grants to the target rig</span>
           </label>
           <label class="check-row" for="migration-no-rollback">
             <input type="checkbox" id="migration-no-rollback">

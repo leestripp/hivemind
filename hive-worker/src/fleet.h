@@ -16,6 +16,7 @@
 // participates in dispatch.
 
 #include <nlohmann/json.hpp>
+#include "hivemind/HostTcpPorts.h"
 
 #include <atomic>
 #include <deque>
@@ -57,6 +58,8 @@ struct AgentSpec {
     // --allow-host-agents opt-in is verified at spawn — this flag alone
     // is never sufficient.
     bool    host_agent = false;
+    // Container-only host-service TCP allowlist. Empty preserves pasta -T none.
+    hivemind::HostTcpPorts host_tcp_ports;
 
     /// Whole-spec compare: a re-sent agent_spawn with an IDENTICAL spec is
     /// a no-op (hub restart reconcile replays every spawn); a changed one

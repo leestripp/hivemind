@@ -59,6 +59,9 @@ int main() {
         b = a;
         b.cpus = 12;
         assert(a != b);                          // Phase 69
+        b = a;
+        b.host_tcp_ports = {8090, 8765};
+        assert(a != b);                          // network policy -> recreate
         std::cout << "test_fleet: AgentSpec equality OK\n";
     }
 
@@ -170,6 +173,19 @@ int main() {
         assert(threw);   // refused: hivex-hostbee-nosuchuser-xyz not provisioned
         hwrunner::g_allow_host_agents = false;   // leave the global clean
         std::cout << "test_fleet: host-agent spawn gating OK\n";
+    }
+
+    // Bare-metal agents already share the host network. A non-empty
+    // container allowlist is contradictory and must fail before provisioning.
+    {
+        hwfleet::AgentSpec hs;
+        hs.id = "bad-host-network"; hs.name = "BadHostNetwork";
+        hs.host_agent = true; hs.host_tcp_ports = {8090};
+        hwfleet::AgentProcess proc(hs, [](const std::string&, const json&) {});
+        bool threw = false;
+        try { proc.start(); } catch (const std::invalid_argument&) { threw = true; }
+        assert(threw);
+        std::cout << "test_fleet: bare-metal host-port rejection OK\n";
     }
 
     // Phase 65b: a task queued while the exec is down must not wedge its

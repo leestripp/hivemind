@@ -130,6 +130,43 @@ int main() {
                 {{"name", "Beta"}, {"role", "reviewer"}, {"worker", "testrig"}});
     const std::string a2 = json::parse(r.bodyAsString())["id"];
 
+    assert(jget(port, "/api/agents/" + a2)["host_tcp_ports"].empty());
+
+    // Host-service grants are a typed, normalized array. Create may persist
+    // while a worker is offline; changing an existing container may not.
+    r = request("POST", port, "/api/agents",
+                {{"name", "Networked"}, {"worker", "testrig"},
+                 {"host_tcp_ports", json::array({8765, 8090, 8765})}});
+    assert(r.statusCode() == 201);
+    const std::string network_agent = json::parse(r.bodyAsString())["id"];
+    assert(json::parse(r.bodyAsString())["host_tcp_ports"] ==
+           json::array({8090, 8765}));
+    assert(jget(port, "/api/agents/" + network_agent)["host_tcp_ports"] ==
+           json::array({8090, 8765}));
+    r = request("PATCH", port, "/api/agents/" + network_agent,
+                {{"host_tcp_ports", json::array({8188})}});
+    assert(r.statusCode() == 409);   // worker offline: no unapplied promise
+    assert(jget(port, "/api/agents/" + network_agent)["host_tcp_ports"] ==
+           json::array({8090, 8765}));
+
+    const json bad_ports[] = {
+        json("8090"), json(nullptr), json::object(),
+        json::array({"-T,auto"}), json::array({1.5}), json::array({true}),
+        json::array({0}), json::array({65536}), json::array({nullptr}),
+    };
+    for (const auto& value : bad_ports) {
+        r = request("POST", port, "/api/agents",
+                    {{"name", "BadPorts"}, {"worker", "testrig"},
+                     {"host_tcp_ports", value}});
+        assert(r.statusCode() == 400);
+        assert(!agents.get_agent_by_name("BadPorts"));
+    }
+    r = request("POST", port, "/api/agents",
+                {{"name", "BadHostPorts"}, {"worker", "testrig"},
+                 {"host_agent", true}, {"host_tcp_ports", json::array({8090})}});
+    assert(r.statusCode() == 400);
+    assert(!agents.get_agent_by_name("BadHostPorts"));
+
     // ── Phase 35: agent type validation ───────────────────────────────────
     // type=gpu on a worker with no gpu cap -> 400
     r = request("POST", port, "/api/agents",

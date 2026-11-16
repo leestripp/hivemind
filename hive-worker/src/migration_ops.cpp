@@ -258,6 +258,11 @@ hwfleet::AgentSpec spec_from_import(const json& f) {
     spec.cpus = f.value("cpus", 0.0);
     spec.type = f.value("type", "");
     spec.host_agent = f.value("target_type", "") == "host";
+    std::string port_error;
+    auto ports = hivemind::parse_host_tcp_ports(
+        f.value("host_tcp_ports", json::array()), port_error);
+    if (!ports) throw std::invalid_argument(port_error);
+    spec.host_tcp_ports = std::move(*ports);
     // The hub replays the FULL spawn spec (llm, prompt, secrets) on its
     // routine reconcile after the roster flip — a partial spec here is
     // enough to provision the runtime and restore the state dir.

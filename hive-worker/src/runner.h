@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "hivemind/HostTcpPorts.h"
+
 namespace hwrunner {
 
 // ----- container lifecycle (exposed for the v2 fleet manager, Phase B) ---
@@ -12,7 +14,7 @@ namespace hwrunner {
 /// hive-<agent> with unsafe chars clamped to '-'.
 std::string container_name(const std::string& agent);
 
-/// ~/.local/share/hive-worker
+/// ~/.local/share/hive-worker, or HIVE_WORKER_DIR for isolated tests.
 std::string worker_dir();
 
 /// First-run seeding of the shared worker workspace (dirs + index.md).
@@ -57,7 +59,8 @@ void ensure_container(const std::string& agent,
                       std::string image = "localhost/hive-agent:latest",
                       bool gpu = false,
                       const std::string& memory = "",
-                      double cpus = 0);
+                      double cpus = 0,
+                      const hivemind::HostTcpPorts* host_tcp_ports = nullptr);
 
 // ── Phase 72: host agents (bare-metal, sudo, NO sandbox) ─────────────
 /// Worker-level opt-in for host agents — set from --allow-host-agents /
@@ -112,6 +115,18 @@ long long parse_memory_bytes(const std::string& s);
 /// Phase 69: format a cpu count the way podman --cpus wants it
 /// ("12", "1.5"). Exposed for tests.
 std::string format_cpus(double cpus);
+
+/// Canonical rootless network mode for the typed host-service allowlist.
+/// Empty = ordinary pasta (Podman's -T none); non-empty = selected -T rules.
+std::string pasta_network_mode(hivemind::HostTcpPorts ports);
+/// Parse only the default mode or this worker's canonical -T-only form.
+/// nullopt means custom/foreign networking and must not be silently recreated.
+std::optional<hivemind::HostTcpPorts> parse_pasta_network_mode(
+    std::string_view mode);
+/// Podman 5.7 collapses HostConfig.NetworkMode to "pasta" and retains the
+/// -T options in Config.CreateCommand. Both must agree with the allowlist.
+std::optional<hivemind::HostTcpPorts> parse_podman_pasta_network(
+    const nlohmann::json& create_command, std::string_view host_network_mode);
 
 
 struct ExecOutcome {
