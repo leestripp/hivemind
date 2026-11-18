@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+live=/etc/letsencrypt/live/leestrippai.com
+out=/etc/haproxy/certs/leestrippai.pem
+tmp=${out}.tmp
+
+umask 027
+cat "$live/fullchain.pem" "$live/privkey.pem" > "$tmp"
+chown root:haproxy "$tmp"
+chmod 0640 "$tmp"
+mv "$tmp" "$out"
+systemctl reload haproxy

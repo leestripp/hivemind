@@ -158,6 +158,7 @@ hive-android/  Android client — NDK GL sphere, on-device STT, streaming
                player (docs/android.md)
 hive-worker/   Remote executor daemon — runs agent containers on other
                machines, driven over a WebSocket channel (Phase 30)
+haproxy/       Sanitized HAProxy edge backup (placeholders; no private keys)
 */tests/       per-app ctest suites
 ```
 

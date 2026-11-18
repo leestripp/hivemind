@@ -44,6 +44,9 @@ Supported edge shape:
 - 80 → redirect to HTTPS. Use certbot standalone with pre/post hooks that
   stop/start HAProxy, plus a deploy hook that rebuilds the HAProxy cert
   bundle and reloads HAProxy.
+- A sanitized backup of the live HAProxy/certbot shape lives in `haproxy/`.
+  It uses placeholders for the SearXNG password hash and Let's Encrypt
+  account id; never commit real hashes or PEM private keys.
 
 ## Topology
 
