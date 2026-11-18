@@ -7,6 +7,7 @@
 #include "migration_ops.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -47,6 +48,11 @@ json last_of(const std::vector<json>& v, const std::string& op) {
 }  // namespace
 
 int main() {
+    // Archive round-trips shell out to `tar --zstd`; hosts without the
+    // zstd CLI cannot run this test (CTest reports rc 77 as a skip).
+    if (std::system("command -v zstd >/dev/null 2>&1") != 0)
+        return 77;
+
     // ── base64 round-trip incl. binary bytes ───────────────────────────
     const std::string bin = [] {
         std::string s;

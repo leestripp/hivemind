@@ -74,7 +74,8 @@ void seed_workspace(const std::string& workspace_dir) {
 
 // Pasta hairpin fix (2026-09-21): under pasta the guest SHARES the host's
 // public IP, so on the droplet itself leestrippai.com resolves IN-GUEST to
-// the listenerless guest address and nginx :443/:8443 is unreachable. When
+// the listenerless guest address and the HAProxy edge (:443/:8443) is
+// unreachable. When
 // THIS host is the apex, ensure_container maps the name to the podman
 // host-gateway instead. Detected once: does the public name match one of
 // our own non-loopback interfaces?

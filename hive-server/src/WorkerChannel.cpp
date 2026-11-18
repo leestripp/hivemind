@@ -27,8 +27,8 @@ using OmniNet::WebSocket::Connection;
 WorkerChannel::WorkerChannel(WorkerStore& store, int port, std::string bind)
     : store_(store), port_(port) {
     OmniNet::HTTP::Server::Config cfg;
-    // Workers dial in from other machines. Behind nginx (30.5) set
-    // worker_ws_bind=127.0.0.1 in server.json — only nginx reaches it.
+    // Workers dial in from other machines. Behind the HAProxy edge set
+    // worker_ws_bind=127.0.0.1 in server.json — only HAProxy reaches it.
     cfg.address = std::move(bind);
     cfg.port = static_cast<uint16_t>(port_);
     cfg.logRequests = false;

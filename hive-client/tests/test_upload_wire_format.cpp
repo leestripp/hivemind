@@ -3,7 +3,7 @@
 // Root cause: OmniNet's HttpClient formatted the request Content-Length
 // via std::ostringstream insertion of size_t. The GTK client process has
 // a global C++ locale with thousands separators (','), so a 1,261,963-byte
-// upload went on the wire as "Content-Length: 1,261,963" — nginx rejected
+// upload went on the wire as "Content-Length: 1,261,963" — the old nginx edge rejected
 // it (400 "client sent invalid Content-Length header"). Every upload
 // >= 1000 bytes failed in the app while CLI probes (classic locale)
 // succeeded, which made the bug look like a size limit.

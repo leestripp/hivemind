@@ -531,7 +531,7 @@ class Bridge:
 
     async def _keepalive(self):
         # Protocol-level ping: the browser auto-pongs, so both directions
-        # stay warm and no hop (nginx, hub splice) can idle-reap the WS.
+        # stay warm and no hop (HAProxy, hub splice) can idle-reap the WS.
         while True:
             await asyncio.sleep(15)
             for ws in list(self.clients):

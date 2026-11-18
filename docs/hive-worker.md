@@ -140,7 +140,7 @@ One OUTBOUND WebSocket to the hub's dedicated worker port:
 
 ```
 hive-worker --server wss://<server> --key hmwk_... --name <name>
-# dials  wss://<server>/api/workers/channel  (TLS via the nginx proxy;
+# dials  wss://<server>/api/workers/channel  (TLS via the HAProxy edge;
 # direct ws://<server>:8423 still works on a trusted LAN, and a
 # co-hosted worker uses ws://127.0.0.1:8423 — loopback needs no TLS)
 ```

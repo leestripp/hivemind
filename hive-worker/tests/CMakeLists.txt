@@ -29,6 +29,8 @@ set_tests_properties(test_host_ports_live PROPERTIES SKIP_RETURN_CODE 77)
 # Per-agent service-port registry + advertised host address (2026-10-09).
 hive_worker_test(test_service_ports)
 hive_worker_test(test_migration_ops)
+# Requires the zstd CLI for `tar --zstd`; absent hosts exit 77.
+set_tests_properties(test_migration_ops PROPERTIES SKIP_RETURN_CODE 77)
 
 # Hub heartbeat acknowledgements must reset the silent-connection watchdog.
 hive_worker_test(test_heartbeat_watchdog)

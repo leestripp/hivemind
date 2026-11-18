@@ -76,5 +76,5 @@ private:
     std::string screen_resolution_ = "1280x800";
     int message_window_ = 200;
     int worker_ws_port_ = 8423;
-    std::string worker_ws_bind_ = "0.0.0.0";   // "127.0.0.1" behind nginx
+    std::string worker_ws_bind_ = "0.0.0.0";   // "127.0.0.1" behind HAProxy
 };

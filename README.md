@@ -44,7 +44,7 @@ and complete their work autonomously.
   that machine over a persistent, auto-reconnecting WebSocket channel.
   Enroll with `hive-server enroll-worker <name>` (key shown once), run
   `hive-worker --server wss://<server> --key hmwk_… --name <name>`
-  on the remote host (TLS via the nginx proxy; `ws://<server>:8423`
+  on the remote host (TLS via the HAProxy edge; `ws://<server>:8423`
   direct also works on a trusted LAN), then set the agent's `worker`
   field. Live status on
   the web **Workers** page, and per-machine CPU/memory/disk graphs on
@@ -164,8 +164,10 @@ hive-worker/   Remote executor daemon — runs agent containers on other
 ## Security
 
 - Bearer API keys (SHA-256 hashed at rest; master key shown once at first run)
-- TLS via nginx + Let's Encrypt in front; server binds localhost-only
-- Brute-force: fail2ban bans after 5 failed keys + nginx rate limiting
+- TLS via HAProxy + Let's Encrypt in front; server binds localhost-only
+- Edge proxy: HAProxy only — nginx is unsafe/deprecated for this
+  deployment (see docs/deploy.md)
+- Brute-force: fail2ban bans after 5 failed keys + HAProxy rate limiting
   (verified live — see docs/deploy.md §4b)
 - Workers authenticate over `wss://` with per-worker keys; TLS verified
   (OmniNet client enforces cert verification against the system CA)
@@ -198,7 +200,7 @@ GET                   /api/models           union of connected workers' catalogs
 | Doc | Contents |
 |---|---|
 | `docs/api.md` | REST API reference (auth, roster, threads, routines, skills, containers, models) |
-| `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, Caddy TLS, lockdown |
+| `docs/deploy.md` | Remote deployment — droplet/VPS, systemd, HAProxy TLS, lockdown |
 | `AGENTS.md` | Roster agent concepts — memory, avatars, cascade delete, tools |
 | `docs/skills.md` | Curated starters and agent-owned workspace/private skills |
 | `docs/client.md` | Voice-enabled GTK4 client — chat, narration, dialogs, menus, theming |

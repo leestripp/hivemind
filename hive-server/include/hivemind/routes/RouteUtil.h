@@ -68,13 +68,11 @@ inline bool normalize_thinking_level(std::string& v) {
 inline thread_local std::string request_id;
 
 /// 2026-10-20: baseline hardening headers on every response (HoneyBee's
-/// external scan flagged their absence + the public nginx version string).
+/// external scan flagged their absence + the old public nginx version
+/// string). Current edge: HAProxy — nginx is unsafe/deprecated here.
 /// HSTS is safe to emit from the hub — it only takes effect over HTTPS,
-/// which nginx terminates in front of us. X-Frame-Options SAMEORIGIN:
+/// which HAProxy terminates in front of us. X-Frame-Options SAMEORIGIN:
 /// the cast page is always loaded top-level (HiveWindow) or same-origin.
-/// The nginx `Server: nginx/x.y` banner itself can only be suppressed
-/// with `server_tokens off` in the nginx config (root-owned) — separate
-/// step, handed to lee.
 inline void apply_security_headers(OmniNet::HTTP::Response& resp) {
     resp.setHeader("X-Content-Type-Options", "nosniff");
     resp.setHeader("X-Frame-Options", "SAMEORIGIN");

@@ -24,6 +24,27 @@ HiveMind deploys as a hub plus any number of workers. The smallest real
 setup is ONE machine running both: hive-server (hub) + hive-worker
 (always-online agents).
 
+## Edge proxy: HAProxy, not nginx
+
+Use HAProxy as the TLS edge. nginx is unsafe for this deployment and
+must not be restored: the Ubuntu 26.04 nginx package remained vulnerable
+to the November 2026 NGINX2Root advisories with no fixed package path at
+migration time.
+
+Supported edge shape:
+
+- 443 → HAProxy TLS → `127.0.0.1:8421`, with `/api/workers/channel`
+  routed to `127.0.0.1:8423` using HTTP/1.1 Upgrade and long WebSocket
+  timeouts.
+- Advertise only `http/1.1` via ALPN; do not enable HTTP/2 or HTTP/3 on
+  this edge.
+- 8443 → HAProxy TLS + Basic auth → the SearXNG localhost backend. Use a
+  crypt(3) format HAProxy supports (SHA-512-crypt) in the HAProxy
+  userlist; Apache MD5 (`$apr1$`) htpasswd hashes are not supported.
+- 80 → redirect to HTTPS. Use certbot standalone with pre/post hooks that
+  stop/start HAProxy, plus a deploy hook that rebuilds the HAProxy cert
+  bundle and reloads HAProxy.
+
 ## Topology
 
 ```
@@ -41,7 +62,7 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
 - Data under `~/.local/share/hivemind/`: threads.db, roster, workers,
   skills library, workspace (attachment store).
 - Config `server.json`: port, worker channel port, auth keys.
-- TLS: terminate at the reverse proxy in front (the client speaks HTTPS
+- TLS: terminate at HAProxy in front (the client speaks HTTPS
   to the proxy; the hub itself is plain HTTP on localhost).
 - The hub runs no hive-brain and needs no podman unless it also runs a
   worker. It does hold provider/model configuration and provider API keys
@@ -62,7 +83,7 @@ droplet (or any always-on box)          rigs (workstations, GPU boxes)
   worker-local registry as the dispatch source of truth.
 - The worker dials OUT to the hub; rigs behind NAT need nothing else.
   Preferred URL is TLS through the hub's reverse proxy:
-  `--server wss://<server>` (nginx proxies `/api/workers/channel` →
+  `--server wss://<server>` (HAProxy proxies `/api/workers/channel` →
   8423 with Upgrade headers and 24h timeouts). A worker co-hosted with
   the hub uses `ws://127.0.0.1:8423` — loopback plaintext is fine.
   With all remote workers on wss, port 8423/tcp can be closed in the

@@ -28,7 +28,7 @@ class AuthStore;
  *
  * Everything is auth-guarded at hive-server (admin or agent scope); the
  * container's :6080 is published on 127.0.0.1 only, so hive-server is the
- * single entry point — safe behind Caddy/TLS (docs/deploy.md).
+ * single entry point — safe behind HAProxy/TLS (docs/deploy.md).
  */
 /// `port_resolver` overrides the channel lookup (tests point it
 /// at a dummy upstream instead of podman).

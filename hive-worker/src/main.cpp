@@ -657,7 +657,7 @@ int main(int argc, char* argv[]) {
             // receiveText() for the welcome was a silent frame-eater: its
             // per-call buffer drops coalesced frames, and the hub's
             // reconcile agent_spawn rides in the SAME TLS record as the
-            // welcome over wss/nginx — the spawn was eaten on every
+            // welcome over the old wss/nginx edge — the spawn was eaten on every
             // reconnect (hit 2026-09-03: Forge never spawned until a
             // manual re-restart; the loopback droplet worker was immune
             // because its frames arrive in separate segments).

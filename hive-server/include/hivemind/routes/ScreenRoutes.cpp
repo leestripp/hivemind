@@ -561,7 +561,7 @@ void register_screen_routes(OmniNet::HTTP::Server& server,
             if (seg.size() == 2) {
                 // Absolute Location — OmniNet's client won't follow relative
                 // redirects; browsers accept either. Scheme: behind TLS
-                // nginx the hardcoded http:// downgraded the noVNC page to
+                // the old nginx edge, the hardcoded http:// downgraded noVNC to
                 // plaintext (and its WS to ws://) — honour X-Forwarded-Proto,
                 // default https (the site is TLS-only).
                 std::string scheme = "https";

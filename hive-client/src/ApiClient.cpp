@@ -38,7 +38,7 @@ nlohmann::json ApiClient::request(const std::string& method, const std::string& 
     nlohmann::json j;
     try { j = nlohmann::json::parse(response); }
     catch (...) {
-        // The body here is usually an nginx/proxy HTML error page —
+        // The body here is usually an edge-proxy HTML error page —
         // never show raw markup in the UI (the status label is plain
         // text; "<html>…" reads as garbage). Strip tags, collapse
         // whitespace, truncate.
@@ -334,7 +334,7 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
     const int http_code = result->statusCode();
     const std::string response = result->bodyAsString();
     if (http_code < 200 || http_code >= 300) {
-        // A proxy (nginx) answers with an HTML error page, not the hub's
+        // An edge proxy (HAProxy) answers with an HTML error page, not the hub's
         // JSON — don't dump markup into the status bar, and name the
         // likely cause for the two size-related codes.
         if (response.find("<html") != std::string::npos ||
@@ -346,7 +346,7 @@ nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,
             // was a locale-corrupted Content-Length (omninet bc2adc4).
             if (http_code == 413)
                 msg += " — file over the proxy's size limit "
-                       "(nginx client_max_body_size)";
+                       "(edge proxy body limit)";
             throw std::runtime_error(msg);
         }
         throw std::runtime_error("upload failed: HTTP " +

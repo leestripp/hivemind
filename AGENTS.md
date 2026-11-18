@@ -98,7 +98,7 @@ Runtime: server API on **:8421**, worker WebSocket channel on **:8423**
 Enroll a worker with
 `hive-server enroll-worker <name>`; connect with
 `hive-worker --server wss://<server> --key hmwk_… --name <name>`
-(TLS via the nginx proxy at `/api/workers/channel`; a co-hosted worker
+(TLS via the HAProxy edge at `/api/workers/channel`; a co-hosted worker
 on the hub machine uses plain `ws://127.0.0.1:8423` — loopback, no TLS
 needed).
 
@@ -173,7 +173,7 @@ Key architectural mapping:
 ## Security Rules (do not regress)
 
 - Bearer API keys are SHA-256 hashed at rest; master key shown once.
-- Server binds localhost-only; TLS is terminated by nginx/Caddy in front.
+- Server binds localhost-only; TLS is terminated by HAProxy in front.
 - Worker keys (`hmwk_…`) are shown once at enrollment, hashed in
   `workers.db`; workers authenticate over `wss://`.
 - LLM providers/models and provider API keys are **hub-owned** in
