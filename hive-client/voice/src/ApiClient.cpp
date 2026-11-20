@@ -1,5 +1,6 @@
 #include "ApiClient.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include <OmniNet.h>
@@ -128,6 +129,16 @@ std::string ApiClient::openDm(const std::string& agent_id) {
     // voice page dies with a 404 "Couldn't open conversation".
     if (j.contains("id") && j["id"].is_string())
         return j["id"].get<std::string>();
+    // The enveloped list is NOT filtered to the requested agent —
+    // threads[0] can be anyone's DM. Pick the entry that names this agent.
+    for (const auto& t : envelope(j, "threads")) {
+        if (!t.contains("id") || !t["id"].is_string() ||
+            !t.contains("agent_ids") || !t["agent_ids"].is_array())
+            continue;
+        if (std::find(t["agent_ids"].begin(), t["agent_ids"].end(),
+                      agent_id) != t["agent_ids"].end())
+            return t["id"].get<std::string>();
+    }
     for (const auto& t : envelope(j, "threads"))
         if (t.contains("id") && t["id"].is_string())
             return t["id"].get<std::string>();
