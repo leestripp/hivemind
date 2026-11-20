@@ -759,20 +759,23 @@ void HiveWindow::on_settings() {
 
     // Rebuilds the model dropdown and per-agent voice rows from one
     // fetch. Declared before refetch so the two can capture each other.
-    std::function<void(std::vector<std::string> models,
-                       std::vector<std::string> voices, std::string error,
-                       std::string selected_model)>
-        rebuild;
+    // SHARED, not by-reference: the async fetch completes after
+    // on_settings returns, so a stack std::function captured with &rebuild
+    // is dangling when the done-queue closure runs — that was the
+    // open-Settings crash.
+    auto rebuild = std::make_shared<std::function<void(
+        std::vector<std::string>, std::vector<std::string>, std::string,
+        std::string)>>();
 
     std::function<void(std::string url, std::string key, std::string model)>
         refetch = [this, weak_dialog, voice_status, voice_list,
                    settings_agents, model_dropdown, model_ids,
-                   updating_dropdown, &rebuild](std::string url,
-                                                std::string key,
-                                                std::string model) {
+                   updating_dropdown, rebuild](std::string url,
+                                               std::string key,
+                                               std::string model) {
             run_async([this, async = async_, weak_dialog, voice_status,
                        voice_list, settings_agents, model_dropdown, model_ids,
-                       updating_dropdown, &rebuild, url, key, model] {
+                       updating_dropdown, rebuild, url, key, model] {
                 std::vector<std::string> models;
                 std::vector<std::string> voices;
                 std::string error;
@@ -802,21 +805,22 @@ void HiveWindow::on_settings() {
                 }
                 std::lock_guard<std::mutex> lk(async->queue_m);
                 async->done_queue.push_back(
-                    [weak_dialog, &rebuild, model_dropdown, model_ids,
+                    [weak_dialog, rebuild, model_dropdown, model_ids,
                      updating_dropdown, voice_status, voice_list,
                      settings_agents, models = std::move(models),
                      voices = std::move(voices), error = std::move(error),
                      model] {
                         if (!*weak_dialog) return;
-                        rebuild(std::move(models), std::move(voices),
-                                std::move(error), model);
+                        (*rebuild)(std::move(models), std::move(voices),
+                                   std::move(error), model);
                     });
                 async->dispatcher.emit();
             });
         };
 
-    rebuild = [this, weak_dialog, voice_status, voice_list, settings_agents,
-               model_dropdown, model_ids, updating_dropdown](
+    *rebuild = [this, weak_dialog, voice_status, voice_list,
+                settings_agents, model_dropdown, model_ids,
+                updating_dropdown](
                   std::vector<std::string> models,
                   std::vector<std::string> voices, std::string error,
                   std::string selected_model) {
