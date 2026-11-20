@@ -98,6 +98,38 @@ Run hive-worker on the hub's own machine. Agents placed on worker
 "droplet" are online whenever the hub is. This replaces v1's "local"
 agents.
 
+## Installed production runtime (no source checkout)
+
+Production hubs/workers do not need a Git repository or a compiler on the
+server. Build and test in the canonical development checkout, then install the
+verified artifacts. The co-hosted droplet layout is:
+
+```text
+~/.local/bin/hive-server
+~/.local/bin/hive-worker
+~/.local/share/hivemind/runtime/
+├── web/dist/                         # hub static UI
+├── hive-server/data/                 # Containerfiles + screen/browser helpers
+├── hive-agent/skills/                # image-build skill payload
+└── build/hive-agent/hive-agent       # binary copied by the base Containerfile
+```
+
+Set both user units' `WorkingDirectory` to the runtime directory and their
+`ExecStart` binaries to `~/.local/bin/`. The runtime payload is not optional:
+the worker resolves Containerfiles, image-build inputs, and host-agent helper
+scripts relative to it when creating or recreating agents. Removing only the
+Git metadata while deleting these files would break future image rebuilds.
+
+`runner.cpp` also retains a legacy screen-helper lookup under
+`$HOME/hivemind/hive-server/data/screen-bridge.py` when
+`/usr/local/bin/screen-bridge.py` is unavailable. Install the helper system-wide
+or retain that single compatibility symlink to the installed runtime; a source
+checkout is not required.
+
+Do not run `git pull` on the production host. Replace the installed artifacts
+from a verified build, restart the hub then the worker, and verify the public
+UI, worker channel, and all four co-hosted agents before deleting old files.
+
 ## Development environment
 
 The dev agent runs ON THE HOST system (moved out of the nested sandbox,
