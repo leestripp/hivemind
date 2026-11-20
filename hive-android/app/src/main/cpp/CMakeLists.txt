@@ -59,8 +59,8 @@ set_target_properties(audiocpp PROPERTIES
         ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libaudiocpp.so
     INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/audio-cpp/include)
 
-add_library(pocket_tts_jni SHARED pocket_tts_jni.cpp)
-set_target_properties(pocket_tts_jni PROPERTIES
+add_library(kokoro_tts_jni SHARED kokoro_tts_jni.cpp)
+set_target_properties(kokoro_tts_jni PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON)
-target_link_libraries(pocket_tts_jni PRIVATE audiocpp ${lib_log})
+target_link_libraries(kokoro_tts_jni PRIVATE audiocpp ${lib_log})

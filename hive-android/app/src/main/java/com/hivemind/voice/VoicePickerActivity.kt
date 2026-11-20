@@ -57,7 +57,7 @@ class VoicePickerActivity : Activity() {
         }, onInitFailed = {
             status.text = "No text-to-speech engine on this device"
         })
-        // Load the pocket-tts model too: when ready, the picker lists
+        // Load the Kokoro model too: when ready, the picker lists
         // the desktop voices instead of the OS engine's.
         Thread {
             tts.initLocal(applicationContext)
@@ -67,8 +67,8 @@ class VoicePickerActivity : Activity() {
     }
 
     private fun populate() {
-        options = if (PocketTts.ready)
-            PocketTts.VOICES.map { v ->
+        options = if (KokoroTts.ready)
+            KokoroTts.VOICES.map { v ->
                 TtsEngine.VoiceOption(v, v.replace('_', ' ')
                     .split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) })
             }
@@ -98,7 +98,7 @@ class VoicePickerActivity : Activity() {
 
 
     private fun sample(opt: TtsEngine.VoiceOption) {
-        if (PocketTts.ready) {
+        if (KokoroTts.ready) {
             tts.applyVoice(opt.name)
             status.text = "Sampling ${opt.label}…"
             ui.postDelayed(

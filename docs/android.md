@@ -31,9 +31,11 @@ top-level in `hive-android/`.
 - **Streaming TTS** — the hub's live turn partial (the same task_delta
   stream the desktop client's chunks come from, via
   `GET /api/threads/:id/activity`) is sentence-chunked every 700 ms and
-  synthesized on-device by pocket-tts/audio.cpp through JNI, with PCM
-  playback through AudioTrack. Android platform TextToSpeech `QUEUE_ADD`
-  is the fallback if pocket-tts cannot initialize or a chunk fails. The
+  synthesized on-device by Kokoro-82M/audio.cpp through JNI, with PCM
+  playback through AudioTrack. Kokoro's eSpeak-ng phonemizer and data are
+  bundled for fully offline speech. Android platform TextToSpeech
+  `QUEUE_ADD` is the fallback if Kokoro cannot initialize or a chunk
+  fails. The
   agent therefore starts speaking from its first sentence instead of
   after the full reply. Chunks are cut
   only at safe sentence boundaries (the still-growing tail is never
@@ -56,8 +58,8 @@ top-level in `hive-android/`.
 - **Per-agent voices** — long-press an agent card for the voice picker:
   single tap samples a voice ("Hi, I'm PA — this is my voice."), double
   tap selects it for that agent (Prefs `voice_<agentId>`; applied when
-  the session's TtsEngine boots). English embedded voices only
-  (offline, q400) — 23 on the test device.
+  the session's TtsEngine boots). The picker lists Kokoro's 54 preset
+  voices once the model is ready, plus system-TTS voices as fallback.
 - **State machine** — IDLE / LISTENING / THINKING / STREAMING. The
   sphere shows a per-state palette (dim cyan idle, cyan listening,
   amber fast-spin thinking, green speaking) and rides mic RMS while
@@ -95,8 +97,11 @@ persisted dedupe policy is not an end-to-end exactly-once guarantee.
 
 - Toolchain: JDK 21 (AGP requirement), Android SDK platform 35 + NDK
   side-by-side; the Gradle wrapper is committed. One-time
-  `./fetch-deps.sh` pulls the whisper.cpp/audio.cpp native dependencies
-  and on-device STT/TTS models (large, gitignored).
+  `./fetch-deps.sh` pulls the whisper.cpp/audio.cpp native dependencies,
+  on-device STT/TTS models, and Termux's eSpeak-ng build (all large or
+  generated files are gitignored). It also builds the tiny local
+  `libpcaudio` playback stub and bundles the NDK C++ runtime for both
+  ABIs.
 - `./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
   (includes native libraries and models for arm64-v8a and x86_64).
 - `adb install -r …`; first launch opens Settings: hub URL (default
@@ -117,8 +122,13 @@ persisted dedupe policy is not an end-to-end exactly-once guarantee.
 
 - **Kotlin shell** — framework Views, org.json, kotlin-stdlib, no
   AndroidX. Native code does the interesting work: `libsphere.so` (GL
-  renderer), whisper.cpp STT, and audio.cpp/pocket-tts synthesis through
+  renderer), whisper.cpp STT, and audio.cpp/Kokoro synthesis through
   JNI. Native libraries/models are bundled for arm64-v8a and x86_64.
+  `KokoroTts` loads libc++_shared, the no-op pcaudio stub, eSpeak-ng,
+  audiocpp, then the JNI bridge; the JNI sets `AUDIOCPP_ESPEAK_DATA` to
+  the extracted data directory so eSpeak never falls back to its
+  nonexistent build-time path. The zipped data asset is extracted with
+  tmp+rename and self-heals if `phontab` is missing or not a file.
 - **SttEngine contract** — start/stop/discard/destroy + transcript +
   listening, with level/transcript/stopped callbacks. A session
   generation counter kills the zombie-capture class: a capture start
@@ -135,8 +145,9 @@ persisted dedupe policy is not an end-to-end exactly-once guarantee.
   `reuse_dm:true`; the turn loop advances a `lastMessageId` cursor over
   `messages?after=`; the idle watch resumes from the same cursor, so a
   message is never spoken twice.
-- **Waydroid** — STT and primary pocket-tts work with the bundled x86_64
-  libraries and need no GMS/system speech service. Only the platform-TTS
+- **Waydroid** — STT and primary Kokoro TTS (including eSpeak-ng) work
+  with the bundled x86_64 libraries and need no GMS/system speech
+  service. Only the platform-TTS
   fallback needs a system engine, which stock LineageOS images may lack.
 - **Accessibility services** — TalkBack (or anything grabbing transient
   audio focus) fights the mic and makes single taps focus-only. adb

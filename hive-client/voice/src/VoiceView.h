@@ -189,6 +189,12 @@ class VoiceView : public Gtk::Box {
     sigc::connection pollConn_;
     sigc::connection audioDrainConn_;
     sigc::connection healthConn_;
+    // Lifetime guards: the dispatcher drain lambda and the Setup retry
+    // timer both capture `this` raw. They must be cancelled in the dtor —
+    // VoiceView is destroyed on agent switch / Back, and a callback firing
+    // after destruction is a use-after-free (SEGV inside gtkmm).
+    sigc::connection uiConn_;
+    sigc::connection retryConn_;
     std::atomic<bool> healthQueued_{false};
     long drainSilentSince_ = 0;
 

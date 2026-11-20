@@ -25,12 +25,19 @@ cmake --build build --target hive-client -j$(nproc)
 1. **Audio I/O** — `libpipewire-0.3-dev` (Debian/Ubuntu). Without it the
    module compiles a null backend and reports unavailable mic/speaker I/O.
 2. **ChimpFlow voice service** — local TTS+STT gateway at
-   `http://127.0.0.1:8090` (audio.cpp pocket-tts + whisper.cpp behind an
+   `http://127.0.0.1:8090` (audio.cpp Kokoro-82M + whisper.cpp behind an
    OpenAI-compatible API; nothing leaves the machine).
    - URL: `CHIMPFLOW_URL` env var (default `http://127.0.0.1:8090`)
    - API key: `CHIMPFLOW_KEY` env var, or the existing
      `~/.config/hive-client-voice/chimpflow.key` file (mode 600)
-   - Voices: whatever `GET /v1/voices` reports
+   - Models: `GET /v1/models`; the persisted `tts_model` preference is
+     sent per utterance. An empty selection uses the gateway default
+     (Kokoro-82M) rather than a hardcoded legacy engine id.
+   - Voices: `GET /v1/voices?model=<model-id>`; speaker ids are
+     model-scoped. Settings offers a TTS model dropdown and refreshes
+     each agent's voice choices when the model changes. **Reconnect**
+     tests the currently typed address/port/key and reloads both catalogs
+     without saving first.
 
 The old configuration directory name is retained deliberately so existing
 voice preferences and per-agent speaker choices continue to work.

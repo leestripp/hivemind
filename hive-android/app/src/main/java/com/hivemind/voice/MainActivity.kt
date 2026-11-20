@@ -68,7 +68,7 @@ class MainActivity : Activity() {
         status = findViewById(R.id.statusText)
         list = findViewById(R.id.agentList)
         tts = TtsEngine(this, onQueueEmpty = { /* nothing to resume */ })
-        // Warm the on-device pocket-tts engine at app start (process-wide
+        // Warm the on-device Kokoro engine at app start (process-wide
         // singleton): VoiceActivity/picker then get instant local voices;
         // state announcements on this screen use it too.
         Thread { tts.initLocal(applicationContext) }.start()
@@ -128,7 +128,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        // No pocket audio from state announcements while backgrounded.
+        // No on-device audio from state announcements while backgrounded.
         ui.removeCallbacks(rosterPoll)
         tts.stop()
         super.onPause()

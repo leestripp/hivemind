@@ -69,7 +69,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     // io worker + UI dispatch.
     ioRunning_ = true;
     ioThread_ = std::thread([this] { ioLoop(); });
-    uiDispatch_.connect([this] {
+    uiConn_ = uiDispatch_.connect([this] {
         std::deque<std::function<void()>> q;
         {
             std::lock_guard<std::mutex> lk(uiMutex_);
@@ -114,6 +114,7 @@ VoiceView::VoiceView(BaseObjectType* cobject,
     stt_->prime();
     announcer_ = std::make_unique<AgentStateAnnouncer>();
     tts_->applyVoice(voiceNameFor(agent_.id));
+    tts_->applyModel(prefs_.ttsModel());
 
     if (talk_) {
         talk_->set_sensitive(false);
@@ -137,6 +138,16 @@ VoiceView::VoiceView(BaseObjectType* cobject,
 }
 
 VoiceView::~VoiceView() {
+    // Cancel every UI-side callback that captures `this` FIRST: the
+    // dispatcher drain, its still-queued closures, and the Setup retry
+    // timer. The io thread is joined below, after which nothing can emit
+    // uiDispatch_ or touch queued state again.
+    uiConn_.disconnect();
+    retryConn_.disconnect();
+    {
+        std::lock_guard<std::mutex> lk(uiMutex_);
+        uiQueue_.clear();
+    }
     stopSpeakAnimator();
     inboxConn_.disconnect();
     pollConn_.disconnect();
@@ -307,12 +318,15 @@ void VoiceView::openThread() {
                                        "\n(tap to retry)");
                 // Retry automatically while still in Setup.
                 if (phase_ == Phase::Setup) {
-                    Glib::signal_timeout().connect_once(
+                    // Stored (not connect_once) so ~VoiceView can cancel it;
+                    // a 3s-later fire on a destroyed view is a UAF.
+                    retryConn_ = Glib::signal_timeout().connect(
                         [this] {
                             if (phase_ == Phase::Setup) {
                                 if (status_) status_->set_label("Connecting…");
                                 openThread();
                             }
+                            return false;  // one-shot
                         },
                         3000);
                 }
@@ -376,6 +390,7 @@ void VoiceView::sendTranscript() {
     finalText_.clear();
     finalCredit_ = 0;
     tts_->applyVoice(voiceNameFor(agent_.id));
+    tts_->applyModel(prefs_.ttsModel());
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {
         talk_->set_label("···");
@@ -484,6 +499,7 @@ void VoiceView::startIdleNarration() {
     netFailSince_ = 0;
     phase_ = Phase::Thinking;
     tts_->applyVoice(voiceNameFor(agent_.id));
+    tts_->applyModel(prefs_.ttsModel());
     if (sphere_) sphere_->setState(SphereState::Thinking);
     if (talk_) {
         talk_->set_label("···");
@@ -497,6 +513,7 @@ void VoiceView::startIdleNarration() {
 
 void VoiceView::speakNotice(const std::string& text) {
     tts_->applyVoice(voiceNameFor(agent_.id));
+    tts_->applyModel(prefs_.ttsModel());
     turnDone_ = true;
     streamText_ = text;
     spokenLen_ = 0;
@@ -508,6 +525,7 @@ void VoiceView::speakPending() {
     PendingNote note = std::move(pendingSpeech_.front());
     pendingSpeech_.pop_front();
     tts_->applyVoice(voiceNameFor(note.senderId));
+    tts_->applyModel(prefs_.ttsModel());
     turnDone_ = true;
     streamText_ = note.text;
     spokenLen_ = 0;
@@ -1060,6 +1078,7 @@ void VoiceView::debugSay(const std::string& text) {
     finalText_.clear();
     finalCredit_ = 0;
     tts_->applyVoice(voiceNameFor(agent_.id));
+    tts_->applyModel(prefs_.ttsModel());
     if (sphere_) sphere_->setState(SphereState::Processing);
     if (talk_) {
         talk_->set_label("···");

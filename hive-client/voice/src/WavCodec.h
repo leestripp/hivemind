@@ -13,7 +13,7 @@ namespace hv {
 // WAV <-> PCM helpers for the ChimpFlow gateway. Pure functions — no
 // I/O, no audio devices — so everything here is unit-tested.
 //
-// ChimpFlow's TTS returns WAV (PCM 16-bit; pocket-tts is mono 24 kHz)
+// ChimpFlow's TTS returns WAV (PCM 16-bit; Kokoro is mono 24 kHz)
 // and its STT accepts any WAV whisper.cpp does. The app's playback and
 // capture contract is 16 kHz mono s16le (AudioCommon), so decode
 // resamples anything non-16k and encode always produces 16k mono.

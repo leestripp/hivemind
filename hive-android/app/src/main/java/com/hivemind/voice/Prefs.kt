@@ -32,7 +32,7 @@ object Prefs {
         val stored = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getString(KEY_VOICE_PREFIX + agentId, "") ?: ""
         // Desktop integrated voice mapping (~/.config/hive-client-voice/
-        // prefs.json, 2026-10-14) — pocket-tts voice names, so the phone
+        // prefs.json, 2026-10-14) — Kokoro voice names, so the phone
         // matches each agent's desktop voice out of the box. An explicit
         // picker selection (stored) always wins over the seed.
         return stored.ifEmpty { DESKTOP_VOICE_SEED[agentId] ?: "" }

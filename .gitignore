@@ -40,3 +40,5 @@ __pycache__/
 *.log
 core
 core.*
+# Staged client rootfs for the desktop container image (built binary + schema + icon)
+hive-client/container/rootfs/

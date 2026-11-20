@@ -1,0 +1,52 @@
+# =============================================================================
+# HiveMind desktop client — standalone GUI container (docs/client.md)
+#
+# Rootless podman image that runs ONLY the GTK4/gtkmm4 hive-client desktop
+# app. GPU (/dev/dri, works for AMD + Intel; NVIDIA needs its own runtime
+# passthrough) and Wayland/PipeWire are passthrough'd at `podman run` time —
+# see hive-client-container.sh. The host lee home is bind-mounted rw so
+# client config (GSettings/dconf under ~/.config, data under
+# ~/.local/share/hivemind) persists on the host.
+#
+# Build (from this directory):
+#   podman build -t localhost/hive-client:latest .
+#
+# Runtime deps mirror the client's linked libs (gtkmm-4.0, webkitgtk-6.0
+# for the embedded screen view, pipewire for voice, gstreamer for media)
+# plus Mesa GL/Vulkan for GPU-accelerated GTK rendering.
+# =============================================================================
+FROM ubuntu:26.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libgtkmm-4.0-0 \
+      libglib2.0-bin \
+      libwebkitgtk-6.0-4 \
+      libpipewire-0.3-0 \
+      libsqlite3-0 \
+      libssl3t64 \
+      libpng16-16t64 \
+      libgl1 \
+      libegl1 \
+      libgles2 \
+      libgl1-mesa-dri \
+      mesa-vulkan-drivers \
+      gstreamer1.0-plugins-base \
+      gstreamer1.0-plugins-good \
+      gstreamer1.0-pipewire \
+      gstreamer1.0-gl \
+      adwaita-icon-theme \
+      hicolor-icon-theme \
+      fonts-dejavu-core \
+      fonts-liberation2 \
+      ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Staged client: self-contained binary (icons/avatars compiled into
+# GResource) + its GSettings schema + app icon.
+COPY rootfs/ /
+RUN glib-compile-schemas /usr/local/share/glib-2.0/schemas
+
+ENTRYPOINT ["/usr/local/bin/hive-client"]

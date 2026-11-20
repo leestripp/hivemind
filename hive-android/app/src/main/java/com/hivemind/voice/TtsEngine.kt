@@ -51,9 +51,9 @@ class TtsEngine(
     @Volatile private var epochBase = 0
     private val pending = mutableListOf<String>()
 
-    /** On-device pocket-tts backend (audio.cpp — the SAME engine and
-     *  voices as desktop integrated voice, so agents sound identical
-     *  on both). When [pocketOk], speakQueued synthesizes chunks on
+    /** On-device Kokoro backend (audio.cpp — the SAME engine and
+     *  voices as ChimpFlow's kokoro-82m, so agents sound identical
+     *  on both). When [kokoroOk], speakQueued synthesizes chunks on
      *  [synthExec] and plays PCM through PcmPlayer, which gives TRUE
      *  mid-word hold (AudioTrack.pause keeps position) — the system-TTS
      *  path below stays as the fallback when the model can't load. */
@@ -61,8 +61,8 @@ class TtsEngine(
         Thread(r, "hive-tts-synth")
     }
     private var player: PcmPlayer? = null
-    @Volatile private var pocketOk = false
-    @Volatile private var pocketVoice: String? = null
+    @Volatile private var kokoroOk = false
+    @Volatile private var kokoroVoice: String? = null
     @Volatile private var rms = 0f
     private val ui = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -92,24 +92,24 @@ class TtsEngine(
         }.also { tts = it }
     }
 
-    /** Load the pocket-tts model. BLOCKING (~1-4s) — bg thread only.
+    /** Load the Kokoro model. BLOCKING (~1-6s) — bg thread only.
      *  Safe to call once at startup; failure leaves the system-TTS
      *  fallback active. */
     fun initLocal(context: Context) {
-        if (!PocketTts.init(context)) return
-        pocketOk = true
-        (preferredVoiceName ?: pocketVoice)?.let {
-            if (it in PocketTts.VOICES) pocketVoice = it
+        if (!KokoroTts.init(context)) return
+        kokoroOk = true
+        (preferredVoiceName ?: kokoroVoice)?.let {
+            if (it in KokoroTts.VOICES) kokoroVoice = it
         }
-        player = PcmPlayer(context.applicationContext, PocketTts.sampleRate,
+        player = PcmPlayer(context.applicationContext, KokoroTts.sampleRate,
             onChunkPlayed = { counted -> if (counted) chunkDone() },
             onLevel = { rms = it })
-        Log.i(TAG, "pocket-tts active (voice=${pocketVoice ?: "alba"})")
+        Log.i(TAG, "kokoro active (voice=${kokoroVoice ?: "af_heart"})")
     }
 
     /** Queue a chunk for speech. Call on the main thread. */
     fun speakQueued(text: String) {
-        if (pocketOk) { pocketSpeak(text); return }
+        if (kokoroOk) { kokoroSpeak(text); return }
         val engine = tts
         if (!ready || engine == null) {
             if (pending.size < 20) pending += text  // never-ready cap
@@ -133,27 +133,27 @@ class TtsEngine(
         engine.speak(text, TextToSpeech.QUEUE_ADD, null, id)
     }
 
-    /** Pocket path: synthesize on the synth thread, hand PCM to the
+    /** Kokoro path: synthesize on the synth thread, hand PCM to the
      *  player. Chunks synthesized DURING a hold still queue (player is
      *  paused) — no rebuild dance needed. Synth failure falls back to
      *  the system engine for that chunk rather than dropping speech. */
-    private fun pocketSpeak(text: String) {
+    private fun kokoroSpeak(text: String) {
         outstanding++
         val epoch = epochBase
         speaking = true
         Log.d(TAG, "synth +${text.length} chars (out=$outstanding)")
         synthExec.execute {
             if (epoch != epochBase) return@execute   // stop() already zeroed
-            val pcm = PocketTts.synthesize(text, pocketVoice ?: "alba")
+            val pcm = KokoroTts.synthesize(text, kokoroVoice ?: "alba")
             if (pcm != null && epoch == epochBase) {
                 player?.enqueue(pcm, counted = true)
             } else if (pcm != null) {
                 // stop() raced the synth — drop the PCM, count stays zeroed
             } else {
-                Log.w(TAG, "pocket synth failed — system TTS speaks this chunk")
+                Log.w(TAG, "kokoro synth failed — system TTS speaks this chunk")
                 ui.post {
                     if (epoch != epochBase) return@post
-                    outstanding--                 // undo pocket count…
+                    outstanding--                 // undo kokoro count…
                     val engine = tts
                     if (ready && engine != null) {
                         outstanding++             // …system count instead
@@ -168,7 +168,7 @@ class TtsEngine(
         }
     }
 
-    /** A pocket chunk finished PLAYING (PcmPlayer writer thread). */
+    /** A kokoro chunk finished PLAYING (PcmPlayer writer thread). */
     private fun chunkDone() {
         if (outstanding > 0) outstanding--
         Log.d(TAG, "chunk played (out=$outstanding)")
@@ -180,11 +180,11 @@ class TtsEngine(
 
     /** Hold/resume playback for push-to-talk. Call on the main thread. */
     fun setHeld(h: Boolean) {
-        if (pocketOk) {
+        if (kokoroOk) {
             if (held == h) return
             held = h
             if (h) player?.pause() else player?.resume()
-            Log.i(TAG, "pocket setHeld($h) — playback ${if (h) "paused mid-word" else "resumed"}")
+            Log.i(TAG, "kokoro setHeld($h) — playback ${if (h) "paused mid-word" else "resumed"}")
             return
         }
         Log.i(TAG, "setHeld($h) — held=$held live=${texts.size}")
@@ -244,9 +244,9 @@ class TtsEngine(
      * utterances QUEUED AFTER this call — the one playing is untouched.
      */
     fun applyVoice(name: String?) {
-        if (name != null && name in PocketTts.VOICES) {
-            pocketVoice = name
-            if (pocketOk) { Log.i(TAG, "pocket voice set to $name"); return }
+        if (name != null && name in KokoroTts.VOICES) {
+            kokoroVoice = name
+            if (kokoroOk) { Log.i(TAG, "kokoro voice set to $name"); return }
         }
         if (!ready) { preferredVoiceName = name; return }
         if (name.isNullOrEmpty()) {
@@ -267,10 +267,10 @@ class TtsEngine(
 
     /** One-off sample playback (voice picker); interrupts any prior sample. */
     fun preview(text: String) {
-        if (pocketOk) {
-            val v = pocketVoice ?: "alba"
+        if (kokoroOk) {
+            val v = kokoroVoice ?: "alba"
             synthExec.execute {
-                val pcm = PocketTts.synthesize(text, v) ?: return@execute
+                val pcm = KokoroTts.synthesize(text, v) ?: return@execute
                 val p = player ?: return@execute
                 p.stop()                       // cut the prior sample
                 p.enqueue(pcm, counted = false)
@@ -290,7 +290,7 @@ class TtsEngine(
         currentId = null
         outstanding = 0
         speaking = false
-        // Advance BOTH counters: pocket synth does not consume utterance
+        // Advance BOTH counters: kokoro synth does not consume utterance
         // ids, so epochBase = seq left its in-flight jobs valid after stop.
         // Advancing seq keeps new system utterances at/above the stale cutoff.
         epochBase = ++seq
@@ -309,7 +309,7 @@ class TtsEngine(
 
     /** Animated 0..1 envelope for the sphere while the agent talks. */
     fun level(nowSec: Float): Float {
-        if (pocketOk) return (rms * 2.2f).coerceIn(0f, 0.9f)
+        if (kokoroOk) return (rms * 2.2f).coerceIn(0f, 0.9f)
         if (!speaking) return 0f
         val base = 0.38f + 0.22f * kotlin.math.sin(nowSec * 7.3f) *
                 kotlin.math.sin(nowSec * 2.1f + 1.3f)

@@ -20,7 +20,7 @@ class AudioPlayback;
 class ChimpFlowClient;
 
 // Queued-utterance TTS for streamed replies, backed by the ChimpFlow
-// gateway (audio.cpp pocket-tts over localhost HTTP). Same
+// gateway (audio.cpp Kokoro over localhost HTTP). Same
 // sentence-queue contract as before: speakQueued() while the agent
 // streams, onQueueEmpty fires once when everything queued has played.
 //
@@ -40,6 +40,10 @@ class TtsEngine {
     // "" = engine default.
     void applyVoice(const std::string& voice);
     std::string voice() const;
+    // Applied per queued utterance (the request's `model` field; ""
+    // = gateway default). Set from Prefs::ttsModel() wherever a voice
+    // is applied.
+    void applyModel(const std::string& model);
 
     // Queue a chunk for speech (from any thread).
     void speakQueued(const std::string& text);
@@ -59,7 +63,7 @@ class TtsEngine {
     int outstanding() const { return outstanding_; }
     bool speaking() const { return speaking_; }
 
-    // TTS voices the gateway currently serves (GET /v1/models); empty
+    // Legacy unscoped TTS voice catalog (GET /v1/voices); empty
     // when the gateway is unreachable.
     std::vector<std::string> voices();
 
@@ -70,14 +74,17 @@ class TtsEngine {
         std::uint64_t epoch;
         std::uint64_t tag;
         std::string text;
-        std::string voice;  // captured at queue time
+        std::string voice;   // captured at queue time
+        std::string model;   // captured at queue time ("" = gateway default)
     };
 
     void workerLoop();
     void onTagDone(std::uint64_t tag);
-    void enqueue(const std::string& text, const std::string& voice);
+    void enqueue(const std::string& text, const std::string& voice,
+                 const std::string& model);
     // POST to ChimpFlow and decode the WAV; {} on failure (logged).
-    DecodedWav synthesize(const std::string& text, const std::string& voice);
+    DecodedWav synthesize(const std::string& text, const std::string& voice,
+                          const std::string& model);
 
     AudioPlayback& playback_;
     std::unique_ptr<ChimpFlowClient> chimp_;
@@ -92,6 +99,7 @@ class TtsEngine {
     std::thread worker_;
 
     std::string voice_;  // under m_
+    std::string model_;  // under m_ ("" = gateway default model)
     std::uint64_t epoch_ = 0;
     std::uint64_t nextTag_ = 1;
     std::atomic<int> outstanding_{0};

@@ -14,7 +14,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import kotlin.math.sqrt
 
 /**
- * Queued float-PCM player for PocketTts output (AudioTrack, 24 kHz
+ * Queued float-PCM player for KokoroTts output (AudioTrack, 24 kHz
  * mono float). One writer thread drains the queue; [pause] is a TRUE
  * hold — AudioTrack.pause() freezes mid-word and [resume] continues
  * exactly where it stopped (the desktop push-to-talk semantics the

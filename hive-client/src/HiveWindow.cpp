@@ -10,6 +10,8 @@
 #include "MediaPlayer.h"
 #include "text_utils.h"
 
+#include <functional>
+
 #include <thread>
 
 #ifdef HIVEMIND_WITH_WEBKIT
@@ -692,6 +694,12 @@ void HiveWindow::on_settings() {
     add_connection_row("Address", *address, 0);
     add_connection_row("Port", *port, 1);
     add_connection_row("API key", *chimp_key, 2);
+    auto* model_dropdown = Gtk::make_managed<Gtk::DropDown>(
+        Gtk::StringList::create(
+            std::vector<Glib::ustring>{"Gateway default (kokoro-82m)"}));
+    model_dropdown->set_sensitive(false);
+    set_accessible_label(*model_dropdown, "ChimpFlow TTS model");
+    add_connection_row("TTS model", *model_dropdown, 3);
     voice_page->append(*connection_grid);
 
     auto* connection_error = Gtk::make_managed<Gtk::Label>();
@@ -725,128 +733,252 @@ void HiveWindow::on_settings() {
     voice_page->append(*voice_scroll);
     stack->add(*voice_page, "chimpflow");
 
+    // Reconnect tests whatever is currently typed in the Address/Port/Key
+    // fields — no need to Save first — and reloads models and voices.
+    auto* reconnect = Gtk::make_managed<Gtk::Button>("Reconnect");
+    reconnect->set_tooltip_text(
+        "Test the address, port, and key above and reload models and "
+        "voices without saving");
+    reconnect->set_halign(Gtk::Align::START);
+    voice_page->append(*reconnect);
+
     auto weak_dialog = std::make_shared<Gtk::Dialog*>(dialog);
     dialog->signal_destroy().connect(
         [weak_dialog] { *weak_dialog = nullptr; });
     const auto settings_agents = agents_;
     const auto chimpflow_url = voice_prefs_.chimpflowUrl();
     const auto chimpflow_api_key = voice_prefs_.chimpflowKey();
-    run_async([this, async = async_, weak_dialog, voice_status, voice_list,
-               settings_agents, chimpflow_url, chimpflow_api_key] {
-        std::vector<std::string> voices;
-        std::string error;
-        try {
-            hv::ChimpFlowClient chimpflow{chimpflow_url, chimpflow_api_key};
-            if (chimpflow_api_key.empty())
-                error = "Enter the ChimpFlow API key, then click Save.";
-            else if (!chimpflow.healthy())
-                error = "ChimpFlow is offline. Check the address and port, then click Save.";
-            else {
-                voices = chimpflow.voices();
-                if (voices.empty()) error = "ChimpFlow returned no voices.";
-            }
-        } catch (const std::exception& e) {
-            error = std::string{"Could not load ChimpFlow voices: "} + e.what();
+
+    // Model picker state. model_ids[i] is the model id each dropdown
+    // index maps to ("" = gateway default); updating_dropdown guards
+    // against our own programmatic set_selected() during rebuilds.
+    auto model_ids = std::make_shared<std::vector<std::string>>();
+    auto active_model =
+        std::make_shared<std::string>(voice_prefs_.ttsModel());
+    auto updating_dropdown = std::make_shared<bool>(false);
+
+    // Rebuilds the model dropdown and per-agent voice rows from one
+    // fetch. Declared before refetch so the two can capture each other.
+    std::function<void(std::vector<std::string> models,
+                       std::vector<std::string> voices, std::string error,
+                       std::string selected_model)>
+        rebuild;
+
+    std::function<void(std::string url, std::string key, std::string model)>
+        refetch = [this, weak_dialog, voice_status, voice_list,
+                   settings_agents, model_dropdown, model_ids,
+                   updating_dropdown, &rebuild](std::string url,
+                                                std::string key,
+                                                std::string model) {
+            run_async([this, async = async_, weak_dialog, voice_status,
+                       voice_list, settings_agents, model_dropdown, model_ids,
+                       updating_dropdown, &rebuild, url, key, model] {
+                std::vector<std::string> models;
+                std::vector<std::string> voices;
+                std::string error;
+                try {
+                    hv::ChimpFlowClient chimpflow{url, key};
+                    if (key.empty())
+                        error = "Enter the ChimpFlow API key, then click "
+                                "Reconnect or Save.";
+                    else if (!chimpflow.healthy())
+                        error = "ChimpFlow is offline. Check the address and "
+                                "port, then click Reconnect.";
+                    else {
+                        models = chimpflow.models();
+                        // Voice ids are model-scoped. "" (gateway default)
+                        // lists the default model's speakers (kokoro-82m).
+                        const std::string effective =
+                            model.empty() ? "kokoro-82m" : model;
+                        voices = chimpflow.voicesForModel(effective);
+                        if (voices.empty())
+                            error = "Model \"" + effective +
+                                    "\" returned no voices.";
+                    }
+                } catch (const std::exception& e) {
+                    error = std::string{
+                                "Could not load ChimpFlow settings: "} +
+                            e.what();
+                }
+                std::lock_guard<std::mutex> lk(async->queue_m);
+                async->done_queue.push_back(
+                    [weak_dialog, &rebuild, model_dropdown, model_ids,
+                     updating_dropdown, voice_status, voice_list,
+                     settings_agents, models = std::move(models),
+                     voices = std::move(voices), error = std::move(error),
+                     model] {
+                        if (!*weak_dialog) return;
+                        rebuild(std::move(models), std::move(voices),
+                                std::move(error), model);
+                    });
+                async->dispatcher.emit();
+            });
+        };
+
+    rebuild = [this, weak_dialog, voice_status, voice_list, settings_agents,
+               model_dropdown, model_ids, updating_dropdown](
+                  std::vector<std::string> models,
+                  std::vector<std::string> voices, std::string error,
+                  std::string selected_model) {
+        if (!alive_ || !*weak_dialog) return;
+
+        // Model dropdown: gateway default first, then served models,
+        // then a "(saved)" entry if the persisted model is unavailable.
+        *updating_dropdown = true;
+        model_ids->clear();
+        std::vector<Glib::ustring> labels;
+        model_ids->push_back("");
+        labels.push_back("Gateway default (kokoro-82m)");
+        for (const auto& m : models) {
+            model_ids->push_back(m);
+            labels.push_back(m);
         }
-        {
-            std::lock_guard<std::mutex> lk(async->queue_m);
-            async->done_queue.push_back(
-                [this, weak_dialog, voice_status, voice_list, settings_agents,
-                 voices = std::move(voices), error = std::move(error)] {
-                    if (!alive_ || !*weak_dialog) return;
-                    voice_status->set_text(
-                        error.empty()
-                            ? std::to_string(voices.size()) + " voices available"
-                            : error);
-                    if (settings_agents.empty()) {
-                        auto* empty = Gtk::make_managed<Gtk::Label>(
-                            "No agents available");
-                        empty->set_margin(16);
-                        empty->set_halign(Gtk::Align::START);
-                        empty->add_css_class("dim-label");
-                        voice_list->append(*empty);
+        if (!selected_model.empty() &&
+            std::find(model_ids->begin(), model_ids->end(),
+                      selected_model) == model_ids->end()) {
+            model_ids->push_back(selected_model);
+            labels.push_back(selected_model + " (saved)");
+        }
+        model_dropdown->set_model(Gtk::StringList::create(labels));
+        const auto found =
+            std::find(model_ids->begin(), model_ids->end(), selected_model);
+        if (found != model_ids->end())
+            model_dropdown->set_selected(static_cast<guint>(
+                std::distance(model_ids->begin(), found)));
+        model_dropdown->set_sensitive(error.empty());
+        *updating_dropdown = false;
+
+        // The voice catalog is scoped to the selected model; rebuild the
+        // per-agent rows from this fetch.
+        while (auto* c = voice_list->get_first_child())
+            voice_list->remove(*c);
+        voice_status->set_text(
+            error.empty()
+                ? std::to_string(voices.size()) + " voices available for \"" +
+                      (selected_model.empty() ? std::string{"kokoro-82m"}
+                                              : selected_model) +
+                      "\""
+                : error);
+        if (!error.empty()) return;
+        if (settings_agents.empty()) {
+            auto* empty =
+                Gtk::make_managed<Gtk::Label>("No agents available");
+            empty->set_margin(16);
+            empty->set_halign(Gtk::Align::START);
+            empty->add_css_class("dim-label");
+            voice_list->append(*empty);
+            return;
+        }
+        for (const auto& agent : settings_agents) {
+            const std::string id = agent.value("id", "");
+            const std::string agent_name = agent.value("name", "?");
+            if (id.empty()) continue;
+            const std::string current = voice_prefs_.voiceFor(id);
+            auto voice_ids =
+                std::make_shared<std::vector<std::string>>();
+            std::vector<Glib::ustring> labels;
+            voice_ids->push_back("");
+            labels.push_back("Default voice");
+            for (const auto& voice : voices) {
+                voice_ids->push_back(voice);
+                labels.push_back(voice);
+            }
+            if (!current.empty() &&
+                std::find(voice_ids->begin(), voice_ids->end(),
+                          current) == voice_ids->end()) {
+                voice_ids->push_back(current);
+                labels.push_back(current + " (saved)");
+            }
+
+            auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
+            auto* box = Gtk::make_managed<Gtk::Box>(
+                Gtk::Orientation::HORIZONTAL, 12);
+            box->set_margin(8);
+            auto* agent_label =
+                Gtk::make_managed<Gtk::Label>(agent_name);
+            agent_label->set_halign(Gtk::Align::START);
+            agent_label->set_hexpand(true);
+            agent_label->set_ellipsize(Pango::EllipsizeMode::END);
+            auto* dropdown = Gtk::make_managed<Gtk::DropDown>(
+                Gtk::StringList::create(labels));
+            dropdown->set_valign(Gtk::Align::CENTER);
+            dropdown->set_sensitive(error.empty());
+            set_accessible_label(*dropdown,
+                                 "Voice for " + agent_name);
+            // GtkDropDown otherwise announces only its current
+            // value ("Default voice"), leaving six identical
+            // controls to a screen reader. The visible agent
+            // label is the accessible name; the voice remains
+            // the control's selected value.
+            gtk_accessible_update_relation(
+                GTK_ACCESSIBLE(dropdown->gobj()),
+                GTK_ACCESSIBLE_RELATION_LABELLED_BY,
+                agent_label->gobj(), nullptr, -1);
+            const auto found = std::find(
+                voice_ids->begin(), voice_ids->end(), current);
+            if (found != voice_ids->end())
+                dropdown->set_selected(static_cast<guint>(
+                    std::distance(voice_ids->begin(), found)));
+            box->append(*agent_label);
+            box->append(*dropdown);
+            row->set_child(*box);
+            voice_list->append(*row);
+
+            // Connect AFTER selecting the persisted value so
+            // opening Settings never saves or speaks a preview.
+            dropdown->property_selected().signal_changed().connect(
+                [this, dropdown, voice_ids, id, agent_name,
+                 voice_status] {
+                    const auto selected = dropdown->get_selected();
+                    if (selected >= voice_ids->size()) return;
+                    const std::string& voice = (*voice_ids)[selected];
+                    voice_prefs_.setVoiceFor(id, voice);
+                    try {
+                        voice_prefs_.save();
+                    } catch (const std::exception& e) {
+                        voice_status->set_text(e.what());
                         return;
                     }
-                    for (const auto& agent : settings_agents) {
-                        const std::string id = agent.value("id", "");
-                        const std::string agent_name = agent.value("name", "?");
-                        if (id.empty()) continue;
-                        const std::string current = voice_prefs_.voiceFor(id);
-                        auto voice_ids =
-                            std::make_shared<std::vector<std::string>>();
-                        std::vector<Glib::ustring> labels;
-                        voice_ids->push_back("");
-                        labels.push_back("Default voice");
-                        for (const auto& voice : voices) {
-                            voice_ids->push_back(voice);
-                            labels.push_back(voice);
-                        }
-                        if (!current.empty() &&
-                            std::find(voice_ids->begin(), voice_ids->end(),
-                                      current) == voice_ids->end()) {
-                            voice_ids->push_back(current);
-                            labels.push_back(current + " (saved)");
-                        }
-
-                        auto* row = Gtk::make_managed<Gtk::ListBoxRow>();
-                        auto* box = Gtk::make_managed<Gtk::Box>(
-                            Gtk::Orientation::HORIZONTAL, 12);
-                        box->set_margin(8);
-                        auto* agent_label =
-                            Gtk::make_managed<Gtk::Label>(agent_name);
-                        agent_label->set_halign(Gtk::Align::START);
-                        agent_label->set_hexpand(true);
-                        agent_label->set_ellipsize(Pango::EllipsizeMode::END);
-                        auto* dropdown = Gtk::make_managed<Gtk::DropDown>(
-                            Gtk::StringList::create(labels));
-                        dropdown->set_valign(Gtk::Align::CENTER);
-                        dropdown->set_sensitive(error.empty());
-                        set_accessible_label(*dropdown,
-                                             "Voice for " + agent_name);
-                        // GtkDropDown otherwise announces only its current
-                        // value ("Default voice"), leaving six identical
-                        // controls to a screen reader. The visible agent
-                        // label is the accessible name; the voice remains
-                        // the control's selected value.
-                        gtk_accessible_update_relation(
-                            GTK_ACCESSIBLE(dropdown->gobj()),
-                            GTK_ACCESSIBLE_RELATION_LABELLED_BY,
-                            agent_label->gobj(), nullptr, -1);
-                        const auto found = std::find(
-                            voice_ids->begin(), voice_ids->end(), current);
-                        if (found != voice_ids->end())
-                            dropdown->set_selected(static_cast<guint>(
-                                std::distance(voice_ids->begin(), found)));
-                        box->append(*agent_label);
-                        box->append(*dropdown);
-                        row->set_child(*box);
-                        voice_list->append(*row);
-
-                        // Connect AFTER selecting the persisted value so
-                        // opening Settings never saves or speaks a preview.
-                        dropdown->property_selected().signal_changed().connect(
-                            [this, dropdown, voice_ids, id, agent_name,
-                             voice_status] {
-                                const auto selected = dropdown->get_selected();
-                                if (selected >= voice_ids->size()) return;
-                                const std::string& voice = (*voice_ids)[selected];
-                                voice_prefs_.setVoiceFor(id, voice);
-                                try {
-                                    voice_prefs_.save();
-                                } catch (const std::exception& e) {
-                                    voice_status->set_text(e.what());
-                                    return;
-                                }
-                                stop_agent_message_speech();
-                                ensure_chat_tts();
-                                chat_tts_->preview("Hi, I'm " + agent_name + ".",
-                                                   voice);
-                            });
-                    }
+                    stop_agent_message_speech();
+                    ensure_chat_tts();
+                    chat_tts_->applyModel(
+                        voice_prefs_.ttsModel());
+                    chat_tts_->preview("Hi, I'm " + agent_name + ".",
+                                       voice);
                 });
         }
-        async->dispatcher.emit();
-    });
+    };
+
+    // Model change saves immediately and reloads the voice catalog for
+    // the newly selected model (testing the current field values).
+    model_dropdown->property_selected().signal_changed().connect(
+        [this, model_dropdown, model_ids, active_model, updating_dropdown,
+         refetch, address, port, chimp_key, voice_status] {
+            if (*updating_dropdown) return;
+            const auto sel = model_dropdown->get_selected();
+            if (sel >= model_ids->size()) return;
+            const std::string id = (*model_ids)[sel];
+            if (id == *active_model) return;
+            *active_model = id;
+            voice_prefs_.setTtsModel(id);
+            try {
+                voice_prefs_.save();
+            } catch (const std::exception& e) {
+                voice_status->set_text(e.what());
+                return;
+            }
+            refetch(voice_settings::makeLoopbackUrl(address->get_text(),
+                                                    port->get_text()),
+                    chimp_key->get_text(), id);
+        });
+    reconnect->signal_clicked().connect(
+        [refetch, address, port, chimp_key, active_model] {
+            refetch(voice_settings::makeLoopbackUrl(address->get_text(),
+                                                    port->get_text()),
+                    chimp_key->get_text(), *active_model);
+        });
+    refetch(chimpflow_url, chimpflow_api_key, *active_model);
+
 
     if (auto* r0 = sidebar->get_row_at_index(0)) sidebar->select_row(*r0);
 
@@ -2282,6 +2414,7 @@ void HiveWindow::speak_agent_message(const std::string& sender_id,
 
     const std::string voice = voice_prefs_.voiceFor(sender_id);
     chat_tts_->applyVoice(voice);
+    chat_tts_->applyModel(voice_prefs_.ttsModel());
     std::fprintf(stderr,
                  "hive-client: chat tts sender=%s voice=%s chunks=%zu\n",
                  sender_label.c_str(),

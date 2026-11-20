@@ -36,6 +36,11 @@ void TtsEngine::applyVoice(const std::string& voice) {
     voice_ = voice;
 }
 
+void TtsEngine::applyModel(const std::string& model) {
+    std::lock_guard<std::mutex> lk(m_);
+    model_ = model;
+}
+
 std::string TtsEngine::voice() const {
     std::lock_guard<std::mutex> lk(m_);
     return voice_;
@@ -43,14 +48,15 @@ std::string TtsEngine::voice() const {
 
 void TtsEngine::speakQueued(const std::string& text) {
     std::lock_guard<std::mutex> lk(m_);
-    enqueue(text, voice_);
+    enqueue(text, voice_, model_);
 }
 
 // m_ is held by the caller.
-void TtsEngine::enqueue(const std::string& text, const std::string& voice) {
+void TtsEngine::enqueue(const std::string& text, const std::string& voice,
+                        const std::string& model) {
     if (text.empty() || queue_.size() >= 40) return;  // cap, as Android
     const std::uint64_t tag = nextTag_++;
-    queue_.push_back({epoch_, tag, text, voice});
+    queue_.push_back({epoch_, tag, text, voice, model});
     pending_.add(tag);
     outstanding_ = static_cast<int>(pending_.size());
     cv_.notify_one();
@@ -77,7 +83,7 @@ void TtsEngine::preview(const std::string& text, const std::string& voice) {
     // Synthesis can take seconds; use the worker so the GTK thread stays
     // responsive when several voices are tried in quick succession.
     std::lock_guard<std::mutex> lk(m_);
-    enqueue(text, voice);
+    enqueue(text, voice, model_);
 }
 
 float TtsEngine::level(float nowSec) const {
@@ -103,7 +109,7 @@ void TtsEngine::workerLoop() {
             queue_.pop_front();
         }
         const std::uint64_t epochAtSpawn = u.epoch;
-        DecodedWav d = synthesize(u.text, u.voice);
+        DecodedWav d = synthesize(u.text, u.voice, u.model);
         if (d.pcm.empty()) {
             // Synthesis failed: no playback item will ever carry this
             // tag, so complete the queue slot HERE. Without this the
@@ -145,9 +151,10 @@ void TtsEngine::onTagDone(std::uint64_t tag) {
 }
 
 DecodedWav TtsEngine::synthesize(const std::string& text,
-                                  const std::string& voice) {
+                                  const std::string& voice,
+                                  const std::string& model) {
     try {
-        DecodedWav d = chimp_->synthesize(text, voice);
+        DecodedWav d = chimp_->synthesize(text, voice, model);
         // Same loudness whatever voice the agent wears — the catalog
         // spans ~6 dB RMS voice-to-voice otherwise.
         normalizeLoudness(d.pcm);

@@ -105,7 +105,7 @@ class VoiceActivity : Activity() {
     /** Chars of [streamText] already queued to TTS. */
     private var spokenLen = 0
     private var turnDone = false
-    /** App is backgrounded: the speech drain freezes (no pocket audio)
+    /** App is backgrounded: the speech drain freezes (no on-device audio)
      *  but the agent's turn is NEVER cancelled — work continues
      *  server-side and the unheard remainder speaks on resume. */
     private var backgrounded = false
@@ -190,7 +190,7 @@ class VoiceActivity : Activity() {
             status.text = "No text-to-speech engine on this device — " +
                           "replies will be silent"
         })
-        // On-device pocket-tts (audio.cpp — same voices as desktop).
+        // On-device Kokoro (audio.cpp — same voices as desktop).
         // Blocking model load (~1-4s) on a bg thread; on failure the
         // system-TTS path simply stays active.
         Thread { tts.initLocal(applicationContext) }.start()
@@ -890,7 +890,7 @@ class VoiceActivity : Activity() {
     }
 
     private fun drainSpeech(flush: Boolean) {
-        // Frozen while backgrounded: nothing reaches TTS (no pocket
+        // Frozen while backgrounded: nothing reaches TTS (no on-device
         // audio) and the spoken cursor holds, so onResume can speak the
         // unheard remainder instead of losing the reply.
         if (backgrounded) return
@@ -1144,18 +1144,18 @@ class VoiceActivity : Activity() {
 
     override fun onPause() {
         sphere.onPause()
-        // Stop the idle watch entirely: no pocket audio from queued
+        // Stop the idle watch entirely: no on-device audio from queued
         // announcements or inbox narration while backgrounded.
         ui.removeCallbacks(inboxWatch)
         backgrounded = true
         // 2026-10-16 (lee): backgrounding must NEVER cancel the agent's
         // turn — work continues server-side and the reply (with any
         // attachments) arrives whether the app is open or not. The old
-        // pocket-audio guard called cancelCurrent() on LISTENING /
+        // on-device-audio guard called cancelCurrent() on LISTENING /
         // STREAMING / THINKING, which POSTed /cancel to the hub and
         // KILLED long jobs (renders, builds) the moment the screen went
         // off. Now: mute locally only. An open mic is discarded (never
-        // record from a pocket) — that path is local, no hub call — and
+        // record from an on-device engine) — that path is local, no hub call — and
         // the speech drain freezes until onResume.
         if (phase == Phase.LISTENING) {
             stt.discard()

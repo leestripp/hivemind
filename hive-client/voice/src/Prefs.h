@@ -46,6 +46,12 @@ public:
     std::string voiceFor(const std::string& agent_id) const;
     void setVoiceFor(const std::string& agent_id, const std::string& voice);
 
+    // Global ChimpFlow TTS model id ("" = gateway default, kokoro-82m).
+    // Voice ids are model-scoped; per-agent voices_ entries saved under
+    // another model are shown as "(saved)" until reassigned.
+    std::string ttsModel() const { return tts_model_; }
+    void setTtsModel(const std::string& v) { tts_model_ = v; }
+
     bool stateAnnounce() const { return state_announce_; }
     void setStateAnnounce(bool v) { state_announce_ = v; }
 
@@ -81,6 +87,7 @@ private:
     std::string agent_name_;
     bool onboarding_done_{false};
     std::map<std::string, std::string> voices_;
+    std::string tts_model_;
     std::string global_shortcut_token_;
     bool state_announce_{false};
     int window_width_{0};

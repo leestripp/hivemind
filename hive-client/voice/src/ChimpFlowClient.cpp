@@ -102,15 +102,55 @@ std::vector<std::string> ChimpFlowClient::voices() {
     return out;
 }
 
+std::vector<std::string> ChimpFlowClient::models() {
+    std::string body;
+    const int code =
+        roundTrip("GET", base_ + "/v1/models", key_, "", "", body);
+    std::vector<std::string> out;
+    if (code != 200) return out;
+    try {
+        const auto j = nlohmann::json::parse(body);
+        for (const auto& m : j.value("data", nlohmann::json::array())) {
+            if (m.contains("id"))
+                out.push_back(m["id"].get<std::string>());
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "hive-voice: chimpflow /v1models parse: %s\n",
+                e.what());
+    }
+    return out;
+}
+
+std::vector<std::string> ChimpFlowClient::voicesForModel(
+    const std::string& model) {
+    std::string body;
+    const int code = roundTrip("GET", base_ + "/v1/voices?model=" + model,
+                               key_, "", "", body);
+    std::vector<std::string> out;
+    if (code != 200) return out;
+    try {
+        const auto j = nlohmann::json::parse(body);
+        for (const auto& v : j.value("data", nlohmann::json::array())) {
+            if (v.contains("id"))
+                out.push_back(v["id"].get<std::string>());
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "hive-voice: chimpflow /v1voices?model parse: %s\n",
+                e.what());
+    }
+    return out;
+}
+
 DecodedWav ChimpFlowClient::synthesize(const std::string& text,
-                                       const std::string& voice) {
+                                       const std::string& voice,
+                                       const std::string& model) {
     // Two distinct ids per the gateway contract: `model` is a model id
-    // from GET /v1/models (the engine loads exactly one TTS model),
-    // `voice` is a speaker id from GET /v1/voices. Sending a voice id
-    // as the model 500s ("unknown model id").
-    nlohmann::json req = {{"model", "pocket-tts"},
-                          {"input", text},
-                          {"response_format", "wav"}};
+    // from GET /v1/models, `voice` is a speaker id from
+    // GET /v1/voices?model=<model>. Sending a voice id as the model 500s
+    // ("unknown model id"). OMITTING `model` selects the gateway default
+    // (kokoro-82m); never restore the retired hardcoded legacy id.
+    nlohmann::json req = {{"input", text}, {"response_format", "wav"}};
+    if (!model.empty()) req["model"] = model;
     if (!voice.empty()) req["voice"] = voice;
     std::string body;
     const int code = roundTrip("POST", base_ + "/v1/audio/speech", key_,

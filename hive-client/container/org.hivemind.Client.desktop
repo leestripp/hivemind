@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=HiveMind
+Comment=HiveMind desktop client (podman container)
+Exec=/home/lee/.local/bin/hive-client-container
+Icon=org.hivemind.Client
+Terminal=false
+Categories=Network;Chat;GTK;
+StartupNotify=true
+StartupWMClass=org.hivemind.Client

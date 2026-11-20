@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace pockettts {
+namespace kokorotts {
 
 struct LoudnessStats {
     float inputRms = 0.0f;
@@ -53,4 +53,4 @@ inline LoudnessStats normalizeLoudness(float* samples, std::size_t count) {
     return stats;
 }
 
-}  // namespace pockettts
+}  // namespace kokorotts

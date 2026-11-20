@@ -171,6 +171,7 @@ void Prefs::load() {
     window_height_ = j.value("win_height", 0);
     global_shortcut_token_ = j.value("global_shortcut_token", "");
     chimpflow_url_ = str("chimpflow_url");
+    tts_model_ = str("tts_model");
     if (j.contains("voices") && j["voices"].is_object())
         for (auto& [k, v] : j["voices"].items())
             if (v.is_string()) voices_[k] = v.get<std::string>();
@@ -188,6 +189,7 @@ void Prefs::save() const {
     j["win_height"] = window_height_;
     j["global_shortcut_token"] = global_shortcut_token_;
     j["chimpflow_url"] = chimpflow_url_;
+    j["tts_model"] = tts_model_;
     j["voices"] = voices_;
     std::filesystem::create_directories(
         std::filesystem::path(configPath()).parent_path());

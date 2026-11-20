@@ -14,11 +14,13 @@ the reply.
   fully offline. Kotlin API + native libs vendored from
   [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) v1.9.4
   (Apache-2.0), fetched by `./fetch-deps.sh`.
-- **TTS**: on-device pocket-tts (audio.cpp through JNI) is primary,
+- **TTS**: on-device Kokoro-82M (audio.cpp through JNI) is primary,
   synthesizing streamed sentence chunks to PCM/AudioTrack with per-agent
-  voices. Android platform `TextToSpeech` remains the fallback when the
-  pocket model cannot load or an individual synthesis fails. This is fully
-  on-device; the app does not call ChimpFlow over the network.
+  voices. eSpeak-ng phonemization and its data are bundled with the app;
+  there is no system eSpeak dependency. Android platform `TextToSpeech`
+  remains the fallback when the Kokoro model cannot load or an individual
+  synthesis fails. This is fully on-device; the app does not call
+  ChimpFlow over the network.
 - **Sphere**: OpenGL ES 2.0 point-cloud renderer in C++ (NDK,
   `app/src/main/cpp/sphere_renderer.cpp`) — Fibonacci lattice displaced
   by simplex noise; amplitude follows mic RMS while listening and a
@@ -46,8 +48,9 @@ than retried, so this is not an exactly-once delivery guarantee.
 
 Long-press an agent card → voice picker: single tap samples a voice
 ("Hi, I'm PA — this is my voice."), long-press selects it for that
-agent (Prefs `voice_<agentId>`) — same gesture idiom as the roster. English embedded voices only
-(offline, q400; 23 on the test device). Selections are per-agent —
+agent (Prefs `voice_<agentId>`) — same gesture idiom as the roster.
+Kokoro's preset voices are listed once the on-device model is ready;
+system-TTS voices remain available as fallback. Selections are per-agent —
 every agent can sound different. Sampling sets the voice, then speaks
 after a 250 ms beat: setVoice() races an immediately-queued speak()
 and the engine can drop the utterance silently.
@@ -62,7 +65,7 @@ the Inbox clears that thread's unread mark on desktop/web too.
 
 ## Speech loudness and volume
 
-Pocket-TTS chunks are RMS-normalized for consistent voices, with a peak-safe
+Kokoro chunks are RMS-normalized for consistent voices, with a peak-safe
 gain cap rather than hard per-sample clipping. `PcmPlayer` also reads the
 assistant-stream volume and applies a square-root playback-gain curve:
 `sqrt(current / maximum)`. Maximum device volume therefore permits full
@@ -149,12 +152,13 @@ permission when prompted.
 
 ## Notes / caveats
 
-- **Waydroid**: STT and primary pocket-tts are self-contained for the
-  bundled x86_64 ABI, so neither requires GMS or a system speech service.
+- **Waydroid**: STT and primary Kokoro TTS (including eSpeak-ng) are
+  self-contained for the bundled x86_64 ABI, so neither requires GMS or a
+  system speech service.
   Only the platform-TTS fallback needs an installed system TTS engine.
 - cleartext HTTP is permitted in the manifest for LAN hubs; the default
   URL is TLS.
-- Third-party code: whisper.cpp and audio.cpp/pocket-tts native sources
-  and models are fetched/vendored for the app; retain their respective
-  upstream licenses. The app shell otherwise uses framework Views,
+- Third-party code: whisper.cpp and audio.cpp/Kokoro native sources,
+  eSpeak-ng, and models are fetched/vendored for the app; retain their
+  respective upstream licenses. The app shell otherwise uses framework Views,
   org.json, and kotlin-stdlib.
