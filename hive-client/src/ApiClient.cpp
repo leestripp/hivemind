@@ -279,7 +279,14 @@ nlohmann::json ApiClient::create_thread(const std::string& title,
                                         bool reuse_dm) {
     nlohmann::json body{{"title", title}, {"agent_ids", agent_ids},
                         {"reuse_dm", reuse_dm}};
-    return request("POST", "/api/threads", &body);
+    auto j = request("POST", "/api/threads", &body);
+    // Hub versions differ: some return the thread object directly, others
+    // an envelope ({"threads": [{...}]}). Callers read the bare object —
+    // an unwrapped envelope leaves "id" empty and agent clicks open no DM.
+    if (j.contains("threads") && j["threads"].is_array() &&
+        !j["threads"].empty() && j["threads"][0].is_object())
+        return j["threads"][0];
+    return j;
 }
 
 nlohmann::json ApiClient::list_messages(const std::string& thread_id,
