@@ -121,7 +121,18 @@ std::string ApiClient::openDm(const std::string& agent_id) {
         {"kind", "dm"},
         {"reuse_dm", true},
     };
-    return jstr(request("POST", "/api/threads", &body, false), "id");
+    const auto j = request("POST", "/api/threads", &body, false);
+    // Hub versions differ: some return the thread object directly
+    // ({"id": ...}), others an envelope ({"threads": [{...}]}). An empty
+    // id here makes every follow-up request hit /api/threads//... and the
+    // voice page dies with a 404 "Couldn't open conversation".
+    if (j.contains("id") && j["id"].is_string())
+        return j["id"].get<std::string>();
+    for (const auto& t : envelope(j, "threads"))
+        if (t.contains("id") && t["id"].is_string())
+            return t["id"].get<std::string>();
+    throw ApiException(500,
+                       "hub POST /api/threads returned no thread id");
 }
 
 std::vector<ThreadMessage> ApiClient::messagesAfter(
