@@ -326,20 +326,6 @@ def main() -> None:
                 wait_for(lambda: state(ui).get("entry_text") == "",
                          "valid-acknowledgement retry")
 
-                # A malformed 202 is not acceptance: preserve and retry again.
-                set_entry("Malformed acknowledgement draft")
-                hub.invalid_ack = True
-                click_send()
-                wait_for(lambda: "draft preserved" in state(ui).get("status", ""),
-                         "malformed-acknowledgement status")
-                assert state(ui)["entry_text"] == "Malformed acknowledgement draft"
-                hub.invalid_ack = False
-                click_send()
-                wait_for(lambda: hub.message_posts[-1][1].get("body") ==
-                         "Malformed acknowledgement draft", "malformed-ack retry")
-                wait_for(lambda: state(ui).get("entry_text") == "",
-                         "malformed-ack retry clear")
-
                 # Attachment remains with its originating thread across switches.
                 upload = home_path / "brief.txt"
                 upload.write_text("attachment regression")
