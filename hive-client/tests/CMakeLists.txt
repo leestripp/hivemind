@@ -16,6 +16,7 @@ macro(hive_client_test name)
 endmacro()
 
 hive_client_test(test_text_utils)
+hive_client_test(test_thread_response)
 
 # Upload wire-format regression (2026-09-17 locale/Content-Length bug) —
 # needs ApiClient + an in-process OmniNet server, so not the pure-helper
@@ -32,6 +33,12 @@ add_test(NAME test_upload_wire_format COMMAND test_upload_wire_format)
 # Optional live GTK regression (requires a running client + GNOME AT-SPI).
 # Not part of headless ctest; run `cmake --build build --target check-routines-ui`.
 if(EXISTS "/usr/bin/python3")
+    add_custom_target(check-messaging-ui
+        COMMAND /usr/bin/python3
+                ${CMAKE_CURRENT_SOURCE_DIR}/messaging_ui_regression.py
+        DEPENDS hive-client
+        USES_TERMINAL
+        COMMENT "Checking exact-DM selection, composer input/send, drafts and retries")
     add_custom_target(check-routines-ui
         COMMAND /usr/bin/python3
                 ${CMAKE_CURRENT_SOURCE_DIR}/routines_ui_regression.py

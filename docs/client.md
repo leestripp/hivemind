@@ -96,6 +96,25 @@ it talks ONLY to the hive-server hub over HTTPS (Bearer key from
 - **Computer use** — watch an agent's browser live (worker-hosted
   browser containers), take over logins, hand control back.
 
+## Conversation and composer reliability
+
+- Agent clicks, thread clicks, new-thread creation, and test automation share
+  one conversation-activation path. Opening a DM accepts either the canonical
+  single-thread response or a legacy `{"threads": [...]}` envelope, but only
+  an exact agent-membership match with a non-empty id. It never falls back to
+  the first thread: an invalid response leaves the current conversation in
+  place and shows an error instead of risking a message to the wrong agent.
+- Text and pending attachments are saved separately per thread while the app
+  is open. Switching conversations restores that conversation's own draft.
+  Send and Enter use the same path; while a send is in flight its controls are
+  locked against duplicates. The draft clears only after the hub acknowledges
+  a non-empty stored message id. HTTP failures and malformed acknowledgements
+  preserve the complete draft for retry.
+- `check-messaging-ui` runs an isolated fake-hub/AT-SPI regression through
+  the real GTK composer and Send button. It covers long Unicode input,
+  direct/enveloped responses, wrong-DM rejection, per-thread drafts and
+  attachments, failed sends, invalid acknowledgements, and retries.
+
 ## Internals worth knowing
 
 - Poll loop: incremental `?after=<msg_id>` message fetch + activity

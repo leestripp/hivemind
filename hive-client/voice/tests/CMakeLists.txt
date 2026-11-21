@@ -36,7 +36,8 @@ target_include_directories(test_voice_turn_logic PRIVATE
 add_executable(test_api_client_activity test_api_client_activity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ApiClient.cpp)
 target_include_directories(test_api_client_activity PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_SOURCE_DIR}/hive-common/include)
 target_link_libraries(test_api_client_activity PRIVATE Catch2::Catch2WithMain
     OmniNet nlohmann_json::nlohmann_json)
 

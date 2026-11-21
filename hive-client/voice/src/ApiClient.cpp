@@ -1,6 +1,7 @@
 #include "ApiClient.h"
 
-#include <algorithm>
+#include <hivemind/ThreadResponse.h>
+
 #include <cstdio>
 
 #include <OmniNet.h>
@@ -122,28 +123,13 @@ std::string ApiClient::openDm(const std::string& agent_id) {
         {"kind", "dm"},
         {"reuse_dm", true},
     };
-    const auto j = request("POST", "/api/threads", &body, false);
-    // Hub versions differ: some return the thread object directly
-    // ({"id": ...}), others an envelope ({"threads": [{...}]}). An empty
-    // id here makes every follow-up request hit /api/threads//... and the
-    // voice page dies with a 404 "Couldn't open conversation".
-    if (j.contains("id") && j["id"].is_string())
-        return j["id"].get<std::string>();
-    // The enveloped list is NOT filtered to the requested agent —
-    // threads[0] can be anyone's DM. Pick the entry that names this agent.
-    for (const auto& t : envelope(j, "threads")) {
-        if (!t.contains("id") || !t["id"].is_string() ||
-            !t.contains("agent_ids") || !t["agent_ids"].is_array())
-            continue;
-        if (std::find(t["agent_ids"].begin(), t["agent_ids"].end(),
-                      agent_id) != t["agent_ids"].end())
-            return t["id"].get<std::string>();
+    try {
+        return hivemind::validated_thread_response(
+                   request("POST", "/api/threads", &body, false), {agent_id})
+            .at("id").get<std::string>();
+    } catch (const std::exception& e) {
+        throw ApiException(500, std::string{"could not open DM: "} + e.what());
     }
-    for (const auto& t : envelope(j, "threads"))
-        if (t.contains("id") && t["id"].is_string())
-            return t["id"].get<std::string>();
-    throw ApiException(500,
-                       "hub POST /api/threads returned no thread id");
 }
 
 std::vector<ThreadMessage> ApiClient::messagesAfter(
@@ -217,9 +203,13 @@ std::string ApiClient::postMessage(const std::string& thread_id,
                                    const std::string& body,
                                    const std::string& source) {
     nlohmann::json b = {{"body", body}, {"source", source}};
-    return jstr(request("POST", "/api/threads/" + thread_id + "/messages",
-                        &b, false),
-                "message_id");
+    try {
+        return hivemind::validated_message_id(request(
+            "POST", "/api/threads/" + thread_id + "/messages", &b, false));
+    } catch (const std::exception& e) {
+        throw ApiException(500, std::string{"message was not acknowledged: "} +
+                                e.what());
+    }
 }
 
 void ApiClient::cancelThread(const std::string& thread_id) {

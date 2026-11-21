@@ -49,7 +49,10 @@ set(HIVE_VOICE_UI_SOURCES
 add_library(hive_voice_ui STATIC ${HIVE_VOICE_UI_SOURCES})
 target_compile_features(hive_voice_ui PUBLIC cxx_std_23)
 set_target_properties(hive_voice_ui PROPERTIES CXX_EXTENSIONS OFF)
-target_include_directories(hive_voice_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(hive_voice_ui PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/hive-common/include
+)
 target_link_libraries(hive_voice_ui PUBLIC
     PkgConfig::GTKMM
     PkgConfig::EPOXY

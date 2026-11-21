@@ -1201,6 +1201,7 @@ HiveWindow::HiveWindow() {
     attach_clear_btn_.add_css_class("flat");
     attach_clear_btn_.signal_clicked().connect([this] {
         pending_attachments_ = nlohmann::json::array();
+        save_composer_draft();
         update_attach_row();
     });
     attach_label_.set_halign(Gtk::Align::START);
@@ -1597,12 +1598,9 @@ void HiveWindow::refresh_all() {
                 rebuild_thread_list();
                 // Chat-first UX: open the most recent conversation automatically.
                 if (current_thread_.empty() && !threads_.empty()) {
-                    current_thread_ = threads_[0].value("id", "");
-                    last_message_id_.clear();
-                    rendered_msg_ids_.clear();
+                    activate_conversation(threads_[0].at("id").get<std::string>());
                     if (auto* row = threads_list_.get_row_at_index(0))
                         threads_list_.select_row(*row);
-                    poll_chat();
                 }
                 set_status("Connected — " +
                            std::to_string(agents_.size()) + " agents, " +
@@ -3534,9 +3532,65 @@ void HiveWindow::load_audio_attachment(Gtk::Box* holder,
 // ── callbacks ───────────────────────────────────────────────────────────────
 
 void HiveWindow::set_composer_enabled(bool enabled) {
-    entry_.set_sensitive(enabled);
-    send_btn_.set_sensitive(enabled);
-    attach_btn_.set_sensitive(enabled && !upload_in_flight_);
+    const bool opening = !opening_dm_agent_.empty();
+    const bool sending = sending_threads_.contains(current_thread_);
+    entry_.set_sensitive(enabled && !opening && !sending);
+    send_btn_.set_sensitive(enabled && !opening && !sending &&
+                            !upload_in_flight_);
+    attach_btn_.set_sensitive(enabled && !opening && !sending &&
+                              !upload_in_flight_);
+}
+
+void HiveWindow::save_composer_draft() {
+    if (current_thread_.empty()) return;
+    composer_text_by_thread_[current_thread_] = entry_.get_text().raw();
+    composer_attachments_by_thread_[current_thread_] = pending_attachments_;
+}
+
+void HiveWindow::activate_conversation(const std::string& id,
+                                       const std::string& dm_agent) {
+    if (id.empty())
+        throw std::invalid_argument("refusing to open an empty conversation id");
+
+    save_composer_draft();
+    ++dm_request_;  // invalidate any slower agent-DM response
+    opening_dm_agent_.clear();
+    current_thread_ = id;
+    current_dm_agent_ = dm_agent;
+
+    last_message_id_.clear();
+    rendered_msg_ids_.clear();
+    chat_stick_bottom_ = true;
+    while (auto* c = messages_box_.get_first_child())
+        messages_box_.remove(*c);
+    live_row_ = nullptr;
+    live_label_ = nullptr;
+    live_agent_key_.clear();
+    load_earlier_btn_ = nullptr;
+    has_more_history_ = false;
+    oldest_message_id_.clear();
+    loading_earlier_ = false;
+    rendered_.clear();
+
+    const auto text = composer_text_by_thread_.find(id);
+    entry_.set_text(text == composer_text_by_thread_.end() ? "" : text->second);
+    const auto atts = composer_attachments_by_thread_.find(id);
+    pending_attachments_ = atts == composer_attachments_by_thread_.end()
+        ? json::array() : atts->second;
+    update_attach_row();
+
+    const bool is_inbox = id == "user";
+    entry_.set_placeholder_text(is_inbox
+        ? "Agents message you here — reply in an agent's own thread"
+        : "Message the team…  (Enter to send)");
+    set_composer_enabled(!is_inbox);
+    update_thread_title();
+    select_thread_row(id);
+    for (const auto& t : threads_)
+        if (t.value("id", "") == id)
+            last_seen_activity_[id] = t.value("last_activity", "");
+    maybe_post_user_read(id);
+    poll_chat();
 }
 
 void HiveWindow::select_thread_row(const std::string& id) {
@@ -3547,8 +3601,8 @@ void HiveWindow::select_thread_row(const std::string& id) {
         if (!row) continue;
         auto* rid = static_cast<std::string*>(row->get_data("thread_id"));
         if (rid && *rid == id) {
-            threads_list_.select_row(*row);   // on_thread_selected early-
-            return;                           // returns: id == current_
+            threads_list_.select_row(*row);
+            return;
         }
     }
 }
@@ -3559,55 +3613,57 @@ void HiveWindow::on_agent_selected() {
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("agent_id"));
     if (!id) return;
-    std::string aid = *id;
+    const std::string aid = *id;
     auto agent = std::find_if(agents_.begin(), agents_.end(),
         [&aid](const json& a) { return a.value("id", "") == aid; });
     if (agent == agents_.end()) return;
-    // Re-selecting the current agent re-enters voice (if available) without
-    // recreating its DM. This is also the path Back -> same agent takes.
-    if (aid == current_dm_agent_) {
+
+    // Re-selecting the successfully opened agent only re-enters voice. If a
+    // previous open failed, current_dm_agent_ was not changed and this click
+    // performs a real retry instead of returning early.
+    if (aid == current_dm_agent_ && !current_thread_.empty() &&
+        opening_dm_agent_.empty()) {
         maybe_show_voice(*agent);
         return;
     }
-    current_dm_agent_ = aid;
-    maybe_show_voice(*agent);
-    // Start (or focus) a DM with this agent.
-    run_async([this, async = async_, aid] {
-        json t = async->api.create_thread("", {aid}, /*reuse_dm=*/true);
+
+    const auto request = ++dm_request_;
+    opening_dm_agent_ = aid;
+    set_composer_enabled(false);
+    set_status("Opening " + agent->value("name", aid) + "…");
+
+    run_async([this, async = async_, aid, agent = *agent, request] {
+        json thread;
+        std::string error;
+        try {
+            thread = async->api.create_thread("", {aid}, /*reuse_dm=*/true);
+        } catch (const std::exception& e) {
+            error = e.what();
+        } catch (...) {
+            error = "unknown conversation-open failure";
+        }
         {
             std::lock_guard<std::mutex> lk(async->queue_m);
-            async->done_queue.push_back([this, async, t, aid] {
-                if (!alive_ || current_dm_agent_ != aid) return;
-                current_thread_ = t.value("id", "");
-                // 2026-09-16: only on_thread_selected() set composer
-                // sensitivity, and it early-returns once current_thread_
-                // is already set — so clicking an agent after viewing the
-                // User Inbox left the composer greyed out. A DM is never
-                // the inbox: always re-enable.
-                set_composer_enabled(true);
-                entry_.set_placeholder_text(
-                    "Message the team\u2026  (Enter to send)");
-                chat_stick_bottom_ = true;
-                // Sidebar: light up this thread's row. refresh_threads()
-                // is signature-gated and reusing an existing DM changes
-                // no server data, so without this the Threads highlight
-                // stayed on whatever row was selected before.
-                select_thread_row(current_thread_);
-                last_message_id_.clear();
-                rendered_msg_ids_.clear();
-                while (auto* c = messages_box_.get_first_child())
-                    messages_box_.remove(*c);
-                live_row_ = nullptr;
-                live_label_ = nullptr;
-                live_agent_key_.clear();
-                load_earlier_btn_ = nullptr;
-                has_more_history_ = false;
-                oldest_message_id_.clear();
-                loading_earlier_ = false;
-                rendered_.clear();
-                refresh_threads();
-                poll_chat();
-            });
+            async->done_queue.push_back(
+                [this, async, aid, agent, request,
+                 thread = std::move(thread), error = std::move(error)] {
+                    if (!alive_ || request != dm_request_ ||
+                        opening_dm_agent_ != aid)
+                        return;
+                    if (!error.empty()) {
+                        opening_dm_agent_.clear();
+                        set_composer_enabled(!current_thread_.empty() &&
+                                             current_thread_ != "user");
+                        set_status("Could not open " +
+                                   agent.value("name", aid) + ": " + error);
+                        return;
+                    }
+                    activate_conversation(thread.at("id").get<std::string>(), aid);
+                    set_composer_enabled(true);
+                    set_status("Connected");
+                    refresh_threads();
+                    maybe_show_voice(agent);
+                });
         }
         async->dispatcher.emit();
     });
@@ -3694,74 +3750,89 @@ void HiveWindow::on_thread_selected() {
     auto* row = threads_list_.get_selected_row();
     if (!row) return;
     auto* id = static_cast<std::string*>(row->get_data("thread_id"));
-    if (!id || *id == current_thread_) return;
+    if (!id || (*id == current_thread_ && opening_dm_agent_.empty())) return;
     show_sidebar();
-    current_thread_ = *id;
-    current_dm_agent_.clear();   // user picked a thread explicitly
-    last_message_id_.clear();
-    rendered_msg_ids_.clear();
-    chat_stick_bottom_ = true;   // opening a thread always shows the newest
-    // Phase 44: the User Inbox is a one-way agent->human channel. It can
-    // never be deleted, and the composer is disabled — the inbox has zero
-    // agent participants, so a reply here would dispatch to nobody.
-    const bool is_inbox = (*id == "user");
-    set_composer_enabled(!is_inbox);
-    entry_.set_placeholder_text(is_inbox
-        ? "Agents message you here — reply in an agent's own thread"
-        : "Message the team…  (Enter to send)");
-    for (auto& t : threads_)
-        if (t.value("id", "") == *id)
-            last_seen_activity_[*id] = t.value("last_activity", "");
-    // 2026-10-01: VIEWING a thread marks it read — this is the ONLY poster
-    // of the user read-mark besides poll_chat's new-message path, and its
-    // absence was the stuck-unread-dot bug: clicking cleared the dot
-    // locally, the 10 s refresh re-fetched unread > 0 from the hub, and
-    // the dot resurrected. Fire-and-forget with a 10 s per-thread debounce.
-    maybe_post_user_read(*id);
-    // Clear the unread dot NOW: rows (and their dots) are otherwise only
-    // rebuilt by the 10s signature-gated refresh — and clicking changes
-    // no server-side data, so the dot could linger for minutes. The
-    // rebuild re-selects the current row; the row_selected handler
-    // re-fires but returns early on *id == current_thread_ (no loop).
+    activate_conversation(*id);
+    // Clear unread dots immediately; signature-gated refreshes may not rebuild.
     rebuild_thread_list();
-    update_thread_title();
-    while (auto* c = messages_box_.get_first_child())
-        messages_box_.remove(*c);
-    live_row_ = nullptr;
-    live_label_ = nullptr;
-    live_agent_key_.clear();
-    load_earlier_btn_ = nullptr;
-    has_more_history_ = false;
-    oldest_message_id_.clear();
-    loading_earlier_ = false;
-    rendered_.clear();
-    poll_chat();
 }
 
-void HiveWindow::on_send() {
-    std::string text = entry_.get_text();
+bool HiveWindow::on_send() {
     if (current_thread_.empty()) {
         set_status("Select an agent or thread first — message not sent.");
-        return;
+        return false;
     }
     if (current_thread_ == "user") {
         set_status("The inbox is one-way — reply in an agent's own thread.");
-        return;
+        return false;
     }
-    if (text.empty() && pending_attachments_.empty()) return;
-    entry_.set_text("");
-    json atts = pending_attachments_;            // take
-    pending_attachments_ = json::array();
-    update_attach_row();
-    std::string tid = current_thread_;
+    if (!opening_dm_agent_.empty()) {
+        set_status("Wait for the conversation to finish opening.");
+        return false;
+    }
+    const std::string tid = current_thread_;
+    if (sending_threads_.contains(tid)) {
+        set_status("The previous message is still sending.");
+        return false;
+    }
+    if (upload_in_flight_) {
+        set_status("Wait for the attachment upload to finish.");
+        return false;
+    }
+
+    const std::string text = entry_.get_text().raw();
+    const json atts = pending_attachments_;
+    if (text.empty() && atts.empty()) return false;
+
+    // Keep the draft visible and intact until the hub accepts it. Selection
+    // changes save/restore per-thread copies; completion only clears `tid`.
+    save_composer_draft();
+    sending_threads_.insert(tid);
+    set_composer_enabled(true);
+    set_status("Sending…");
+
     run_async([this, async = async_, tid, text, atts] {
-        async->api.post_message(tid, text, atts);
+        std::string error;
+        try {
+            async->api.post_message(tid, text, atts);
+        } catch (const std::exception& e) {
+            error = e.what();
+        } catch (...) {
+            error = "unknown message-send failure";
+        }
         {
             std::lock_guard<std::mutex> lk(async->queue_m);
-            async->done_queue.push_back([this, async] { if (alive_) poll_chat(); });
+            async->done_queue.push_back([this, async, tid, error] {
+                if (!alive_) return;
+                sending_threads_.erase(tid);
+                if (error.empty()) {
+                    composer_text_by_thread_.erase(tid);
+                    composer_attachments_by_thread_.erase(tid);
+                    if (current_thread_ == tid) {
+                        entry_.set_text("");
+                        pending_attachments_ = json::array();
+                        update_attach_row();
+                        set_status("Message sent.");
+                        poll_chat();
+                    }
+                    refresh_threads();
+                } else {
+                    // entry_ and this thread's saved attachments still hold
+                    // the complete draft, even if the user changed threads.
+                    if (current_thread_ == tid)
+                        set_status("Message not sent; draft preserved: " + error);
+                    if (error.find("401") != std::string::npos ||
+                        error.find("bearer") != std::string::npos ||
+                        error.find("api key") != std::string::npos)
+                        maybe_show_connect_dialog();
+                }
+                set_composer_enabled(!current_thread_.empty() &&
+                                     current_thread_ != "user");
+            });
         }
         async->dispatcher.emit();
     });
+    return true;
 }
 
 void HiveWindow::update_attach_row() {
@@ -3823,6 +3894,11 @@ void HiveWindow::attach_picked_file(const std::string& path) {
         set_status("Wait for the current attachment upload to finish.");
         return;
     }
+    if (sending_threads_.contains(tid)) {
+        set_status("Wait for the current message to finish sending.");
+        return;
+    }
+    save_composer_draft();
     namespace fs = std::filesystem;
     const std::string name = fs::path(path).filename().string();
     upload_in_flight_ = true;
@@ -3857,7 +3933,7 @@ void HiveWindow::attach_picked_file(const std::string& path) {
         }
         {
             std::lock_guard<std::mutex> lk(async->queue_m);
-            async->done_queue.push_back([this, async, meta, err] {
+            async->done_queue.push_back([this, async, tid, meta, err] {
                 if (!alive_) return;
                 upload_in_flight_ = false;
                 upload_preparing_ = false;
@@ -3865,10 +3941,15 @@ void HiveWindow::attach_picked_file(const std::string& path) {
                 set_composer_enabled(!current_thread_.empty() &&
                                      current_thread_ != "user");
                 if (err.empty()) {
-                    pending_attachments_.push_back(meta);
-                    set_status("Attached " + meta.value("name", "file") +
-                               " — send a message to deliver it");
-                } else {
+                    auto& draft = composer_attachments_by_thread_[tid];
+                    if (!draft.is_array()) draft = json::array();
+                    draft.push_back(meta);
+                    if (current_thread_ == tid) {
+                        pending_attachments_ = draft;
+                        set_status("Attached " + meta.value("name", "file") +
+                                   " — send a message to deliver it");
+                    }
+                } else if (current_thread_ == tid) {
                     set_status("Upload failed: " + err);
                 }
                 update_attach_row();
@@ -5686,19 +5767,8 @@ void HiveWindow::on_new_thread() {
                         std::lock_guard<std::mutex> lk(async->queue_m);
                         async->done_queue.push_back([this, async, nt] {
                             if (!alive_) return;
-                            current_thread_ = nt.value("id", "");
-                            last_message_id_.clear();
-                            rendered_msg_ids_.clear();
-                            while (auto* c = messages_box_.get_first_child())
-                                messages_box_.remove(*c);
-                            live_row_ = nullptr;
-                            live_label_ = nullptr;
-                            live_agent_key_.clear();
-                            load_earlier_btn_ = nullptr;
-                            has_more_history_ = false;
-                            oldest_message_id_.clear();
-                            loading_earlier_ = false;
-                            rendered_.clear();
+                            show_sidebar();
+                            activate_conversation(nt.at("id").get<std::string>());
                             refresh_threads();
                         });
                     }
@@ -5931,6 +6001,11 @@ nlohmann::json HiveWindow::ui_state() {
             {"thread_groups", thread_groups_},
             {"rendered_count", rendered_.size()},
             {"entry_sensitive", entry_.get_sensitive()},
+            {"entry_text", std::string{entry_.get_text()}},
+            {"send_sensitive", send_btn_.get_sensitive()},
+            {"sending_threads", sending_threads_},
+            {"current_dm_agent", current_dm_agent_},
+            {"opening_dm_agent", opening_dm_agent_},
             {"attach_sensitive", attach_btn_.get_sensitive()},
             {"pending_attachments", pending_attachments_.size()},
             {"upload_in_flight", upload_in_flight_},
@@ -6020,20 +6095,7 @@ nlohmann::json HiveWindow::ui_create_thread(const std::string& title,
     std::string new_id = nt.value("id", "");
     return invoke_on_ui([this, nt, new_id] {
         show_sidebar();
-        current_dm_agent_.clear();
-        current_thread_ = new_id;
-        last_message_id_.clear();
-        rendered_msg_ids_.clear();
-        while (auto* c = messages_box_.get_first_child())
-            messages_box_.remove(*c);
-        live_row_ = nullptr;
-        live_label_ = nullptr;
-        live_agent_key_.clear();
-        load_earlier_btn_ = nullptr;
-        has_more_history_ = false;
-        oldest_message_id_.clear();
-        loading_earlier_ = false;
-        rendered_.clear();
+        activate_conversation(new_id);
         refresh_threads();
         return nt;
     });
@@ -6044,23 +6106,7 @@ nlohmann::json HiveWindow::ui_select_thread(const std::string& id) {
         for (auto& t : threads_) {
             if (t.value("id", "") == id) {
                 show_sidebar();
-                current_dm_agent_.clear();
-                current_thread_ = id;
-                last_message_id_.clear();
-                rendered_msg_ids_.clear();
-                while (auto* c = messages_box_.get_first_child())
-                    messages_box_.remove(*c);
-                live_row_ = nullptr;
-                live_label_ = nullptr;
-                live_agent_key_.clear();
-                load_earlier_btn_ = nullptr;
-                has_more_history_ = false;
-                oldest_message_id_.clear();
-                loading_earlier_ = false;
-                rendered_.clear();
-                set_composer_enabled(id != "user");
-                select_thread_row(id);
-                poll_chat();
+                activate_conversation(id);
                 return nlohmann::json{{"selected", id}};
             }
         }
@@ -6123,7 +6169,8 @@ nlohmann::json HiveWindow::ui_send(const std::string& body) {
         if (current_thread_.empty())
             return nlohmann::json{{"error", "no thread selected"}};
         entry_.set_text(body);
-        on_send();   // exact button path: reads entry_, clears, posts async
+        if (!on_send())  // exact button/Enter path, including all guards
+            return nlohmann::json{{"error", std::string{status_label_.get_text()}}};
         return nlohmann::json{{"sent", true}, {"thread", current_thread_}};
     });
 }

@@ -1,9 +1,10 @@
 #include "ApiClient.h"
+
+#include <hivemind/ThreadResponse.h>
 #include "text_utils.h"
 
 #include <OmniNet.h>
 
-#include <algorithm>
 #include <stdexcept>
 #include <cstdio>
 
@@ -280,32 +281,8 @@ nlohmann::json ApiClient::create_thread(const std::string& title,
                                         bool reuse_dm) {
     nlohmann::json body{{"title", title}, {"agent_ids", agent_ids},
                         {"reuse_dm", reuse_dm}};
-    auto j = request("POST", "/api/threads", &body);
-    // Hub versions differ: some return the thread object directly, others
-    // an envelope ({"threads": [{...}]}). Worse, the enveloped list is NOT
-    // filtered to the requested agent — threads[0] can be anyone's DM
-    // (clicking Bob opened HoneyBee's). Pick the entry whose agent_ids
-    // actually match the request; only then fall back to the bare shape.
-    if (j.contains("threads") && j["threads"].is_array()) {
-        for (const auto& t : j["threads"]) {
-            if (!t.is_object() || !t.contains("agent_ids") ||
-                !t["agent_ids"].is_array())
-                continue;
-            const auto& got = t["agent_ids"];
-            if (got.size() != agent_ids.size()) continue;
-            bool match = true;
-            for (const auto& id : agent_ids)
-                if (std::find(got.begin(), got.end(), id) == got.end()) {
-                    match = false;
-                    break;
-                }
-            if (match) return t;
-        }
-        if (!j["threads"].empty() && j["threads"][0].is_object())
-            return j["threads"][0];  // no exact match: better than nothing
-        return j;
-    }
-    return j;
+    return hivemind::validated_thread_response(
+        request("POST", "/api/threads", &body), agent_ids);
 }
 
 nlohmann::json ApiClient::list_messages(const std::string& thread_id,
@@ -327,7 +304,10 @@ nlohmann::json ApiClient::post_message(const std::string& thread_id,
                                        const nlohmann::json& attachments) {
     nlohmann::json body{{"body", body_text}};
     if (!attachments.empty()) body["attachments"] = attachments;
-    return request("POST", "/api/threads/" + thread_id + "/messages", &body);
+    auto response = request("POST", "/api/threads/" + thread_id +
+                                  "/messages", &body);
+    hivemind::validated_message_id(response);
+    return response;
 }
 
 nlohmann::json ApiClient::upload_attachment(const std::string& thread_id,

@@ -105,6 +105,8 @@ private:
     void poll_roster();          // agents busy/state (Phase 27)
     std::string roster_sig_;   // last busy/state signature
     std::string current_dm_agent_;  // agent whose DM is focused ("" if none)
+    std::string opening_dm_agent_;  // async open: sending stays locked
+    std::uint64_t dm_request_ = 0;  // rejects stale DM-open completions
     bool restoring_selection_ = false;  // rebuild_roster reselect guard
     // Secondary-click opens actions only, never the agent DM/voice page.
     bool agent_menu_open_ = false;
@@ -122,7 +124,7 @@ private:
     /// test hook drives this directly so the flow is headlessly testable.
     void attach_picked_file(const std::string& path);
 
-    void on_send();
+    bool on_send();
     void ensure_chat_tts();  // narration and Settings voice previews
     void on_new_agent();
     void show_agent_dialog(const nlohmann::json* existing);  // nullptr = create
@@ -159,8 +161,13 @@ private:
     void rebuild_thread_list();
     /// Select `id`'s row in the Threads sidebar (no-op when absent).
     void select_thread_row(const std::string& id);
-    /// Single switch for the composer (entry/send/attach). Two
-    /// call sites used to set these independently and drifted apart.
+    /// One transition for every agent/thread/new-thread path. Resets all
+    /// transcript paging state and swaps in that conversation's own draft.
+    void activate_conversation(const std::string& id,
+                               const std::string& dm_agent = "");
+    void save_composer_draft();
+    /// Single switch for the composer (entry/send/attach), also accounting
+    /// for DM opens, uploads and sends already in flight.
     void set_composer_enabled(bool enabled);
     /// Phase 52: render/remove the live streaming bubble from the
     /// activity poll's turns[] (partial text of the first active turn).
@@ -398,6 +405,12 @@ private:
     Gtk::Label attach_label_;            // pending-attachment summary line
     Gtk::Button attach_clear_btn_;       // drops pending attachments
     nlohmann::json pending_attachments_ = nlohmann::json::array();
+    // Widgets mirror the active thread's draft. Maps preserve text and
+    // attachments across selection changes and failed network sends.
+    std::unordered_map<std::string, std::string> composer_text_by_thread_;
+    std::unordered_map<std::string, nlohmann::json>
+        composer_attachments_by_thread_;
+    std::unordered_set<std::string> sending_threads_;
     bool upload_in_flight_ = false;
     bool upload_preparing_ = false;
     std::string upload_name_;
